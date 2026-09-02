@@ -24,7 +24,5 @@ chmod +x "$INSTALL_PATH"
 echo
 echo "Installation completed successfully."
 echo
-echo "Run:"
-echo
-echo "    u-opti"
-echo
+
+"$INSTALL_PATH"
