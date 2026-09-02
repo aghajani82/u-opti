@@ -13,13 +13,15 @@ while true; do
     echo "======================================"
     echo
     echo "1) Update Server"
-    echo "2) Uninstall U-OPTI"
+    echo "2) System Optimization"
+    echo "3) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
-    read -rp "Please enter your selection [0-2]: " choice
+    read -rp "Please enter your selection [0-3]: " choice
 
     case "$choice" in
+
         1)
             clear
 
@@ -39,6 +41,61 @@ while true; do
             ;;
 
         2)
+            while true; do
+                clear
+
+                echo "======================================"
+                echo "        System Optimization"
+                echo "======================================"
+                echo
+                echo "1) System Information"
+                echo
+                echo "0) Back"
+                echo
+                read -rp "Please enter your selection [0-1]: " opt_choice
+
+                case "$opt_choice" in
+
+                    1)
+                        clear
+
+                        echo "======================================"
+                        echo "         System Information"
+                        echo "======================================"
+                        echo
+
+                        echo "OS          : $(. /etc/os-release && echo "$PRETTY_NAME")"
+                        echo "Kernel      : $(uname -r)"
+                        echo "Architecture: $(uname -m)"
+                        echo "CPU Cores   : $(nproc)"
+
+                        echo "RAM         : $(free -h | awk '/^Mem:/ {print $2}')"
+                        echo "Disk        : $(df -h / | awk 'NR==2 {print $2 " total, " $3 " used, " $4 " free"}')"
+                        echo "Uptime      : $(uptime -p)"
+
+                        echo "Timezone    : $(timedatectl show --property=Timezone --value)"
+                        echo "NTP         : $(timedatectl show --property=NTPSynchronized --value)"
+
+                        echo
+                        echo "--------------------------------------"
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+
+                    0)
+                        break
+                        ;;
+
+                    *)
+                        echo
+                        echo "Invalid selection!"
+                        sleep 2
+                        ;;
+                esac
+            done
+            ;;
+
+        3)
             clear
 
             echo "======================================"
