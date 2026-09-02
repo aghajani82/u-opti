@@ -1,6 +1,7 @@
 #!/bin/bash
 
 VERSION="0.1.0"
+INSTALL_PATH="/usr/local/bin/u-opti"
 
 while true; do
     clear
@@ -12,16 +13,20 @@ while true; do
     echo "======================================"
     echo
     echo "1) Update Server"
+    echo "2) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
-    read -rp "Please enter your selection [0-1]: " choice
+    read -rp "Please enter your selection [0-2]: " choice
 
     case "$choice" in
         1)
+            clear
+
+            echo "======================================"
+            echo "           Updating Server"
+            echo "======================================"
             echo
-            echo "Updating server..."
-            echo "--------------------------------------"
 
             apt update && apt upgrade -y
 
@@ -29,7 +34,40 @@ while true; do
             echo "--------------------------------------"
             echo "Server update completed."
             echo
+
             read -rp "Press Enter to return to menu..."
+            ;;
+
+        2)
+            clear
+
+            echo "======================================"
+            echo "          Uninstalling U-OPTI"
+            echo "======================================"
+            echo
+
+            read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " confirm
+
+            case "$confirm" in
+                y|Y|yes|YES)
+                    echo
+                    echo "Removing U-OPTI..."
+
+                    rm -f "$INSTALL_PATH"
+
+                    echo
+                    echo "U-OPTI has been successfully removed."
+                    echo
+
+                    exit 0
+                    ;;
+
+                *)
+                    echo
+                    echo "Uninstallation cancelled."
+                    sleep 2
+                    ;;
+            esac
             ;;
 
         0)
