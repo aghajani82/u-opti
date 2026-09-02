@@ -1,0 +1,46 @@
+#!/bin/bash
+
+VERSION="0.1.0"
+
+while true; do
+    clear
+
+    echo "======================================"
+    echo "              U-OPTI"
+    echo "       Ubuntu Server Optimizer"
+    echo "              v$VERSION"
+    echo "======================================"
+    echo
+    echo "1) Update Server"
+    echo
+    echo "0) Exit"
+    echo
+    read -rp "Please enter your selection [0-1]: " choice
+
+    case "$choice" in
+        1)
+            echo
+            echo "Updating server..."
+            echo "--------------------------------------"
+
+            apt update && apt upgrade -y
+
+            echo
+            echo "--------------------------------------"
+            echo "Server update completed."
+            echo
+            read -rp "Press Enter to return to menu..."
+            ;;
+
+        0)
+            clear
+            exit 0
+            ;;
+
+        *)
+            echo
+            echo "Invalid selection!"
+            sleep 2
+            ;;
+    esac
+done
