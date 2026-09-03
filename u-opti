@@ -2,7 +2,7 @@
 
 VERSION="0.7.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
-REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
+REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/refactor/v0.8.0/u-opti"
 
 # BBR configuration backup
 BBR_BACKUP_DIR="/etc/u-opti"
