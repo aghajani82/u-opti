@@ -12,6 +12,7 @@ MODULES_PATH="$LIB_PATH/modules"
 
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
+source "$MODULES_PATH/time.sh"
 
 while true; do
     clear
@@ -78,10 +79,7 @@ while true; do
                         ;;
 
                     2)
-                        echo
-                        echo "Time & Date module is being refactored next."
-                        echo
-                        read -rp "Press Enter to return..."
+                        show_time_menu
                         ;;
 
                     3)
