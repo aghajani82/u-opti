@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.4.0"
+VERSION="0.5.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
 
@@ -54,10 +54,11 @@ while true; do
                 echo "2) Time & Date"
                 echo "3) Swap Management"
                 echo "4) BBR Management"
+                echo "5) Storage Management"
                 echo
                 echo "0) Back"
                 echo
-                read -rp "Please enter your selection [0-4]: " opt_choice
+                read -rp "Please enter your selection [0-5]: " opt_choice
 
                 case "$opt_choice" in
 
@@ -69,35 +70,22 @@ while true; do
                         echo "======================================"
                         echo
 
-                        # Operating System
                         OS_NAME=$(. /etc/os-release && echo "$PRETTY_NAME")
-
-                        # Kernel
                         KERNEL=$(uname -r)
-
-                        # Architecture
                         ARCH=$(uname -m)
-
-                        # CPU
                         CPU_CORES=$(nproc)
 
-                        # RAM
                         RAM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
                         RAM_USED=$(free -h | awk '/^Mem:/ {print $3}')
                         RAM_FREE=$(free -h | awk '/^Mem:/ {print $7}')
 
-                        # Disk
                         DISK_INFO=$(df -h / | awk 'NR==2 {
                             printf "%s total, %s used, %s free", $2, $3, $4
                         }')
 
-                        # Uptime
                         UPTIME=$(uptime -p)
-
-                        # Timezone
                         TIMEZONE=$(timedatectl show --property=Timezone --value)
 
-                        # NTP
                         NTP_SYNC=$(timedatectl show --property=NTPSynchronized --value)
 
                         if [ "$NTP_SYNC" = "yes" ]; then
@@ -106,7 +94,6 @@ while true; do
                             NTP_STATUS="Not Synchronized"
                         fi
 
-                        # Swap
                         SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
                         SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
 
@@ -116,7 +103,6 @@ while true; do
                             SWAP_STATUS="Disabled"
                         fi
 
-                        # BBR
                         CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "Unknown")
                         AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "Unknown")
 
@@ -130,10 +116,8 @@ while true; do
                             BBR_STATUS="Not Available"
                         fi
 
-                        # IPv4
                         IPV4=$(hostname -I | awk '{print $1}')
 
-                        # IPv6
                         if ip -6 addr show scope global | grep -q inet6; then
                             IPV6_STATUS="Enabled"
                         else
@@ -393,7 +377,6 @@ while true; do
                                             echo
                                             echo "Swap created successfully."
                                             echo
-
                                             free -h
                                         else
                                             echo
@@ -421,10 +404,10 @@ while true; do
 
                     4)
                         while true; do
-                            clear
-
                             CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
                             AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
+
+                            clear
 
                             echo "======================================"
                             echo "           BBR Management"
@@ -577,7 +560,6 @@ while true; do
 
                                     echo "Available congestion controls:"
                                     echo
-
                                     sysctl -n net.ipv4.tcp_available_congestion_control
 
                                     echo
@@ -605,7 +587,7 @@ while true; do
                                     echo
                                     echo "Switching to $NEW_CC..."
 
-                                    sysctl -w net.ipv4.tcp_congestion_control="$NEW_CC"
+                                    sysctl -w net.ipv4.tcp.congestion_control="$NEW_CC"
 
                                     if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
                                         sed -i "s/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=$NEW_CC/" /etc/sysctl.conf
@@ -616,6 +598,167 @@ while true; do
                                     echo
                                     echo "BBR has been disabled."
                                     echo "Current Congestion Control: $(sysctl -n net.ipv4.tcp_congestion_control)"
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                0)
+                                    break
+                                    ;;
+
+                                *)
+                                    echo
+                                    echo "Invalid selection!"
+                                    sleep 2
+                                    ;;
+                            esac
+                        done
+                        ;;
+
+                    5)
+                        while true; do
+                            clear
+
+                            echo "======================================"
+                            echo "        Storage Management"
+                            echo "======================================"
+                            echo
+
+                            ROOT_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
+                            ROOT_USED=$(df -h / | awk 'NR==2 {print $3}')
+                            ROOT_FREE=$(df -h / | awk 'NR==2 {print $4}')
+                            ROOT_USAGE=$(df -h / | awk 'NR==2 {print $5}')
+
+                            echo "Root Filesystem (/)"
+                            echo "Total       : $ROOT_TOTAL"
+                            echo "Used        : $ROOT_USED"
+                            echo "Free        : $ROOT_FREE"
+                            echo "Usage       : $ROOT_USAGE"
+
+                            echo
+                            echo "--------------------------------------"
+                            echo
+                            echo "1) Disk Information"
+                            echo "2) Find Large Files"
+                            echo "3) Find Large Directories"
+                            echo "4) Clean APT Cache"
+                            echo
+                            echo "0) Back"
+                            echo
+
+                            read -rp "Please enter your selection [0-4]: " storage_choice
+
+                            case "$storage_choice" in
+
+                                1)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "          Disk Information"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Filesystem Usage:"
+                                    echo
+                                    df -hT
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                2)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "           Large Files"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Searching for files larger than 500 MB..."
+                                    echo
+                                    echo "This may take a while..."
+                                    echo
+
+                                    find / -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null \
+                                    | sort -nr \
+                                    | head -20 \
+                                    | awk '{
+                                        size=$1;
+                                        $1="";
+                                        sub(/^ /, "", $0);
+
+                                        if (size >= 1073741824)
+                                            printf "%.2f GB\t%s\n", size/1073741824, $0;
+                                        else
+                                            printf "%.0f MB\t%s\n", size/1048576, $0;
+                                    }'
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                3)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "        Large Directories"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Top 20 largest directories under /..."
+                                    echo
+                                    echo "This may take a while..."
+                                    echo
+
+                                    du -xhd1 / 2>/dev/null \
+                                    | sort -hr \
+                                    | head -20
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                4)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "          Clean APT Cache"
+                                    echo "======================================"
+                                    echo
+
+                                    APT_CACHE_SIZE=$(du -sh /var/cache/apt/archives 2>/dev/null | awk '{print $1}')
+
+                                    echo "Current APT cache size: ${APT_CACHE_SIZE:-0B}"
+                                    echo
+
+                                    read -rp "Do you want to clean the APT cache? [y/N]: " CLEAN_CONFIRM
+
+                                    case "$CLEAN_CONFIRM" in
+                                        y|Y|yes|YES)
+                                            echo
+                                            echo "Cleaning APT cache..."
+
+                                            if apt-get clean; then
+                                                echo
+                                                echo "APT cache cleaned successfully."
+                                            else
+                                                echo
+                                                echo "Failed to clean APT cache."
+                                            fi
+                                            ;;
+
+                                        *)
+                                            echo
+                                            echo "Operation cancelled."
+                                            ;;
+                                    esac
 
                                     echo
                                     read -rp "Press Enter to return..."
