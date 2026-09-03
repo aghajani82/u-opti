@@ -74,11 +74,7 @@ while true; do
                show_system_information
                        ;;
 
-    2)
-        while true; do
-            ...
-
-                        ;;
+   
 
                     2)
                         while true; do
