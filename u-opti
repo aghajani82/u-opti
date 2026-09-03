@@ -2,6 +2,7 @@
 
 VERSION="0.1.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
+REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
 
 while true; do
     clear
@@ -14,11 +15,12 @@ while true; do
     echo
     echo "1) Update Server"
     echo "2) System Optimization"
-    echo "3) Uninstall U-OPTI"
+    echo "3) Update U-OPTI"
+    echo "4) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
-    read -rp "Please enter your selection [0-3]: " choice
+    read -rp "Please enter your selection [0-4]: " choice
 
     case "$choice" in
 
@@ -49,10 +51,11 @@ while true; do
                 echo "======================================"
                 echo
                 echo "1) System Information"
+                echo "2) Time & Date"
                 echo
                 echo "0) Back"
                 echo
-                read -rp "Please enter your selection [0-1]: " opt_choice
+                read -rp "Please enter your selection [0-2]: " opt_choice
 
                 case "$opt_choice" in
 
@@ -68,11 +71,9 @@ while true; do
                         echo "Kernel      : $(uname -r)"
                         echo "Architecture: $(uname -m)"
                         echo "CPU Cores   : $(nproc)"
-
                         echo "RAM         : $(free -h | awk '/^Mem:/ {print $2}')"
                         echo "Disk        : $(df -h / | awk 'NR==2 {print $2 " total, " $3 " used, " $4 " free"}')"
                         echo "Uptime      : $(uptime -p)"
-
                         echo "Timezone    : $(timedatectl show --property=Timezone --value)"
                         echo "NTP         : $(timedatectl show --property=NTPSynchronized --value)"
 
@@ -80,6 +81,138 @@ while true; do
                         echo "--------------------------------------"
                         echo
                         read -rp "Press Enter to return..."
+                        ;;
+
+                    2)
+                        while true; do
+                            clear
+
+                            echo "======================================"
+                            echo "            Time & Date"
+                            echo "======================================"
+                            echo
+                            echo "1) Current Date & Time"
+                            echo "2) Change Timezone"
+                            echo "3) NTP Status"
+                            echo "4) Enable Time Synchronization"
+                            echo
+                            echo "0) Back"
+                            echo
+                            read -rp "Please enter your selection [0-4]: " time_choice
+
+                            case "$time_choice" in
+
+                                1)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "        Current Date & Time"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Current Date & Time:"
+                                    date
+
+                                    echo
+                                    echo "Timezone:"
+                                    timedatectl show --property=Timezone --value
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                2)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "           Change Timezone"
+                                    echo "======================================"
+                                    echo
+
+                                    CURRENT_TIMEZONE=$(timedatectl show --property=Timezone --value)
+
+                                    echo "Current Timezone: $CURRENT_TIMEZONE"
+                                    echo
+                                    echo "Examples:"
+                                    echo "  Asia/Tehran"
+                                    echo "  Europe/Berlin"
+                                    echo "  America/New_York"
+                                    echo "  UTC"
+                                    echo
+
+                                    read -rp "Enter new timezone: " NEW_TIMEZONE
+
+                                    if timedatectl list-timezones | grep -Fxq "$NEW_TIMEZONE"; then
+                                        timedatectl set-timezone "$NEW_TIMEZONE"
+
+                                        echo
+                                        echo "Timezone changed successfully."
+                                        echo "New Timezone: $(timedatectl show --property=Timezone --value)"
+                                    else
+                                        echo
+                                        echo "Invalid timezone."
+                                        echo "No changes were made."
+                                    fi
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                3)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "             NTP Status"
+                                    echo "======================================"
+                                    echo
+
+                                    timedatectl status
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                4)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "      Time Synchronization"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Enabling NTP time synchronization..."
+
+                                    if timedatectl set-ntp true; then
+                                        echo
+                                        echo "Time synchronization has been enabled."
+                                    else
+                                        echo
+                                        echo "Failed to enable time synchronization."
+                                    fi
+
+                                    echo
+                                    echo "Current NTP Status:"
+                                    timedatectl show --property=NTPSynchronized --value
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                0)
+                                    break
+                                    ;;
+
+                                *)
+                                    echo
+                                    echo "Invalid selection!"
+                                    sleep 2
+                                    ;;
+                            esac
+                        done
                         ;;
 
                     0)
@@ -99,6 +232,59 @@ while true; do
             clear
 
             echo "======================================"
+            echo "            Update U-OPTI"
+            echo "======================================"
+            echo
+
+            TEMP_FILE=$(mktemp)
+
+            echo "Downloading latest version..."
+            echo
+
+            if curl -fsSL "$REPO_URL" -o "$TEMP_FILE"; then
+
+                if bash -n "$TEMP_FILE"; then
+
+                    chmod +x "$TEMP_FILE"
+                    mv "$TEMP_FILE" "$INSTALL_PATH"
+
+                    echo
+                    echo "U-OPTI has been updated successfully."
+                    echo
+                    echo "Restarting U-OPTI..."
+                    sleep 2
+
+                    exec "$INSTALL_PATH"
+
+                else
+
+                    rm -f "$TEMP_FILE"
+
+                    echo
+                    echo "Update failed."
+                    echo "Downloaded file contains a syntax error."
+                    echo
+
+                    read -rp "Press Enter to return..."
+                fi
+
+            else
+
+                rm -f "$TEMP_FILE"
+
+                echo
+                echo "Update failed."
+                echo "Could not download the latest version from GitHub."
+                echo
+
+                read -rp "Press Enter to return..."
+            fi
+            ;;
+
+        4)
+            clear
+
+            echo "======================================"
             echo "          Uninstalling U-OPTI"
             echo "======================================"
             echo
@@ -106,6 +292,7 @@ while true; do
             read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " confirm
 
             case "$confirm" in
+
                 y|Y|yes|YES)
                     echo
                     echo "Removing U-OPTI..."
