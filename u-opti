@@ -1,6 +1,7 @@
 #!/bin/bash
 
 VERSION="0.8.0"
+
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/refactor/v0.8.0/u-opti"
 
@@ -13,6 +14,7 @@ MODULES_PATH="$LIB_PATH/modules"
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
 source "$MODULES_PATH/time.sh"
+source "$MODULES_PATH/swap.sh"
 
 while true; do
     clear
@@ -83,10 +85,7 @@ while true; do
                         ;;
 
                     3)
-                        echo
-                        echo "Swap module is being refactored next."
-                        echo
-                        read -rp "Press Enter to return..."
+                        show_swap_menu
                         ;;
 
                     4)
