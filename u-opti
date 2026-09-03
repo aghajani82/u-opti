@@ -1,12 +1,27 @@
 #!/bin/bash
 
-VERSION="0.7.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
-REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
+LIB_PATH="/usr/local/lib/u-opti"
+MODULES_PATH="$LIB_PATH/modules"
+VERSION_FILE="$LIB_PATH/VERSION"
 
-# BBR configuration backup
-BBR_BACKUP_DIR="/etc/u-opti"
-BBR_BACKUP_FILE="$BBR_BACKUP_DIR/bbr-backup.conf"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+
+if [ -f "$VERSION_FILE" ]; then
+    VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+fi
+
+if [ -z "$VERSION" ]; then
+    VERSION="0.8.0"
+fi
+
+source "$LIB_PATH/common.sh"
+source "$MODULES_PATH/system.sh"
+source "$MODULES_PATH/time.sh"
+source "$MODULES_PATH/swap.sh"
+source "$MODULES_PATH/bbr.sh"
+source "$MODULES_PATH/storage.sh"
 
 while true; do
     clear
@@ -24,6 +39,7 @@ while true; do
     echo
     echo "0) Exit"
     echo
+
     read -rp "Please enter your selection [0-4]: " choice
 
     case "$choice" in
@@ -62,1030 +78,29 @@ while true; do
                 echo
                 echo "0) Back"
                 echo
+
                 read -rp "Please enter your selection [0-5]: " opt_choice
 
                 case "$opt_choice" in
 
                     1)
-                        clear
-
-                        echo "======================================"
-                        echo "         System Information"
-                        echo "======================================"
-                        echo
-
-                        OS_NAME=$(. /etc/os-release && echo "$PRETTY_NAME")
-                        KERNEL=$(uname -r)
-                        ARCH=$(uname -m)
-                        CPU_CORES=$(nproc)
-
-                        RAM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
-                        RAM_USED=$(free -h | awk '/^Mem:/ {print $3}')
-                        RAM_FREE=$(free -h | awk '/^Mem:/ {print $7}')
-
-                        DISK_INFO=$(df -h / | awk 'NR==2 {
-                            printf "%s total, %s used, %s free", $2, $3, $4
-                        }')
-
-                        UPTIME=$(uptime -p)
-                        TIMEZONE=$(timedatectl show --property=Timezone --value)
-                        NTP_SYNC=$(timedatectl show --property=NTPSynchronized --value)
-
-                        if [ "$NTP_SYNC" = "yes" ]; then
-                            NTP_STATUS="Synchronized"
-                        else
-                            NTP_STATUS="Not Synchronized"
-                        fi
-
-                        SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
-                        SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
-
-                        if swapon --show | grep -q .; then
-                            SWAP_STATUS="Enabled ($SWAP_TOTAL)"
-                        else
-                            SWAP_STATUS="Disabled"
-                        fi
-
-                        CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "Unknown")
-                        AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "Unknown")
-                        DEFAULT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "Unknown")
-
-                        if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                            if [ "$CURRENT_CC" = "bbr" ]; then
-                                BBR_STATUS="Enabled"
-                            else
-                                BBR_STATUS="Available / Disabled"
-                            fi
-                        else
-                            BBR_STATUS="Not Available"
-                        fi
-
-                        IPV4=$(hostname -I | awk '{print $1}')
-
-                        if ip -6 addr show scope global | grep -q inet6; then
-                            IPV6_STATUS="Enabled"
-                        else
-                            IPV6_STATUS="Disabled"
-                        fi
-
-                        echo "OS           : $OS_NAME"
-                        echo "Kernel       : $KERNEL"
-                        echo "Architecture : $ARCH"
-                        echo "CPU Cores    : $CPU_CORES"
-                        echo "RAM          : $RAM_USED / $RAM_TOTAL used"
-                        echo "RAM Free     : $RAM_FREE"
-                        echo "Disk         : $DISK_INFO"
-                        echo "Uptime       : $UPTIME"
-                        echo
-                        echo "Timezone     : $TIMEZONE"
-                        echo "NTP          : $NTP_STATUS"
-                        echo
-                        echo "Swap         : $SWAP_STATUS"
-                        echo "Swap Used    : $SWAP_USED"
-                        echo
-                        echo "IPv4         : ${IPV4:-Not Available}"
-                        echo "IPv6         : $IPV6_STATUS"
-                        echo
-                        echo "BBR          : $BBR_STATUS"
-                        echo "Congestion   : $CURRENT_CC"
-                        echo "Default Qdisc: $DEFAULT_QDISC"
-
-                        echo
-                        echo "Available Congestion Controls:"
-                        echo "$AVAILABLE_CC"
-
-                        echo
-                        echo "--------------------------------------"
-                        echo
-                        read -rp "Press Enter to return..."
+                        show_system_information
                         ;;
 
                     2)
-                        while true; do
-                            clear
-
-                            echo "======================================"
-                            echo "            Time & Date"
-                            echo "======================================"
-                            echo
-                            echo "1) Current Date & Time"
-                            echo "2) Change Timezone"
-                            echo "3) NTP Status"
-                            echo "4) Enable Time Synchronization"
-                            echo
-                            echo "0) Back"
-                            echo
-                            read -rp "Please enter your selection [0-4]: " time_choice
-
-                            case "$time_choice" in
-
-                                1)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "        Current Date & Time"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Current Date & Time:"
-                                    date
-
-                                    echo
-                                    echo "Timezone:"
-                                    timedatectl show --property=Timezone --value
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                2)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "           Change Timezone"
-                                    echo "======================================"
-                                    echo
-
-                                    CURRENT_TIMEZONE=$(timedatectl show --property=Timezone --value)
-
-                                    echo "Current Timezone: $CURRENT_TIMEZONE"
-                                    echo
-                                    echo "Examples:"
-                                    echo "  Asia/Tehran"
-                                    echo "  Europe/Berlin"
-                                    echo "  America/New_York"
-                                    echo "  UTC"
-                                    echo
-
-                                    read -rp "Enter new timezone: " NEW_TIMEZONE
-
-                                    if timedatectl list-timezones | grep -Fxq "$NEW_TIMEZONE"; then
-                                        timedatectl set-timezone "$NEW_TIMEZONE"
-
-                                        echo
-                                        echo "Timezone changed successfully."
-                                        echo "New Timezone: $(timedatectl show --property=Timezone --value)"
-                                    else
-                                        echo
-                                        echo "Invalid timezone."
-                                        echo "No changes were made."
-                                    fi
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                3)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "             NTP Status"
-                                    echo "======================================"
-                                    echo
-
-                                    timedatectl status
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                4)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "      Time Synchronization"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Enabling NTP time synchronization..."
-
-                                    if timedatectl set-ntp true; then
-                                        echo
-                                        echo "Time synchronization has been enabled."
-                                    else
-                                        echo
-                                        echo "Failed to enable time synchronization."
-                                    fi
-
-                                    echo
-                                    echo "Current NTP Status:"
-                                    timedatectl show --property=NTPSynchronized --value
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                0)
-                                    break
-                                    ;;
-
-                                *)
-                                    echo
-                                    echo "Invalid selection!"
-                                    sleep 2
-                                    ;;
-                            esac
-                        done
+                        show_time_menu
                         ;;
 
                     3)
-                        while true; do
-                            clear
-
-                            SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
-                            SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
-
-                            echo "======================================"
-                            echo "          Swap Management"
-                            echo "======================================"
-                            echo
-
-                            echo "Current Swap:"
-                            echo "Size        : $SWAP_TOTAL"
-                            echo "Used        : $SWAP_USED"
-
-                            echo
-                            echo "--------------------------------------"
-                            echo
-                            echo "1) Show Swap Information"
-                            echo "2) Create Swap"
-                            echo
-                            echo "0) Back"
-                            echo
-
-                            read -rp "Please enter your selection [0-2]: " swap_choice
-
-                            case "$swap_choice" in
-
-                                1)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "        Swap Information"
-                                    echo "======================================"
-                                    echo
-
-                                    free -h
-
-                                    echo
-                                    echo "Active Swap Devices:"
-                                    swapon --show
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                2)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "            Create Swap"
-                                    echo "======================================"
-                                    echo
-
-                                    if swapon --show | grep -q .; then
-                                        echo "Swap is already enabled."
-                                        echo
-                                        echo "No changes were made."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                    else
-                                        read -rp "Enter Swap size (e.g. 1G, 2G, 4G): " SWAP_SIZE
-
-                                        if [[ ! "$SWAP_SIZE" =~ ^[0-9]+[MG]$ ]]; then
-                                            echo
-                                            echo "Invalid size."
-                                            echo "Use formats such as: 1G, 2G, 512M"
-                                            echo
-                                            read -rp "Press Enter to return..."
-                                            continue
-                                        fi
-
-                                        echo
-                                        echo "Creating ${SWAP_SIZE} swap file..."
-
-                                        if fallocate -l "$SWAP_SIZE" /swapfile 2>/dev/null; then
-                                            chmod 600 /swapfile
-                                            mkswap /swapfile >/dev/null
-                                            swapon /swapfile
-
-                                            if ! grep -q "^/swapfile " /etc/fstab; then
-                                                echo "/swapfile none swap sw 0 0" >> /etc/fstab
-                                            fi
-
-                                            echo
-                                            echo "Swap created successfully."
-                                            echo
-                                            free -h
-                                        else
-                                            echo
-                                            echo "Failed to create swap."
-                                            rm -f /swapfile
-                                        fi
-
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                    fi
-                                    ;;
-
-                                0)
-                                    break
-                                    ;;
-
-                                *)
-                                    echo
-                                    echo "Invalid selection!"
-                                    sleep 2
-                                    ;;
-                            esac
-                        done
+                        show_swap_menu
                         ;;
 
                     4)
-                        while true; do
-                            clear
-
-                            KERNEL=$(uname -r)
-                            CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-                            AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
-                            DEFAULT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
-
-                            if modinfo tcp_bbr >/dev/null 2>&1; then
-                                BBR_MODULE="Available"
-                            else
-                                BBR_MODULE="Not Available"
-                            fi
-
-                            if lsmod | grep -qw tcp_bbr; then
-                                BBR_LOADED="Loaded"
-                            else
-                                BBR_LOADED="Not Loaded"
-                            fi
-
-                            if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                BBR_AVAILABLE="Yes"
-                            else
-                                BBR_AVAILABLE="No"
-                            fi
-
-                            if [ "$CURRENT_CC" = "bbr" ]; then
-                                BBR_STATUS="Enabled"
-                            else
-                                BBR_STATUS="Disabled"
-                            fi
-
-                            clear
-
-                            echo "======================================"
-                            echo "           BBR Management"
-                            echo "======================================"
-                            echo
-                            echo "Kernel                  : $KERNEL"
-                            echo "Current Congestion      : $CURRENT_CC"
-                            echo "Available Algorithms    : $AVAILABLE_CC"
-                            echo "Default Qdisc           : $DEFAULT_QDISC"
-                            echo "BBR Module              : $BBR_MODULE"
-                            echo "BBR Module Status       : $BBR_LOADED"
-                            echo "BBR Available           : $BBR_AVAILABLE"
-                            echo "BBR Status              : $BBR_STATUS"
-                            echo
-                            echo "Actual Interface Qdiscs:"
-                            tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
-                            echo
-                            echo "--------------------------------------"
-                            echo
-                            echo "1) BBR Status"
-                            echo "2) Check BBR Compatibility"
-                            echo "3) Enable BBR"
-                            echo "4) Disable BBR"
-                            echo "5) Load BBR Module"
-                            echo "6) Configure Qdisc"
-                            echo
-                            echo "0) Back"
-                            echo
-
-                            read -rp "Please enter your selection [0-6]: " bbr_choice
-
-                            case "$bbr_choice" in
-
-                                1)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "             BBR Status"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Kernel:"
-                                    echo "$KERNEL"
-
-                                    echo
-                                    echo "Current Congestion Control:"
-                                    echo "$CURRENT_CC"
-
-                                    echo
-                                    echo "Available Congestion Controls:"
-                                    echo "$AVAILABLE_CC"
-
-                                    echo
-                                    echo "Default Qdisc:"
-                                    echo "$DEFAULT_QDISC"
-
-                                    echo
-                                    echo "BBR Module:"
-                                    echo "$BBR_MODULE"
-
-                                    echo
-                                    echo "BBR Module Status:"
-                                    echo "$BBR_LOADED"
-
-                                    echo
-                                    echo "BBR Available:"
-                                    echo "$BBR_AVAILABLE"
-
-                                    echo
-                                    echo "BBR Status:"
-                                    echo "$BBR_STATUS"
-
-                                    echo
-                                    echo "Actual Interface Qdiscs:"
-                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                2)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "      BBR Compatibility Check"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Kernel:"
-                                    echo "$KERNEL"
-
-                                    echo
-                                    echo "Current Congestion Control:"
-                                    echo "$CURRENT_CC"
-
-                                    echo
-                                    echo "Available Algorithms:"
-                                    echo "$AVAILABLE_CC"
-
-                                    echo
-                                    echo "Default Qdisc:"
-                                    echo "$DEFAULT_QDISC"
-
-                                    echo
-                                    echo "BBR Module:"
-                                    echo "$BBR_MODULE"
-
-                                    echo
-                                    echo "BBR Module Status:"
-                                    echo "$BBR_LOADED"
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-
-                                    if [ "$BBR_MODULE" = "Available" ]; then
-                                        echo "BBR kernel module      : YES"
-
-                                        if [ "$BBR_LOADED" = "Loaded" ]; then
-                                            echo "BBR module loaded      : YES"
-                                        else
-                                            echo "BBR module loaded      : NO"
-                                        fi
-
-                                        if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                            echo "BBR registered         : YES"
-                                        else
-                                            echo "BBR registered         : NO"
-                                        fi
-
-                                        if [ "$CURRENT_CC" = "bbr" ]; then
-                                            echo "BBR active             : YES"
-                                        else
-                                            echo "BBR active             : NO"
-                                        fi
-
-                                        echo
-                                        echo "Recommendation:"
-
-                                        if ! echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                            echo "The BBR module exists but is not loaded."
-                                            echo "Load the module first."
-                                        elif [ "$CURRENT_CC" != "bbr" ]; then
-                                            echo "BBR is available and can be enabled."
-                                        else
-                                            echo "BBR is already active."
-                                        fi
-                                    else
-                                        echo "BBR kernel module      : NO"
-                                        echo
-                                        echo "Recommendation:"
-                                        echo "BBR is not provided by the current kernel."
-                                    fi
-
-                                    echo
-                                    echo "Actual Interface Qdiscs:"
-                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                3)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "             Enable BBR"
-                                    echo "======================================"
-                                    echo
-
-                                    if ! modinfo tcp_bbr >/dev/null 2>&1; then
-                                        echo "BBR module is not available on this kernel."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                        continue
-                                    fi
-
-                                    if ! lsmod | grep -qw tcp_bbr; then
-                                        echo "BBR module is not loaded."
-                                        echo
-                                        echo "Loading tcp_bbr..."
-                                        echo
-
-                                        if ! modprobe tcp_bbr; then
-                                            echo "Failed to load tcp_bbr."
-                                            echo
-                                            read -rp "Press Enter to return..."
-                                            continue
-                                        fi
-                                    fi
-
-                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
-
-                                    if ! echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                        echo "BBR is still not available after loading the module."
-                                        echo
-                                        echo "No changes were made."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                        continue
-                                    fi
-
-                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
-                                    CURRENT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "")
-
-                                    echo "Current Congestion Control : $CURRENT_CC"
-                                    echo "Current Default Qdisc      : $CURRENT_QDISC"
-                                    echo
-
-                                    echo "This will:"
-                                    echo "  - Enable BBR"
-                                    echo "  - Keep the current default qdisc"
-                                    echo "  - Save a backup of current settings"
-                                    echo "  - Make BBR module loading persistent"
-                                    echo
-
-                                    read -rp "Continue? [y/N]: " ENABLE_CONFIRM
-
-                                    case "$ENABLE_CONFIRM" in
-                                        y|Y|yes|YES)
-
-                                            mkdir -p "$BBR_BACKUP_DIR"
-
-                                            cat > "$BBR_BACKUP_FILE" <<EOF
-CURRENT_CC=$CURRENT_CC
-CURRENT_QDISC=$CURRENT_QDISC
-EOF
-
-                                            echo
-                                            echo "Backup saved to:"
-                                            echo "$BBR_BACKUP_FILE"
-
-                                            sysctl -w net.ipv4.tcp_congestion_control=bbr
-
-                                            if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
-                                                sed -i 's/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=bbr/' /etc/sysctl.conf
-                                            else
-                                                echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-                                            fi
-
-                                            mkdir -p /etc/modules-load.d
-                                            echo "tcp_bbr" > /etc/modules-load.d/tcp_bbr.conf
-
-                                            echo
-                                            echo "BBR has been enabled."
-                                            echo
-                                            echo "Current Congestion Control:"
-                                            sysctl -n net.ipv4.tcp_congestion_control
-
-                                            echo
-                                            echo "BBR module:"
-                                            lsmod | grep tcp_bbr || echo "tcp_bbr not shown in lsmod."
-
-                                            echo
-                                            echo "Note:"
-                                            echo "The current qdisc was not changed."
-                                            ;;
-
-                                        *)
-                                            echo
-                                            echo "Operation cancelled."
-                                            ;;
-                                    esac
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                4)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "            Disable BBR"
-                                    echo "======================================"
-                                    echo
-
-                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
-                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
-
-                                    if [ "$CURRENT_CC" != "bbr" ]; then
-                                        echo "BBR is not currently active."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                        continue
-                                    fi
-
-                                    if [ -f "$BBR_BACKUP_FILE" ]; then
-                                        # shellcheck disable=SC1090
-                                        source "$BBR_BACKUP_FILE"
-                                        FALLBACK_CC="$CURRENT_CC"
-
-                                        if [ -n "${CURRENT_CC:-}" ]; then
-                                            FALLBACK_CC="$CURRENT_CC"
-                                        fi
-                                    else
-                                        if echo "$AVAILABLE_CC" | grep -qw "cubic"; then
-                                            FALLBACK_CC="cubic"
-                                        elif echo "$AVAILABLE_CC" | grep -qw "reno"; then
-                                            FALLBACK_CC="reno"
-                                        else
-                                            FALLBACK_CC=""
-                                        fi
-                                    fi
-
-                                    if [ -z "$FALLBACK_CC" ] || [ "$FALLBACK_CC" = "bbr" ]; then
-                                        if echo "$AVAILABLE_CC" | grep -qw "cubic"; then
-                                            FALLBACK_CC="cubic"
-                                        elif echo "$AVAILABLE_CC" | grep -qw "reno"; then
-                                            FALLBACK_CC="reno"
-                                        fi
-                                    fi
-
-                                    if [ -z "$FALLBACK_CC" ] || [ "$FALLBACK_CC" = "bbr" ]; then
-                                        echo "No safe fallback congestion control was detected."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                        continue
-                                    fi
-
-                                    echo "Current Congestion Control : bbr"
-                                    echo "Detected Fallback          : $FALLBACK_CC"
-                                    echo
-
-                                    read -rp "Disable BBR and switch to $FALLBACK_CC? [y/N]: " DISABLE_CONFIRM
-
-                                    case "$DISABLE_CONFIRM" in
-                                        y|Y|yes|YES)
-
-                                            sysctl -w net.ipv4.tcp_congestion_control="$FALLBACK_CC"
-
-                                            if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
-                                                sed -i "s/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=$FALLBACK_CC/" /etc/sysctl.conf
-                                            else
-                                                echo "net.ipv4.tcp_congestion_control=$FALLBACK_CC" >> /etc/sysctl.conf
-                                            fi
-
-                                            rm -f /etc/modules-load.d/tcp_bbr.conf
-
-                                            echo
-                                            echo "BBR has been disabled."
-                                            echo "Current Congestion Control:"
-                                            sysctl -n net.ipv4.tcp_congestion_control
-
-                                            echo
-                                            echo "The BBR module remains loaded until reboot or manual unload."
-                                            ;;
-
-                                        *)
-                                            echo
-                                            echo "Operation cancelled."
-                                            ;;
-                                    esac
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                5)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "          Load BBR Module"
-                                    echo "======================================"
-                                    echo
-
-                                    if ! modinfo tcp_bbr >/dev/null 2>&1; then
-                                        echo "BBR module is not available on this kernel."
-                                        echo
-                                        read -rp "Press Enter to return..."
-                                        continue
-                                    fi
-
-                                    if lsmod | grep -qw tcp_bbr; then
-                                        echo "tcp_bbr is already loaded."
-                                    else
-                                        echo "Loading tcp_bbr..."
-
-                                        if modprobe tcp_bbr; then
-                                            echo
-                                            echo "tcp_bbr loaded successfully."
-                                        else
-                                            echo
-                                            echo "Failed to load tcp_bbr."
-                                        fi
-                                    fi
-
-                                    echo
-                                    echo "Available congestion controls:"
-                                    sysctl -n net.ipv4.tcp_available_congestion_control
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                6)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "           Configure Qdisc"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Current default qdisc:"
-                                    sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown"
-
-                                    echo
-                                    echo "Current interface qdiscs:"
-                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
-
-                                    echo
-                                    echo "This option can change the default qdisc."
-                                    echo "The currently active interface qdiscs are also shown above."
-                                    echo
-                                    echo "Available common choices:"
-                                    echo "  fq"
-                                    echo "  fq_codel"
-                                    echo "  pfifo_fast"
-                                    echo "  noqueue"
-                                    echo
-
-                                    read -rp "Enter new default qdisc: " NEW_QDISC
-
-                                    case "$NEW_QDISC" in
-                                        fq|fq_codel|pfifo_fast|noqueue)
-
-                                            CURRENT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "")
-
-                                            if [ -n "$CURRENT_QDISC" ]; then
-                                                mkdir -p "$BBR_BACKUP_DIR"
-
-                                                if [ ! -f "$BBR_BACKUP_FILE" ]; then
-                                                    cat > "$BBR_BACKUP_FILE" <<EOF
-CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control)
-CURRENT_QDISC=$CURRENT_QDISC
-EOF
-                                                fi
-                                            fi
-
-                                            if sysctl -w net.core.default_qdisc="$NEW_QDISC"; then
-
-                                                if grep -q "^net.core.default_qdisc=" /etc/sysctl.conf; then
-                                                    sed -i "s/^net.core.default_qdisc=.*/net.core.default_qdisc=$NEW_QDISC/" /etc/sysctl.conf
-                                                else
-                                                    echo "net.core.default_qdisc=$NEW_QDISC" >> /etc/sysctl.conf
-                                                fi
-
-                                                echo
-                                                echo "Default qdisc changed successfully."
-                                                echo
-                                                echo "Current Default Qdisc:"
-                                                sysctl -n net.core.default_qdisc
-
-                                            else
-                                                echo
-                                                echo "Failed to change default qdisc."
-                                            fi
-                                            ;;
-
-                                        *)
-                                            echo
-                                            echo "Unsupported qdisc."
-                                            echo "No changes were made."
-                                            ;;
-                                    esac
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                0)
-                                    break
-                                    ;;
-
-                                *)
-                                    echo
-                                    echo "Invalid selection!"
-                                    sleep 2
-                                    ;;
-                            esac
-                        done
+                        show_bbr_menu
                         ;;
 
                     5)
-                        while true; do
-                            clear
-
-                            ROOT_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
-                            ROOT_USED=$(df -h / | awk 'NR==2 {print $3}')
-                            ROOT_FREE=$(df -h / | awk 'NR==2 {print $4}')
-                            ROOT_USAGE=$(df -h / | awk 'NR==2 {print $5}')
-
-                            echo "======================================"
-                            echo "        Storage Management"
-                            echo "======================================"
-                            echo
-
-                            echo "Root Filesystem (/)"
-                            echo "Total       : $ROOT_TOTAL"
-                            echo "Used        : $ROOT_USED"
-                            echo "Free        : $ROOT_FREE"
-                            echo "Usage       : $ROOT_USAGE"
-
-                            echo
-                            echo "--------------------------------------"
-                            echo
-                            echo "1) Disk Information"
-                            echo "2) Find Large Files"
-                            echo "3) Find Large Directories"
-                            echo "4) Clean APT Cache"
-                            echo
-                            echo "0) Back"
-                            echo
-
-                            read -rp "Please enter your selection [0-4]: " storage_choice
-
-                            case "$storage_choice" in
-
-                                1)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "          Disk Information"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Filesystem Usage:"
-                                    echo
-                                    df -hT
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                2)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "           Large Files"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Searching for files larger than 500 MB..."
-                                    echo
-                                    echo "This may take a while..."
-                                    echo
-
-                                    find / -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null \
-                                    | sort -nr \
-                                    | head -20 \
-                                    | awk '{
-                                        size=$1;
-                                        $1="";
-                                        sub(/^ /, "", $0);
-
-                                        if (size >= 1073741824)
-                                            printf "%.2f GB\t%s\n", size/1073741824, $0;
-                                        else
-                                            printf "%.0f MB\t%s\n", size/1048576, $0;
-                                    }'
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                3)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "        Large Directories"
-                                    echo "======================================"
-                                    echo
-
-                                    echo "Top 20 largest directories under /..."
-                                    echo
-                                    echo "This may take a while..."
-                                    echo
-
-                                    du -xhd1 / 2>/dev/null \
-                                    | sort -hr \
-                                    | head -20
-
-                                    echo
-                                    echo "--------------------------------------"
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                4)
-                                    clear
-
-                                    echo "======================================"
-                                    echo "          Clean APT Cache"
-                                    echo "======================================"
-                                    echo
-
-                                    APT_CACHE_SIZE=$(du -sh /var/cache/apt/archives 2>/dev/null | awk '{print $1}')
-
-                                    echo "Current APT cache size: ${APT_CACHE_SIZE:-0B}"
-                                    echo
-
-                                    read -rp "Do you want to clean the APT cache? [y/N]: " CLEAN_CONFIRM
-
-                                    case "$CLEAN_CONFIRM" in
-                                        y|Y|yes|YES)
-                                            echo
-                                            echo "Cleaning APT cache..."
-
-                                            if apt-get clean; then
-                                                echo
-                                                echo "APT cache cleaned successfully."
-                                            else
-                                                echo
-                                                echo "Failed to clean APT cache."
-                                            fi
-                                            ;;
-
-                                        *)
-                                            echo
-                                            echo "Operation cancelled."
-                                            ;;
-                                    esac
-
-                                    echo
-                                    read -rp "Press Enter to return..."
-                                    ;;
-
-                                0)
-                                    break
-                                    ;;
-
-                                *)
-                                    echo
-                                    echo "Invalid selection!"
-                                    sleep 2
-                                    ;;
-                            esac
-                        done
+                        show_storage_menu
                         ;;
 
                     0)
@@ -1109,86 +124,293 @@ EOF
             echo "======================================"
             echo
 
-            TEMP_FILE=$(mktemp)
+            if ! command -v curl >/dev/null 2>&1; then
+                echo "Error: curl is not installed."
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
 
-            echo "Downloading latest version..."
+            TEMP_DIR=$(mktemp -d)
+
+            echo "Preparing update..."
             echo
 
-            if curl -fsSL "$REPO_URL" -o "$TEMP_FILE"; then
+            echo "Downloading VERSION..."
 
-                if bash -n "$TEMP_FILE"; then
-
-                    chmod +x "$TEMP_FILE"
-                    mv "$TEMP_FILE" "$INSTALL_PATH"
-
-                    echo
-                    echo "U-OPTI has been updated successfully."
-                    echo
-                    echo "Restarting U-OPTI..."
-                    sleep 2
-
-                    exec "$INSTALL_PATH"
-
-                else
-
-                    rm -f "$TEMP_FILE"
-
-                    echo
-                    echo "Update failed."
-                    echo "Downloaded file contains a syntax error."
-                    echo
-
-                    read -rp "Press Enter to return..."
-                fi
-
-            else
-
-                rm -f "$TEMP_FILE"
-
+            if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
                 echo
-                echo "Update failed."
-                echo "Could not download the latest version from GitHub."
+                echo "Failed to download VERSION."
+                rm -rf "$TEMP_DIR"
                 echo
-
                 read -rp "Press Enter to return..."
+                continue
             fi
+
+            REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
+
+            if [ -z "$REMOTE_VERSION" ]; then
+                echo
+                echo "Remote version could not be determined."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Current Version : $VERSION"
+            echo "Remote Version  : $REMOTE_VERSION"
+            echo
+
+            echo "Downloading U-OPTI..."
+
+            if ! curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"; then
+                echo
+                echo "Failed to download u-opti."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading common library..."
+
+            if ! curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"; then
+                echo
+                echo "Failed to download common.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading System Information module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"; then
+                echo
+                echo "Failed to download system.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Time & Date module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"; then
+                echo
+                echo "Failed to download time.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Swap Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"; then
+                echo
+                echo "Failed to download swap.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading BBR Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"; then
+                echo
+                echo "Failed to download bbr.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Storage Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
+                echo
+                echo "Failed to download storage.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo
+            echo "Checking downloaded files..."
+
+            REQUIRED_FILES=(
+                "$TEMP_DIR/VERSION"
+                "$TEMP_DIR/u-opti"
+                "$TEMP_DIR/common.sh"
+                "$TEMP_DIR/system.sh"
+                "$TEMP_DIR/time.sh"
+                "$TEMP_DIR/swap.sh"
+                "$TEMP_DIR/bbr.sh"
+                "$TEMP_DIR/storage.sh"
+            )
+
+            UPDATE_FILES_OK=true
+
+            for FILE in "${REQUIRED_FILES[@]}"; do
+                if [ ! -s "$FILE" ]; then
+                    echo
+                    echo "Missing or empty file:"
+                    echo "$FILE"
+                    UPDATE_FILES_OK=false
+                fi
+            done
+
+            if [ "$UPDATE_FILES_OK" != "true" ]; then
+                echo
+                echo "Update cancelled."
+                echo "The installed version was not changed."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "All required files are present."
+
+            echo
+            echo "Checking Bash syntax..."
+
+            if ! bash -n "$TEMP_DIR/u-opti" || \
+               ! bash -n "$TEMP_DIR/common.sh" || \
+               ! bash -n "$TEMP_DIR/system.sh" || \
+               ! bash -n "$TEMP_DIR/time.sh" || \
+               ! bash -n "$TEMP_DIR/swap.sh" || \
+               ! bash -n "$TEMP_DIR/bbr.sh" || \
+               ! bash -n "$TEMP_DIR/storage.sh"; then
+
+                echo
+                echo "Bash syntax check failed."
+                echo "Update cancelled."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Bash syntax check passed."
+
+            echo
+            echo "Creating backup of current installation..."
+
+            BACKUP_DIR=$(mktemp -d)
+
+            cp -f "$INSTALL_PATH" "$BACKUP_DIR/u-opti" 2>/dev/null || true
+            cp -f "$LIB_PATH/common.sh" "$BACKUP_DIR/common.sh" 2>/dev/null || true
+            cp -f "$LIB_PATH/VERSION" "$BACKUP_DIR/VERSION" 2>/dev/null || true
+
+            cp -f "$MODULES_PATH/system.sh" "$BACKUP_DIR/system.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/time.sh" "$BACKUP_DIR/time.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/swap.sh" "$BACKUP_DIR/swap.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/bbr.sh" "$BACKUP_DIR/bbr.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/storage.sh" "$BACKUP_DIR/storage.sh" 2>/dev/null || true
+
+            echo "Backup created."
+
+            echo
+            echo "Installing update..."
+
+            UPDATE_FAILED=false
+
+            cp "$TEMP_DIR/u-opti" "$INSTALL_PATH" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
+
+            if [ "$UPDATE_FAILED" = "true" ]; then
+
+                echo
+                echo "Update failed during installation."
+                echo "Attempting to restore the previous version..."
+
+                [ -f "$BACKUP_DIR/u-opti" ] && cp "$BACKUP_DIR/u-opti" "$INSTALL_PATH"
+                [ -f "$BACKUP_DIR/common.sh" ] && cp "$BACKUP_DIR/common.sh" "$LIB_PATH/common.sh"
+                [ -f "$BACKUP_DIR/VERSION" ] && cp "$BACKUP_DIR/VERSION" "$LIB_PATH/VERSION"
+
+                [ -f "$BACKUP_DIR/system.sh" ] && cp "$BACKUP_DIR/system.sh" "$MODULES_PATH/system.sh"
+                [ -f "$BACKUP_DIR/time.sh" ] && cp "$BACKUP_DIR/time.sh" "$MODULES_PATH/time.sh"
+                [ -f "$BACKUP_DIR/swap.sh" ] && cp "$BACKUP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
+                [ -f "$BACKUP_DIR/bbr.sh" ] && cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
+                [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
+
+                rm -rf "$BACKUP_DIR"
+                rm -rf "$TEMP_DIR"
+
+                echo
+                echo "Previous version restored."
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            chmod +x "$INSTALL_PATH"
+            chmod +x "$LIB_PATH/common.sh"
+            chmod +x "$MODULES_PATH/system.sh"
+            chmod +x "$MODULES_PATH/time.sh"
+            chmod +x "$MODULES_PATH/swap.sh"
+            chmod +x "$MODULES_PATH/bbr.sh"
+            chmod +x "$MODULES_PATH/storage.sh"
+
+            rm -rf "$BACKUP_DIR"
+            rm -rf "$TEMP_DIR"
+
+            VERSION="$REMOTE_VERSION"
+
+            echo
+            echo "======================================"
+            echo "          Update completed"
+            echo "======================================"
+            echo
+            echo "Installed Version: $REMOTE_VERSION"
+            echo
+            echo "All U-OPTI modules were updated successfully."
+            echo
+
+            read -rp "Press Enter to return..."
             ;;
 
         4)
             clear
 
             echo "======================================"
-            echo "          Uninstalling U-OPTI"
+            echo "          Uninstall U-OPTI"
             echo "======================================"
             echo
 
-            read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " confirm
+            read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " UNINSTALL_CONFIRM
 
-            case "$confirm" in
+            case "$UNINSTALL_CONFIRM" in
 
                 y|Y|yes|YES)
-                    echo
-                    echo "Removing U-OPTI..."
-
                     rm -f "$INSTALL_PATH"
+                    rm -rf "$LIB_PATH"
 
                     echo
-                    echo "U-OPTI has been successfully removed."
-                    echo
-
+                    echo "U-OPTI has been uninstalled."
                     exit 0
                     ;;
 
                 *)
                     echo
-                    echo "Uninstallation cancelled."
+                    echo "Uninstall cancelled."
                     sleep 2
                     ;;
             esac
             ;;
 
         0)
-            clear
             exit 0
             ;;
 

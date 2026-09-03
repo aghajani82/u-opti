@@ -2,8 +2,12 @@
 
 set -e
 
-REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+
 INSTALL_PATH="/usr/local/bin/u-opti"
+LIB_PATH="/usr/local/lib/u-opti"
+MODULES_PATH="$LIB_PATH/modules"
 
 echo "======================================"
 echo "          Installing U-OPTI"
@@ -15,14 +19,169 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo "Downloading U-OPTI..."
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl is required but is not installed."
+    echo "Install it with: apt install curl"
+    exit 1
+fi
 
-curl -fsSL "$REPO_URL" -o "$INSTALL_PATH"
+TEMP_DIR=$(mktemp -d)
 
-chmod +x "$INSTALL_PATH"
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+
+trap cleanup EXIT
+
+echo "Downloading VERSION..."
+
+if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
+    echo
+    echo "Failed to download VERSION."
+    exit 1
+fi
+
+REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
+
+if [ -z "$REMOTE_VERSION" ]; then
+    echo
+    echo "Error: Unable to determine U-OPTI version."
+    exit 1
+fi
+
+echo "Remote Version: $REMOTE_VERSION"
 
 echo
-echo "Installation completed successfully."
+echo "Downloading U-OPTI..."
+
+if ! curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"; then
+    echo "Failed to download u-opti."
+    exit 1
+fi
+
+echo "Downloading common library..."
+
+if ! curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"; then
+    echo "Failed to download common.sh."
+    exit 1
+fi
+
+echo "Downloading System Information module..."
+
+if ! curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"; then
+    echo "Failed to download system.sh."
+    exit 1
+fi
+
+echo "Downloading Time & Date module..."
+
+if ! curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"; then
+    echo "Failed to download time.sh."
+    exit 1
+fi
+
+echo "Downloading Swap Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"; then
+    echo "Failed to download swap.sh."
+    exit 1
+fi
+
+echo "Downloading BBR Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"; then
+    echo "Failed to download bbr.sh."
+    exit 1
+fi
+
+echo "Downloading Storage Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
+    echo "Failed to download storage.sh."
+    exit 1
+fi
+
+echo
+echo "Checking downloaded files..."
+
+REQUIRED_FILES=(
+    "$TEMP_DIR/VERSION"
+    "$TEMP_DIR/u-opti"
+    "$TEMP_DIR/common.sh"
+    "$TEMP_DIR/system.sh"
+    "$TEMP_DIR/time.sh"
+    "$TEMP_DIR/swap.sh"
+    "$TEMP_DIR/bbr.sh"
+    "$TEMP_DIR/storage.sh"
+)
+
+for FILE in "${REQUIRED_FILES[@]}"; do
+    if [ ! -s "$FILE" ]; then
+        echo
+        echo "Error: Required file is missing or empty:"
+        echo "$FILE"
+        exit 1
+    fi
+done
+
+echo "All required files are present."
+
+echo
+echo "Checking Bash syntax..."
+
+bash -n "$TEMP_DIR/u-opti"
+bash -n "$TEMP_DIR/common.sh"
+bash -n "$TEMP_DIR/system.sh"
+bash -n "$TEMP_DIR/time.sh"
+bash -n "$TEMP_DIR/swap.sh"
+bash -n "$TEMP_DIR/bbr.sh"
+bash -n "$TEMP_DIR/storage.sh"
+
+echo "Bash syntax check passed."
+
+echo
+echo "Creating directories..."
+
+mkdir -p "$LIB_PATH"
+mkdir -p "$MODULES_PATH"
+
+echo
+echo "Installing files..."
+
+cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
+cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
+cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
+
+cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh"
+cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh"
+cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
+cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
+cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
+
+echo
+echo "Setting permissions..."
+
+chmod +x "$INSTALL_PATH"
+chmod +x "$LIB_PATH/common.sh"
+
+chmod +x "$MODULES_PATH/system.sh"
+chmod +x "$MODULES_PATH/time.sh"
+chmod +x "$MODULES_PATH/swap.sh"
+chmod +x "$MODULES_PATH/bbr.sh"
+chmod +x "$MODULES_PATH/storage.sh"
+
+echo
+echo "======================================"
+echo "       Installation completed"
+echo "======================================"
+echo
+echo "Installed Version: $REMOTE_VERSION"
+echo
+echo "Installation Path:"
+echo "$INSTALL_PATH"
+echo
+echo "Library Path:"
+echo "$LIB_PATH"
 echo
 
 "$INSTALL_PATH"
