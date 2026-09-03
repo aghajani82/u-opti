@@ -5,9 +5,6 @@ VERSION="0.8.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/refactor/v0.8.0/u-opti"
 
-BBR_BACKUP_DIR="/etc/u-opti"
-BBR_BACKUP_FILE="$BBR_BACKUP_DIR/bbr-backup.conf"
-
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 
@@ -15,6 +12,8 @@ source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
 source "$MODULES_PATH/time.sh"
 source "$MODULES_PATH/swap.sh"
+source "$MODULES_PATH/bbr.sh"
+source "$MODULES_PATH/storage.sh"
 
 while true; do
     clear
@@ -89,17 +88,11 @@ while true; do
                         ;;
 
                     4)
-                        echo
-                        echo "BBR module is being refactored next."
-                        echo
-                        read -rp "Press Enter to return..."
+                        show_bbr_menu
                         ;;
 
                     5)
-                        echo
-                        echo "Storage module is being refactored next."
-                        echo
-                        read -rp "Press Enter to return..."
+                        show_storage_menu
                         ;;
 
                     0)
@@ -139,6 +132,7 @@ while true; do
             read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " UNINSTALL_CONFIRM
 
             case "$UNINSTALL_CONFIRM" in
+
                 y|Y|yes|YES)
                     rm -f "$INSTALL_PATH"
                     rm -rf "$LIB_PATH"
