@@ -1,8 +1,12 @@
 #!/bin/bash
 
-VERSION="0.6.0"
+VERSION="0.7.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
+
+# BBR configuration backup
+BBR_BACKUP_DIR="/etc/u-opti"
+BBR_BACKUP_FILE="$BBR_BACKUP_DIR/bbr-backup.conf"
 
 while true; do
     clear
@@ -85,7 +89,6 @@ while true; do
 
                         UPTIME=$(uptime -p)
                         TIMEZONE=$(timedatectl show --property=Timezone --value)
-
                         NTP_SYNC=$(timedatectl show --property=NTPSynchronized --value)
 
                         if [ "$NTP_SYNC" = "yes" ]; then
@@ -293,13 +296,13 @@ while true; do
                         while true; do
                             clear
 
+                            SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
+                            SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
+
                             echo "======================================"
                             echo "          Swap Management"
                             echo "======================================"
                             echo
-
-                            SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
-                            SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
 
                             echo "Current Swap:"
                             echo "Size        : $SWAP_TOTAL"
@@ -406,9 +409,24 @@ while true; do
 
                     4)
                         while true; do
+                            clear
+
+                            KERNEL=$(uname -r)
                             CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
                             AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
                             DEFAULT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
+
+                            if modinfo tcp_bbr >/dev/null 2>&1; then
+                                BBR_MODULE="Available"
+                            else
+                                BBR_MODULE="Not Available"
+                            fi
+
+                            if lsmod | grep -qw tcp_bbr; then
+                                BBR_LOADED="Loaded"
+                            else
+                                BBR_LOADED="Not Loaded"
+                            fi
 
                             if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
                                 BBR_AVAILABLE="Yes"
@@ -428,12 +446,17 @@ while true; do
                             echo "           BBR Management"
                             echo "======================================"
                             echo
-                            echo "Kernel                  : $(uname -r)"
+                            echo "Kernel                  : $KERNEL"
                             echo "Current Congestion      : $CURRENT_CC"
                             echo "Available Algorithms    : $AVAILABLE_CC"
                             echo "Default Qdisc           : $DEFAULT_QDISC"
+                            echo "BBR Module              : $BBR_MODULE"
+                            echo "BBR Module Status       : $BBR_LOADED"
                             echo "BBR Available           : $BBR_AVAILABLE"
                             echo "BBR Status              : $BBR_STATUS"
+                            echo
+                            echo "Actual Interface Qdiscs:"
+                            tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
                             echo
                             echo "--------------------------------------"
                             echo
@@ -441,11 +464,13 @@ while true; do
                             echo "2) Check BBR Compatibility"
                             echo "3) Enable BBR"
                             echo "4) Disable BBR"
+                            echo "5) Load BBR Module"
+                            echo "6) Configure Qdisc"
                             echo
                             echo "0) Back"
                             echo
 
-                            read -rp "Please enter your selection [0-4]: " bbr_choice
+                            read -rp "Please enter your selection [0-6]: " bbr_choice
 
                             case "$bbr_choice" in
 
@@ -457,12 +482,8 @@ while true; do
                                     echo "======================================"
                                     echo
 
-                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
-                                    DEFAULT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
-
                                     echo "Kernel:"
-                                    echo "$(uname -r)"
+                                    echo "$KERNEL"
 
                                     echo
                                     echo "Current Congestion Control:"
@@ -477,19 +498,24 @@ while true; do
                                     echo "$DEFAULT_QDISC"
 
                                     echo
-                                    echo "BBR:"
+                                    echo "BBR Module:"
+                                    echo "$BBR_MODULE"
 
-                                    if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                        echo "Available"
-                                    else
-                                        echo "Not Available"
-                                    fi
+                                    echo
+                                    echo "BBR Module Status:"
+                                    echo "$BBR_LOADED"
 
-                                    if [ "$CURRENT_CC" = "bbr" ]; then
-                                        echo "Enabled"
-                                    else
-                                        echo "Disabled"
-                                    fi
+                                    echo
+                                    echo "BBR Available:"
+                                    echo "$BBR_AVAILABLE"
+
+                                    echo
+                                    echo "BBR Status:"
+                                    echo "$BBR_STATUS"
+
+                                    echo
+                                    echo "Actual Interface Qdiscs:"
+                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
 
                                     echo
                                     echo "--------------------------------------"
@@ -505,12 +531,8 @@ while true; do
                                     echo "======================================"
                                     echo
 
-                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
-                                    DEFAULT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown")
-
                                     echo "Kernel:"
-                                    echo "$(uname -r)"
+                                    echo "$KERNEL"
 
                                     echo
                                     echo "Current Congestion Control:"
@@ -521,44 +543,63 @@ while true; do
                                     echo "$AVAILABLE_CC"
 
                                     echo
-                                    echo "Current Default Qdisc:"
+                                    echo "Default Qdisc:"
                                     echo "$DEFAULT_QDISC"
+
+                                    echo
+                                    echo "BBR Module:"
+                                    echo "$BBR_MODULE"
+
+                                    echo
+                                    echo "BBR Module Status:"
+                                    echo "$BBR_LOADED"
 
                                     echo
                                     echo "--------------------------------------"
                                     echo
 
-                                    if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                        echo "BBR Kernel Support : YES"
-                                        echo "BBR Registered      : YES"
+                                    if [ "$BBR_MODULE" = "Available" ]; then
+                                        echo "BBR kernel module      : YES"
+
+                                        if [ "$BBR_LOADED" = "Loaded" ]; then
+                                            echo "BBR module loaded      : YES"
+                                        else
+                                            echo "BBR module loaded      : NO"
+                                        fi
+
+                                        if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                            echo "BBR registered         : YES"
+                                        else
+                                            echo "BBR registered         : NO"
+                                        fi
 
                                         if [ "$CURRENT_CC" = "bbr" ]; then
-                                            echo "BBR Active          : YES"
+                                            echo "BBR active             : YES"
                                         else
-                                            echo "BBR Active          : NO"
+                                            echo "BBR active             : NO"
                                         fi
 
                                         echo
                                         echo "Recommendation:"
-                                        echo "BBR can be enabled on this system."
 
-                                        if [ "$DEFAULT_QDISC" = "fq" ]; then
-                                            echo "Qdisc status: fq"
-                                            echo "Qdisc is suitable for BBR."
+                                        if ! echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                            echo "The BBR module exists but is not loaded."
+                                            echo "Load the module first."
+                                        elif [ "$CURRENT_CC" != "bbr" ]; then
+                                            echo "BBR is available and can be enabled."
                                         else
-                                            echo "Qdisc status: $DEFAULT_QDISC"
-                                            echo "When enabling BBR, U-OPTI can set the default qdisc to fq."
+                                            echo "BBR is already active."
                                         fi
-
                                     else
-                                        echo "BBR Kernel Support : NO"
-                                        echo "BBR Registered      : NO"
-
+                                        echo "BBR kernel module      : NO"
                                         echo
                                         echo "Recommendation:"
-                                        echo "BBR cannot be enabled safely on the current system"
-                                        echo "without first providing BBR support in the kernel."
+                                        echo "BBR is not provided by the current kernel."
                                     fi
+
+                                    echo
+                                    echo "Actual Interface Qdiscs:"
+                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
 
                                     echo
                                     echo "--------------------------------------"
@@ -574,92 +615,102 @@ while true; do
                                     echo "======================================"
                                     echo
 
-                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
-                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
+                                    if ! modinfo tcp_bbr >/dev/null 2>&1; then
+                                        echo "BBR module is not available on this kernel."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
 
-                                    if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
-                                        echo "BBR is available in the current kernel."
+                                    if ! lsmod | grep -qw tcp_bbr; then
+                                        echo "BBR module is not loaded."
+                                        echo
+                                        echo "Loading tcp_bbr..."
                                         echo
 
-                                        if [ "$CURRENT_CC" = "bbr" ]; then
-                                            echo "BBR is already enabled."
+                                        if ! modprobe tcp_bbr; then
+                                            echo "Failed to load tcp_bbr."
                                             echo
                                             read -rp "Press Enter to return..."
                                             continue
                                         fi
+                                    fi
 
-                                        CURRENT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "")
+                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
 
-                                        echo "Current Congestion Control : $CURRENT_CC"
-                                        echo "Current Default Qdisc      : $CURRENT_QDISC"
-                                        echo
-
-                                        read -rp "Enable BBR and set default qdisc to fq? [y/N]: " ENABLE_CONFIRM
-
-                                        case "$ENABLE_CONFIRM" in
-                                            y|Y|yes|YES)
-
-                                                echo
-                                                echo "Enabling BBR..."
-
-                                                if ! sysctl -w net.core.default_qdisc=fq; then
-                                                    echo
-                                                    echo "Failed to set default qdisc."
-                                                    echo
-                                                    read -rp "Press Enter to return..."
-                                                    continue
-                                                fi
-
-                                                if ! sysctl -w net.ipv4.tcp_congestion_control=bbr; then
-                                                    echo
-                                                    echo "Failed to enable BBR."
-                                                    echo
-                                                    read -rp "Press Enter to return..."
-                                                    continue
-                                                fi
-
-                                                if grep -q "^net.core.default_qdisc=" /etc/sysctl.conf; then
-                                                    sed -i 's/^net.core.default_qdisc=.*/net.core.default_qdisc=fq/' /etc/sysctl.conf
-                                                else
-                                                    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-                                                fi
-
-                                                if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
-                                                    sed -i 's/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=bbr/' /etc/sysctl.conf
-                                                else
-                                                    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-                                                fi
-
-                                                echo
-                                                echo "BBR has been enabled."
-                                                echo
-                                                echo "Current Congestion Control:"
-                                                sysctl -n net.ipv4.tcp_congestion_control
-
-                                                echo
-                                                echo "Default Qdisc:"
-                                                sysctl -n net.core.default_qdisc
-                                                ;;
-
-                                            *)
-                                                echo
-                                                echo "Operation cancelled."
-                                                ;;
-                                        esac
-
-                                        echo
-                                        read -rp "Press Enter to return..."
-
-                                    else
-                                        echo "BBR is not available on the current kernel."
+                                    if ! echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                        echo "BBR is still not available after loading the module."
                                         echo
                                         echo "No changes were made."
                                         echo
-                                        echo "Use 'Check BBR Compatibility' for more information."
-
-                                        echo
                                         read -rp "Press Enter to return..."
+                                        continue
                                     fi
+
+                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
+                                    CURRENT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "")
+
+                                    echo "Current Congestion Control : $CURRENT_CC"
+                                    echo "Current Default Qdisc      : $CURRENT_QDISC"
+                                    echo
+
+                                    echo "This will:"
+                                    echo "  - Enable BBR"
+                                    echo "  - Keep the current default qdisc"
+                                    echo "  - Save a backup of current settings"
+                                    echo "  - Make BBR module loading persistent"
+                                    echo
+
+                                    read -rp "Continue? [y/N]: " ENABLE_CONFIRM
+
+                                    case "$ENABLE_CONFIRM" in
+                                        y|Y|yes|YES)
+
+                                            mkdir -p "$BBR_BACKUP_DIR"
+
+                                            cat > "$BBR_BACKUP_FILE" <<EOF
+CURRENT_CC=$CURRENT_CC
+CURRENT_QDISC=$CURRENT_QDISC
+EOF
+
+                                            echo
+                                            echo "Backup saved to:"
+                                            echo "$BBR_BACKUP_FILE"
+
+                                            sysctl -w net.ipv4.tcp_congestion_control=bbr
+
+                                            if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
+                                                sed -i 's/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=bbr/' /etc/sysctl.conf
+                                            else
+                                                echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+                                            fi
+
+                                            mkdir -p /etc/modules-load.d
+                                            echo "tcp_bbr" > /etc/modules-load.d/tcp_bbr.conf
+
+                                            echo
+                                            echo "BBR has been enabled."
+                                            echo
+                                            echo "Current Congestion Control:"
+                                            sysctl -n net.ipv4.tcp_congestion_control
+
+                                            echo
+                                            echo "BBR module:"
+                                            lsmod | grep tcp_bbr || echo "tcp_bbr not shown in lsmod."
+
+                                            echo
+                                            echo "Note:"
+                                            echo "The current qdisc was not changed."
+                                            ;;
+
+                                        *)
+                                            echo
+                                            echo "Operation cancelled."
+                                            ;;
+                                    esac
+
+                                    echo
+                                    read -rp "Press Enter to return..."
                                     ;;
 
                                 4)
@@ -676,30 +727,45 @@ while true; do
                                     if [ "$CURRENT_CC" != "bbr" ]; then
                                         echo "BBR is not currently active."
                                         echo
-                                        echo "Current Congestion Control:"
-                                        echo "$CURRENT_CC"
-                                        echo
                                         read -rp "Press Enter to return..."
                                         continue
                                     fi
 
-                                    if echo "$AVAILABLE_CC" | grep -qw "cubic"; then
-                                        FALLBACK_CC="cubic"
-                                    elif echo "$AVAILABLE_CC" | grep -qw "reno"; then
-                                        FALLBACK_CC="reno"
+                                    if [ -f "$BBR_BACKUP_FILE" ]; then
+                                        # shellcheck disable=SC1090
+                                        source "$BBR_BACKUP_FILE"
+                                        FALLBACK_CC="$CURRENT_CC"
+
+                                        if [ -n "${CURRENT_CC:-}" ]; then
+                                            FALLBACK_CC="$CURRENT_CC"
+                                        fi
                                     else
+                                        if echo "$AVAILABLE_CC" | grep -qw "cubic"; then
+                                            FALLBACK_CC="cubic"
+                                        elif echo "$AVAILABLE_CC" | grep -qw "reno"; then
+                                            FALLBACK_CC="reno"
+                                        else
+                                            FALLBACK_CC=""
+                                        fi
+                                    fi
+
+                                    if [ -z "$FALLBACK_CC" ] || [ "$FALLBACK_CC" = "bbr" ]; then
+                                        if echo "$AVAILABLE_CC" | grep -qw "cubic"; then
+                                            FALLBACK_CC="cubic"
+                                        elif echo "$AVAILABLE_CC" | grep -qw "reno"; then
+                                            FALLBACK_CC="reno"
+                                        fi
+                                    fi
+
+                                    if [ -z "$FALLBACK_CC" ] || [ "$FALLBACK_CC" = "bbr" ]; then
                                         echo "No safe fallback congestion control was detected."
                                         echo
-                                        echo "No changes were made."
-                                        echo
                                         read -rp "Press Enter to return..."
                                         continue
                                     fi
 
-                                    echo "BBR is currently active."
-                                    echo
-                                    echo "Detected fallback:"
-                                    echo "$FALLBACK_CC"
+                                    echo "Current Congestion Control : bbr"
+                                    echo "Detected Fallback          : $FALLBACK_CC"
                                     echo
 
                                     read -rp "Disable BBR and switch to $FALLBACK_CC? [y/N]: " DISABLE_CONFIRM
@@ -707,31 +773,140 @@ while true; do
                                     case "$DISABLE_CONFIRM" in
                                         y|Y|yes|YES)
 
-                                            echo
-                                            echo "Switching to $FALLBACK_CC..."
+                                            sysctl -w net.ipv4.tcp_congestion_control="$FALLBACK_CC"
 
-                                            if sysctl -w net.ipv4.tcp_congestion_control="$FALLBACK_CC"; then
-
-                                                if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
-                                                    sed -i "s/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=$FALLBACK_CC/" /etc/sysctl.conf
-                                                else
-                                                    echo "net.ipv4.tcp_congestion_control=$FALLBACK_CC" >> /etc/sysctl.conf
-                                                fi
-
-                                                echo
-                                                echo "BBR has been disabled."
-                                                echo "Current Congestion Control:"
-                                                sysctl -n net.ipv4.tcp_congestion_control
-
+                                            if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
+                                                sed -i "s/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=$FALLBACK_CC/" /etc/sysctl.conf
                                             else
-                                                echo
-                                                echo "Failed to change congestion control."
+                                                echo "net.ipv4.tcp_congestion_control=$FALLBACK_CC" >> /etc/sysctl.conf
                                             fi
+
+                                            rm -f /etc/modules-load.d/tcp_bbr.conf
+
+                                            echo
+                                            echo "BBR has been disabled."
+                                            echo "Current Congestion Control:"
+                                            sysctl -n net.ipv4.tcp_congestion_control
+
+                                            echo
+                                            echo "The BBR module remains loaded until reboot or manual unload."
                                             ;;
 
                                         *)
                                             echo
                                             echo "Operation cancelled."
+                                            ;;
+                                    esac
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                5)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "          Load BBR Module"
+                                    echo "======================================"
+                                    echo
+
+                                    if ! modinfo tcp_bbr >/dev/null 2>&1; then
+                                        echo "BBR module is not available on this kernel."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    if lsmod | grep -qw tcp_bbr; then
+                                        echo "tcp_bbr is already loaded."
+                                    else
+                                        echo "Loading tcp_bbr..."
+
+                                        if modprobe tcp_bbr; then
+                                            echo
+                                            echo "tcp_bbr loaded successfully."
+                                        else
+                                            echo
+                                            echo "Failed to load tcp_bbr."
+                                        fi
+                                    fi
+
+                                    echo
+                                    echo "Available congestion controls:"
+                                    sysctl -n net.ipv4.tcp_available_congestion_control
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                6)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "           Configure Qdisc"
+                                    echo "======================================"
+                                    echo
+
+                                    echo "Current default qdisc:"
+                                    sysctl -n net.core.default_qdisc 2>/dev/null || echo "unknown"
+
+                                    echo
+                                    echo "Current interface qdiscs:"
+                                    tc qdisc show 2>/dev/null | grep "dev " || echo "Unable to read qdisc information."
+
+                                    echo
+                                    echo "This option can change the default qdisc."
+                                    echo "The currently active interface qdiscs are also shown above."
+                                    echo
+                                    echo "Available common choices:"
+                                    echo "  fq"
+                                    echo "  fq_codel"
+                                    echo "  pfifo_fast"
+                                    echo "  noqueue"
+                                    echo
+
+                                    read -rp "Enter new default qdisc: " NEW_QDISC
+
+                                    case "$NEW_QDISC" in
+                                        fq|fq_codel|pfifo_fast|noqueue)
+
+                                            CURRENT_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "")
+
+                                            if [ -n "$CURRENT_QDISC" ]; then
+                                                mkdir -p "$BBR_BACKUP_DIR"
+
+                                                if [ ! -f "$BBR_BACKUP_FILE" ]; then
+                                                    cat > "$BBR_BACKUP_FILE" <<EOF
+CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control)
+CURRENT_QDISC=$CURRENT_QDISC
+EOF
+                                                fi
+                                            fi
+
+                                            if sysctl -w net.core.default_qdisc="$NEW_QDISC"; then
+
+                                                if grep -q "^net.core.default_qdisc=" /etc/sysctl.conf; then
+                                                    sed -i "s/^net.core.default_qdisc=.*/net.core.default_qdisc=$NEW_QDISC/" /etc/sysctl.conf
+                                                else
+                                                    echo "net.core.default_qdisc=$NEW_QDISC" >> /etc/sysctl.conf
+                                                fi
+
+                                                echo
+                                                echo "Default qdisc changed successfully."
+                                                echo
+                                                echo "Current Default Qdisc:"
+                                                sysctl -n net.core.default_qdisc
+
+                                            else
+                                                echo
+                                                echo "Failed to change default qdisc."
+                                            fi
+                                            ;;
+
+                                        *)
+                                            echo
+                                            echo "Unsupported qdisc."
+                                            echo "No changes were made."
                                             ;;
                                     esac
 
