@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
 
@@ -53,10 +53,11 @@ while true; do
                 echo "1) System Information"
                 echo "2) Time & Date"
                 echo "3) Swap Management"
+                echo "4) BBR Management"
                 echo
                 echo "0) Back"
                 echo
-                read -rp "Please enter your selection [0-3]: " opt_choice
+                read -rp "Please enter your selection [0-4]: " opt_choice
 
                 case "$opt_choice" in
 
@@ -317,6 +318,221 @@ while true; do
                                         echo
                                         read -rp "Press Enter to return..."
                                     fi
+                                    ;;
+
+                                0)
+                                    break
+                                    ;;
+
+                                *)
+                                    echo
+                                    echo "Invalid selection!"
+                                    sleep 2
+                                    ;;
+                            esac
+                        done
+                        ;;
+
+                    4)
+                        while true; do
+                            clear
+
+                            CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
+                            AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
+
+                            echo "======================================"
+                            echo "           BBR Management"
+                            echo "======================================"
+                            echo
+                            echo "Current Congestion Control : $CURRENT_CC"
+                            echo "Available Algorithms       : $AVAILABLE_CC"
+                            echo
+
+                            if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                BBR_AVAILABLE="Yes"
+                            else
+                                BBR_AVAILABLE="No"
+                            fi
+
+                            if [ "$CURRENT_CC" = "bbr" ]; then
+                                BBR_STATUS="Enabled"
+                            else
+                                BBR_STATUS="Disabled"
+                            fi
+
+                            echo "BBR Available : $BBR_AVAILABLE"
+                            echo "BBR Status    : $BBR_STATUS"
+                            echo
+                            echo "--------------------------------------"
+                            echo
+                            echo "1) BBR Status"
+                            echo "2) Enable BBR"
+                            echo "3) Disable BBR"
+                            echo
+                            echo "0) Back"
+                            echo
+
+                            read -rp "Please enter your selection [0-3]: " bbr_choice
+
+                            case "$bbr_choice" in
+
+                                1)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "             BBR Status"
+                                    echo "======================================"
+                                    echo
+
+                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
+                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "unknown")
+
+                                    echo "Current Congestion Control:"
+                                    echo "$CURRENT_CC"
+
+                                    echo
+                                    echo "Available Congestion Controls:"
+                                    echo "$AVAILABLE_CC"
+
+                                    echo
+                                    echo "BBR Status:"
+
+                                    if echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                        echo "Available"
+                                    else
+                                        echo "Not Available"
+                                    fi
+
+                                    if [ "$CURRENT_CC" = "bbr" ]; then
+                                        echo "Enabled"
+                                    else
+                                        echo "Disabled"
+                                    fi
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                2)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "             Enable BBR"
+                                    echo "======================================"
+                                    echo
+
+                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
+
+                                    if ! echo "$AVAILABLE_CC" | grep -qw "bbr"; then
+                                        echo "BBR is not available on this kernel."
+                                        echo
+                                        echo "No changes were made."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
+
+                                    if [ "$CURRENT_CC" = "bbr" ]; then
+                                        echo "BBR is already enabled."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    echo "Enabling BBR..."
+                                    echo
+
+                                    sysctl -w net.core.default_qdisc=fq
+                                    sysctl -w net.ipv4.tcp_congestion_control=bbr
+
+                                    if grep -q "^net.core.default_qdisc=" /etc/sysctl.conf; then
+                                        sed -i 's/^net.core.default_qdisc=.*/net.core.default_qdisc=fq/' /etc/sysctl.conf
+                                    else
+                                        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+                                    fi
+
+                                    if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
+                                        sed -i 's/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=bbr/' /etc/sysctl.conf
+                                    else
+                                        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+                                    fi
+
+                                    echo
+                                    echo "BBR has been enabled."
+                                    echo
+                                    echo "Current:"
+                                    echo "Congestion Control: $(sysctl -n net.ipv4.tcp_congestion_control)"
+                                    echo "Default Qdisc      : $(sysctl -n net.core.default_qdisc)"
+
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                3)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "            Disable BBR"
+                                    echo "======================================"
+                                    echo
+
+                                    CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "")
+
+                                    if [ "$CURRENT_CC" != "bbr" ]; then
+                                        echo "BBR is not currently enabled."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    echo "Available congestion controls:"
+                                    echo
+
+                                    sysctl -n net.ipv4.tcp_available_congestion_control
+
+                                    echo
+                                    read -rp "Enter congestion control to use instead of BBR: " NEW_CC
+
+                                    AVAILABLE_CC=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo "")
+
+                                    if ! echo "$AVAILABLE_CC" | grep -qw "$NEW_CC"; then
+                                        echo
+                                        echo "Invalid congestion control."
+                                        echo "No changes were made."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    if [ "$NEW_CC" = "bbr" ]; then
+                                        echo
+                                        echo "Please choose an algorithm other than bbr."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                        continue
+                                    fi
+
+                                    echo
+                                    echo "Switching to $NEW_CC..."
+
+                                    sysctl -w net.ipv4.tcp_congestion_control="$NEW_CC"
+
+                                    if grep -q "^net.ipv4.tcp_congestion_control=" /etc/sysctl.conf; then
+                                        sed -i "s/^net.ipv4.tcp_congestion_control=.*/net.ipv4.tcp_congestion_control=$NEW_CC/" /etc/sysctl.conf
+                                    else
+                                        echo "net.ipv4.tcp_congestion_control=$NEW_CC" >> /etc/sysctl.conf
+                                    fi
+
+                                    echo
+                                    echo "BBR has been disabled."
+                                    echo "Current Congestion Control: $(sysctl -n net.ipv4.tcp_congestion_control)"
+
+                                    echo
+                                    read -rp "Press Enter to return..."
                                     ;;
 
                                 0)
