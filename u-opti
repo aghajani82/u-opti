@@ -1,162 +1,423 @@
 #!/bin/bash
 
-set -e
+INSTALL_PATH="/usr/local/bin/u-opti"
+LIB_PATH="/usr/local/lib/u-opti"
+MODULES_PATH="$LIB_PATH/modules"
+VERSION_FILE="$LIB_PATH/VERSION"
 
 BRANCH="refactor/v0.8.0"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
-INSTALL_PATH="/usr/local/bin/u-opti"
-LIB_PATH="/usr/local/lib/u-opti"
-MODULES_PATH="$LIB_PATH/modules"
-
-echo "======================================"
-echo "          Installing U-OPTI"
-echo "======================================"
-echo
-
-if [ "$EUID" -ne 0 ]; then
-    echo "Error: Please run this installer as root."
-    exit 1
+if [ -f "$VERSION_FILE" ]; then
+    VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
 fi
 
-if ! command -v curl >/dev/null 2>&1; then
-    echo "Error: curl is required but is not installed."
-    echo "Install it with: apt install curl"
-    exit 1
+if [ -z "$VERSION" ]; then
+    VERSION="0.8.0"
 fi
 
-TEMP_DIR=$(mktemp -d)
+source "$LIB_PATH/common.sh"
+source "$MODULES_PATH/system.sh"
+source "$MODULES_PATH/time.sh"
+source "$MODULES_PATH/swap.sh"
+source "$MODULES_PATH/bbr.sh"
+source "$MODULES_PATH/storage.sh"
 
-cleanup() {
-    rm -rf "$TEMP_DIR"
-}
+while true; do
+    clear
 
-trap cleanup EXIT
-
-echo "Downloading VERSION..."
-
-curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"
-
-REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
-
-if [ -z "$REMOTE_VERSION" ]; then
+    echo "======================================"
+    echo "              U-OPTI"
+    echo "       Ubuntu Server Optimizer"
+    echo "              v$VERSION"
+    echo "======================================"
     echo
-    echo "Error: Unable to determine U-OPTI version."
-    exit 1
-fi
+    echo "1) Update Server"
+    echo "2) System Optimization"
+    echo "3) Update U-OPTI"
+    echo "4) Uninstall U-OPTI"
+    echo
+    echo "0) Exit"
+    echo
 
-echo "Remote Version: $REMOTE_VERSION"
+    read -rp "Please enter your selection [0-4]: " choice
 
-echo
-echo "Creating directories..."
+    case "$choice" in
 
-mkdir -p "$LIB_PATH"
-mkdir -p "$MODULES_PATH"
+        1)
+            clear
 
-echo
-echo "Downloading U-OPTI..."
+            echo "======================================"
+            echo "           Updating Server"
+            echo "======================================"
+            echo
 
-curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"
+            apt update && apt upgrade -y
 
-echo "Downloading common library..."
+            echo
+            echo "--------------------------------------"
+            echo "Server update completed."
+            echo
 
-curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"
+            read -rp "Press Enter to return to menu..."
+            ;;
 
-echo "Downloading System Information module..."
+        2)
+            while true; do
+                clear
 
-curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"
+                echo "======================================"
+                echo "        System Optimization"
+                echo "======================================"
+                echo
+                echo "1) System Information"
+                echo "2) Time & Date"
+                echo "3) Swap Management"
+                echo "4) BBR Management"
+                echo "5) Storage Management"
+                echo
+                echo "0) Back"
+                echo
 
-echo "Downloading Time & Date module..."
+                read -rp "Please enter your selection [0-5]: " opt_choice
 
-curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"
+                case "$opt_choice" in
 
-echo "Downloading Swap Management module..."
+                    1)
+                        show_system_information
+                        ;;
 
-curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"
+                    2)
+                        show_time_menu
+                        ;;
 
-echo "Downloading BBR Management module..."
+                    3)
+                        show_swap_menu
+                        ;;
 
-curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"
+                    4)
+                        show_bbr_menu
+                        ;;
 
-echo "Downloading Storage Management module..."
+                    5)
+                        show_storage_menu
+                        ;;
 
-curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"
+                    0)
+                        break
+                        ;;
 
-echo
-echo "Checking downloaded files..."
+                    *)
+                        echo
+                        echo "Invalid selection!"
+                        sleep 2
+                        ;;
+                esac
+            done
+            ;;
 
-REQUIRED_FILES=(
-    "$TEMP_DIR/VERSION"
-    "$TEMP_DIR/u-opti"
-    "$TEMP_DIR/common.sh"
-    "$TEMP_DIR/system.sh"
-    "$TEMP_DIR/time.sh"
-    "$TEMP_DIR/swap.sh"
-    "$TEMP_DIR/bbr.sh"
-    "$TEMP_DIR/storage.sh"
-)
+        3)
+            clear
 
-for FILE in "${REQUIRED_FILES[@]}"; do
-    if [ ! -s "$FILE" ]; then
-        echo
-        echo "Error: Required file is missing or empty:"
-        echo "$FILE"
-        exit 1
-    fi
+            echo "======================================"
+            echo "            Update U-OPTI"
+            echo "======================================"
+            echo
+
+            if ! command -v curl >/dev/null 2>&1; then
+                echo "Error: curl is not installed."
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            TEMP_DIR=$(mktemp -d)
+
+            echo "Preparing update..."
+            echo
+
+            echo "Downloading VERSION..."
+
+            if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
+                echo
+                echo "Failed to download VERSION."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
+
+            if [ -z "$REMOTE_VERSION" ]; then
+                echo
+                echo "Remote version could not be determined."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Current Version : $VERSION"
+            echo "Remote Version  : $REMOTE_VERSION"
+            echo
+
+            echo "Downloading U-OPTI..."
+
+            if ! curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"; then
+                echo
+                echo "Failed to download u-opti."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading common library..."
+
+            if ! curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"; then
+                echo
+                echo "Failed to download common.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading System Information module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"; then
+                echo
+                echo "Failed to download system.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Time & Date module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"; then
+                echo
+                echo "Failed to download time.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Swap Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"; then
+                echo
+                echo "Failed to download swap.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading BBR Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"; then
+                echo
+                echo "Failed to download bbr.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading Storage Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
+                echo
+                echo "Failed to download storage.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo
+            echo "Checking downloaded files..."
+
+            REQUIRED_FILES=(
+                "$TEMP_DIR/VERSION"
+                "$TEMP_DIR/u-opti"
+                "$TEMP_DIR/common.sh"
+                "$TEMP_DIR/system.sh"
+                "$TEMP_DIR/time.sh"
+                "$TEMP_DIR/swap.sh"
+                "$TEMP_DIR/bbr.sh"
+                "$TEMP_DIR/storage.sh"
+            )
+
+            UPDATE_FILES_OK=true
+
+            for FILE in "${REQUIRED_FILES[@]}"; do
+                if [ ! -s "$FILE" ]; then
+                    echo
+                    echo "Missing or empty file:"
+                    echo "$FILE"
+                    UPDATE_FILES_OK=false
+                fi
+            done
+
+            if [ "$UPDATE_FILES_OK" != "true" ]; then
+                echo
+                echo "Update cancelled."
+                echo "The installed version was not changed."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "All required files are present."
+
+            echo
+            echo "Checking Bash syntax..."
+
+            if ! bash -n "$TEMP_DIR/u-opti" || \
+               ! bash -n "$TEMP_DIR/common.sh" || \
+               ! bash -n "$TEMP_DIR/system.sh" || \
+               ! bash -n "$TEMP_DIR/time.sh" || \
+               ! bash -n "$TEMP_DIR/swap.sh" || \
+               ! bash -n "$TEMP_DIR/bbr.sh" || \
+               ! bash -n "$TEMP_DIR/storage.sh"; then
+
+                echo
+                echo "Bash syntax check failed."
+                echo "Update cancelled."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Bash syntax check passed."
+
+            echo
+            echo "Creating backup of current installation..."
+
+            BACKUP_DIR=$(mktemp -d)
+
+            cp -f "$INSTALL_PATH" "$BACKUP_DIR/u-opti" 2>/dev/null || true
+            cp -f "$LIB_PATH/common.sh" "$BACKUP_DIR/common.sh" 2>/dev/null || true
+            cp -f "$LIB_PATH/VERSION" "$BACKUP_DIR/VERSION" 2>/dev/null || true
+
+            cp -f "$MODULES_PATH/system.sh" "$BACKUP_DIR/system.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/time.sh" "$BACKUP_DIR/time.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/swap.sh" "$BACKUP_DIR/swap.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/bbr.sh" "$BACKUP_DIR/bbr.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/storage.sh" "$BACKUP_DIR/storage.sh" 2>/dev/null || true
+
+            echo "Backup created."
+
+            echo
+            echo "Installing update..."
+
+            UPDATE_FAILED=false
+
+            cp "$TEMP_DIR/u-opti" "$INSTALL_PATH" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
+
+            if [ "$UPDATE_FAILED" = "true" ]; then
+
+                echo
+                echo "Update failed during installation."
+                echo "Attempting to restore the previous version..."
+
+                [ -f "$BACKUP_DIR/u-opti" ] && cp "$BACKUP_DIR/u-opti" "$INSTALL_PATH"
+                [ -f "$BACKUP_DIR/common.sh" ] && cp "$BACKUP_DIR/common.sh" "$LIB_PATH/common.sh"
+                [ -f "$BACKUP_DIR/VERSION" ] && cp "$BACKUP_DIR/VERSION" "$LIB_PATH/VERSION"
+
+                [ -f "$BACKUP_DIR/system.sh" ] && cp "$BACKUP_DIR/system.sh" "$MODULES_PATH/system.sh"
+                [ -f "$BACKUP_DIR/time.sh" ] && cp "$BACKUP_DIR/time.sh" "$MODULES_PATH/time.sh"
+                [ -f "$BACKUP_DIR/swap.sh" ] && cp "$BACKUP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
+                [ -f "$BACKUP_DIR/bbr.sh" ] && cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
+                [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
+
+                rm -rf "$BACKUP_DIR"
+                rm -rf "$TEMP_DIR"
+
+                echo
+                echo "Previous version restored."
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            chmod +x "$INSTALL_PATH"
+            chmod +x "$LIB_PATH/common.sh"
+            chmod +x "$MODULES_PATH/system.sh"
+            chmod +x "$MODULES_PATH/time.sh"
+            chmod +x "$MODULES_PATH/swap.sh"
+            chmod +x "$MODULES_PATH/bbr.sh"
+            chmod +x "$MODULES_PATH/storage.sh"
+
+            rm -rf "$BACKUP_DIR"
+            rm -rf "$TEMP_DIR"
+
+            VERSION="$REMOTE_VERSION"
+
+            echo
+            echo "======================================"
+            echo "          Update completed"
+            echo "======================================"
+            echo
+            echo "Installed Version: $REMOTE_VERSION"
+            echo
+            echo "All U-OPTI modules were updated successfully."
+            echo
+
+            read -rp "Press Enter to return..."
+            ;;
+
+        4)
+            clear
+
+            echo "======================================"
+            echo "          Uninstall U-OPTI"
+            echo "======================================"
+            echo
+
+            read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " UNINSTALL_CONFIRM
+
+            case "$UNINSTALL_CONFIRM" in
+
+                y|Y|yes|YES)
+                    rm -f "$INSTALL_PATH"
+                    rm -rf "$LIB_PATH"
+
+                    echo
+                    echo "U-OPTI has been uninstalled."
+                    exit 0
+                    ;;
+
+                *)
+                    echo
+                    echo "Uninstall cancelled."
+                    sleep 2
+                    ;;
+            esac
+            ;;
+
+        0)
+            exit 0
+            ;;
+
+        *)
+            echo
+            echo "Invalid selection!"
+            sleep 2
+            ;;
+    esac
 done
-
-echo "All required files are present."
-
-echo
-echo "Checking Bash syntax..."
-
-bash -n "$TEMP_DIR/u-opti"
-bash -n "$TEMP_DIR/common.sh"
-bash -n "$TEMP_DIR/system.sh"
-bash -n "$TEMP_DIR/time.sh"
-bash -n "$TEMP_DIR/swap.sh"
-bash -n "$TEMP_DIR/bbr.sh"
-bash -n "$TEMP_DIR/storage.sh"
-
-echo "Bash syntax check passed."
-
-echo
-echo "Installing files..."
-
-cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
-cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
-cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
-
-cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh"
-cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh"
-cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
-cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
-cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
-
-echo
-echo "Setting permissions..."
-
-chmod +x "$INSTALL_PATH"
-chmod +x "$LIB_PATH/common.sh"
-
-chmod +x "$MODULES_PATH/system.sh"
-chmod +x "$MODULES_PATH/time.sh"
-chmod +x "$MODULES_PATH/swap.sh"
-chmod +x "$MODULES_PATH/bbr.sh"
-chmod +x "$MODULES_PATH/storage.sh"
-
-echo
-echo "======================================"
-echo "       Installation completed"
-echo "======================================"
-echo
-echo "Installed Version: $REMOTE_VERSION"
-echo
-echo "Installation Path:"
-echo "$INSTALL_PATH"
-echo
-echo "Library Path:"
-echo "$LIB_PATH"
-echo
-
-"$INSTALL_PATH"
