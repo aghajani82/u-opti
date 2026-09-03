@@ -2,8 +2,6 @@
 
 set -e
 
-VERSION="0.8.0"
-
 BRANCH="refactor/v0.8.0"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
@@ -13,7 +11,6 @@ MODULES_PATH="$LIB_PATH/modules"
 
 echo "======================================"
 echo "          Installing U-OPTI"
-echo "              v$VERSION"
 echo "======================================"
 echo
 
@@ -28,55 +25,99 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Creating directories..."
+TEMP_DIR=$(mktemp -d)
 
-mkdir -p "$LIB_PATH"
-mkdir -p "$MODULES_PATH"
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+
+trap cleanup EXIT
+
+echo "Downloading VERSION..."
+
+if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
+    echo
+    echo "Failed to download VERSION."
+    exit 1
+fi
+
+REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
+
+if [ -z "$REMOTE_VERSION" ]; then
+    echo
+    echo "Error: Unable to determine U-OPTI version."
+    exit 1
+fi
+
+echo "Remote Version: $REMOTE_VERSION"
 
 echo
 echo "Downloading U-OPTI..."
 
-curl -fsSL "$BASE_URL/u-opti" -o "$INSTALL_PATH"
+if ! curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"; then
+    echo "Failed to download u-opti."
+    exit 1
+fi
 
 echo "Downloading common library..."
 
-curl -fsSL "$BASE_URL/lib/common.sh" -o "$LIB_PATH/common.sh"
+if ! curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"; then
+    echo "Failed to download common.sh."
+    exit 1
+fi
 
 echo "Downloading System Information module..."
 
-curl -fsSL "$BASE_URL/modules/system.sh" -o "$MODULES_PATH/system.sh"
+if ! curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"; then
+    echo "Failed to download system.sh."
+    exit 1
+fi
 
 echo "Downloading Time & Date module..."
 
-curl -fsSL "$BASE_URL/modules/time.sh" -o "$MODULES_PATH/time.sh"
+if ! curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"; then
+    echo "Failed to download time.sh."
+    exit 1
+fi
 
 echo "Downloading Swap Management module..."
 
-curl -fsSL "$BASE_URL/modules/swap.sh" -o "$MODULES_PATH/swap.sh"
+if ! curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"; then
+    echo "Failed to download swap.sh."
+    exit 1
+fi
 
 echo "Downloading BBR Management module..."
 
-curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$MODULES_PATH/bbr.sh"
+if ! curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"; then
+    echo "Failed to download bbr.sh."
+    exit 1
+fi
 
 echo "Downloading Storage Management module..."
 
-curl -fsSL "$BASE_URL/modules/storage.sh" -o "$MODULES_PATH/storage.sh"
+if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
+    echo "Failed to download storage.sh."
+    exit 1
+fi
 
 echo
 echo "Checking downloaded files..."
 
 REQUIRED_FILES=(
-    "$INSTALL_PATH"
-    "$LIB_PATH/common.sh"
-    "$MODULES_PATH/system.sh"
-    "$MODULES_PATH/time.sh"
-    "$MODULES_PATH/swap.sh"
-    "$MODULES_PATH/bbr.sh"
-    "$MODULES_PATH/storage.sh"
+    "$TEMP_DIR/VERSION"
+    "$TEMP_DIR/u-opti"
+    "$TEMP_DIR/common.sh"
+    "$TEMP_DIR/system.sh"
+    "$TEMP_DIR/time.sh"
+    "$TEMP_DIR/swap.sh"
+    "$TEMP_DIR/bbr.sh"
+    "$TEMP_DIR/storage.sh"
 )
 
 for FILE in "${REQUIRED_FILES[@]}"; do
     if [ ! -s "$FILE" ]; then
+        echo
         echo "Error: Required file is missing or empty:"
         echo "$FILE"
         exit 1
@@ -88,15 +129,34 @@ echo "All required files are present."
 echo
 echo "Checking Bash syntax..."
 
-bash -n "$INSTALL_PATH"
-bash -n "$LIB_PATH/common.sh"
-bash -n "$MODULES_PATH/system.sh"
-bash -n "$MODULES_PATH/time.sh"
-bash -n "$MODULES_PATH/swap.sh"
-bash -n "$MODULES_PATH/bbr.sh"
-bash -n "$MODULES_PATH/storage.sh"
+bash -n "$TEMP_DIR/u-opti"
+bash -n "$TEMP_DIR/common.sh"
+bash -n "$TEMP_DIR/system.sh"
+bash -n "$TEMP_DIR/time.sh"
+bash -n "$TEMP_DIR/swap.sh"
+bash -n "$TEMP_DIR/bbr.sh"
+bash -n "$TEMP_DIR/storage.sh"
 
 echo "Bash syntax check passed."
+
+echo
+echo "Creating directories..."
+
+mkdir -p "$LIB_PATH"
+mkdir -p "$MODULES_PATH"
+
+echo
+echo "Installing files..."
+
+cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
+cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
+cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
+
+cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh"
+cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh"
+cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
+cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
+cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
 
 echo
 echo "Setting permissions..."
@@ -115,15 +175,13 @@ echo "======================================"
 echo "       Installation completed"
 echo "======================================"
 echo
-echo "Installed files:"
+echo "Installed Version: $REMOTE_VERSION"
 echo
+echo "Installation Path:"
 echo "$INSTALL_PATH"
-echo "$LIB_PATH/common.sh"
-echo "$MODULES_PATH/system.sh"
-echo "$MODULES_PATH/time.sh"
-echo "$MODULES_PATH/swap.sh"
-echo "$MODULES_PATH/bbr.sh"
-echo "$MODULES_PATH/storage.sh"
+echo
+echo "Library Path:"
+echo "$LIB_PATH"
 echo
 
 "$INSTALL_PATH"
