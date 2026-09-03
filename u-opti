@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 INSTALL_PATH="/usr/local/bin/u-opti"
 REPO_URL="https://raw.githubusercontent.com/aghajani82/u-opti/main/u-opti"
 
@@ -52,10 +52,11 @@ while true; do
                 echo
                 echo "1) System Information"
                 echo "2) Time & Date"
+                echo "3) Swap Management"
                 echo
                 echo "0) Back"
                 echo
-                read -rp "Please enter your selection [0-2]: " opt_choice
+                read -rp "Please enter your selection [0-3]: " opt_choice
 
                 case "$opt_choice" in
 
@@ -200,6 +201,122 @@ while true; do
 
                                     echo
                                     read -rp "Press Enter to return..."
+                                    ;;
+
+                                0)
+                                    break
+                                    ;;
+
+                                *)
+                                    echo
+                                    echo "Invalid selection!"
+                                    sleep 2
+                                    ;;
+                            esac
+                        done
+                        ;;
+
+                    3)
+                        while true; do
+                            clear
+
+                            echo "======================================"
+                            echo "          Swap Management"
+                            echo "======================================"
+                            echo
+
+                            SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
+                            SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
+
+                            echo "Current Swap:"
+                            echo "Size        : $SWAP_TOTAL"
+                            echo "Used        : $SWAP_USED"
+
+                            echo
+                            echo "--------------------------------------"
+                            echo
+                            echo "1) Show Swap Information"
+                            echo "2) Create Swap"
+                            echo
+                            echo "0) Back"
+                            echo
+
+                            read -rp "Please enter your selection [0-2]: " swap_choice
+
+                            case "$swap_choice" in
+
+                                1)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "        Swap Information"
+                                    echo "======================================"
+                                    echo
+
+                                    free -h
+
+                                    echo
+                                    echo "Active Swap Devices:"
+                                    swapon --show
+
+                                    echo
+                                    echo "--------------------------------------"
+                                    echo
+                                    read -rp "Press Enter to return..."
+                                    ;;
+
+                                2)
+                                    clear
+
+                                    echo "======================================"
+                                    echo "            Create Swap"
+                                    echo "======================================"
+                                    echo
+
+                                    if swapon --show | grep -q .; then
+                                        echo "Swap is already enabled."
+                                        echo
+                                        echo "No changes were made."
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                    else
+                                        read -rp "Enter Swap size (e.g. 1G, 2G, 4G): " SWAP_SIZE
+
+                                        if [[ ! "$SWAP_SIZE" =~ ^[0-9]+[MG]$ ]]; then
+                                            echo
+                                            echo "Invalid size."
+                                            echo "Use formats such as: 1G, 2G, 512M"
+                                            echo
+                                            read -rp "Press Enter to return..."
+                                            continue
+                                        fi
+
+                                        echo
+                                        echo "Creating ${SWAP_SIZE} swap file..."
+
+                                        if fallocate -l "$SWAP_SIZE" /swapfile 2>/dev/null; then
+                                            chmod 600 /swapfile
+                                            mkswap /swapfile >/dev/null
+                                            swapon /swapfile
+
+                                            if ! grep -q "^/swapfile " /etc/fstab; then
+                                                echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                                            fi
+
+                                            echo
+                                            echo "Swap created successfully."
+                                            echo
+
+                                            free -h
+                                        else
+                                            echo
+                                            echo "Failed to create swap."
+                                            rm -f /swapfile
+                                        fi
+
+                                        echo
+                                        read -rp "Press Enter to return..."
+                                    fi
                                     ;;
 
                                 0)
