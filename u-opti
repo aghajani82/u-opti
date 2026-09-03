@@ -1,13 +1,18 @@
 #!/bin/bash
 
-VERSION="0.8.0"
-
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
+VERSION_FILE="$LIB_PATH/VERSION"
 
 BRANCH="refactor/v0.8.0"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+
+if [ -f "$VERSION_FILE" ]; then
+    VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
+else
+    VERSION="0.8.0"
+fi
 
 while true; do
     clear
@@ -119,19 +124,15 @@ while true; do
 
             TEMP_DIR=$(mktemp -d)
 
-            cleanup_update() {
-                rm -rf "$TEMP_DIR"
-            }
-
-            trap cleanup_update RETURN
-
             echo "Preparing update..."
             echo
 
             echo "Downloading VERSION..."
+
             if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
                 echo
                 echo "Failed to download VERSION."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -142,6 +143,7 @@ while true; do
             if [ -z "$REMOTE_VERSION" ]; then
                 echo
                 echo "Remote version could not be determined."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -155,6 +157,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti"; then
                 echo
                 echo "Failed to download u-opti."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -164,6 +167,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh"; then
                 echo
                 echo "Failed to download common.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -173,6 +177,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/modules/system.sh" -o "$TEMP_DIR/system.sh"; then
                 echo
                 echo "Failed to download system.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -182,6 +187,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/modules/time.sh" -o "$TEMP_DIR/time.sh"; then
                 echo
                 echo "Failed to download time.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -191,6 +197,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/modules/swap.sh" -o "$TEMP_DIR/swap.sh"; then
                 echo
                 echo "Failed to download swap.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -200,6 +207,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/modules/bbr.sh" -o "$TEMP_DIR/bbr.sh"; then
                 echo
                 echo "Failed to download bbr.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -209,6 +217,7 @@ while true; do
             if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
                 echo
                 echo "Failed to download storage.sh."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -243,6 +252,7 @@ while true; do
                 echo
                 echo "Update cancelled."
                 echo "The installed version was not changed."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -253,64 +263,18 @@ while true; do
             echo
             echo "Checking Bash syntax..."
 
-            if ! bash -n "$TEMP_DIR/u-opti"; then
-                echo
-                echo "u-opti syntax check failed."
-                echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
+            if ! bash -n "$TEMP_DIR/u-opti" || \
+               ! bash -n "$TEMP_DIR/common.sh" || \
+               ! bash -n "$TEMP_DIR/system.sh" || \
+               ! bash -n "$TEMP_DIR/time.sh" || \
+               ! bash -n "$TEMP_DIR/swap.sh" || \
+               ! bash -n "$TEMP_DIR/bbr.sh" || \
+               ! bash -n "$TEMP_DIR/storage.sh"; then
 
-            if ! bash -n "$TEMP_DIR/common.sh"; then
                 echo
-                echo "common.sh syntax check failed."
+                echo "Bash syntax check failed."
                 echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
-
-            if ! bash -n "$TEMP_DIR/system.sh"; then
-                echo
-                echo "system.sh syntax check failed."
-                echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
-
-            if ! bash -n "$TEMP_DIR/time.sh"; then
-                echo
-                echo "time.sh syntax check failed."
-                echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
-
-            if ! bash -n "$TEMP_DIR/swap.sh"; then
-                echo
-                echo "swap.sh syntax check failed."
-                echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
-
-            if ! bash -n "$TEMP_DIR/bbr.sh"; then
-                echo
-                echo "bbr.sh syntax check failed."
-                echo "Update cancelled."
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
-
-            if ! bash -n "$TEMP_DIR/storage.sh"; then
-                echo
-                echo "storage.sh syntax check failed."
-                echo "Update cancelled."
+                rm -rf "$TEMP_DIR"
                 echo
                 read -rp "Press Enter to return..."
                 continue
@@ -325,6 +289,7 @@ while true; do
 
             cp -f "$INSTALL_PATH" "$BACKUP_DIR/u-opti" 2>/dev/null || true
             cp -f "$LIB_PATH/common.sh" "$BACKUP_DIR/common.sh" 2>/dev/null || true
+            cp -f "$LIB_PATH/VERSION" "$BACKUP_DIR/VERSION" 2>/dev/null || true
 
             mkdir -p "$BACKUP_DIR/modules"
 
@@ -339,47 +304,35 @@ while true; do
             echo
             echo "Installing update..."
 
-            if ! cp "$TEMP_DIR/u-opti" "$INSTALL_PATH" || \
-               ! cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh" || \
-               ! cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh" || \
-               ! cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh" || \
-               ! cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh" || \
-               ! cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || \
-               ! cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"; then
+            UPDATE_FAILED=false
+
+            cp "$TEMP_DIR/u-opti" "$INSTALL_PATH" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/system.sh" "$MODULES_PATH/system.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
+
+            if [ "$UPDATE_FAILED" = "true" ]; then
 
                 echo
                 echo "Update failed during installation."
                 echo "Attempting to restore the previous version..."
 
-                if [ -f "$BACKUP_DIR/u-opti" ]; then
-                    cp "$BACKUP_DIR/u-opti" "$INSTALL_PATH"
-                fi
+                [ -f "$BACKUP_DIR/u-opti" ] && cp "$BACKUP_DIR/u-opti" "$INSTALL_PATH"
+                [ -f "$BACKUP_DIR/common.sh" ] && cp "$BACKUP_DIR/common.sh" "$LIB_PATH/common.sh"
+                [ -f "$BACKUP_DIR/VERSION" ] && cp "$BACKUP_DIR/VERSION" "$LIB_PATH/VERSION"
 
-                if [ -f "$BACKUP_DIR/common.sh" ]; then
-                    cp "$BACKUP_DIR/common.sh" "$LIB_PATH/common.sh"
-                fi
-
-                if [ -f "$BACKUP_DIR/system.sh" ]; then
-                    cp "$BACKUP_DIR/system.sh" "$MODULES_PATH/system.sh"
-                fi
-
-                if [ -f "$BACKUP_DIR/time.sh" ]; then
-                    cp "$BACKUP_DIR/time.sh" "$MODULES_PATH/time.sh"
-                fi
-
-                if [ -f "$BACKUP_DIR/swap.sh" ]; then
-                    cp "$BACKUP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
-                fi
-
-                if [ -f "$BACKUP_DIR/bbr.sh" ]; then
-                    cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
-                fi
-
-                if [ -f "$BACKUP_DIR/storage.sh" ]; then
-                    cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
-                fi
+                [ -f "$BACKUP_DIR/system.sh" ] && cp "$BACKUP_DIR/system.sh" "$MODULES_PATH/system.sh"
+                [ -f "$BACKUP_DIR/time.sh" ] && cp "$BACKUP_DIR/time.sh" "$MODULES_PATH/time.sh"
+                [ -f "$BACKUP_DIR/swap.sh" ] && cp "$BACKUP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
+                [ -f "$BACKUP_DIR/bbr.sh" ] && cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
+                [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
 
                 rm -rf "$BACKUP_DIR"
+                rm -rf "$TEMP_DIR"
 
                 echo
                 echo "Previous version restored."
@@ -396,9 +349,10 @@ while true; do
             chmod +x "$MODULES_PATH/bbr.sh"
             chmod +x "$MODULES_PATH/storage.sh"
 
-            cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
-
             rm -rf "$BACKUP_DIR"
+            rm -rf "$TEMP_DIR"
+
+            VERSION="$REMOTE_VERSION"
 
             echo
             echo "======================================"
