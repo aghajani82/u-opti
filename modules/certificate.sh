@@ -6,7 +6,8 @@
 
 CERTBOT_BIN=""
 ACME_WEBROOT="/var/www/u-opti-acme"
-ACME_NGINX_CONF="/etc/nginx/conf.d/u-opti-acme.conf"
+ACME_CONF_DIR="/etc/nginx/conf.d"
+ACME_CONF_PREFIX="u-opti-acme"
 
 get_certbot_path() {
     if command -v certbot >/dev/null 2>&1; then
@@ -114,7 +115,24 @@ validate_nginx() {
     return 0
 }
 
+domain_exists_in_nginx() {
+    local domain="$1"
+
+    nginx -T 2>/dev/null | grep -Eq "server_name[[:space:]]+[^;]*(^|[[:space:]])${domain}([[:space:]]|;)"
+}
+
+get_acme_conf_path() {
+    local domain="$1"
+
+    echo "$ACME_CONF_DIR/${ACME_CONF_PREFIX}-${domain}.conf"
+}
+
 prepare_acme_webroot() {
+    local domain="$1"
+    local conf_path
+
+    conf_path="$(get_acme_conf_path "$domain")"
+
     if ! mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"; then
         echo "Error: Failed to create ACME webroot."
         return 1
@@ -124,34 +142,39 @@ prepare_acme_webroot() {
     chmod 755 "$ACME_WEBROOT/.well-known"
     chmod 755 "$ACME_WEBROOT/.well-known/acme-challenge"
 
-    cat > "$ACME_NGINX_CONF" <<EOF
+    cat > "$conf_path" <<EOF
 # ==========================================
 # U-OPTI - Let's Encrypt ACME Challenge
+# Domain: $domain
 # ==========================================
 
 server {
     listen 80;
     listen [::]:80;
 
-    server_name _;
+    server_name $domain;
 
     location ^~ /.well-known/acme-challenge/ {
         root $ACME_WEBROOT;
         default_type text/plain;
         try_files \$uri =404;
     }
+
+    location / {
+        return 404;
+    }
 }
 EOF
 
     if ! nginx -t >/dev/null 2>&1; then
         echo "Error: Failed to validate ACME Nginx configuration."
-        rm -f "$ACME_NGINX_CONF"
+        rm -f "$conf_path"
         return 1
     fi
 
     if ! systemctl reload nginx; then
         echo "Error: Failed to reload Nginx after ACME configuration."
-        rm -f "$ACME_NGINX_CONF"
+        rm -f "$conf_path"
         return 1
     fi
 
@@ -173,6 +196,7 @@ certificate_status() {
 
     local live_dir="/etc/letsencrypt/live"
     local found=0
+    local cert_dir
 
     if [[ ! -d "$live_dir" ]]; then
         echo "No Let's Encrypt certificates found."
@@ -272,6 +296,7 @@ issue_certificate() {
     fi
 
     local domain
+    local conf_path
 
     read -r -p "Enter your domain: " domain
 
@@ -297,6 +322,16 @@ issue_certificate() {
         return 1
     fi
 
+    if domain_exists_in_nginx "$domain"; then
+        echo
+        echo "Error: The domain '$domain' is already configured in Nginx."
+        echo
+        echo "U-OPTI will not modify an existing Nginx site configuration."
+        echo "Use that site's existing ACME/webroot configuration instead."
+        pause_screen
+        return 1
+    fi
+
     echo
     echo "Domain:"
     echo "$domain"
@@ -306,6 +341,10 @@ issue_certificate() {
     echo
     echo "Nginx site configuration will not be modified by Certbot."
     echo
+    echo "U-OPTI will create a dedicated temporary ACME server"
+    echo "for this domain on port 80."
+    echo
+
     read -r -p "Continue with certificate issuance? [y/N]: " confirm
 
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -315,11 +354,57 @@ issue_certificate() {
         return 0
     fi
 
-    if ! prepare_acme_webroot; then
+    if ! prepare_acme_webroot "$domain"; then
         pause_screen
         return 1
     fi
 
+    conf_path="$(get_acme_conf_path "$domain")"
+
+    echo
+    echo "Testing ACME challenge path..."
+    echo
+
+    local test_file
+    test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test"
+
+    echo "u-opti-test" > "$test_file"
+
+    local challenge_response
+
+    challenge_response="$(
+        curl -fsS \
+            --max-time 10 \
+            "http://$domain/.well-known/acme-challenge/u-opti-test" \
+            2>/dev/null || true
+    )"
+
+    rm -f "$test_file"
+
+    if [[ "$challenge_response" != "u-opti-test" ]]; then
+        echo
+        echo "Error: ACME challenge path is not reachable."
+        echo
+        echo "Expected response:"
+        echo "u-opti-test"
+        echo
+        echo "Received:"
+        echo "${challenge_response:-<no response>}"
+        echo
+        echo "Make sure:"
+        echo "1. DNS for the domain points to this server."
+        echo "2. Port 80 is reachable from the Internet."
+        echo "3. Nginx is running."
+        echo "4. The ACME challenge path is reachable."
+
+        rm -f "$conf_path"
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+
+        pause_screen
+        return 1
+    fi
+
+    echo "ACME challenge path is reachable."
     echo
     echo "Requesting certificate from Let's Encrypt..."
     echo
@@ -343,6 +428,7 @@ issue_certificate() {
         echo "/etc/letsencrypt/live/$domain/privkey.pem"
         echo
         echo "Nginx site configuration was not modified by Certbot."
+        echo "ACME configuration remains available for future renewal."
     else
         echo
         echo "Error: Failed to issue certificate."
@@ -380,7 +466,7 @@ renew_certificates() {
     if "$CERTBOT_BIN" renew; then
         echo
         echo "Certificate renewal process completed."
-        echo "U-OPTI did not modify Nginx configuration."
+        echo "U-OPTI did not modify Nginx site configuration."
     else
         echo
         echo "Error: Certificate renewal failed."
@@ -406,6 +492,7 @@ remove_certificate() {
     fi
 
     local domain
+    local conf_path
 
     read -r -p "Enter domain to remove: " domain
 
@@ -437,7 +524,7 @@ remove_certificate() {
     echo "WARNING: This will permanently remove the certificate"
     echo "from Certbot's configuration."
     echo
-    echo "Nginx configuration will not be modified."
+    echo "Nginx site configuration will not be modified."
     echo
 
     read -r -p "Continue with removal? [y/N]: " confirm
@@ -457,7 +544,19 @@ remove_certificate() {
 
         echo
         echo "Certificate removed successfully."
-        echo "Nginx configuration was not modified by U-OPTI."
+
+        conf_path="$(get_acme_conf_path "$domain")"
+
+        if [[ -f "$conf_path" ]]; then
+            rm -f "$conf_path"
+
+            if nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx >/dev/null 2>&1
+            fi
+        fi
+
+        echo "U-OPTI ACME configuration removed."
+        echo "Nginx site configuration was not modified."
     else
         echo
         echo "Error: Failed to remove certificate."
