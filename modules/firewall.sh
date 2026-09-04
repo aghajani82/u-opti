@@ -166,9 +166,49 @@ firewall_show_rules() {
         return
     fi
 
-    ufw status numbered
+    local STATUS
+    STATUS=$(ufw status | head -n 1)
+
+    echo "Firewall Status : $STATUS"
+    echo
+
+    echo "Configured TCP Rules"
+    echo "--------------------------------------"
+
+    local RULES
+    RULES=$(ufw show added 2>/dev/null | sed -n 's/^ufw allow \([0-9][0-9]*\)\/tcp.*$/\1\/tcp/p' | awk '!seen[$0]++')
+
+    if [ -n "$RULES" ]; then
+        while IFS= read -r RULE; do
+            echo "  $RULE"
+        done <<< "$RULES"
+    else
+        echo "  No TCP allow rules configured."
+    fi
 
     echo
+
+    local SSH_PORT
+    SSH_PORT=$(firewall_get_ssh_port)
+
+    echo "SSH Port"
+    echo "--------------------------------------"
+
+    if [ -n "$SSH_PORT" ]; then
+        echo "  $SSH_PORT/tcp"
+    else
+        echo "  Unable to determine SSH port."
+    fi
+
+    echo
+
+    if [[ "$STATUS" == "Status: active" ]]; then
+        echo "Active UFW Rules"
+        echo "--------------------------------------"
+        ufw status numbered
+        echo
+    fi
+
     read -rp "Press Enter to return..."
 }
 
