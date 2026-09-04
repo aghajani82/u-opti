@@ -448,6 +448,7 @@ while true; do
                 echo
                 echo "Previous version restored."
                 echo
+
                 read -rp "Press Enter to return..."
                 continue
             fi
@@ -482,7 +483,7 @@ while true; do
             read -rp "Press Enter to return..."
             ;;
 
-        7)
+        8)
             clear
 
             echo "======================================"
