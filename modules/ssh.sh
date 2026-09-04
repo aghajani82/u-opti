@@ -11,7 +11,9 @@ UOPTI_SSH_DIR="/etc/u-opti/ssh"
 UOPTI_SSH_PORT_FILE="$UOPTI_SSH_DIR/port"
 UOPTI_SSH_BACKUP_DIR="$UOPTI_SSH_DIR/backups"
 
-UOPTI_SSH_CONFIG="/etc/ssh/sshd_config.d/99-u-opti-port.conf"
+# U-OPTI managed section inside sshd_config
+UOPTI_SSH_MARKER_BEGIN="# BEGIN U-OPTI MANAGED SSH PORT"
+UOPTI_SSH_MARKER_END="# END U-OPTI MANAGED SSH PORT"
 
 ssh_require_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -76,24 +78,97 @@ ssh_get_effective_setting() {
         '
 }
 
-ssh_has_include_directive() {
-    grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' "$SSH_CONFIG"
-}
-
-ssh_has_existing_port_directive() {
-    grep -Eq '^[[:space:]]*Port[[:space:]]+[0-9]+([[:space:]]|$)' "$SSH_CONFIG"
-}
-
 ssh_get_listening_ssh_ports() {
-    local CURRENT_PORT="$1"
-
-    ss -lntH 2>/dev/null |
-        awk -v port="$CURRENT_PORT" '
-            $4 ~ ("(^|:)" port "$") {
+    ss -lntp 2>/dev/null |
+        awk '
+            /users:\(\("sshd"/ {
                 print $4
             }
         ' |
         sort -u
+}
+
+ssh_has_uopti_marker() {
+    grep -qF "$UOPTI_SSH_MARKER_BEGIN" "$SSH_CONFIG"
+}
+
+ssh_has_manual_port_directive() {
+    awk '
+        /^[[:space:]]*#/ {
+            next
+        }
+
+        /^[[:space:]]*Port[[:space:]]+[0-9]+([[:space:]]|$)/ {
+            print
+            found=1
+        }
+
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' "$SSH_CONFIG"
+}
+
+ssh_remove_uopti_managed_block() {
+    local TEMP_CONFIG
+
+    TEMP_CONFIG=$(mktemp)
+
+    awk -v begin="$UOPTI_SSH_MARKER_BEGIN" -v end="$UOPTI_SSH_MARKER_END" '
+        $0 == begin {
+            inside=1
+            next
+        }
+
+        $0 == end {
+            inside=0
+            next
+        }
+
+        !inside {
+            print
+        }
+    ' "$SSH_CONFIG" > "$TEMP_CONFIG"
+
+    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    rm -f "$TEMP_CONFIG"
+
+    return 0
+}
+
+ssh_write_uopti_port() {
+    local NEW_PORT="$1"
+    local TEMP_CONFIG
+
+    TEMP_CONFIG=$(mktemp)
+
+    if ssh_remove_uopti_managed_block; then
+        :
+    else
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    {
+        cat "$SSH_CONFIG"
+        echo
+        echo "$UOPTI_SSH_MARKER_BEGIN"
+        echo "Port $NEW_PORT"
+        echo "$UOPTI_SSH_MARKER_END"
+    } > "$TEMP_CONFIG"
+
+    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    rm -f "$TEMP_CONFIG"
+
+    return 0
 }
 
 ssh_backup_current_state() {
@@ -104,10 +179,6 @@ ssh_backup_current_state() {
 
     if [ -f "$SSH_CONFIG" ]; then
         cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"
-    fi
-
-    if [ -f "$UOPTI_SSH_CONFIG" ]; then
-        cp -a "$UOPTI_SSH_CONFIG" "$BACKUP_DIR/99-u-opti-port.conf"
     fi
 
     if [ -f "$UOPTI_SSH_PORT_FILE" ]; then
@@ -122,13 +193,6 @@ ssh_restore_state() {
 
     if [ -f "$BACKUP_DIR/sshd_config" ]; then
         cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG"
-    fi
-
-    if [ -f "$BACKUP_DIR/99-u-opti-port.conf" ]; then
-        mkdir -p "$(dirname "$UOPTI_SSH_CONFIG")"
-        cp -a "$BACKUP_DIR/99-u-opti-port.conf" "$UOPTI_SSH_CONFIG"
-    else
-        rm -f "$UOPTI_SSH_CONFIG"
     fi
 
     if [ -f "$BACKUP_DIR/port" ]; then
@@ -147,38 +211,6 @@ ssh_restore_state() {
     fi
 }
 
-ssh_add_include_directive() {
-    local TEMP_CONFIG
-
-    TEMP_CONFIG=$(mktemp)
-
-    {
-        echo "Include /etc/ssh/sshd_config.d/*.conf"
-        cat "$SSH_CONFIG"
-    } > "$TEMP_CONFIG"
-
-    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
-        rm -f "$TEMP_CONFIG"
-        return 1
-    fi
-
-    rm -f "$TEMP_CONFIG"
-
-    return 0
-}
-
-ssh_write_port_config() {
-    local NEW_PORT="$1"
-
-    mkdir -p "$(dirname "$UOPTI_SSH_CONFIG")"
-
-    cat > "$UOPTI_SSH_CONFIG" <<EOF
-# U-OPTI managed SSH port
-# This file is managed by U-OPTI.
-Port $NEW_PORT
-EOF
-}
-
 ssh_validate_configuration() {
     if ! sshd -t; then
         echo
@@ -193,16 +225,34 @@ ssh_port_is_listening() {
     local PORT="$1"
 
     ss -lntH 2>/dev/null |
-        awk '{print $4}' |
-        grep -Eq "(^|:)${PORT}$"
+        awk -v port="$PORT" '
+            $4 ~ ("(^|:)" port "$") {
+                found=1
+            }
+
+            END {
+                exit(found ? 0 : 1)
+            }
+        '
 }
 
 ssh_restart_backend() {
     if ssh_socket_is_active || ssh_socket_is_enabled; then
-        systemctl daemon-reload || return 1
-        systemctl restart "$SSH_SOCKET_UNIT" || return 1
+
+        if ! systemctl daemon-reload; then
+            return 1
+        fi
+
+        if ! systemctl restart "$SSH_SOCKET_UNIT"; then
+            return 1
+        fi
+
     else
-        systemctl restart "$SSH_SERVICE_UNIT" || return 1
+
+        if ! systemctl restart "$SSH_SERVICE_UNIT"; then
+            return 1
+        fi
+
     fi
 
     return 0
@@ -231,7 +281,7 @@ ssh_show_status() {
     local SSH_SOCKET
     local SOCKET_MODE
     local LISTENING_PORTS
-    local INCLUDE_STATUS
+    local UOPTI_MODE
 
     EFFECTIVE_PORT=$(ssh_get_sshd_effective_port)
     ROOT_LOGIN=$(ssh_get_effective_setting "permitrootlogin")
@@ -247,13 +297,13 @@ ssh_show_status() {
         SOCKET_MODE="disabled"
     fi
 
-    if ssh_has_include_directive; then
-        INCLUDE_STATUS="enabled"
-    else
-        INCLUDE_STATUS="not found"
-    fi
+    LISTENING_PORTS=$(ssh_get_listening_ssh_ports)
 
-    LISTENING_PORTS=$(ssh_get_listening_ssh_ports "$EFFECTIVE_PORT")
+    if ssh_has_uopti_marker; then
+        UOPTI_MODE="managed"
+    else
+        UOPTI_MODE="system/default"
+    fi
 
     echo "SSH Configuration"
     echo
@@ -265,7 +315,6 @@ ssh_show_status() {
     echo "Service Status            : ${SSH_SERVICE:-unknown}"
     echo "Socket Status             : ${SSH_SOCKET:-unknown}"
     echo "Socket Activation         : $SOCKET_MODE"
-    echo "Config Include            : $INCLUDE_STATUS"
     echo
 
     echo "SSH Listening Ports"
@@ -274,18 +323,13 @@ ssh_show_status() {
     if [ -n "$LISTENING_PORTS" ]; then
         echo "$LISTENING_PORTS"
     else
-        echo "No SSH listener detected on port $EFFECTIVE_PORT."
+        echo "No SSH listener detected."
     fi
 
     echo
-
-    if [ -f "$UOPTI_SSH_CONFIG" ]; then
-        echo "U-OPTI Port Config         : managed"
-    else
-        echo "U-OPTI Port Config         : system/default"
-    fi
-
+    echo "U-OPTI Port Config         : $UOPTI_MODE"
     echo
+
     read -rp "Press Enter to return..."
 }
 
@@ -349,15 +393,15 @@ ssh_change_port() {
         return
     fi
 
-    if ssh_has_existing_port_directive && [ ! -f "$UOPTI_SSH_CONFIG" ]; then
+    if ssh_has_manual_port_directive && ! ssh_has_uopti_marker; then
         echo
-        echo "Error: An existing SSH Port directive was found in"
+        echo "Error: A manual SSH Port directive was found in:"
         echo "$SSH_CONFIG"
         echo
-        echo "U-OPTI will not modify an existing manual SSH Port"
+        echo "U-OPTI will not overwrite an existing manual Port"
         echo "configuration automatically."
         echo
-        echo "Please review the SSH configuration manually first."
+        echo "Please review the SSH configuration first."
         echo
         read -rp "Press Enter to return..."
         return
@@ -378,32 +422,11 @@ ssh_change_port() {
     echo "$BACKUP_DIR"
     echo
 
-    if ! ssh_has_include_directive; then
-        echo "SSH Include directive was not found."
-        echo "Adding the standard sshd_config.d Include..."
+    echo "Writing U-OPTI managed SSH port..."
 
-        if ! ssh_add_include_directive; then
-            echo
-            echo "Error: Failed to add SSH Include directive."
-            echo "Restoring previous configuration..."
-
-            ssh_restore_state "$BACKUP_DIR"
-
-            echo "Previous configuration restored."
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-
-        echo "Include directive added."
+    if ! ssh_write_uopti_port "$NEW_PORT"; then
         echo
-    fi
-
-    echo "Writing U-OPTI SSH port configuration..."
-
-    if ! ssh_write_port_config "$NEW_PORT"; then
-        echo
-        echo "Error: Failed to write U-OPTI SSH configuration."
+        echo "Error: Failed to update sshd_config."
         echo "Restoring previous configuration..."
 
         ssh_restore_state "$BACKUP_DIR"
