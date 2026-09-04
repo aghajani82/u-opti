@@ -39,13 +39,14 @@ while true; do
     echo "2) System Optimization"
     echo "3) SSH Management"
     echo "4) Firewall Management"
-    echo "5) Update U-OPTI"
-    echo "6) Uninstall U-OPTI"
+    echo "5) X-UI PRO Management"
+    echo "6) Update U-OPTI"
+    echo "7) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-6]: " choice
+    read -rp "Please enter your selection [0-7]: " choice
 
     case "$choice" in
 
@@ -130,6 +131,10 @@ while true; do
             ;;
 
         5)
+            show_xui_pro_menu
+            ;;
+
+        6)
             clear
 
             echo "======================================"
@@ -274,6 +279,17 @@ while true; do
                 continue
             fi
 
+            echo "Downloading X-UI PRO Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/xui-pro.sh" -o "$TEMP_DIR/xui-pro.sh"; then
+                echo
+                echo "Failed to download xui-pro.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
             echo
             echo "Checking downloaded files..."
 
@@ -288,6 +304,7 @@ while true; do
                 "$TEMP_DIR/storage.sh"
                 "$TEMP_DIR/ssh.sh"
                 "$TEMP_DIR/firewall.sh"
+                "$TEMP_DIR/xui-pro.sh"
             )
 
             UPDATE_FILES_OK=true
@@ -324,7 +341,8 @@ while true; do
                ! bash -n "$TEMP_DIR/bbr.sh" || \
                ! bash -n "$TEMP_DIR/storage.sh" || \
                ! bash -n "$TEMP_DIR/ssh.sh" || \
-               ! bash -n "$TEMP_DIR/firewall.sh"; then
+               ! bash -n "$TEMP_DIR/firewall.sh" || \
+               ! bash -n "$TEMP_DIR/xui-pro.sh"; then
 
                 echo
                 echo "Bash syntax check failed."
@@ -353,6 +371,7 @@ while true; do
             cp -f "$MODULES_PATH/storage.sh" "$BACKUP_DIR/storage.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/ssh.sh" "$BACKUP_DIR/ssh.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/firewall.sh" "$BACKUP_DIR/firewall.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/xui-pro.sh" "$BACKUP_DIR/xui-pro.sh" 2>/dev/null || true
 
             echo "Backup created."
 
@@ -371,6 +390,7 @@ while true; do
             cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/xui-pro.sh" "$MODULES_PATH/xui-pro.sh" || UPDATE_FAILED=true
 
             if [ "$UPDATE_FAILED" = "true" ]; then
 
@@ -389,6 +409,7 @@ while true; do
                 [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
                 [ -f "$BACKUP_DIR/ssh.sh" ] && cp "$BACKUP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
                 [ -f "$BACKUP_DIR/firewall.sh" ] && cp "$BACKUP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh"
+                [ -f "$BACKUP_DIR/xui-pro.sh" ] && cp "$BACKUP_DIR/xui-pro.sh" "$MODULES_PATH/xui-pro.sh"
 
                 rm -rf "$BACKUP_DIR"
                 rm -rf "$TEMP_DIR"
@@ -409,6 +430,7 @@ while true; do
             chmod +x "$MODULES_PATH/storage.sh"
             chmod +x "$MODULES_PATH/ssh.sh"
             chmod +x "$MODULES_PATH/firewall.sh"
+            chmod +x "$MODULES_PATH/xui-pro.sh"
 
             rm -rf "$BACKUP_DIR"
             rm -rf "$TEMP_DIR"
@@ -428,7 +450,7 @@ while true; do
             read -rp "Press Enter to return..."
             ;;
 
-        6)
+        7)
             clear
 
             echo "======================================"
