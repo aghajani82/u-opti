@@ -172,6 +172,53 @@ firewall_show_rules() {
     read -rp "Press Enter to return..."
 }
 
+firewall_backup_state() {
+    local BACKUP_DIR="$1"
+
+    if ! mkdir -p "$BACKUP_DIR"; then
+        return 1
+    fi
+
+    if [ ! -d /etc/ufw ]; then
+        echo "Error: /etc/ufw was not found." >&2
+        return 1
+    fi
+
+    if ! cp -a /etc/ufw "$BACKUP_DIR/ufw"; then
+        return 1
+    fi
+
+    return 0
+}
+
+firewall_restore_state() {
+    local BACKUP_DIR="$1"
+
+    if [ ! -d "$BACKUP_DIR/ufw" ]; then
+        echo "Error: Firewall backup was not found." >&2
+        return 1
+    fi
+
+    if ! ufw disable >/dev/null 2>&1; then
+        # UFW may already be inactive; continue with file restore.
+        true
+    fi
+
+    if ! rm -rf /etc/ufw; then
+        return 1
+    fi
+
+    if ! cp -a "$BACKUP_DIR/ufw" /etc/ufw; then
+        return 1
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw reload >/dev/null 2>&1 || true
+    fi
+
+    return 0
+}
+
 firewall_configure() {
     clear
 
@@ -208,8 +255,7 @@ firewall_configure() {
     local EXTRA_PORTS
     local EXTRA_OUTPUT
 
-    EXTRA_OUTPUT=$(firewall_collect_extra_ports "$EXTRA_INPUT")
-    if [ $? -ne 0 ]; then
+    if ! EXTRA_OUTPUT=$(firewall_collect_extra_ports "$EXTRA_INPUT"); then
         echo
         echo "Firewall configuration was cancelled."
         echo
@@ -284,15 +330,20 @@ firewall_configure() {
     TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
     local BACKUP_DIR="$UOPTI_FIREWALL_BACKUP_DIR/$TIMESTAMP"
 
-    if ! mkdir -p "$BACKUP_DIR"; then
+    echo
+    echo "Creating firewall backup..."
+
+    if ! firewall_backup_state "$BACKUP_DIR"; then
         echo
-        echo "Error: Unable to create firewall backup."
+        echo "Error: Firewall backup failed."
+        echo "No firewall changes were made."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    cp -a /etc/ufw "$BACKUP_DIR/ufw" 2>/dev/null || true
+    echo "Backup created:"
+    echo "$BACKUP_DIR"
 
     echo
     echo "Applying UFW configuration..."
@@ -308,17 +359,26 @@ firewall_configure() {
         APPLY_FAILED=true
     fi
 
-    for PORT in "${PORTS_TO_ALLOW[@]}"; do
-        if ! ufw allow "$PORT/tcp"; then
-            APPLY_FAILED=true
-            break
-        fi
-    done
+    if [ "$APPLY_FAILED" = "false" ]; then
+        for PORT in "${PORTS_TO_ALLOW[@]}"; do
+            if ! ufw allow "$PORT/tcp"; then
+                APPLY_FAILED=true
+                break
+            fi
+        done
+    fi
 
     if [ "$APPLY_FAILED" = "true" ]; then
         echo
         echo "Failed while applying firewall rules."
-        echo "No firewall enable operation was performed."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
         echo
         read -rp "Press Enter to return..."
         return
@@ -331,6 +391,14 @@ firewall_configure() {
         echo
         echo "ERROR: SSH port $SSH_PORT/tcp was not found in UFW rules."
         echo "Firewall will NOT be enabled."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
         echo
         read -rp "Press Enter to return..."
         return
@@ -344,6 +412,14 @@ firewall_configure() {
     if ! ufw --force enable; then
         echo
         echo "ERROR: Failed to enable UFW."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
         echo
         read -rp "Press Enter to return..."
         return
