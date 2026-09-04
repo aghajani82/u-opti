@@ -30,8 +30,7 @@ xui_pro_install() {
     echo "$DOMAIN"
     echo
 
-    echo "The X-UI PRO installer will be downloaded from:"
-    echo
+    echo "X-UI PRO installer:"
     echo "https://raw.githubusercontent.com/aghajani82/x-ui-pro/master/x-ui-pro.sh"
     echo
 
