@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# U-OPTI requires root privileges.
+if [ "$EUID" -ne 0 ]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "Error: Root privileges are required, but sudo is not installed."
+        exit 1
+    fi
+    exec sudo -E "$0" "$@"
+fi
+
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
@@ -13,7 +22,7 @@ if [ -f "$VERSION_FILE" ]; then
 fi
 
 if [ -z "$VERSION" ]; then
-    VERSION="0.8.0"
+    VERSION="0.10.0"
 fi
 
 source "$LIB_PATH/common.sh"
@@ -25,6 +34,7 @@ source "$MODULES_PATH/storage.sh"
 source "$MODULES_PATH/ssh.sh"
 source "$MODULES_PATH/firewall.sh"
 source "$MODULES_PATH/xui-pro.sh"
+source "$MODULES_PATH/certificate.sh"
 
 while true; do
     clear
@@ -46,7 +56,7 @@ while true; do
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-7]: " choice
+    read -rp "Please enter your selection [0-8]: " choice
 
     case "$choice" in
 
@@ -135,6 +145,10 @@ while true; do
             ;;
 
         6)
+            show_certificate_menu
+            ;;
+
+        7)
             clear
 
             echo "======================================"
@@ -290,6 +304,17 @@ while true; do
                 continue
             fi
 
+            echo "Downloading Certificate Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/certificate.sh" -o "$TEMP_DIR/certificate.sh"; then
+                echo
+                echo "Failed to download certificate.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
             echo
             echo "Checking downloaded files..."
 
@@ -305,6 +330,7 @@ while true; do
                 "$TEMP_DIR/ssh.sh"
                 "$TEMP_DIR/firewall.sh"
                 "$TEMP_DIR/xui-pro.sh"
+                "$TEMP_DIR/certificate.sh"
             )
 
             UPDATE_FILES_OK=true
@@ -342,7 +368,8 @@ while true; do
                ! bash -n "$TEMP_DIR/storage.sh" || \
                ! bash -n "$TEMP_DIR/ssh.sh" || \
                ! bash -n "$TEMP_DIR/firewall.sh" || \
-               ! bash -n "$TEMP_DIR/xui-pro.sh"; then
+               ! bash -n "$TEMP_DIR/xui-pro.sh" || \
+               ! bash -n "$TEMP_DIR/certificate.sh"; then
 
                 echo
                 echo "Bash syntax check failed."
@@ -372,6 +399,7 @@ while true; do
             cp -f "$MODULES_PATH/ssh.sh" "$BACKUP_DIR/ssh.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/firewall.sh" "$BACKUP_DIR/firewall.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/xui-pro.sh" "$BACKUP_DIR/xui-pro.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/certificate.sh" "$BACKUP_DIR/certificate.sh" 2>/dev/null || true
 
             echo "Backup created."
 
@@ -391,6 +419,7 @@ while true; do
             cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/xui-pro.sh" "$MODULES_PATH/xui-pro.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/certificate.sh" "$MODULES_PATH/certificate.sh" || UPDATE_FAILED=true
 
             if [ "$UPDATE_FAILED" = "true" ]; then
 
@@ -410,6 +439,7 @@ while true; do
                 [ -f "$BACKUP_DIR/ssh.sh" ] && cp "$BACKUP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
                 [ -f "$BACKUP_DIR/firewall.sh" ] && cp "$BACKUP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh"
                 [ -f "$BACKUP_DIR/xui-pro.sh" ] && cp "$BACKUP_DIR/xui-pro.sh" "$MODULES_PATH/xui-pro.sh"
+                [ -f "$BACKUP_DIR/certificate.sh" ] && cp "$BACKUP_DIR/certificate.sh" "$MODULES_PATH/certificate.sh"
 
                 rm -rf "$BACKUP_DIR"
                 rm -rf "$TEMP_DIR"
@@ -431,6 +461,7 @@ while true; do
             chmod +x "$MODULES_PATH/ssh.sh"
             chmod +x "$MODULES_PATH/firewall.sh"
             chmod +x "$MODULES_PATH/xui-pro.sh"
+            chmod +x "$MODULES_PATH/certificate.sh"
 
             rm -rf "$BACKUP_DIR"
             rm -rf "$TEMP_DIR"
