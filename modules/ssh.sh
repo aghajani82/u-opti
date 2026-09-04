@@ -107,8 +107,30 @@ ssh_get_listening_ssh_ports() {
         sort -u
 }
 
+ssh_get_uopti_marker_state() {
+    if [ ! -f "$SSH_CONFIG" ]; then
+        echo "missing-config"
+        return 0
+    fi
+
+    awk -v begin="$UOPTI_SSH_MARKER_BEGIN" -v end="$UOPTI_SSH_MARKER_END" '
+        $0 == begin { begins++; if (inside) broken=1; inside=1; next }
+        $0 == end { ends++; if (!inside) broken=1; inside=0; next }
+        END {
+            if (inside) broken=1
+            if (begins == 0 && ends == 0) {
+                print "none"
+            } else if (begins == 1 && ends == 1 && !broken) {
+                print "valid"
+            } else {
+                print "broken"
+            }
+        }
+    ' "$SSH_CONFIG"
+}
+
 ssh_has_uopti_marker() {
-    grep -qF "$UOPTI_SSH_MARKER_BEGIN" "$SSH_CONFIG"
+    [ "$(ssh_get_uopti_marker_state)" = "valid" ]
 }
 
 ssh_has_manual_port_directive() {
@@ -130,6 +152,14 @@ ssh_has_manual_port_directive() {
 ssh_build_uopti_config() {
     local NEW_PORT="$1"
     local TEMP_CONFIG="$2"
+    local MARKER_STATE
+
+    MARKER_STATE=$(ssh_get_uopti_marker_state)
+
+    if [ "$MARKER_STATE" = "broken" ]; then
+        echo "Error: U-OPTI managed SSH marker is incomplete or invalid." >&2
+        return 1
+    fi
 
     if ! awk \
         -v begin="$UOPTI_SSH_MARKER_BEGIN" \
@@ -158,8 +188,6 @@ ssh_build_uopti_config() {
         echo "Port $NEW_PORT"
         echo "$UOPTI_SSH_MARKER_END"
     } >> "$TEMP_CONFIG"
-
-    return 0
 }
 
 ssh_write_uopti_port() {
@@ -191,18 +219,58 @@ ssh_write_uopti_port() {
     return 0
 }
 
+ssh_save_port() {
+    local PORT="$1"
+    local TEMP_PORT
+
+    mkdir -p "$UOPTI_SSH_DIR" || return 1
+
+    TEMP_PORT=$(mktemp "$UOPTI_SSH_DIR/.port.XXXXXX") || return 1
+
+    printf '%s\n' "$PORT" > "$TEMP_PORT" || {
+        rm -f "$TEMP_PORT"
+        return 1
+    }
+
+    if [ -f "$UOPTI_SSH_PORT_FILE" ]; then
+        if ! chown --reference="$UOPTI_SSH_PORT_FILE" "$TEMP_PORT" || \
+           ! chmod --reference="$UOPTI_SSH_PORT_FILE" "$TEMP_PORT"; then
+            rm -f "$TEMP_PORT"
+            return 1
+        fi
+    fi
+
+    if ! mv -f "$TEMP_PORT" "$UOPTI_SSH_PORT_FILE"; then
+        rm -f "$TEMP_PORT"
+        return 1
+    fi
+
+    return 0
+}
+
 ssh_backup_current_state() {
     local TIMESTAMP="$1"
     local BACKUP_DIR="$UOPTI_SSH_BACKUP_DIR/$TIMESTAMP"
 
-    mkdir -p "$BACKUP_DIR"
+    if ! mkdir -p "$BACKUP_DIR"; then
+        return 1
+    fi
 
-    if [ -f "$SSH_CONFIG" ]; then
-        cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"
+    if [ ! -f "$SSH_CONFIG" ]; then
+        rm -rf "$BACKUP_DIR"
+        return 1
+    fi
+
+    if ! cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"; then
+        rm -rf "$BACKUP_DIR"
+        return 1
     fi
 
     if [ -f "$UOPTI_SSH_PORT_FILE" ]; then
-        cp -a "$UOPTI_SSH_PORT_FILE" "$BACKUP_DIR/port"
+        if ! cp -a "$UOPTI_SSH_PORT_FILE" "$BACKUP_DIR/port"; then
+            rm -rf "$BACKUP_DIR"
+            return 1
+        fi
     fi
 
     echo "$BACKUP_DIR"
@@ -210,25 +278,55 @@ ssh_backup_current_state() {
 
 ssh_restore_state() {
     local BACKUP_DIR="$1"
+    local RESTORE_OK=1
 
-    if [ -f "$BACKUP_DIR/sshd_config" ]; then
-        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG"
+    if [ ! -d "$BACKUP_DIR" ]; then
+        echo "Error: Backup directory was not found: $BACKUP_DIR" >&2
+        return 1
+    fi
+
+    if [ ! -f "$BACKUP_DIR/sshd_config" ]; then
+        echo "Error: SSH configuration backup was not found." >&2
+        return 1
+    fi
+
+    if ! cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG"; then
+        RESTORE_OK=0
     fi
 
     if [ -f "$BACKUP_DIR/port" ]; then
-        mkdir -p "$UOPTI_SSH_DIR"
-        cp -a "$BACKUP_DIR/port" "$UOPTI_SSH_PORT_FILE"
+        if ! mkdir -p "$UOPTI_SSH_DIR" || ! cp -a "$BACKUP_DIR/port" "$UOPTI_SSH_PORT_FILE"; then
+            RESTORE_OK=0
+        fi
     else
-        rm -f "$UOPTI_SSH_PORT_FILE"
+        if ! rm -f "$UOPTI_SSH_PORT_FILE"; then
+            RESTORE_OK=0
+        fi
     fi
 
-    systemctl daemon-reload >/dev/null 2>&1 || true
+    if [ "$RESTORE_OK" -eq 0 ]; then
+        echo "Error: Failed to restore SSH state from backup." >&2
+        return 1
+    fi
+
+    if ! systemctl daemon-reload >/dev/null 2>&1; then
+        echo "Error: Failed to reload systemd after SSH restore." >&2
+        return 1
+    fi
 
     if ssh_socket_is_active || ssh_socket_is_enabled; then
-        systemctl restart "$SSH_SOCKET_UNIT" >/dev/null 2>&1 || true
+        if ! systemctl restart "$SSH_SOCKET_UNIT" >/dev/null 2>&1; then
+            echo "Error: Failed to restart SSH socket after restore." >&2
+            return 1
+        fi
     else
-        systemctl restart "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+        if ! systemctl restart "$SSH_SERVICE_UNIT" >/dev/null 2>&1; then
+            echo "Error: Failed to restart SSH service after restore." >&2
+            return 1
+        fi
     fi
+
+    return 0
 }
 
 ssh_validate_configuration() {
@@ -328,11 +426,9 @@ ssh_show_status() {
     [ -z "$PUBKEY_AUTH" ] && PUBKEY_AUTH="unknown"
 
     SSH_SERVICE=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null)
-
     [ -z "$SSH_SERVICE" ] && SSH_SERVICE="unknown"
 
     SSH_SOCKET=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null)
-
     [ -z "$SSH_SOCKET" ] && SSH_SOCKET="unknown"
 
     if ssh_socket_is_active || ssh_socket_is_enabled; then
@@ -345,11 +441,18 @@ ssh_show_status() {
         LISTENING_PORTS=$(ssh_get_listening_ssh_ports "$EFFECTIVE_PORT")
     fi
 
-    if ssh_has_uopti_marker; then
-        UOPTI_MODE="managed"
-    else
-        UOPTI_MODE="system/default"
-    fi
+    UOPTI_MODE=$(ssh_get_uopti_marker_state)
+    case "$UOPTI_MODE" in
+        valid)
+            UOPTI_MODE="managed"
+            ;;
+        none)
+            UOPTI_MODE="system/default"
+            ;;
+        broken)
+            UOPTI_MODE="BROKEN"
+            ;;
+    esac
 
     echo "SSH Configuration"
     echo
@@ -439,7 +542,19 @@ ssh_change_port() {
         return
     fi
 
-    if ssh_has_manual_port_directive && ! ssh_has_uopti_marker; then
+    local MARKER_STATE
+    MARKER_STATE=$(ssh_get_uopti_marker_state)
+
+    if [ "$MARKER_STATE" = "broken" ]; then
+        echo
+        echo "Error: U-OPTI managed SSH marker is incomplete or invalid."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ssh_has_manual_port_directive && [ "$MARKER_STATE" != "valid" ]; then
         echo
         echo "Error: A manual SSH Port directive was found in:"
         echo "$SSH_CONFIG"
@@ -460,9 +575,18 @@ ssh_change_port() {
 
     local TIMESTAMP
     local BACKUP_DIR
+    local RESTORE_OK=0
 
     TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
     BACKUP_DIR=$(ssh_backup_current_state "$TIMESTAMP")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        echo "Error: Failed to create a complete SSH backup."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
 
     echo "Backup created:"
     echo "$BACKUP_DIR"
@@ -475,9 +599,12 @@ ssh_change_port() {
         echo "Error: Failed to update sshd_config."
         echo "Restoring previous configuration..."
 
-        ssh_restore_state "$BACKUP_DIR"
+        if ssh_restore_state "$BACKUP_DIR"; then
+            echo "Previous configuration restored."
+        else
+            echo "WARNING: Automatic restore failed."
+        fi
 
-        echo "Previous configuration restored."
         echo
         read -rp "Press Enter to return..."
         return
@@ -491,9 +618,12 @@ ssh_change_port() {
         echo "SSH configuration is invalid."
         echo "Restoring previous configuration..."
 
-        ssh_restore_state "$BACKUP_DIR"
+        if ssh_restore_state "$BACKUP_DIR"; then
+            echo "Previous configuration restored."
+        else
+            echo "WARNING: Automatic restore failed."
+        fi
 
-        echo "Previous configuration restored."
         echo
         read -rp "Press Enter to return..."
         return
@@ -509,9 +639,12 @@ ssh_change_port() {
         echo "Error: SSH restart failed."
         echo "Restoring previous configuration..."
 
-        ssh_restore_state "$BACKUP_DIR"
+        if ssh_restore_state "$BACKUP_DIR"; then
+            echo "Previous configuration restored."
+        else
+            echo "WARNING: Automatic restore failed."
+        fi
 
-        echo "Previous configuration restored."
         echo
         read -rp "Press Enter to return..."
         return
@@ -524,8 +657,21 @@ ssh_change_port() {
 
     if ssh_port_is_listening "$NEW_PORT"; then
 
-        mkdir -p "$UOPTI_SSH_DIR"
-        echo "$NEW_PORT" > "$UOPTI_SSH_PORT_FILE"
+        if ! ssh_save_port "$NEW_PORT"; then
+            echo
+            echo "Error: SSH changed successfully, but U-OPTI failed to save the new port."
+            echo "Restoring previous SSH configuration..."
+
+            if ssh_restore_state "$BACKUP_DIR"; then
+                echo "Previous configuration restored."
+            else
+                echo "WARNING: Automatic restore failed."
+            fi
+
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
 
         echo
         echo "======================================"
@@ -553,15 +699,23 @@ ssh_change_port() {
     echo "Port $NEW_PORT is not listening."
     echo "Restoring previous configuration..."
 
-    ssh_restore_state "$BACKUP_DIR"
+    if ssh_restore_state "$BACKUP_DIR"; then
+        RESTORE_OK=1
+        echo "Previous SSH configuration restored."
+    else
+        echo "WARNING: Automatic restore failed."
+    fi
 
-    echo "Previous SSH configuration restored."
     echo
 
     if ssh_port_is_listening "$CURRENT_PORT"; then
         echo "Old SSH port $CURRENT_PORT is still listening."
     else
         echo "WARNING: Old SSH port could not be verified."
+    fi
+
+    if [ "$RESTORE_OK" -eq 0 ]; then
+        echo "WARNING: SSH state requires manual verification."
     fi
 
     echo
