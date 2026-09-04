@@ -5,6 +5,8 @@
 # ==========================================
 
 CERTBOT_BIN=""
+ACME_WEBROOT="/var/www/.well-known-acme"
+ACME_NGINX_CONF="/etc/nginx/conf.d/u-opti-acme.conf"
 
 get_certbot_path() {
     if command -v certbot >/dev/null 2>&1; then
@@ -60,8 +62,6 @@ install_certbot() {
 
     echo "Installing Certbot..."
     echo
-    echo "This will not stop or restart Nginx."
-    echo
 
     if ! apt update; then
         echo
@@ -70,7 +70,7 @@ install_certbot() {
         return 1
     fi
 
-    if ! apt install -y certbot python3-certbot-nginx; then
+    if ! apt install -y certbot; then
         echo
         echo "Error: Failed to install Certbot."
         pause_screen
@@ -89,6 +89,52 @@ install_certbot() {
     "$CERTBOT_BIN" --version
 
     pause_screen
+    return 0
+}
+
+prepare_acme_webroot() {
+    if ! mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"; then
+        echo "Error: Failed to create ACME webroot."
+        return 1
+    fi
+
+    chmod 755 "$ACME_WEBROOT"
+    chmod 755 "$ACME_WEBROOT/.well-known"
+    chmod 755 "$ACME_WEBROOT/.well-known/acme-challenge"
+
+    if [[ ! -f "$ACME_NGINX_CONF" ]]; then
+        cat > "$ACME_NGINX_CONF" <<EOF
+# U-OPTI ACME challenge configuration
+location ^~ /.well-known/acme-challenge/ {
+    root $ACME_WEBROOT;
+    default_type "text/plain";
+    try_files \$uri =404;
+}
+EOF
+    fi
+
+    return 0
+}
+
+validate_nginx_for_acme() {
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo "Error: Nginx is not installed."
+        echo "Install Nginx first."
+        return 1
+    fi
+
+    if ! systemctl is-active --quiet nginx; then
+        echo "Error: Nginx is not running."
+        echo "Start Nginx before issuing a certificate."
+        return 1
+    fi
+
+    if ! nginx -t >/dev/null 2>&1; then
+        echo "Error: Existing Nginx configuration is invalid."
+        echo "Fix the Nginx configuration before issuing a certificate."
+        return 1
+    fi
+
     return 0
 }
 
@@ -144,8 +190,16 @@ certificate_status() {
             expiry_date="Unknown"
             days_left="Unknown"
         else
-            expiry_date="$(date -d "$expiry_raw" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "Unknown")"
-            expiry_epoch="$(date -d "$expiry_raw" '+%s' 2>/dev/null || echo "")"
+            expiry_date="$(
+                date -d "$expiry_raw" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
+                || echo "Unknown"
+            )"
+
+            expiry_epoch="$(
+                date -d "$expiry_raw" '+%s' 2>/dev/null \
+                || echo ""
+            )"
+
             now_epoch="$(date '+%s')"
 
             if [[ -n "$expiry_epoch" && "$expiry_epoch" =~ ^[0-9]+$ ]]; then
@@ -192,16 +246,7 @@ issue_certificate() {
         return 1
     fi
 
-    if ! command -v nginx >/dev/null 2>&1; then
-        echo "Error: Nginx is not installed."
-        echo "Install and configure Nginx first."
-        pause_screen
-        return 1
-    fi
-
-    if ! systemctl is-active --quiet nginx; then
-        echo "Error: Nginx is not running."
-        echo "Start Nginx before issuing a certificate."
+    if ! validate_nginx_for_acme; then
         pause_screen
         return 1
     fi
@@ -237,9 +282,9 @@ issue_certificate() {
     echo "$domain"
     echo
     echo "Certificate method:"
-    echo "Certbot + Nginx"
+    echo "Certbot + ACME Webroot"
     echo
-    echo "Nginx will remain running during the process."
+    echo "Nginx configuration will not be modified by Certbot."
     echo
     read -r -p "Continue with certificate issuance? [y/N]: " confirm
 
@@ -250,40 +295,56 @@ issue_certificate() {
         return 0
     fi
 
+    if ! prepare_acme_webroot; then
+        pause_screen
+        return 1
+    fi
+
+    if ! nginx -t >/dev/null 2>&1; then
+        echo
+        echo "Error: Nginx configuration test failed."
+        echo "The ACME configuration was not loaded."
+        pause_screen
+        return 1
+    fi
+
+    if ! systemctl reload nginx; then
+        echo
+        echo "Error: Failed to reload Nginx."
+        pause_screen
+        return 1
+    fi
+
     echo
     echo "Requesting certificate from Let's Encrypt..."
     echo
 
-    if "$CERTBOT_BIN" --nginx \
+    if "$CERTBOT_BIN" certonly \
+        --webroot \
+        -w "$ACME_WEBROOT" \
         --non-interactive \
         --agree-tos \
         --register-unsafely-without-email \
-        --redirect \
+        --cert-name "$domain" \
         -d "$domain"; then
 
         echo
         echo "Certificate issued successfully."
         echo
-
-        if systemctl reload nginx; then
-            echo "Nginx reloaded successfully."
-        else
-            echo "Warning: Certificate was issued, but Nginx reload failed."
-        fi
-
-        echo
         echo "Certificate:"
-        echo "/etc/letsencrypt/live/$domain/"
+        echo "/etc/letsencrypt/live/$domain/fullchain.pem"
+        echo
+        echo "Private Key:"
+        echo "/etc/letsencrypt/live/$domain/privkey.pem"
     else
         echo
         echo "Error: Failed to issue certificate."
         echo
         echo "Make sure:"
         echo "1. DNS for the domain points to this server."
-        echo "2. Ports 80 and 443 are reachable."
-        echo "3. Nginx has a valid configuration."
-        echo "4. The domain is not blocked by another service."
-
+        echo "2. Port 80 is reachable from the Internet."
+        echo "3. Nginx is running."
+        echo "4. The ACME challenge path is reachable."
         pause_screen
         return 1
     fi
@@ -311,12 +372,7 @@ renew_certificates() {
     if "$CERTBOT_BIN" renew; then
         echo
         echo "Certificate renewal process completed."
-
-        if systemctl reload nginx; then
-            echo "Nginx reloaded successfully."
-        else
-            echo "Warning: Nginx reload failed."
-        fi
+        echo "Nginx configuration was not modified by U-OPTI."
     else
         echo
         echo "Error: Certificate renewal failed."
@@ -391,12 +447,7 @@ remove_certificate() {
 
         echo
         echo "Certificate removed successfully."
-
-        if systemctl reload nginx; then
-            echo "Nginx reloaded successfully."
-        else
-            echo "Warning: Nginx reload failed."
-        fi
+        echo "Nginx configuration was not modified by U-OPTI."
     else
         echo
         echo "Error: Failed to remove certificate."
