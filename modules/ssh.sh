@@ -6,9 +6,14 @@
 SSH_CONFIG="/etc/ssh/sshd_config"
 SSH_SOCKET_UNIT="ssh.socket"
 SSH_SERVICE_UNIT="ssh.service"
+
 UOPTI_SSH_DIR="/etc/u-opti/ssh"
 UOPTI_SSH_PORT_FILE="$UOPTI_SSH_DIR/port"
 UOPTI_SSH_BACKUP_DIR="$UOPTI_SSH_DIR/backups"
+
+UOPTI_SSH_CONFIG="/etc/ssh/sshd_config.d/99-u-opti-port.conf"
+UOPTI_SSH_SOCKET_DIR="/etc/systemd/system/$SSH_SOCKET_UNIT.d"
+UOPTI_SSH_SOCKET_OVERRIDE="$UOPTI_SSH_SOCKET_DIR/override.conf"
 
 ssh_require_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -37,29 +42,183 @@ ssh_port_is_valid() {
 ssh_port_is_in_use() {
     local PORT="$1"
 
-    if ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${PORT}$"; then
+    if ss -lntH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${PORT}$"; then
         return 0
     fi
 
     return 1
 }
 
-ssh_get_effective_port() {
-    sshd -T 2>/dev/null | awk '$1 == "port" {print $2; exit}'
-}
-
-ssh_get_effective_setting() {
-    local SETTING="$1"
-
-    sshd -T 2>/dev/null | awk -v key="$SETTING" '$1 == key {$1=""; sub(/^ /, ""); print; exit}'
+ssh_service_is_active() {
+    systemctl is-active --quiet "$SSH_SERVICE_UNIT"
 }
 
 ssh_socket_is_active() {
     systemctl is-active --quiet "$SSH_SOCKET_UNIT"
 }
 
-ssh_service_is_active() {
-    systemctl is-active --quiet "$SSH_SERVICE_UNIT"
+ssh_get_sshd_effective_port() {
+    sshd -T 2>/dev/null | awk '$1 == "port" {print $2; exit}'
+}
+
+ssh_get_effective_setting() {
+    local SETTING="$1"
+
+    sshd -T 2>/dev/null |
+        awk -v key="$SETTING" '$1 == key {
+            $1=""
+            sub(/^ /, "")
+            print
+            exit
+        }'
+}
+
+ssh_get_socket_ports() {
+    systemctl show "$SSH_SOCKET_UNIT" --property=Listen --value 2>/dev/null |
+        tr ' ' '\n' |
+        sed '/^$/d'
+}
+
+ssh_get_current_port() {
+    local SOCKET_PORTS
+
+    if ssh_socket_is_active; then
+        SOCKET_PORTS=$(ssh_get_socket_ports)
+
+        if [ -n "$SOCKET_PORTS" ]; then
+            echo "$SOCKET_PORTS" |
+                sed -E 's/^\[//; s/\]:[0-9]+$/ /' |
+                awk -F: '
+                    {
+                        port=$NF
+                        gsub(/[^0-9]/, "", port)
+                        if (port != "") {
+                            print port
+                        }
+                    }
+                ' |
+                head -n 1
+
+            return
+        fi
+    fi
+
+    ssh_get_sshd_effective_port
+}
+
+ssh_backup_current_state() {
+    local TIMESTAMP="$1"
+    local BACKUP_DIR="$UOPTI_SSH_BACKUP_DIR/$TIMESTAMP"
+
+    mkdir -p "$BACKUP_DIR"
+
+    if [ -f "$SSH_CONFIG" ]; then
+        cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"
+    fi
+
+    if [ -f "$UOPTI_SSH_CONFIG" ]; then
+        cp -a "$UOPTI_SSH_CONFIG" "$BACKUP_DIR/99-u-opti-port.conf"
+    fi
+
+    if [ -f "$UOPTI_SSH_SOCKET_OVERRIDE" ]; then
+        cp -a "$UOPTI_SSH_SOCKET_OVERRIDE" "$BACKUP_DIR/ssh.socket.override.conf"
+    fi
+
+    if [ -f "$UOPTI_SSH_PORT_FILE" ]; then
+        cp -a "$UOPTI_SSH_PORT_FILE" "$BACKUP_DIR/port"
+    fi
+
+    echo "$BACKUP_DIR"
+}
+
+ssh_restore_state() {
+    local BACKUP_DIR="$1"
+
+    if [ -f "$BACKUP_DIR/sshd_config" ]; then
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG"
+    fi
+
+    if [ -f "$BACKUP_DIR/99-u-opti-port.conf" ]; then
+        mkdir -p "$(dirname "$UOPTI_SSH_CONFIG")"
+        cp -a "$BACKUP_DIR/99-u-opti-port.conf" "$UOPTI_SSH_CONFIG"
+    else
+        rm -f "$UOPTI_SSH_CONFIG"
+    fi
+
+    if [ -f "$BACKUP_DIR/ssh.socket.override.conf" ]; then
+        mkdir -p "$UOPTI_SSH_SOCKET_DIR"
+        cp -a "$BACKUP_DIR/ssh.socket.override.conf" "$UOPTI_SSH_SOCKET_OVERRIDE"
+    else
+        rm -f "$UOPTI_SSH_SOCKET_OVERRIDE"
+        rmdir "$UOPTI_SSH_SOCKET_DIR" 2>/dev/null || true
+    fi
+
+    if [ -f "$BACKUP_DIR/port" ]; then
+        mkdir -p "$UOPTI_SSH_DIR"
+        cp -a "$BACKUP_DIR/port" "$UOPTI_SSH_PORT_FILE"
+    else
+        rm -f "$UOPTI_SSH_PORT_FILE"
+    fi
+
+    systemctl daemon-reload
+
+    if ssh_socket_is_active; then
+        systemctl restart "$SSH_SOCKET_UNIT" >/dev/null 2>&1 || true
+    else
+        systemctl restart "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+    fi
+}
+
+ssh_write_sshd_config() {
+    local NEW_PORT="$1"
+
+    mkdir -p "$(dirname "$UOPTI_SSH_CONFIG")"
+
+    cat > "$UOPTI_SSH_CONFIG" <<EOF
+# U-OPTI managed SSH port
+# This file is managed by U-OPTI.
+Port $NEW_PORT
+EOF
+}
+
+ssh_write_socket_override() {
+    local NEW_PORT="$1"
+
+    mkdir -p "$UOPTI_SSH_SOCKET_DIR"
+
+    cat > "$UOPTI_SSH_SOCKET_OVERRIDE" <<EOF
+[Socket]
+ListenStream=
+ListenStream=0.0.0.0:$NEW_PORT
+ListenStream=[::]:$NEW_PORT
+EOF
+}
+
+ssh_remove_socket_override() {
+    rm -f "$UOPTI_SSH_SOCKET_OVERRIDE"
+    rmdir "$UOPTI_SSH_SOCKET_DIR" 2>/dev/null || true
+}
+
+ssh_validate_configuration() {
+    if ! sshd -t; then
+        echo
+        echo "Error: SSH configuration test failed."
+        return 1
+    fi
+
+    return 0
+}
+
+ssh_port_is_listening() {
+    local PORT="$1"
+
+    if ss -lntH 2>/dev/null |
+        awk '{print $4}' |
+        grep -Eq "(^|:)${PORT}$"; then
+        return 0
+    fi
+
+    return 1
 }
 
 ssh_show_status() {
@@ -84,7 +243,7 @@ ssh_show_status() {
     local SSH_SERVICE
     local SSH_SOCKET
 
-    EFFECTIVE_PORT=$(ssh_get_effective_port)
+    EFFECTIVE_PORT=$(ssh_get_current_port)
     ROOT_LOGIN=$(ssh_get_effective_setting "permitrootlogin")
     PASSWORD_AUTH=$(ssh_get_effective_setting "passwordauthentication")
     PUBKEY_AUTH=$(ssh_get_effective_setting "pubkeyauthentication")
@@ -92,156 +251,34 @@ ssh_show_status() {
     SSH_SERVICE=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null || true)
     SSH_SOCKET=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null || true)
 
-    echo "Effective SSH Configuration"
+    echo "SSH Configuration"
     echo
-    echo "SSH Port                : ${EFFECTIVE_PORT:-unknown}"
-    echo "Root Login              : ${ROOT_LOGIN:-unknown}"
-    echo "Password Authentication : ${PASSWORD_AUTH:-unknown}"
+    echo "SSH Port                  : ${EFFECTIVE_PORT:-unknown}"
+    echo "Root Login                : ${ROOT_LOGIN:-unknown}"
+    echo "Password Authentication   : ${PASSWORD_AUTH:-unknown}"
     echo "Public Key Authentication: ${PUBKEY_AUTH:-unknown}"
     echo
-    echo "Service Status          : ${SSH_SERVICE:-unknown}"
-    echo "Socket Status           : ${SSH_SOCKET:-unknown}"
+    echo "Service Status            : ${SSH_SERVICE:-unknown}"
+    echo "Socket Status             : ${SSH_SOCKET:-unknown}"
     echo
 
-    echo "Listening SSH Ports"
+    echo "SSH Listening Ports"
     echo "--------------------------------------"
 
-    ss -lntH 2>/dev/null | awk '
-        $4 ~ /(^|:)22$/ ||
-        $4 ~ /(^|:)([0-9]{1,5})$/ {
-            if ($4 ~ /:/) {
-                print $4
-            }
-        }
-    ' | sort -u
+    if ssh_socket_is_active; then
+        ssh_get_socket_ports
+    else
+        ss -lntH 2>/dev/null |
+            awk -v port="$EFFECTIVE_PORT" '
+                $4 ~ "(^|:)\"" port "\"$" {
+                    print $4
+                }
+            ' |
+            sort -u
+    fi
 
     echo
     read -rp "Press Enter to return..."
-}
-
-ssh_backup_current_config() {
-    local TIMESTAMP
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
-
-    mkdir -p "$UOPTI_SSH_BACKUP_DIR"
-
-    if ! cp -a "$SSH_CONFIG" "$UOPTI_SSH_BACKUP_DIR/sshd_config.$TIMESTAMP"; then
-        echo
-        echo "Error: Failed to backup $SSH_CONFIG"
-        return 1
-    fi
-
-    if [ -f "/etc/systemd/system/$SSH_SOCKET_UNIT.d/override.conf" ]; then
-        mkdir -p "$UOPTI_SSH_BACKUP_DIR/socket-$TIMESTAMP"
-
-        if ! cp -a \
-            "/etc/systemd/system/$SSH_SOCKET_UNIT.d/override.conf" \
-            "$UOPTI_SSH_BACKUP_DIR/socket-$TIMESTAMP/override.conf"; then
-
-            echo
-            echo "Error: Failed to backup SSH socket override."
-            return 1
-        fi
-    fi
-
-    echo "$TIMESTAMP"
-    return 0
-}
-
-ssh_remove_uopti_port_config() {
-    if [ -f "$UOPTI_SSH_PORT_FILE" ]; then
-        rm -f "$UOPTI_SSH_PORT_FILE"
-    fi
-}
-
-ssh_apply_sshd_port() {
-    local NEW_PORT="$1"
-    local TEMP_CONFIG
-
-    TEMP_CONFIG=$(mktemp)
-
-    awk '
-        BEGIN { in_block=0 }
-
-        /# BEGIN U-OPTI MANAGED SSH PORT/ {
-            in_block=1
-            next
-        }
-
-        /# END U-OPTI MANAGED SSH PORT/ {
-            in_block=0
-            next
-        }
-
-        !in_block {
-            print
-        }
-    ' "$SSH_CONFIG" > "$TEMP_CONFIG"
-
-    cat >> "$TEMP_CONFIG" <<EOF
-
-# BEGIN U-OPTI MANAGED SSH PORT
-Port $NEW_PORT
-# END U-OPTI MANAGED SSH PORT
-EOF
-
-    if ! cat "$TEMP_CONFIG" > "$SSH_CONFIG"; then
-        rm -f "$TEMP_CONFIG"
-        return 1
-    fi
-
-    rm -f "$TEMP_CONFIG"
-
-    echo "$NEW_PORT" > "$UOPTI_SSH_PORT_FILE"
-
-    return 0
-}
-
-ssh_apply_socket_port() {
-    local NEW_PORT="$1"
-    local SOCKET_DROPIN_DIR="/etc/systemd/system/$SSH_SOCKET_UNIT.d"
-    local SOCKET_DROPIN_FILE="$SOCKET_DROPIN_DIR/override.conf"
-
-    mkdir -p "$SOCKET_DROPIN_DIR"
-
-    cat > "$SOCKET_DROPIN_FILE" <<EOF
-[Socket]
-ListenStream=
-ListenStream=0.0.0.0:$NEW_PORT
-ListenStream=[::]:$NEW_PORT
-EOF
-
-    return $?
-}
-
-ssh_remove_socket_override() {
-    local SOCKET_DROPIN_FILE="/etc/systemd/system/$SSH_SOCKET_UNIT.d/override.conf"
-
-    if [ -f "$SOCKET_DROPIN_FILE" ]; then
-        rm -f "$SOCKET_DROPIN_FILE"
-    fi
-
-    rmdir /etc/systemd/system/$SSH_SOCKET_UNIT.d 2>/dev/null || true
-}
-
-ssh_verify_configuration() {
-    if ! sshd -t; then
-        echo
-        echo "Error: SSH configuration test failed."
-        return 1
-    fi
-
-    return 0
-}
-
-ssh_verify_port_listening() {
-    local PORT="$1"
-
-    if ss -lntH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${PORT}$"; then
-        return 0
-    fi
-
-    return 1
 }
 
 ssh_change_port() {
@@ -265,7 +302,7 @@ ssh_change_port() {
     fi
 
     local CURRENT_PORT
-    CURRENT_PORT=$(ssh_get_effective_port)
+    CURRENT_PORT=$(ssh_get_current_port)
 
     if [ -z "$CURRENT_PORT" ]; then
         echo "Error: Unable to determine the current SSH port."
@@ -299,7 +336,6 @@ ssh_change_port() {
     if ssh_port_is_in_use "$NEW_PORT"; then
         echo
         echo "Error: Port $NEW_PORT is already in use."
-        echo "Choose another port."
         echo
         read -rp "Press Enter to return..."
         return
@@ -308,37 +344,35 @@ ssh_change_port() {
     echo
     echo "New SSH Port: $NEW_PORT"
     echo
-    echo "A backup will be created before changing SSH."
+
+    local TIMESTAMP
+    local BACKUP_DIR
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+    BACKUP_DIR=$(ssh_backup_current_state "$TIMESTAMP")
+
+    echo "Backup created:"
+    echo "$BACKUP_DIR"
     echo
 
-    local BACKUP_TIMESTAMP
-    BACKUP_TIMESTAMP=$(ssh_backup_current_config)
+    echo "Preparing SSH configuration..."
 
-    if [ -z "$BACKUP_TIMESTAMP" ]; then
+    if ! ssh_write_sshd_config "$NEW_PORT"; then
         echo
-        echo "SSH port change cancelled."
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Backup created: $BACKUP_TIMESTAMP"
-    echo
-
-    if ! ssh_apply_sshd_port "$NEW_PORT"; then
-        echo
-        echo "Error: Failed to update SSH configuration."
+        echo "Error: Failed to prepare sshd configuration."
+        ssh_restore_state "$BACKUP_DIR"
         read -rp "Press Enter to return..."
         return
     fi
 
     if ssh_socket_is_active; then
         echo "SSH socket activation detected."
-        echo "Updating ssh.socket configuration..."
+        echo "Preparing ssh.socket configuration..."
 
-        if ! ssh_apply_socket_port "$NEW_PORT"; then
+        if ! ssh_write_socket_override "$NEW_PORT"; then
             echo
-            echo "Error: Failed to update ssh.socket configuration."
-            echo
+            echo "Error: Failed to prepare ssh.socket configuration."
+            ssh_restore_state "$BACKUP_DIR"
             read -rp "Press Enter to return..."
             return
         fi
@@ -347,10 +381,12 @@ ssh_change_port() {
     echo
     echo "Testing SSH configuration..."
 
-    if ! ssh_verify_configuration; then
+    if ! ssh_validate_configuration; then
         echo
         echo "SSH configuration is invalid."
-        echo "The SSH service was not restarted."
+        echo "Restoring previous configuration..."
+        ssh_restore_state "$BACKUP_DIR"
+        echo "Previous configuration restored."
         echo
         read -rp "Press Enter to return..."
         return
@@ -361,28 +397,41 @@ ssh_change_port() {
     echo
     echo "Reloading systemd configuration..."
 
-    systemctl daemon-reload
+    if ! systemctl daemon-reload; then
+        echo
+        echo "Error: systemd daemon-reload failed."
+        echo "Restoring previous configuration..."
+        ssh_restore_state "$BACKUP_DIR"
+        echo "Previous configuration restored."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Restarting SSH..."
+
+    local RESTART_OK=true
 
     if ssh_socket_is_active; then
-        echo
-        echo "Restarting SSH socket..."
-
         if ! systemctl restart "$SSH_SOCKET_UNIT"; then
-            echo
-            echo "Error: Failed to restart ssh.socket."
-            read -rp "Press Enter to return..."
-            return
+            RESTART_OK=false
         fi
     else
-        echo
-        echo "Restarting SSH service..."
-
         if ! systemctl restart "$SSH_SERVICE_UNIT"; then
-            echo
-            echo "Error: Failed to restart ssh.service."
-            read -rp "Press Enter to return..."
-            return
+            RESTART_OK=false
         fi
+    fi
+
+    if [ "$RESTART_OK" != "true" ]; then
+        echo
+        echo "Error: Failed to restart SSH."
+        echo "Restoring previous configuration..."
+        ssh_restore_state "$BACKUP_DIR"
+        echo "Previous configuration restored."
+        echo
+        read -rp "Press Enter to return..."
+        return
     fi
 
     sleep 2
@@ -390,7 +439,11 @@ ssh_change_port() {
     echo
     echo "Verifying new SSH port..."
 
-    if ssh_verify_port_listening "$NEW_PORT"; then
+    if ssh_port_is_listening "$NEW_PORT"; then
+
+        mkdir -p "$UOPTI_SSH_DIR"
+        echo "$NEW_PORT" > "$UOPTI_SSH_PORT_FILE"
+
         echo
         echo "======================================"
         echo "      SSH Port Change Successful"
@@ -399,9 +452,11 @@ ssh_change_port() {
         echo "Old Port: $CURRENT_PORT"
         echo "New Port: $NEW_PORT"
         echo
-        echo "Important:"
+        echo "IMPORTANT:"
         echo "Open a NEW SSH connection using port $NEW_PORT"
         echo "before closing your current SSH session."
+        echo
+        echo "The old SSH session remains open."
         echo
         read -rp "Press Enter to return..."
         return
@@ -413,10 +468,11 @@ ssh_change_port() {
     echo "======================================"
     echo
     echo "Port $NEW_PORT is not listening."
-    echo
-    echo "Your current SSH session was not intentionally closed."
-    echo "The configuration backup is available under:"
-    echo "$UOPTI_SSH_BACKUP_DIR"
+    echo "Restoring previous configuration..."
+
+    ssh_restore_state "$BACKUP_DIR"
+
+    echo "Previous SSH configuration restored."
     echo
     read -rp "Press Enter to return..."
 }
