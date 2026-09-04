@@ -2,7 +2,7 @@
 
 set -e
 
-BRANCH="refactor/v0.9.0"
+BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
 INSTALL_PATH="/usr/local/bin/u-opti"
