@@ -50,8 +50,9 @@ while true; do
     echo "3) SSH Management"
     echo "4) Firewall Management"
     echo "5) X-UI PRO Management"
-    echo "6) Update U-OPTI"
-    echo "7) Uninstall U-OPTI"
+    echo "6) Certificate Management"
+    echo "7) Update U-OPTI"
+    echo "8) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
