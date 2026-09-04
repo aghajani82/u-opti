@@ -127,10 +127,9 @@ ssh_has_manual_port_directive() {
     ' "$SSH_CONFIG"
 }
 
-ssh_remove_uopti_managed_block() {
-    local TEMP_CONFIG
-
-    TEMP_CONFIG=$(mktemp)
+ssh_build_uopti_config() {
+    local NEW_PORT="$1"
+    local TEMP_CONFIG="$2"
 
     if ! awk \
         -v begin="$UOPTI_SSH_MARKER_BEGIN" \
@@ -150,16 +149,15 @@ ssh_remove_uopti_managed_block() {
             }
         ' "$SSH_CONFIG" > "$TEMP_CONFIG"; then
 
-        rm -f "$TEMP_CONFIG"
         return 1
     fi
 
-    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
-        rm -f "$TEMP_CONFIG"
-        return 1
-    fi
-
-    rm -f "$TEMP_CONFIG"
+    {
+        echo
+        echo "$UOPTI_SSH_MARKER_BEGIN"
+        echo "Port $NEW_PORT"
+        echo "$UOPTI_SSH_MARKER_END"
+    } >> "$TEMP_CONFIG"
 
     return 0
 }
@@ -168,27 +166,27 @@ ssh_write_uopti_port() {
     local NEW_PORT="$1"
     local TEMP_CONFIG
 
-    TEMP_CONFIG=$(mktemp)
+    TEMP_CONFIG=$(mktemp) || return 1
 
-    if ! ssh_remove_uopti_managed_block; then
+    if ! ssh_build_uopti_config "$NEW_PORT" "$TEMP_CONFIG"; then
         rm -f "$TEMP_CONFIG"
         return 1
     fi
 
-    {
-        cat "$SSH_CONFIG"
-        echo
-        echo "$UOPTI_SSH_MARKER_BEGIN"
-        echo "Port $NEW_PORT"
-        echo "$UOPTI_SSH_MARKER_END"
-    } > "$TEMP_CONFIG"
-
-    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
+    if ! chown --reference="$SSH_CONFIG" "$TEMP_CONFIG"; then
         rm -f "$TEMP_CONFIG"
         return 1
     fi
 
-    rm -f "$TEMP_CONFIG"
+    if ! chmod --reference="$SSH_CONFIG" "$TEMP_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    if ! mv -f "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
 
     return 0
 }
@@ -331,15 +329,11 @@ ssh_show_status() {
 
     SSH_SERVICE=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null)
 
-    if [ -z "$SSH_SERVICE" ]; then
-        SSH_SERVICE="unknown"
-    fi
+    [ -z "$SSH_SERVICE" ] && SSH_SERVICE="unknown"
 
     SSH_SOCKET=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null)
 
-    if [ -z "$SSH_SOCKET" ]; then
-        SSH_SOCKET="unknown"
-    fi
+    [ -z "$SSH_SOCKET" ] && SSH_SOCKET="unknown"
 
     if ssh_socket_is_active || ssh_socket_is_enabled; then
         SOCKET_MODE="enabled"
