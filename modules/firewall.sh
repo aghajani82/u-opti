@@ -449,6 +449,268 @@ firewall_configure() {
     read -rp "Press Enter to return..."
 }
 
+
+firewall_add_ports() {
+    clear
+
+    echo "======================================"
+    echo "            Add Port"
+    echo "======================================"
+    echo
+
+    if ! firewall_require_root || ! firewall_require_ufw; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    read -rp "TCP ports (space-separated): " PORT_INPUT
+
+    if [ -z "$PORT_INPUT" ]; then
+        echo
+        echo "No ports entered."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local PORT
+    local ADD_PORTS=()
+    local DUPLICATE_PORTS=()
+    local INVALID_FOUND=false
+
+    read -ra INPUT_PORTS <<< "$PORT_INPUT"
+
+    for PORT in "${INPUT_PORTS[@]}"; do
+        if ! firewall_port_is_valid "$PORT"; then
+            echo "Invalid port: $PORT"
+            INVALID_FOUND=true
+            continue
+        fi
+
+        if firewall_port_list_contains "$PORT" "${ADD_PORTS[@]}"; then
+            continue
+        fi
+
+        if firewall_rule_exists "$PORT"; then
+            DUPLICATE_PORTS+=("$PORT")
+            continue
+        fi
+
+        ADD_PORTS+=("$PORT")
+    done
+
+    if [ "$INVALID_FOUND" = "true" ]; then
+        echo
+        echo "Invalid port input detected."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "${#ADD_PORTS[@]}" -eq 0 ]; then
+        echo
+        echo "No new ports to add."
+        if [ "${#DUPLICATE_PORTS[@]}" -gt 0 ]; then
+            echo
+            echo "Already allowed:"
+            for PORT in "${DUPLICATE_PORTS[@]}"; do
+                echo "  $PORT/tcp"
+            done
+        fi
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "The following TCP ports will be added:"
+    for PORT in "${ADD_PORTS[@]}"; do
+        echo "  $PORT/tcp"
+    done
+
+    if [ "${#DUPLICATE_PORTS[@]}" -gt 0 ]; then
+        echo
+        echo "Already allowed (will be skipped):"
+        for PORT in "${DUPLICATE_PORTS[@]}"; do
+            echo "  $PORT/tcp"
+        done
+    fi
+
+    echo
+    read -rp "Add these ports? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Add port operation cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+            ;;
+    esac
+
+    for PORT in "${ADD_PORTS[@]}"; do
+        if ! ufw allow "$PORT/tcp"; then
+            echo
+            echo "Failed to add port $PORT/tcp."
+            echo "Stopping further changes."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    done
+
+    echo
+    echo "Ports added successfully."
+    echo
+
+    for PORT in "${ADD_PORTS[@]}"; do
+        echo "  $PORT/tcp"
+    done
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
+firewall_remove_ports() {
+    clear
+
+    echo "======================================"
+    echo "           Remove Port"
+    echo "======================================"
+    echo
+
+    if ! firewall_require_root || ! firewall_require_ufw; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local SSH_PORT
+    SSH_PORT=$(firewall_get_ssh_port)
+
+    read -rp "TCP ports to remove (space-separated): " PORT_INPUT
+
+    if [ -z "$PORT_INPUT" ]; then
+        echo
+        echo "No ports entered."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local PORT
+    local REMOVE_PORTS=()
+    local NOT_FOUND_PORTS=()
+    local SSH_BLOCKED=()
+    local INVALID_FOUND=false
+
+    read -ra INPUT_PORTS <<< "$PORT_INPUT"
+
+    for PORT in "${INPUT_PORTS[@]}"; do
+        if ! firewall_port_is_valid "$PORT"; then
+            echo "Invalid port: $PORT"
+            INVALID_FOUND=true
+            continue
+        fi
+
+        if firewall_port_list_contains "$PORT" "${REMOVE_PORTS[@]}" ||
+           firewall_port_list_contains "$PORT" "${NOT_FOUND_PORTS[@]}" ||
+           firewall_port_list_contains "$PORT" "${SSH_BLOCKED[@]}"; then
+            continue
+        fi
+
+        if [ "$PORT" = "$SSH_PORT" ]; then
+            SSH_BLOCKED+=("$PORT")
+            continue
+        fi
+
+        if firewall_rule_exists "$PORT"; then
+            REMOVE_PORTS+=("$PORT")
+        else
+            NOT_FOUND_PORTS+=("$PORT")
+        fi
+    done
+
+    if [ "$INVALID_FOUND" = "true" ]; then
+        echo
+        echo "Invalid port input detected."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+
+    if [ "${#SSH_BLOCKED[@]}" -gt 0 ]; then
+        echo "SSH protection:"
+        for PORT in "${SSH_BLOCKED[@]}"; do
+            echo "  $PORT/tcp cannot be removed because it is the current SSH port."
+        done
+        echo
+    fi
+
+    if [ "${#NOT_FOUND_PORTS[@]}" -gt 0 ]; then
+        echo "Not currently allowed (will be skipped):"
+        for PORT in "${NOT_FOUND_PORTS[@]}"; do
+            echo "  $PORT/tcp"
+        done
+        echo
+    fi
+
+    if [ "${#REMOVE_PORTS[@]}" -eq 0 ]; then
+        echo "No ports can be removed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "The following TCP ports will be removed:"
+    for PORT in "${REMOVE_PORTS[@]}"; do
+        echo "  $PORT/tcp"
+    done
+
+    echo
+    read -rp "Remove these ports? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Remove port operation cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+            ;;
+    esac
+
+    for PORT in "${REMOVE_PORTS[@]}"; do
+        if ! ufw delete allow "$PORT/tcp"; then
+            echo
+            echo "Failed to remove port $PORT/tcp."
+            echo "Stopping further changes."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    done
+
+    echo
+    echo "Ports removed successfully."
+    echo
+
+    for PORT in "${REMOVE_PORTS[@]}"; do
+        echo "  $PORT/tcp"
+    done
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
 show_firewall_menu() {
     while true; do
         clear
@@ -461,11 +723,13 @@ show_firewall_menu() {
         echo "1) Firewall Status"
         echo "2) Configure Firewall"
         echo "3) Show Rules"
+        echo "4) Add Port"
+        echo "5) Remove Port"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-3]: " FIREWALL_CHOICE
+        read -rp "Please enter your selection [0-5]: " FIREWALL_CHOICE
 
         case "$FIREWALL_CHOICE" in
             1)
@@ -476,6 +740,12 @@ show_firewall_menu() {
                 ;;
             3)
                 firewall_show_rules
+                ;;
+            4)
+                firewall_add_ports
+                ;;
+            5)
+                firewall_remove_ports
                 ;;
             0)
                 return
