@@ -23,6 +23,7 @@ source "$MODULES_PATH/swap.sh"
 source "$MODULES_PATH/bbr.sh"
 source "$MODULES_PATH/storage.sh"
 source "$MODULES_PATH/ssh.sh"
+source "$MODULES_PATH/firewall.sh"
 
 while true; do
     clear
@@ -36,13 +37,14 @@ while true; do
     echo "1) Update Server"
     echo "2) System Optimization"
     echo "3) SSH Management"
-    echo "4) Update U-OPTI"
-    echo "5) Uninstall U-OPTI"
+    echo "4) Firewall Management"
+    echo "5) Update U-OPTI"
+    echo "6) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-5]: " choice
+    read -rp "Please enter your selection [0-6]: " choice
 
     case "$choice" in
 
@@ -123,6 +125,10 @@ while true; do
             ;;
 
         4)
+            show_firewall_menu
+            ;;
+
+        5)
             clear
 
             echo "======================================"
@@ -256,6 +262,17 @@ while true; do
                 continue
             fi
 
+            echo "Downloading Firewall Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/firewall.sh" -o "$TEMP_DIR/firewall.sh"; then
+                echo
+                echo "Failed to download firewall.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
             echo
             echo "Checking downloaded files..."
 
@@ -269,6 +286,7 @@ while true; do
                 "$TEMP_DIR/bbr.sh"
                 "$TEMP_DIR/storage.sh"
                 "$TEMP_DIR/ssh.sh"
+                "$TEMP_DIR/firewall.sh"
             )
 
             UPDATE_FILES_OK=true
@@ -304,7 +322,8 @@ while true; do
                ! bash -n "$TEMP_DIR/swap.sh" || \
                ! bash -n "$TEMP_DIR/bbr.sh" || \
                ! bash -n "$TEMP_DIR/storage.sh" || \
-               ! bash -n "$TEMP_DIR/ssh.sh"; then
+               ! bash -n "$TEMP_DIR/ssh.sh" || \
+               ! bash -n "$TEMP_DIR/firewall.sh"; then
 
                 echo
                 echo "Bash syntax check failed."
@@ -332,6 +351,7 @@ while true; do
             cp -f "$MODULES_PATH/bbr.sh" "$BACKUP_DIR/bbr.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/storage.sh" "$BACKUP_DIR/storage.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/ssh.sh" "$BACKUP_DIR/ssh.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/firewall.sh" "$BACKUP_DIR/firewall.sh" 2>/dev/null || true
 
             echo "Backup created."
 
@@ -349,6 +369,7 @@ while true; do
             cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh" || UPDATE_FAILED=true
 
             if [ "$UPDATE_FAILED" = "true" ]; then
 
@@ -366,6 +387,7 @@ while true; do
                 [ -f "$BACKUP_DIR/bbr.sh" ] && cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
                 [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
                 [ -f "$BACKUP_DIR/ssh.sh" ] && cp "$BACKUP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
+                [ -f "$BACKUP_DIR/firewall.sh" ] && cp "$BACKUP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh"
 
                 rm -rf "$BACKUP_DIR"
                 rm -rf "$TEMP_DIR"
@@ -385,6 +407,7 @@ while true; do
             chmod +x "$MODULES_PATH/bbr.sh"
             chmod +x "$MODULES_PATH/storage.sh"
             chmod +x "$MODULES_PATH/ssh.sh"
+            chmod +x "$MODULES_PATH/firewall.sh"
 
             rm -rf "$BACKUP_DIR"
             rm -rf "$TEMP_DIR"
@@ -404,7 +427,7 @@ while true; do
             read -rp "Press Enter to return..."
             ;;
 
-        5)
+        6)
             clear
 
             echo "======================================"
