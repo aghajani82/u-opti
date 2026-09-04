@@ -24,6 +24,7 @@ source "$MODULES_PATH/bbr.sh"
 source "$MODULES_PATH/storage.sh"
 source "$MODULES_PATH/ssh.sh"
 source "$MODULES_PATH/firewall.sh"
+source "$MODULES_PATH/xui-pro.sh"
 
 while true; do
     clear
