@@ -59,13 +59,26 @@ ssh_service_is_active() {
     systemctl is-active --quiet "$SSH_SERVICE_UNIT" 2>/dev/null
 }
 
+ssh_prepare_runtime_dir() {
+    if [ ! -d /run/sshd ]; then
+        mkdir -p /run/sshd || return 1
+        chmod 0755 /run/sshd || return 1
+    fi
+
+    return 0
+}
+
 ssh_get_sshd_effective_port() {
+    ssh_prepare_runtime_dir || return 1
+
     sshd -T 2>/dev/null |
         awk '$1 == "port" {print $2; exit}'
 }
 
 ssh_get_effective_setting() {
     local SETTING="$1"
+
+    ssh_prepare_runtime_dir || return 1
 
     sshd -T 2>/dev/null |
         awk -v key="$SETTING" '
@@ -79,9 +92,15 @@ ssh_get_effective_setting() {
 }
 
 ssh_get_listening_ssh_ports() {
-    ss -lntp 2>/dev/null |
-        awk '
-            /users:\(\("sshd"/ {
+    local CURRENT_PORT="$1"
+
+    if [ -z "$CURRENT_PORT" ]; then
+        return 1
+    fi
+
+    ss -lntH 2>/dev/null |
+        awk -v port="$CURRENT_PORT" '
+            $4 ~ ("(^|:)" port "$") {
                 print $4
             }
         ' |
@@ -99,7 +118,6 @@ ssh_has_manual_port_directive() {
         }
 
         /^[[:space:]]*Port[[:space:]]+[0-9]+([[:space:]]|$)/ {
-            print
             found=1
         }
 
@@ -114,21 +132,27 @@ ssh_remove_uopti_managed_block() {
 
     TEMP_CONFIG=$(mktemp)
 
-    awk -v begin="$UOPTI_SSH_MARKER_BEGIN" -v end="$UOPTI_SSH_MARKER_END" '
-        $0 == begin {
-            inside=1
-            next
-        }
+    if ! awk \
+        -v begin="$UOPTI_SSH_MARKER_BEGIN" \
+        -v end="$UOPTI_SSH_MARKER_END" '
+            $0 == begin {
+                inside=1
+                next
+            }
 
-        $0 == end {
-            inside=0
-            next
-        }
+            $0 == end {
+                inside=0
+                next
+            }
 
-        !inside {
-            print
-        }
-    ' "$SSH_CONFIG" > "$TEMP_CONFIG"
+            !inside {
+                print
+            }
+        ' "$SSH_CONFIG" > "$TEMP_CONFIG"; then
+
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
 
     if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
         rm -f "$TEMP_CONFIG"
@@ -146,9 +170,7 @@ ssh_write_uopti_port() {
 
     TEMP_CONFIG=$(mktemp)
 
-    if ssh_remove_uopti_managed_block; then
-        :
-    else
+    if ! ssh_remove_uopti_managed_block; then
         rm -f "$TEMP_CONFIG"
         return 1
     fi
@@ -212,6 +234,12 @@ ssh_restore_state() {
 }
 
 ssh_validate_configuration() {
+    if ! ssh_prepare_runtime_dir; then
+        echo
+        echo "Error: Failed to prepare SSH runtime directory."
+        return 1
+    fi
+
     if ! sshd -t; then
         echo
         echo "Error: SSH configuration test failed."
@@ -223,6 +251,10 @@ ssh_validate_configuration() {
 
 ssh_port_is_listening() {
     local PORT="$1"
+
+    if [ -z "$PORT" ]; then
+        return 1
+    fi
 
     ss -lntH 2>/dev/null |
         awk -v port="$PORT" '
@@ -284,12 +316,30 @@ ssh_show_status() {
     local UOPTI_MODE
 
     EFFECTIVE_PORT=$(ssh_get_sshd_effective_port)
+
+    if [ -z "$EFFECTIVE_PORT" ]; then
+        EFFECTIVE_PORT="unknown"
+    fi
+
     ROOT_LOGIN=$(ssh_get_effective_setting "permitrootlogin")
     PASSWORD_AUTH=$(ssh_get_effective_setting "passwordauthentication")
     PUBKEY_AUTH=$(ssh_get_effective_setting "pubkeyauthentication")
 
-    SSH_SERVICE=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null || echo "unknown")
-    SSH_SOCKET=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null || echo "inactive")
+    [ -z "$ROOT_LOGIN" ] && ROOT_LOGIN="unknown"
+    [ -z "$PASSWORD_AUTH" ] && PASSWORD_AUTH="unknown"
+    [ -z "$PUBKEY_AUTH" ] && PUBKEY_AUTH="unknown"
+
+    SSH_SERVICE=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null)
+
+    if [ -z "$SSH_SERVICE" ]; then
+        SSH_SERVICE="unknown"
+    fi
+
+    SSH_SOCKET=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null)
+
+    if [ -z "$SSH_SOCKET" ]; then
+        SSH_SOCKET="unknown"
+    fi
 
     if ssh_socket_is_active || ssh_socket_is_enabled; then
         SOCKET_MODE="enabled"
@@ -297,7 +347,9 @@ ssh_show_status() {
         SOCKET_MODE="disabled"
     fi
 
-    LISTENING_PORTS=$(ssh_get_listening_ssh_ports)
+    if [ "$EFFECTIVE_PORT" != "unknown" ]; then
+        LISTENING_PORTS=$(ssh_get_listening_ssh_ports "$EFFECTIVE_PORT")
+    fi
 
     if ssh_has_uopti_marker; then
         UOPTI_MODE="managed"
@@ -307,13 +359,13 @@ ssh_show_status() {
 
     echo "SSH Configuration"
     echo
-    echo "SSH Port                  : ${EFFECTIVE_PORT:-unknown}"
-    echo "Root Login                : ${ROOT_LOGIN:-unknown}"
-    echo "Password Authentication   : ${PASSWORD_AUTH:-unknown}"
-    echo "Public Key Authentication: ${PUBKEY_AUTH:-unknown}"
+    echo "SSH Port                  : $EFFECTIVE_PORT"
+    echo "Root Login                : $ROOT_LOGIN"
+    echo "Password Authentication   : $PASSWORD_AUTH"
+    echo "Public Key Authentication: $PUBKEY_AUTH"
     echo
-    echo "Service Status            : ${SSH_SERVICE:-unknown}"
-    echo "Socket Status             : ${SSH_SOCKET:-unknown}"
+    echo "Service Status            : $SSH_SERVICE"
+    echo "Socket Status             : $SSH_SOCKET"
     echo "Socket Activation         : $SOCKET_MODE"
     echo
 
