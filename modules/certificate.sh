@@ -118,7 +118,9 @@ validate_nginx() {
 domain_exists_in_nginx() {
     local domain="$1"
 
-    nginx -T 2>/dev/null | grep -Eq "server_name[[:space:]]+[^;]*(^|[[:space:]])${domain}([[:space:]]|;)"
+    nginx -T 2>/dev/null |
+        grep -Eq \
+        "server_name[[:space:]]+[^;]*(^|[[:space:]])${domain}([[:space:]]|;)"
 }
 
 get_acme_conf_path() {
@@ -129,9 +131,14 @@ get_acme_conf_path() {
 
 prepare_acme_webroot() {
     local domain="$1"
-    local conf_path
+    local conf_path="$2"
+    local previous_content=""
+    local had_previous=0
 
-    conf_path="$(get_acme_conf_path "$domain")"
+    if [[ -f "$conf_path" ]]; then
+        had_previous=1
+        previous_content="$(cat "$conf_path")"
+    fi
 
     if ! mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge"; then
         echo "Error: Failed to create ACME webroot."
@@ -168,16 +175,72 @@ EOF
 
     if ! nginx -t >/dev/null 2>&1; then
         echo "Error: Failed to validate ACME Nginx configuration."
-        rm -f "$conf_path"
+
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous_content" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+
+        nginx -t >/dev/null 2>&1 || true
+
         return 1
     fi
 
     if ! systemctl reload nginx; then
         echo "Error: Failed to reload Nginx after ACME configuration."
-        rm -f "$conf_path"
+
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous_content" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+
         return 1
     fi
 
+    return 0
+}
+
+test_acme_webroot() {
+    local domain="$1"
+    local test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test"
+    local response=""
+
+    echo "Testing ACME challenge path..."
+    echo
+
+    if ! printf '%s\n' "u-opti-test" > "$test_file"; then
+        echo "Error: Failed to create ACME test file."
+        return 1
+    fi
+
+    response="$(
+        curl -fsS \
+            --max-time 10 \
+            -H "Host: $domain" \
+            "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+            2>/dev/null || true
+    )"
+
+    rm -f "$test_file"
+
+    if [[ "$response" != "u-opti-test" ]]; then
+        echo
+        echo "Error: ACME challenge path is not reachable from Nginx."
+        echo
+        echo "Expected response:"
+        echo "u-opti-test"
+        echo
+        echo "Received:"
+        echo "${response:-<no response>}"
+
+        return 1
+    fi
+
+    echo "ACME challenge path is reachable."
     return 0
 }
 
@@ -332,6 +395,8 @@ issue_certificate() {
         return 1
     fi
 
+    conf_path="$(get_acme_conf_path "$domain")"
+
     echo
     echo "Domain:"
     echo "$domain"
@@ -341,7 +406,7 @@ issue_certificate() {
     echo
     echo "Nginx site configuration will not be modified by Certbot."
     echo
-    echo "U-OPTI will create a dedicated temporary ACME server"
+    echo "U-OPTI will create a dedicated ACME server"
     echo "for this domain on port 80."
     echo
 
@@ -354,57 +419,24 @@ issue_certificate() {
         return 0
     fi
 
-    if ! prepare_acme_webroot "$domain"; then
+    if ! prepare_acme_webroot "$domain" "$conf_path"; then
         pause_screen
         return 1
     fi
 
-    conf_path="$(get_acme_conf_path "$domain")"
-
-    echo
-    echo "Testing ACME challenge path..."
     echo
 
-    local test_file
-    test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test"
-
-    echo "u-opti-test" > "$test_file"
-
-    local challenge_response
-
-    challenge_response="$(
-        curl -fsS \
-            --max-time 10 \
-            "http://$domain/.well-known/acme-challenge/u-opti-test" \
-            2>/dev/null || true
-    )"
-
-    rm -f "$test_file"
-
-    if [[ "$challenge_response" != "u-opti-test" ]]; then
+    if ! test_acme_webroot "$domain"; then
         echo
-        echo "Error: ACME challenge path is not reachable."
+        echo "Make sure the Nginx ACME configuration is active."
         echo
-        echo "Expected response:"
-        echo "u-opti-test"
-        echo
-        echo "Received:"
-        echo "${challenge_response:-<no response>}"
-        echo
-        echo "Make sure:"
-        echo "1. DNS for the domain points to this server."
-        echo "2. Port 80 is reachable from the Internet."
-        echo "3. Nginx is running."
-        echo "4. The ACME challenge path is reachable."
-
-        rm -f "$conf_path"
-        nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1
+        echo "ACME configuration:"
+        echo "$conf_path"
 
         pause_screen
         return 1
     fi
 
-    echo "ACME challenge path is reachable."
     echo
     echo "Requesting certificate from Let's Encrypt..."
     echo
@@ -433,11 +465,11 @@ issue_certificate() {
         echo
         echo "Error: Failed to issue certificate."
         echo
-        echo "Make sure:"
-        echo "1. DNS for the domain points to this server."
-        echo "2. Port 80 is reachable from the Internet."
-        echo "3. Nginx is running."
-        echo "4. The ACME challenge path is reachable."
+        echo "The ACME Nginx configuration has been kept"
+        echo "so the certificate can be retried without rebuilding it."
+        echo
+        echo "ACME configuration:"
+        echo "$conf_path"
 
         pause_screen
         return 1
@@ -552,6 +584,10 @@ remove_certificate() {
 
             if nginx -t >/dev/null 2>&1; then
                 systemctl reload nginx >/dev/null 2>&1
+            else
+                echo
+                echo "Warning: Nginx configuration test failed after"
+                echo "removing the U-OPTI ACME configuration."
             fi
         fi
 
