@@ -114,6 +114,13 @@ if ! curl -fsSL "$BASE_URL/modules/firewall.sh" -o "$TEMP_DIR/firewall.sh"; then
     exit 1
 fi
 
+echo "Downloading X-UI PRO Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/xui-pro.sh" -o "$TEMP_DIR/xui-pro.sh"; then
+    echo "Failed to download xui-pro.sh."
+    exit 1
+fi
+
 echo
 echo "Checking downloaded files..."
 
@@ -128,6 +135,7 @@ REQUIRED_FILES=(
     "$TEMP_DIR/storage.sh"
     "$TEMP_DIR/ssh.sh"
     "$TEMP_DIR/firewall.sh"
+    "$TEMP_DIR/xui-pro.sh"
 )
 
 for FILE in "${REQUIRED_FILES[@]}"; do
@@ -153,6 +161,7 @@ bash -n "$TEMP_DIR/bbr.sh"
 bash -n "$TEMP_DIR/storage.sh"
 bash -n "$TEMP_DIR/ssh.sh"
 bash -n "$TEMP_DIR/firewall.sh"
+bash -n "$TEMP_DIR/xui-pro.sh"
 
 echo "Bash syntax check passed."
 
@@ -176,6 +185,7 @@ cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
 cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
 cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
 cp "$TEMP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh"
+cp "$TEMP_DIR/xui-pro.sh" "$MODULES_PATH/xui-pro.sh"
 
 echo
 echo "Setting permissions..."
@@ -190,6 +200,7 @@ chmod +x "$MODULES_PATH/bbr.sh"
 chmod +x "$MODULES_PATH/storage.sh"
 chmod +x "$MODULES_PATH/ssh.sh"
 chmod +x "$MODULES_PATH/firewall.sh"
+chmod +x "$MODULES_PATH/xui-pro.sh"
 
 echo
 echo "======================================"
@@ -209,6 +220,9 @@ echo "$MODULES_PATH/ssh.sh"
 echo
 echo "Firewall Module:"
 echo "$MODULES_PATH/firewall.sh"
+echo
+echo "X-UI PRO Module:"
+echo "$MODULES_PATH/xui-pro.sh"
 echo
 
 "$INSTALL_PATH"
