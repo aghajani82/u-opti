@@ -6,7 +6,7 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, and maintainin
 
 ## Current Version
 
-**v0.9.0**
+**v0.10.0**
 
 ## Features
 
