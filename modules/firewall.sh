@@ -199,10 +199,7 @@ firewall_restore_state() {
         return 1
     fi
 
-    if ! ufw disable >/dev/null 2>&1; then
-        # UFW may already be inactive; continue with file restore.
-        true
-    fi
+    ufw disable >/dev/null 2>&1 || true
 
     if ! rm -rf /etc/ufw; then
         return 1
@@ -212,8 +209,16 @@ firewall_restore_state() {
         return 1
     fi
 
-    if command -v ufw >/dev/null 2>&1; then
-        ufw reload >/dev/null 2>&1 || true
+    ufw reload >/dev/null 2>&1 || true
+
+    return 0
+}
+
+firewall_rule_exists() {
+    local PORT="$1"
+
+    if ! ufw show added 2>/dev/null | grep -Eq "ufw allow ${PORT}/tcp([[:space:]]|$)"; then
+        return 1
     fi
 
     return 0
@@ -327,7 +332,7 @@ firewall_configure() {
     }
 
     local TIMESTAMP
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
     local BACKUP_DIR="$UOPTI_FIREWALL_BACKUP_DIR/$TIMESTAMP"
 
     echo
@@ -387,7 +392,7 @@ firewall_configure() {
     echo
     echo "Checking SSH rule before enabling firewall..."
 
-    if ! ufw status | grep -Eq "(^|[[:space:]])${SSH_PORT}/tcp([[:space:]]|$)"; then
+    if ! firewall_rule_exists "$SSH_PORT"; then
         echo
         echo "ERROR: SSH port $SSH_PORT/tcp was not found in UFW rules."
         echo "Firewall will NOT be enabled."
