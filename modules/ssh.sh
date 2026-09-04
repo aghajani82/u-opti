@@ -11,7 +11,6 @@ UOPTI_SSH_DIR="/etc/u-opti/ssh"
 UOPTI_SSH_PORT_FILE="$UOPTI_SSH_DIR/port"
 UOPTI_SSH_BACKUP_DIR="$UOPTI_SSH_DIR/backups"
 
-# U-OPTI managed SSH configuration
 UOPTI_SSH_CONFIG="/etc/ssh/sshd_config.d/99-u-opti-port.conf"
 
 ssh_require_root() {
@@ -77,6 +76,14 @@ ssh_get_effective_setting() {
         '
 }
 
+ssh_has_include_directive() {
+    grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' "$SSH_CONFIG"
+}
+
+ssh_has_existing_port_directive() {
+    grep -Eq '^[[:space:]]*Port[[:space:]]+[0-9]+([[:space:]]|$)' "$SSH_CONFIG"
+}
+
 ssh_get_listening_ssh_ports() {
     local CURRENT_PORT="$1"
 
@@ -133,11 +140,31 @@ ssh_restore_state() {
 
     systemctl daemon-reload >/dev/null 2>&1 || true
 
-    if ssh_socket_is_active; then
+    if ssh_socket_is_active || ssh_socket_is_enabled; then
         systemctl restart "$SSH_SOCKET_UNIT" >/dev/null 2>&1 || true
     else
         systemctl restart "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
     fi
+}
+
+ssh_add_include_directive() {
+    local TEMP_CONFIG
+
+    TEMP_CONFIG=$(mktemp)
+
+    {
+        echo "Include /etc/ssh/sshd_config.d/*.conf"
+        cat "$SSH_CONFIG"
+    } > "$TEMP_CONFIG"
+
+    if ! cp -a "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    rm -f "$TEMP_CONFIG"
+
+    return 0
 }
 
 ssh_write_port_config() {
@@ -150,10 +177,6 @@ ssh_write_port_config() {
 # This file is managed by U-OPTI.
 Port $NEW_PORT
 EOF
-}
-
-ssh_remove_port_config() {
-    rm -f "$UOPTI_SSH_CONFIG"
 }
 
 ssh_validate_configuration() {
@@ -208,6 +231,7 @@ ssh_show_status() {
     local SSH_SOCKET
     local SOCKET_MODE
     local LISTENING_PORTS
+    local INCLUDE_STATUS
 
     EFFECTIVE_PORT=$(ssh_get_sshd_effective_port)
     ROOT_LOGIN=$(ssh_get_effective_setting "permitrootlogin")
@@ -223,6 +247,12 @@ ssh_show_status() {
         SOCKET_MODE="disabled"
     fi
 
+    if ssh_has_include_directive; then
+        INCLUDE_STATUS="enabled"
+    else
+        INCLUDE_STATUS="not found"
+    fi
+
     LISTENING_PORTS=$(ssh_get_listening_ssh_ports "$EFFECTIVE_PORT")
 
     echo "SSH Configuration"
@@ -235,6 +265,7 @@ ssh_show_status() {
     echo "Service Status            : ${SSH_SERVICE:-unknown}"
     echo "Socket Status             : ${SSH_SOCKET:-unknown}"
     echo "Socket Activation         : $SOCKET_MODE"
+    echo "Config Include            : $INCLUDE_STATUS"
     echo
 
     echo "SSH Listening Ports"
@@ -318,6 +349,20 @@ ssh_change_port() {
         return
     fi
 
+    if ssh_has_existing_port_directive && [ ! -f "$UOPTI_SSH_CONFIG" ]; then
+        echo
+        echo "Error: An existing SSH Port directive was found in"
+        echo "$SSH_CONFIG"
+        echo
+        echo "U-OPTI will not modify an existing manual SSH Port"
+        echo "configuration automatically."
+        echo
+        echo "Please review the SSH configuration manually first."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
     echo
     echo "Current SSH Port: $CURRENT_PORT"
     echo "New SSH Port    : $NEW_PORT"
@@ -333,12 +378,36 @@ ssh_change_port() {
     echo "$BACKUP_DIR"
     echo
 
-    echo "Writing new SSH configuration..."
+    if ! ssh_has_include_directive; then
+        echo "SSH Include directive was not found."
+        echo "Adding the standard sshd_config.d Include..."
+
+        if ! ssh_add_include_directive; then
+            echo
+            echo "Error: Failed to add SSH Include directive."
+            echo "Restoring previous configuration..."
+
+            ssh_restore_state "$BACKUP_DIR"
+
+            echo "Previous configuration restored."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        echo "Include directive added."
+        echo
+    fi
+
+    echo "Writing U-OPTI SSH port configuration..."
 
     if ! ssh_write_port_config "$NEW_PORT"; then
         echo
-        echo "Error: Failed to write SSH configuration."
+        echo "Error: Failed to write U-OPTI SSH configuration."
+        echo "Restoring previous configuration..."
+
         ssh_restore_state "$BACKUP_DIR"
+
         echo "Previous configuration restored."
         echo
         read -rp "Press Enter to return..."
