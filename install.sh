@@ -50,7 +50,6 @@ if [ -z "$REMOTE_VERSION" ]; then
 fi
 
 echo "Remote Version: $REMOTE_VERSION"
-
 echo
 echo "Downloading U-OPTI..."
 
@@ -101,6 +100,20 @@ if ! curl -fsSL "$BASE_URL/modules/storage.sh" -o "$TEMP_DIR/storage.sh"; then
     exit 1
 fi
 
+echo "Downloading SSH Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/ssh.sh" -o "$TEMP_DIR/ssh.sh"; then
+    echo "Failed to download ssh.sh."
+    exit 1
+fi
+
+echo "Downloading Firewall Management module..."
+
+if ! curl -fsSL "$BASE_URL/modules/firewall.sh" -o "$TEMP_DIR/firewall.sh"; then
+    echo "Failed to download firewall.sh."
+    exit 1
+fi
+
 echo
 echo "Checking downloaded files..."
 
@@ -113,6 +126,8 @@ REQUIRED_FILES=(
     "$TEMP_DIR/swap.sh"
     "$TEMP_DIR/bbr.sh"
     "$TEMP_DIR/storage.sh"
+    "$TEMP_DIR/ssh.sh"
+    "$TEMP_DIR/firewall.sh"
 )
 
 for FILE in "${REQUIRED_FILES[@]}"; do
@@ -136,6 +151,8 @@ bash -n "$TEMP_DIR/time.sh"
 bash -n "$TEMP_DIR/swap.sh"
 bash -n "$TEMP_DIR/bbr.sh"
 bash -n "$TEMP_DIR/storage.sh"
+bash -n "$TEMP_DIR/ssh.sh"
+bash -n "$TEMP_DIR/firewall.sh"
 
 echo "Bash syntax check passed."
 
@@ -157,6 +174,8 @@ cp "$TEMP_DIR/time.sh" "$MODULES_PATH/time.sh"
 cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
 cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
 cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
+cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
+cp "$TEMP_DIR/firewall.sh" "$MODULES_PATH/firewall.sh"
 
 echo
 echo "Setting permissions..."
@@ -169,6 +188,8 @@ chmod +x "$MODULES_PATH/time.sh"
 chmod +x "$MODULES_PATH/swap.sh"
 chmod +x "$MODULES_PATH/bbr.sh"
 chmod +x "$MODULES_PATH/storage.sh"
+chmod +x "$MODULES_PATH/ssh.sh"
+chmod +x "$MODULES_PATH/firewall.sh"
 
 echo
 echo "======================================"
@@ -182,6 +203,12 @@ echo "$INSTALL_PATH"
 echo
 echo "Library Path:"
 echo "$LIB_PATH"
+echo
+echo "SSH Module:"
+echo "$MODULES_PATH/ssh.sh"
+echo
+echo "Firewall Module:"
+echo "$MODULES_PATH/firewall.sh"
 echo
 
 "$INSTALL_PATH"
