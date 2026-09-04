@@ -22,6 +22,7 @@ source "$MODULES_PATH/time.sh"
 source "$MODULES_PATH/swap.sh"
 source "$MODULES_PATH/bbr.sh"
 source "$MODULES_PATH/storage.sh"
+source "$MODULES_PATH/ssh.sh"
 
 while true; do
     clear
@@ -34,13 +35,14 @@ while true; do
     echo
     echo "1) Update Server"
     echo "2) System Optimization"
-    echo "3) Update U-OPTI"
-    echo "4) Uninstall U-OPTI"
+    echo "3) SSH Management"
+    echo "4) Update U-OPTI"
+    echo "5) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-4]: " choice
+    read -rp "Please enter your selection [0-5]: " choice
 
     case "$choice" in
 
@@ -117,6 +119,10 @@ while true; do
             ;;
 
         3)
+            show_ssh_menu
+            ;;
+
+        4)
             clear
 
             echo "======================================"
@@ -239,6 +245,17 @@ while true; do
                 continue
             fi
 
+            echo "Downloading SSH Management module..."
+
+            if ! curl -fsSL "$BASE_URL/modules/ssh.sh" -o "$TEMP_DIR/ssh.sh"; then
+                echo
+                echo "Failed to download ssh.sh."
+                rm -rf "$TEMP_DIR"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
             echo
             echo "Checking downloaded files..."
 
@@ -251,6 +268,7 @@ while true; do
                 "$TEMP_DIR/swap.sh"
                 "$TEMP_DIR/bbr.sh"
                 "$TEMP_DIR/storage.sh"
+                "$TEMP_DIR/ssh.sh"
             )
 
             UPDATE_FILES_OK=true
@@ -285,7 +303,8 @@ while true; do
                ! bash -n "$TEMP_DIR/time.sh" || \
                ! bash -n "$TEMP_DIR/swap.sh" || \
                ! bash -n "$TEMP_DIR/bbr.sh" || \
-               ! bash -n "$TEMP_DIR/storage.sh"; then
+               ! bash -n "$TEMP_DIR/storage.sh" || \
+               ! bash -n "$TEMP_DIR/ssh.sh"; then
 
                 echo
                 echo "Bash syntax check failed."
@@ -312,6 +331,7 @@ while true; do
             cp -f "$MODULES_PATH/swap.sh" "$BACKUP_DIR/swap.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/bbr.sh" "$BACKUP_DIR/bbr.sh" 2>/dev/null || true
             cp -f "$MODULES_PATH/storage.sh" "$BACKUP_DIR/storage.sh" 2>/dev/null || true
+            cp -f "$MODULES_PATH/ssh.sh" "$BACKUP_DIR/ssh.sh" 2>/dev/null || true
 
             echo "Backup created."
 
@@ -328,6 +348,7 @@ while true; do
             cp "$TEMP_DIR/swap.sh" "$MODULES_PATH/swap.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh" || UPDATE_FAILED=true
             cp "$TEMP_DIR/storage.sh" "$MODULES_PATH/storage.sh" || UPDATE_FAILED=true
+            cp "$TEMP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh" || UPDATE_FAILED=true
 
             if [ "$UPDATE_FAILED" = "true" ]; then
 
@@ -344,6 +365,7 @@ while true; do
                 [ -f "$BACKUP_DIR/swap.sh" ] && cp "$BACKUP_DIR/swap.sh" "$MODULES_PATH/swap.sh"
                 [ -f "$BACKUP_DIR/bbr.sh" ] && cp "$BACKUP_DIR/bbr.sh" "$MODULES_PATH/bbr.sh"
                 [ -f "$BACKUP_DIR/storage.sh" ] && cp "$BACKUP_DIR/storage.sh" "$MODULES_PATH/storage.sh"
+                [ -f "$BACKUP_DIR/ssh.sh" ] && cp "$BACKUP_DIR/ssh.sh" "$MODULES_PATH/ssh.sh"
 
                 rm -rf "$BACKUP_DIR"
                 rm -rf "$TEMP_DIR"
@@ -362,6 +384,7 @@ while true; do
             chmod +x "$MODULES_PATH/swap.sh"
             chmod +x "$MODULES_PATH/bbr.sh"
             chmod +x "$MODULES_PATH/storage.sh"
+            chmod +x "$MODULES_PATH/ssh.sh"
 
             rm -rf "$BACKUP_DIR"
             rm -rf "$TEMP_DIR"
@@ -381,7 +404,7 @@ while true; do
             read -rp "Press Enter to return..."
             ;;
 
-        4)
+        5)
             clear
 
             echo "======================================"
