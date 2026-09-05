@@ -732,11 +732,12 @@ show_ssh_menu() {
         echo
         echo "1) SSH Status"
         echo "2) Change SSH Port"
+        echo "3) SSH Access Management"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-2]: " SSH_CHOICE
+        read -rp "Please enter your selection [0-3]: " SSH_CHOICE
 
         case "$SSH_CHOICE" in
             1)
@@ -744,6 +745,9 @@ show_ssh_menu() {
                 ;;
             2)
                 ssh_change_port
+                ;;
+            3)
+                show_ssh_access_menu
                 ;;
             0)
                 return
