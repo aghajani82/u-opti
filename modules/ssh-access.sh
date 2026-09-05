@@ -485,6 +485,191 @@ ssh_access_generate_key_pair() {
 
 
 
+ssh_access_backup_authorized_keys() {
+    local KEY_FILE="$1"
+    local TIMESTAMP
+    local BACKUP_DIR
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+    BACKUP_DIR="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/$TIMESTAMP"
+
+    mkdir -p "$BACKUP_DIR" || return 1
+
+    if [ -f "$KEY_FILE" ]; then
+        cp -a "$KEY_FILE" "$BACKUP_DIR/authorized_keys" || {
+            rm -rf "$BACKUP_DIR"
+            return 1
+        }
+    else
+        printf '%s\n' "absent" > "$BACKUP_DIR/state" || {
+            rm -rf "$BACKUP_DIR"
+            return 1
+        }
+    fi
+
+    echo "$BACKUP_DIR"
+}
+
+ssh_access_add_public_key() {
+    clear
+
+    echo "======================================"
+    echo "            Add Public Key"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v ssh-keygen >/dev/null 2>&1; then
+        echo "Error: ssh-keygen was not found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+    local PUBLIC_KEY
+    local TEMP_KEY_FILE
+    local BACKUP_DIR
+    local SSH_DIR
+
+    TARGET_USER=$(ssh_access_get_target_user)
+    HOME_DIR=$(ssh_access_get_user_home "$TARGET_USER")
+
+    if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+        echo "Error: Unable to determine the user's home directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+    SSH_DIR="$HOME_DIR/.ssh"
+
+    echo "Target User: $TARGET_USER"
+    echo "Authorized Keys: $AUTHORIZED_KEYS_FILE"
+    echo
+    echo "Paste the PUBLIC key below."
+    echo "Example: ssh-ed25519 AAAA... comment"
+    echo
+
+    read -r PUBLIC_KEY
+
+    if [ -z "$PUBLIC_KEY" ]; then
+        echo
+        echo "Error: Public key cannot be empty."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    TEMP_KEY_FILE=$(mktemp) || {
+        echo
+        echo "Error: Failed to create temporary file."
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    printf '%s\n' "$PUBLIC_KEY" > "$TEMP_KEY_FILE"
+    chmod 600 "$TEMP_KEY_FILE"
+
+    if ! ssh-keygen -lf "$TEMP_KEY_FILE" >/dev/null 2>&1; then
+        rm -f "$TEMP_KEY_FILE"
+        echo
+        echo "Error: Invalid SSH public key."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -f "$AUTHORIZED_KEYS_FILE" ] &&
+       grep -Fqx "$PUBLIC_KEY" "$AUTHORIZED_KEYS_FILE"; then
+        rm -f "$TEMP_KEY_FILE"
+        echo
+        echo "This public key is already installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    BACKUP_DIR=$(ssh_access_backup_authorized_keys "$AUTHORIZED_KEYS_FILE")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        rm -f "$TEMP_KEY_FILE"
+        echo
+        echo "Error: Failed to create SSH key backup."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Backup created:"
+    echo "$BACKUP_DIR"
+    echo
+
+    if [ ! -d "$SSH_DIR" ]; then
+        if ! mkdir -p "$SSH_DIR"; then
+            rm -f "$TEMP_KEY_FILE"
+            echo
+            echo "Error: Failed to create SSH directory."
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        chmod 700 "$SSH_DIR"
+        chown "$TARGET_USER:$TARGET_USER" "$SSH_DIR"
+    fi
+
+    if [ ! -f "$AUTHORIZED_KEYS_FILE" ]; then
+        touch "$AUTHORIZED_KEYS_FILE" || {
+            rm -f "$TEMP_KEY_FILE"
+            echo
+            echo "Error: Failed to create authorized_keys."
+            read -rp "Press Enter to return..."
+            return
+        }
+
+        chmod 600 "$AUTHORIZED_KEYS_FILE"
+        chown "$TARGET_USER:$TARGET_USER" "$AUTHORIZED_KEYS_FILE"
+    fi
+
+    if ! cat "$TEMP_KEY_FILE" >> "$AUTHORIZED_KEYS_FILE"; then
+        rm -f "$TEMP_KEY_FILE"
+        echo
+        echo "Error: Failed to install public key."
+        echo "The previous state is preserved in the backup."
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    rm -f "$TEMP_KEY_FILE"
+
+    chmod 600 "$AUTHORIZED_KEYS_FILE"
+    chown "$TARGET_USER:$TARGET_USER" "$AUTHORIZED_KEYS_FILE"
+
+    echo
+    echo "======================================"
+    echo "      Public Key Added Successfully"
+    echo "======================================"
+    echo
+    echo "User       : $TARGET_USER"
+    echo "Key File   : $AUTHORIZED_KEYS_FILE"
+    echo "Backup     : $BACKUP_DIR"
+    echo
+    echo "The public key is now installed."
+    echo
+    read -rp "Press Enter to return..."
+}
+
+
+
+
 
 
 
@@ -520,9 +705,7 @@ show_ssh_access_menu() {
                 ssh_access_generate_key_pair
                 ;;
             3)
-                echo
-                echo "Add Public Key is not implemented yet."
-                read -rp "Press Enter to return..."
+                ssh_access_add_public_key
                 ;;
             4)
                 echo
