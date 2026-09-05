@@ -1069,6 +1069,90 @@ ssh_access_remove_public_key() {
 
 
 
+ssh_access_backup_restore() {
+    ssh_access_require_root || return 1
+
+    local target_user
+    local user_home
+    local ssh_dir
+    local authorized_keys
+    local backup_dir
+    local timestamp
+    local backup_path
+
+    target_user="$(ssh_access_get_target_user)"
+    user_home="$(ssh_access_get_user_home "$target_user")"
+
+    if [[ -z "$user_home" || ! -d "$user_home" ]]; then
+        echo "✗ Could not determine home directory for user: $target_user"
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    ssh_dir="$user_home/.ssh"
+    authorized_keys="$ssh_dir/authorized_keys"
+
+    timestamp="$(date '+%Y%m%d-%H%M%S')"
+    backup_path="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/$timestamp"
+
+    mkdir -p "$backup_path" || {
+        echo "✗ Failed to create backup directory."
+        read -rp "Press Enter to return..."
+        return 1
+    }
+
+    chmod 700 "$backup_path"
+
+    if [[ -f "$authorized_keys" ]]; then
+        cp -a "$authorized_keys" "$backup_path/authorized_keys" || {
+            echo "✗ Failed to back up authorized_keys."
+            rm -rf "$backup_path"
+            read -rp "Press Enter to return..."
+            return 1
+        }
+    fi
+
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        cp -a /etc/ssh/sshd_config "$backup_path/sshd_config"
+    fi
+
+    if [[ -d /etc/ssh/sshd_config.d ]]; then
+        cp -a /etc/ssh/sshd_config.d "$backup_path/sshd_config.d"
+    fi
+
+    cat <<EOF
+
+======================================
+       SSH Access Backup Created
+======================================
+
+User        : $target_user
+Backup Path : $backup_path
+
+Included:
+  - authorized_keys
+  - sshd_config
+  - sshd_config.d/
+
+EOF
+
+    if [[ -f "$authorized_keys" ]]; then
+        echo "✓ Public key access backed up."
+    else
+        echo "- No authorized_keys file found."
+    fi
+
+    echo
+    echo "Keep this backup in a secure location."
+    echo
+    read -rp "Press Enter to return..."
+}
+
+
+
+
+
+
 
 
 
@@ -1110,9 +1194,7 @@ show_ssh_access_menu() {
                 ssh_access_remove_public_key
                 ;;
             6)
-                echo
-                echo "Backup & Restore is not implemented yet."
-                read -rp "Press Enter to return..."
+                ssh_access_backup_restore
                 ;;
             7)
                 echo
