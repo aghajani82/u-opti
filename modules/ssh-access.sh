@@ -1435,6 +1435,109 @@ EOF
 
 
 
+ssh_access_change_user_password() {
+    clear
+
+    echo "======================================"
+    echo "         Change User Password"
+    echo "======================================"
+    echo
+
+    ssh_access_require_root || {
+        read -rp "Press Enter to return..."
+        return 1
+    }
+
+    local TARGET_USER
+    local PASSWORD
+    local CONFIRM_PASSWORD
+
+    TARGET_USER="$(ssh_access_get_target_user)"
+
+    if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
+        echo "✗ Unable to determine target user."
+        echo
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    echo "Target User : $TARGET_USER"
+    echo
+    echo "Enter a new password for this user."
+    echo "The password will not be displayed while typing."
+    echo
+
+    while true; do
+        read -rsp "New password: " PASSWORD
+        echo
+
+        if [ -z "$PASSWORD" ]; then
+            echo "✗ Password cannot be empty."
+            echo
+            continue
+        fi
+
+        read -rsp "Confirm password: " CONFIRM_PASSWORD
+        echo
+
+        if [ "$PASSWORD" != "$CONFIRM_PASSWORD" ]; then
+            echo
+            echo "✗ Passwords do not match."
+            echo
+            continue
+        fi
+
+        break
+    done
+
+    echo
+    echo "WARNING"
+    echo "The password for user '$TARGET_USER' will be changed."
+    echo
+
+    local CONFIRM
+
+    read -rp "Continue? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Operation cancelled."
+            read -rp "Press Enter to return..."
+            return 0
+            ;;
+    esac
+
+    if printf '%s:%s\n' "$TARGET_USER" "$PASSWORD" | chpasswd; then
+        echo
+        echo "======================================"
+        echo "     Password Changed Successfully"
+        echo "======================================"
+        echo
+        echo "User : $TARGET_USER"
+        echo
+        echo "The new password is now active."
+    else
+        echo
+        echo "======================================"
+        echo "        Password Change Failed"
+        echo "======================================"
+        echo
+        echo "No password change was completed."
+    fi
+
+    unset PASSWORD
+    unset CONFIRM_PASSWORD
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
+
+
+
 
 
 
@@ -1500,12 +1603,10 @@ show_ssh_access_menu() {
                 ;;
          esac
          ;;
-            7)
-                echo
-                echo "Change User Password is not implemented yet."
-                read -rp "Press Enter to return..."
-                ;;
-            0)
+             7)
+            ssh_access_change_user_password
+            ;;
+             0)
                 return
                 ;;
             *)
