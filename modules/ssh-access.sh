@@ -1114,7 +1114,7 @@ ssh_access_restore() {
             -mindepth 1 \
             -maxdepth 1 \
             -type d \
-            -name 'backup-*' \
+            \( -name 'backup-*' -o -regex '.*/[0-9]{8}-[0-9]{6}' \)
             | sort -r
     )
 
