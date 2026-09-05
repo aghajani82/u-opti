@@ -1451,6 +1451,7 @@ ssh_access_change_user_password() {
     local TARGET_USER
     local PASSWORD
     local CONFIRM_PASSWORD
+    local CONFIRM
 
     TARGET_USER="$(ssh_access_get_target_user)"
 
@@ -1463,6 +1464,28 @@ ssh_access_change_user_password() {
 
     echo "Target User : $TARGET_USER"
     echo
+    echo "This will change the password for the selected user."
+    echo
+    echo "0) Back"
+    echo
+
+    read -rp "Continue? [0-1]: " CONFIRM
+
+    case "$CONFIRM" in
+        0)
+            return 0
+            ;;
+        1)
+            ;;
+        *)
+            echo
+            echo "Invalid selection."
+            read -rp "Press Enter to return..."
+            return 1
+            ;;
+    esac
+
+    echo
     echo "Enter a new password for this user."
     echo "The password will not be displayed while typing."
     echo
@@ -1472,6 +1495,7 @@ ssh_access_change_user_password() {
         echo
 
         if [ -z "$PASSWORD" ]; then
+            echo
             echo "✗ Password cannot be empty."
             echo
             continue
@@ -1495,9 +1519,7 @@ ssh_access_change_user_password() {
     echo "The password for user '$TARGET_USER' will be changed."
     echo
 
-    local CONFIRM
-
-    read -rp "Continue? [y/N]: " CONFIRM
+    read -rp "Confirm password change? [y/N]: " CONFIRM
 
     case "$CONFIRM" in
         y|Y|yes|YES)
@@ -1505,6 +1527,8 @@ ssh_access_change_user_password() {
         *)
             echo
             echo "Operation cancelled."
+            unset PASSWORD
+            unset CONFIRM_PASSWORD
             read -rp "Press Enter to return..."
             return 0
             ;;
