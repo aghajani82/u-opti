@@ -1069,6 +1069,179 @@ ssh_access_remove_public_key() {
 
 
 
+
+ssh_access_restore() {
+    ssh_access_require_root || return 1
+
+    local target_user
+    local user_home
+    local ssh_dir
+    local authorized_keys
+    local backups=()
+    local backup
+    local selected
+    local backup_path
+    local current_backup
+    local confirm
+
+    target_user="$(ssh_access_get_target_user)"
+    user_home="$(ssh_access_get_user_home "$target_user")"
+
+    if [[ -z "$user_home" || ! -d "$user_home" ]]; then
+        echo "✗ Could not determine home directory for user: $target_user"
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    ssh_dir="$user_home/.ssh"
+    authorized_keys="$ssh_dir/authorized_keys"
+
+    if [[ ! -d "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" ]]; then
+        echo
+        echo "No SSH access backups were found."
+        read -rp "Press Enter to return..."
+        return 0
+    fi
+
+    while IFS= read -r backup; do
+        [[ -n "$backup" ]] && backups+=("$backup")
+    done < <(find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r)
+
+    if [[ ${#backups[@]} -eq 0 ]]; then
+        echo
+        echo "No SSH access backups were found."
+        read -rp "Press Enter to return..."
+        return 0
+    fi
+
+    echo
+    echo "======================================"
+    echo "          SSH Access Restore"
+    echo "======================================"
+    echo
+    echo "Available Backups"
+    echo "--------------------------------------"
+
+    local i=1
+    for backup in "${backups[@]}"; do
+        echo "$i) $(basename "$backup")"
+        ((i++))
+    done
+
+    echo
+    read -rp "Select backup [1-${#backups[@]}]: " selected
+
+    if ! [[ "$selected" =~ ^[0-9]+$ ]] || (( selected < 1 || selected > ${#backups[@]} )); then
+        echo "✗ Invalid selection."
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    backup_path="${backups[$((selected - 1))]}"
+
+    echo
+    echo "Selected Backup"
+    echo "--------------------------------------"
+    echo "Path        : $backup_path"
+
+    [[ -f "$backup_path/authorized_keys" ]] \
+        && echo "✓ authorized_keys found" \
+        || echo "- authorized_keys not found"
+
+    [[ -f "$backup_path/sshd_config" ]] \
+        && echo "✓ sshd_config found" \
+        || echo "- sshd_config not found"
+
+    [[ -d "$backup_path/sshd_config.d" ]] \
+        && echo "✓ sshd_config.d found" \
+        || echo "- sshd_config.d not found"
+
+    echo
+    echo "WARNING"
+    echo "This will restore SSH access files from the selected backup."
+    echo "Your current SSH access configuration may be replaced."
+    echo
+    read -rp "Continue with restore? [y/N]: " confirm
+
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo
+        echo "Restore cancelled."
+        read -rp "Press Enter to return..."
+        return 0
+    }
+
+    current_backup="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/pre-restore-$(date '+%Y%m%d-%H%M%S')"
+    mkdir -p "$current_backup"
+    chmod 700 "$current_backup"
+
+    if [[ -f "$authorized_keys" ]]; then
+        cp -a "$authorized_keys" "$current_backup/authorized_keys"
+    fi
+
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        cp -a /etc/ssh/sshd_config "$current_backup/sshd_config"
+    fi
+
+    if [[ -d /etc/ssh/sshd_config.d ]]; then
+        cp -a /etc/ssh/sshd_config.d "$current_backup/sshd_config.d"
+    fi
+
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+    chown "$target_user":"$(id -gn "$target_user")" "$ssh_dir"
+
+    if [[ -f "$backup_path/authorized_keys" ]]; then
+        cp -a "$backup_path/authorized_keys" "$authorized_keys"
+        chmod 600 "$authorized_keys"
+        chown "$target_user":"$(id -gn "$target_user")" "$authorized_keys"
+    fi
+
+    if [[ -f "$backup_path/sshd_config" ]]; then
+        cp -a "$backup_path/sshd_config" /etc/ssh/sshd_config
+    fi
+
+    if [[ -d "$backup_path/sshd_config.d" ]]; then
+        rm -rf /etc/ssh/sshd_config.d
+        cp -a "$backup_path/sshd_config.d" /etc/ssh/sshd_config.d
+    fi
+
+    if [[ -x /usr/sbin/sshd ]]; then
+        if ! /usr/sbin/sshd -t >/dev/null 2>&1; then
+            echo
+            echo "✗ Restored SSH configuration is invalid."
+            echo "Current state has NOT been safely validated."
+            echo
+            echo "Pre-restore backup:"
+            echo "$current_backup"
+            read -rp "Press Enter to return..."
+            return 1
+        fi
+    fi
+
+    echo
+    echo "======================================"
+    echo "       SSH Access Restored"
+    echo "======================================"
+    echo
+    echo "Restored From : $backup_path"
+    echo "Safety Backup : $current_backup"
+    echo
+    echo "✓ SSH access files restored."
+    echo "✓ SSH configuration validation passed."
+    echo
+    echo "No SSH service restart was performed."
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
+
+
+
+
+
+
+
 ssh_access_backup_restore() {
     ssh_access_require_root || return 1
 
@@ -1194,8 +1367,28 @@ show_ssh_access_menu() {
                 ssh_access_remove_public_key
                 ;;
             6)
-                ssh_access_backup_restore
+         echo
+         echo "1) Create Backup"
+         echo "2) Restore Backup"
+         echo "0) Back"
+         echo
+         read -rp "Please enter your selection [0-2]: " backup_choice
+
+         case "$backup_choice" in
+             1)
+            ssh_access_backup_restore
+            ;;
+             2)
+            ssh_access_restore
+            ;;
+             0)
+            ;;
+             *)
+                echo "Invalid selection."
+                read -rp "Press Enter to return..."
                 ;;
+         esac
+         ;;
             7)
                 echo
                 echo "Change User Password is not implemented yet."
