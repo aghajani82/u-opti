@@ -1108,15 +1108,15 @@ ssh_access_restore() {
     fi
 
     while IFS= read -r backup; do
-        [[ -n "$backup" ]] && backups+=("$backup")
-    done < <(
-        find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d \
-            \( -name 'backup-*' -o -regex '.*/[0-9]{8}-[0-9]{6}' \)
-            | sort -r
-    )
+    [[ -n "$backup" ]] && backups+=("$backup")
+done < <(
+    find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" \
+        -mindepth 1 \
+        -maxdepth 1 \
+        -type d \
+        \( -name 'backup-*' -o -regex '.*/[0-9]\{8\}-[0-9]\{6\}' \) \
+        | sort -r
+)
 
     if [[ ${#backups[@]} -eq 0 ]]; then
         echo
