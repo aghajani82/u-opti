@@ -1082,7 +1082,10 @@ ssh_access_restore() {
     local selected
     local backup_path
     local current_backup
+    local timestamp
     local confirm
+    local group_name
+    local restore_failed=0
 
     target_user="$(ssh_access_get_target_user)"
     user_home="$(ssh_access_get_user_home "$target_user")"
@@ -1095,6 +1098,7 @@ ssh_access_restore() {
 
     ssh_dir="$user_home/.ssh"
     authorized_keys="$ssh_dir/authorized_keys"
+    group_name="$(id -gn "$target_user")"
 
     if [[ ! -d "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" ]]; then
         echo
@@ -1105,7 +1109,14 @@ ssh_access_restore() {
 
     while IFS= read -r backup; do
         [[ -n "$backup" ]] && backups+=("$backup")
-    done < <(find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r)
+    done < <(
+        find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -type d \
+            -name 'backup-*' \
+            | sort -r
+    )
 
     if [[ ${#backups[@]} -eq 0 ]]; then
         echo
@@ -1123,6 +1134,7 @@ ssh_access_restore() {
     echo "--------------------------------------"
 
     local i=1
+
     for backup in "${backups[@]}"; do
         echo "$i) $(basename "$backup")"
         ((i++))
@@ -1131,7 +1143,8 @@ ssh_access_restore() {
     echo
     read -rp "Select backup [1-${#backups[@]}]: " selected
 
-    if ! [[ "$selected" =~ ^[0-9]+$ ]] || (( selected < 1 || selected > ${#backups[@]} )); then
+    if ! [[ "$selected" =~ ^[0-9]+$ ]] || \
+       (( selected < 1 || selected > ${#backups[@]} )); then
         echo "✗ Invalid selection."
         read -rp "Press Enter to return..."
         return 1
@@ -1159,7 +1172,7 @@ ssh_access_restore() {
     echo
     echo "WARNING"
     echo "This will restore SSH access files from the selected backup."
-    echo "Your current SSH access configuration may be replaced."
+    echo "Your current SSH access configuration will be replaced."
     echo
     read -rp "Continue with restore? [y/N]: " confirm
 
@@ -1170,49 +1183,126 @@ ssh_access_restore() {
         return 0
     }
 
-    current_backup="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/pre-restore-$(date '+%Y%m%d-%H%M%S')"
-    mkdir -p "$current_backup"
+    timestamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+    current_backup="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/pre-restore-$timestamp"
+
+    mkdir -p "$current_backup" || {
+        echo "✗ Failed to create pre-restore backup."
+        read -rp "Press Enter to return..."
+        return 1
+    }
+
     chmod 700 "$current_backup"
 
+    echo
+    echo "Creating safety backup of current SSH configuration..."
+
     if [[ -f "$authorized_keys" ]]; then
-        cp -a "$authorized_keys" "$current_backup/authorized_keys"
+        cp -a "$authorized_keys" "$current_backup/authorized_keys" || restore_failed=1
     fi
 
     if [[ -f /etc/ssh/sshd_config ]]; then
-        cp -a /etc/ssh/sshd_config "$current_backup/sshd_config"
+        cp -a /etc/ssh/sshd_config "$current_backup/sshd_config" || restore_failed=1
     fi
 
     if [[ -d /etc/ssh/sshd_config.d ]]; then
-        cp -a /etc/ssh/sshd_config.d "$current_backup/sshd_config.d"
+        cp -a /etc/ssh/sshd_config.d "$current_backup/sshd_config.d" || restore_failed=1
     fi
 
-    mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
-    chown "$target_user":"$(id -gn "$target_user")" "$ssh_dir"
+    if (( restore_failed != 0 )); then
+        echo "✗ Failed to create safety backup."
+        echo "Restore aborted."
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    echo "✓ Safety backup created:"
+    echo "  $current_backup"
+
+    echo
+    echo "Restoring SSH access files..."
 
     if [[ -f "$backup_path/authorized_keys" ]]; then
-        cp -a "$backup_path/authorized_keys" "$authorized_keys"
-        chmod 600 "$authorized_keys"
-        chown "$target_user":"$(id -gn "$target_user")" "$authorized_keys"
+        mkdir -p "$ssh_dir"
+        chmod 700 "$ssh_dir"
+        chown "$target_user:$group_name" "$ssh_dir"
+
+        if ! cp -a "$backup_path/authorized_keys" "$authorized_keys"; then
+            restore_failed=1
+        else
+            chmod 600 "$authorized_keys"
+            chown "$target_user:$group_name" "$authorized_keys"
+        fi
     fi
 
     if [[ -f "$backup_path/sshd_config" ]]; then
-        cp -a "$backup_path/sshd_config" /etc/ssh/sshd_config
+        if ! cp -a "$backup_path/sshd_config" /etc/ssh/sshd_config; then
+            restore_failed=1
+        fi
     fi
 
     if [[ -d "$backup_path/sshd_config.d" ]]; then
         rm -rf /etc/ssh/sshd_config.d
-        cp -a "$backup_path/sshd_config.d" /etc/ssh/sshd_config.d
+
+        if ! cp -a "$backup_path/sshd_config.d" /etc/ssh/sshd_config.d; then
+            restore_failed=1
+        fi
     fi
+
+    if (( restore_failed != 0 )); then
+        echo
+        echo "✗ Restore failed."
+        echo "Attempting automatic rollback..."
+
+        [[ -f "$current_backup/authorized_keys" ]] && {
+            cp -a "$current_backup/authorized_keys" "$authorized_keys"
+            chmod 600 "$authorized_keys"
+            chown "$target_user:$group_name" "$authorized_keys"
+        }
+
+        [[ -f "$current_backup/sshd_config" ]] && \
+            cp -a "$current_backup/sshd_config" /etc/ssh/sshd_config
+
+        [[ -d "$current_backup/sshd_config.d" ]] && {
+            rm -rf /etc/ssh/sshd_config.d
+            cp -a "$current_backup/sshd_config.d" /etc/ssh/sshd_config.d
+        }
+
+        echo "✓ Rollback completed."
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    echo
+    echo "Validating restored SSH configuration..."
 
     if [[ -x /usr/sbin/sshd ]]; then
         if ! /usr/sbin/sshd -t >/dev/null 2>&1; then
             echo
             echo "✗ Restored SSH configuration is invalid."
-            echo "Current state has NOT been safely validated."
+            echo "Attempting automatic rollback..."
+
+            [[ -f "$current_backup/authorized_keys" ]] && {
+                cp -a "$current_backup/authorized_keys" "$authorized_keys"
+                chmod 600 "$authorized_keys"
+                chown "$target_user:$group_name" "$authorized_keys"
+            }
+
+            [[ -f "$current_backup/sshd_config" ]] && \
+                cp -a "$current_backup/sshd_config" /etc/ssh/sshd_config
+
+            [[ -d "$current_backup/sshd_config.d" ]] && {
+                rm -rf /etc/ssh/sshd_config.d
+                cp -a "$current_backup/sshd_config.d" /etc/ssh/sshd_config.d
+            }
+
+            echo "✓ Rollback completed."
             echo
-            echo "Pre-restore backup:"
+            echo "Your previous SSH configuration has been restored."
+            echo
+            echo "Safety Backup:"
             echo "$current_backup"
+
             read -rp "Press Enter to return..."
             return 1
         fi
@@ -1223,8 +1313,8 @@ ssh_access_restore() {
     echo "       SSH Access Restored"
     echo "======================================"
     echo
-    echo "Restored From : $backup_path"
-    echo "Safety Backup : $current_backup"
+    echo "Restored From : $(basename "$backup_path")"
+    echo "Safety Backup : $(basename "$current_backup")"
     echo
     echo "✓ SSH access files restored."
     echo "✓ SSH configuration validation passed."
@@ -1265,8 +1355,8 @@ ssh_access_backup_restore() {
     ssh_dir="$user_home/.ssh"
     authorized_keys="$ssh_dir/authorized_keys"
 
-    timestamp="$(date '+%Y%m%d-%H%M%S')"
-    backup_path="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/$timestamp"
+    timestamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+    backup_path="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/backup-$timestamp"
 
     mkdir -p "$backup_path" || {
         echo "✗ Failed to create backup directory."
