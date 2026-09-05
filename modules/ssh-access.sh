@@ -1069,7 +1069,6 @@ ssh_access_remove_public_key() {
 
 
 
-
 ssh_access_restore() {
     ssh_access_require_root || return 1
 
@@ -1108,15 +1107,13 @@ ssh_access_restore() {
     fi
 
     while IFS= read -r backup; do
-    [[ -n "$backup" ]] && backups+=("$backup")
-done < <(
-    find "$SSH_AUTHORIZED_KEYS_BACKUP_DIR" \
-        -mindepth 1 \
-        -maxdepth 1 \
-        -type d \
-        \( -name 'backup-*' -o -regex '.*/[0-9]\{8\}-[0-9]\{6\}' \) \
-        | sort -r
-)
+        [[ -n "$backup" ]] && backups+=("$backup")
+    done < <(
+        ls -dt \
+            "$SSH_AUTHORIZED_KEYS_BACKUP_DIR"/backup-* \
+            "$SSH_AUTHORIZED_KEYS_BACKUP_DIR"/????????-?????? \
+            2>/dev/null
+    )
 
     if [[ ${#backups[@]} -eq 0 ]]; then
         echo
@@ -1143,7 +1140,7 @@ done < <(
     echo
     read -rp "Select backup [1-${#backups[@]}]: " selected
 
-    if ! [[ "$selected" =~ ^[0-9]+$ ]] || \
+    if ! [[ "$selected" =~ ^[0-9]+$ ]] ||
        (( selected < 1 || selected > ${#backups[@]} )); then
         echo "✗ Invalid selection."
         read -rp "Press Enter to return..."
@@ -1224,14 +1221,22 @@ done < <(
 
     if [[ -f "$backup_path/authorized_keys" ]]; then
         mkdir -p "$ssh_dir"
-        chmod 700 "$ssh_dir"
-        chown "$target_user:$group_name" "$ssh_dir"
 
-        if ! cp -a "$backup_path/authorized_keys" "$authorized_keys"; then
+        if ! chmod 700 "$ssh_dir"; then
             restore_failed=1
-        else
-            chmod 600 "$authorized_keys"
-            chown "$target_user:$group_name" "$authorized_keys"
+        fi
+
+        if ! chown "$target_user:$group_name" "$ssh_dir"; then
+            restore_failed=1
+        fi
+
+        if (( restore_failed == 0 )); then
+            if ! cp -a "$backup_path/authorized_keys" "$authorized_keys"; then
+                restore_failed=1
+            else
+                chmod 600 "$authorized_keys"
+                chown "$target_user:$group_name" "$authorized_keys"
+            fi
         fi
     fi
 
@@ -1242,9 +1247,9 @@ done < <(
     fi
 
     if [[ -d "$backup_path/sshd_config.d" ]]; then
-        rm -rf /etc/ssh/sshd_config.d
-
-        if ! cp -a "$backup_path/sshd_config.d" /etc/ssh/sshd_config.d; then
+        if ! rm -rf /etc/ssh/sshd_config.d; then
+            restore_failed=1
+        elif ! cp -a "$backup_path/sshd_config.d" /etc/ssh/sshd_config.d; then
             restore_failed=1
         fi
     fi
@@ -1254,19 +1259,20 @@ done < <(
         echo "✗ Restore failed."
         echo "Attempting automatic rollback..."
 
-        [[ -f "$current_backup/authorized_keys" ]] && {
+        if [[ -f "$current_backup/authorized_keys" ]]; then
             cp -a "$current_backup/authorized_keys" "$authorized_keys"
             chmod 600 "$authorized_keys"
             chown "$target_user:$group_name" "$authorized_keys"
-        }
+        fi
 
-        [[ -f "$current_backup/sshd_config" ]] && \
+        if [[ -f "$current_backup/sshd_config" ]]; then
             cp -a "$current_backup/sshd_config" /etc/ssh/sshd_config
+        fi
 
-        [[ -d "$current_backup/sshd_config.d" ]] && {
+        if [[ -d "$current_backup/sshd_config.d" ]]; then
             rm -rf /etc/ssh/sshd_config.d
             cp -a "$current_backup/sshd_config.d" /etc/ssh/sshd_config.d
-        }
+        fi
 
         echo "✓ Rollback completed."
         read -rp "Press Enter to return..."
@@ -1282,19 +1288,20 @@ done < <(
             echo "✗ Restored SSH configuration is invalid."
             echo "Attempting automatic rollback..."
 
-            [[ -f "$current_backup/authorized_keys" ]] && {
+            if [[ -f "$current_backup/authorized_keys" ]]; then
                 cp -a "$current_backup/authorized_keys" "$authorized_keys"
                 chmod 600 "$authorized_keys"
                 chown "$target_user:$group_name" "$authorized_keys"
-            }
+            fi
 
-            [[ -f "$current_backup/sshd_config" ]] && \
+            if [[ -f "$current_backup/sshd_config" ]]; then
                 cp -a "$current_backup/sshd_config" /etc/ssh/sshd_config
+            fi
 
-            [[ -d "$current_backup/sshd_config.d" ]] && {
+            if [[ -d "$current_backup/sshd_config.d" ]]; then
                 rm -rf /etc/ssh/sshd_config.d
                 cp -a "$current_backup/sshd_config.d" /etc/ssh/sshd_config.d
-            }
+            fi
 
             echo "✓ Rollback completed."
             echo
@@ -1324,7 +1331,6 @@ done < <(
 
     read -rp "Press Enter to return..."
 }
-
 
 
 
