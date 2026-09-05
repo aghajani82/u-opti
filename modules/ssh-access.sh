@@ -118,13 +118,13 @@ ssh_access_show_check() {
     fi
 
     if [ -n "$SSHD_PATH" ]; then
-        if sshd -t >/dev/null 2>&1; then
-            SSH_CONFIG_STATUS="valid"
-            echo "✓ SSH Configuration          : valid"
-        else
-            SSH_CONFIG_STATUS="invalid"
-            echo "✗ SSH Configuration          : INVALID"
-        fi
+    if "$SSHD_PATH" -t >/dev/null 2>&1; then
+        SSH_CONFIG_STATUS="valid"
+        echo "✓ SSH Configuration          : valid"
+    else
+        SSH_CONFIG_STATUS="invalid"
+        echo "✗ SSH Configuration          : INVALID"
+    fi
 
         EFFECTIVE_PORT=$(ssh_get_sshd_effective_port 2>/dev/null || true)
         PASSWORD_AUTH=$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)
