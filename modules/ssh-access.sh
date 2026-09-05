@@ -670,6 +670,111 @@ ssh_access_add_public_key() {
 
 
 
+ssh_access_list_public_keys() {
+    clear
+
+    echo "======================================"
+    echo "            Installed SSH Keys"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+    local KEY_COUNT=0
+    local LINE
+    local KEY_TYPE
+    local KEY_DATA
+    local KEY_COMMENT
+    local FINGERPRINT
+    local NUMBER=0
+
+    TARGET_USER=$(ssh_access_get_target_user)
+    HOME_DIR=$(ssh_access_get_user_home "$TARGET_USER")
+
+    if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+        echo "Error: Unable to determine the user's home directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+
+    echo "User        : $TARGET_USER"
+    echo "Key File    : $AUTHORIZED_KEYS_FILE"
+    echo
+
+    if [ ! -f "$AUTHORIZED_KEYS_FILE" ]; then
+        echo "No authorized_keys file was found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Installed Public Keys"
+    echo "--------------------------------------"
+
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+        [[ "$LINE" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
+
+        KEY_TYPE=$(printf '%s\n' "$LINE" | awk '{print $1}')
+        KEY_DATA=$(printf '%s\n' "$LINE" | awk '{print $2}')
+
+        if [ -z "$KEY_TYPE" ] || [ -z "$KEY_DATA" ]; then
+            continue
+        fi
+
+        if ! printf '%s\n' "$KEY_DATA" | base64 -d >/dev/null 2>&1; then
+            continue
+        fi
+
+        NUMBER=$((NUMBER + 1))
+        KEY_COMMENT=$(printf '%s\n' "$LINE" | cut -d' ' -f3-)
+
+        FINGERPRINT=$(
+            printf '%s\n' "$LINE" |
+                ssh-keygen -lf - 2>/dev/null ||
+                true
+        )
+
+        echo
+        echo "Key #$NUMBER"
+        echo "Type        : $KEY_TYPE"
+
+        if [ -n "$KEY_COMMENT" ] && [ "$KEY_COMMENT" != "$LINE" ]; then
+            echo "Comment     : $KEY_COMMENT"
+        fi
+
+        if [ -n "$FINGERPRINT" ]; then
+            echo "Fingerprint : $FINGERPRINT"
+        else
+            echo "Fingerprint : unavailable"
+        fi
+
+        KEY_COUNT=$NUMBER
+    done < "$AUTHORIZED_KEYS_FILE"
+
+    echo
+    echo "--------------------------------------"
+
+    if [ "$KEY_COUNT" -eq 0 ]; then
+        echo "No valid public keys were detected."
+    else
+        echo "Total installed keys: $KEY_COUNT"
+    fi
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
+
 
 
 
@@ -708,9 +813,7 @@ show_ssh_access_menu() {
                 ssh_access_add_public_key
                 ;;
             4)
-                echo
-                echo "List Public Keys is not implemented yet."
-                read -rp "Press Enter to return..."
+                ssh_access_list_public_keys
                 ;;
             5)
                 echo
