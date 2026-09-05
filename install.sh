@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="main"
+BRANCH="refactor/v0.11.0-ssh-access"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -24,6 +24,7 @@ MODULES=(
     "bbr.sh"
     "storage.sh"
     "ssh.sh"
+    "ssh-access.sh"
     "firewall.sh"
     "xui-pro.sh"
     "certificate.sh"
@@ -65,6 +66,7 @@ for MODULE in "${MODULES[@]}"; do
         bbr.sh) LABEL="BBR Management" ;;
         storage.sh) LABEL="Storage Management" ;;
         ssh.sh) LABEL="SSH Management" ;;
+		ssh-access.sh) LABEL="SSH Access Management" ;;
         firewall.sh) LABEL="Firewall Management" ;;
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
