@@ -1138,14 +1138,29 @@ ssh_access_restore() {
     done
 
     echo
-    read -rp "Select backup [1-${#backups[@]}]: " selected
+	
+	
+	
+	
+    echo
+    echo "0) Back"
+    echo
+    read -rp "Select backup [0-${#backups[@]}]: " selected
 
     if ! [[ "$selected" =~ ^[0-9]+$ ]] ||
-       (( selected < 1 || selected > ${#backups[@]} )); then
-        echo "✗ Invalid selection."
-        read -rp "Press Enter to return..."
-        return 1
+   (( selected < 0 || selected > ${#backups[@]} )); then
+    echo "✗ Invalid selection."
+    read -rp "Press Enter to return..."
+    return 1
     fi
+
+    if (( selected == 0 )); then
+    return 0
+    fi
+	
+	
+	
+	
 
     backup_path="${backups[$((selected - 1))]}"
 
