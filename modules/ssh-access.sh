@@ -281,6 +281,216 @@ ssh_access_show_check() {
     read -rp "Press Enter to return..."
 }
 
+
+
+
+
+
+
+
+ssh_access_generate_key_pair() {
+    clear
+
+    echo "======================================"
+    echo "        Generate SSH Key Pair"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v ssh-keygen >/dev/null 2>&1; then
+        echo "Error: ssh-keygen was not found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local KEY_NAME
+    local KEY_DIR
+    local KEY_PATH
+    local PUBLIC_KEY_PATH
+    local PASSPHRASE
+    local CONFIRM_PASSPHRASE
+    local FINGERPRINT
+
+    KEY_DIR=$(mktemp -d /tmp/u-opti-ssh-key.XXXXXX)
+
+    if [ ! -d "$KEY_DIR" ]; then
+        echo "Error: Failed to create temporary key directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    chmod 700 "$KEY_DIR"
+
+    echo "Enter a name for the key."
+    echo "Example: my-server"
+    echo
+
+    while true; do
+        read -rp "Key name: " KEY_NAME
+
+        if [ -z "$KEY_NAME" ]; then
+            echo
+            echo "Error: Key name cannot be empty."
+            echo
+            continue
+        fi
+
+        if [[ ! "$KEY_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo
+            echo "Error: Use only letters, numbers, dot, dash or underscore."
+            echo
+            continue
+        fi
+
+        break
+    done
+
+    KEY_PATH="$KEY_DIR/$KEY_NAME"
+    PUBLIC_KEY_PATH="$KEY_PATH.pub"
+
+    echo
+    echo "Choose a passphrase for the private key."
+    echo "Leave it empty only if you intentionally want no passphrase."
+    echo
+
+    while true; do
+        read -rsp "Passphrase: " PASSPHRASE
+        echo
+        read -rsp "Confirm passphrase: " CONFIRM_PASSPHRASE
+        echo
+
+        if [ "$PASSPHRASE" != "$CONFIRM_PASSPHRASE" ]; then
+            echo
+            echo "Error: Passphrases do not match."
+            echo
+            continue
+        fi
+
+        break
+    done
+
+    echo
+    echo "Generating Ed25519 SSH key pair..."
+    echo
+
+    if ! ssh-keygen \
+        -t ed25519 \
+        -f "$KEY_PATH" \
+        -N "$PASSPHRASE" \
+        -C "$KEY_NAME"; then
+
+        echo
+        echo "Error: SSH key generation failed."
+        rm -rf "$KEY_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    chmod 600 "$KEY_PATH"
+    chmod 644 "$PUBLIC_KEY_PATH"
+
+    FINGERPRINT=$(ssh-keygen -lf "$PUBLIC_KEY_PATH" 2>/dev/null || true)
+
+    echo
+    echo "======================================"
+    echo "      SSH Key Pair Generated"
+    echo "======================================"
+    echo
+
+    echo "Key Type   : Ed25519"
+    echo "Private Key: $KEY_PATH"
+    echo "Public Key : $PUBLIC_KEY_PATH"
+    echo
+
+    if [ -n "$PASSPHRASE" ]; then
+        echo "Passphrase : protected"
+    else
+        echo "Passphrase : none"
+    fi
+
+    echo
+    echo "Fingerprint"
+    echo "--------------------------------------"
+    echo "$FINGERPRINT"
+
+    echo
+    echo "Public Key"
+    echo "--------------------------------------"
+    cat "$PUBLIC_KEY_PATH"
+
+    echo
+    echo "Private Key must be copied to your own computer."
+    echo "Do NOT add it to GitHub or share it with anyone."
+    echo
+    echo "Example SCP command from your computer:"
+    echo
+    echo "scp root@SERVER_IP:$KEY_PATH ~/.ssh/"
+    echo
+
+    while true; do
+        echo "What would you like to do?"
+        echo
+        echo "1) Keep temporary key files"
+        echo "2) Delete temporary key files"
+        echo "0) Return"
+        echo
+
+        local ACTION
+        read -rp "Please enter your selection [0-2]: " ACTION
+
+        case "$ACTION" in
+            1)
+                echo
+                echo "Temporary key files are still stored here:"
+                echo "$KEY_DIR"
+                echo
+                echo "Delete them after copying the private key."
+                read -rp "Press Enter to return..."
+                return
+                ;;
+            2)
+                rm -rf "$KEY_DIR"
+
+                if [ ! -e "$KEY_DIR" ]; then
+                    echo
+                    echo "Temporary key files deleted."
+                else
+                    echo
+                    echo "WARNING: Failed to completely delete temporary key files."
+                fi
+
+                echo
+                read -rp "Press Enter to return..."
+                return
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
+
+
+
+
+
+
+
+
+
 show_ssh_access_menu() {
     while true; do
         clear
@@ -307,9 +517,7 @@ show_ssh_access_menu() {
                 ssh_access_show_check
                 ;;
             2)
-                echo
-                echo "SSH Key Generation is not implemented yet."
-                read -rp "Press Enter to return..."
+                ssh_access_generate_key_pair
                 ;;
             3)
                 echo
