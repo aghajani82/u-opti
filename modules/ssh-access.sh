@@ -779,6 +779,297 @@ ssh_access_list_public_keys() {
 
 
 
+ssh_access_remove_public_key() {
+    clear
+
+    echo "======================================"
+    echo "            Remove Public Key"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+    local KEY_NUMBER
+    local KEY_INDEX=0
+    local SELECTED_LINE
+    local LINE
+    local KEY_TYPE
+    local KEY_DATA
+    local TEMP_KEY_FILE
+    local FINGERPRINT
+    local BACKUP_DIR
+    local TEMP_AUTHORIZED_KEYS
+
+    TARGET_USER=$(ssh_access_get_target_user)
+    HOME_DIR=$(ssh_access_get_user_home "$TARGET_USER")
+
+    if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+        echo "Error: Unable to determine the user's home directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+
+    if [ ! -f "$AUTHORIZED_KEYS_FILE" ]; then
+        echo "No authorized_keys file was found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "User     : $TARGET_USER"
+    echo "Key File : $AUTHORIZED_KEYS_FILE"
+    echo
+    echo "Installed Public Keys"
+    echo "--------------------------------------"
+
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+        [[ "$LINE" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
+
+        KEY_TYPE=""
+        KEY_DATA=""
+
+        for TOKEN in $LINE; do
+            case "$TOKEN" in
+                ssh-rsa|ssh-ed25519|ecdsa-*)
+                    KEY_TYPE="$TOKEN"
+                    ;;
+                sk-ssh-ed25519@openssh.com|sk-ecdsa-*)
+                    KEY_TYPE="$TOKEN"
+                    ;;
+            esac
+
+            if [ -n "$KEY_TYPE" ]; then
+                # Next token after key type is the base64 key data.
+                KEY_DATA=$(printf '%s\n' "$LINE" | awk -v type="$KEY_TYPE" '
+                    {
+                        for (i = 1; i < NF; i++) {
+                            if ($i == type) {
+                                print $(i+1)
+                                exit
+                            }
+                        }
+                    }
+                ')
+                break
+            fi
+        done
+
+        if [ -z "$KEY_TYPE" ] || [ -z "$KEY_DATA" ]; then
+            continue
+        fi
+
+        TEMP_KEY_FILE=$(mktemp) || {
+            echo "Error: Failed to create temporary file."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        }
+
+        printf '%s %s\n' "$KEY_TYPE" "$KEY_DATA" > "$TEMP_KEY_FILE"
+
+        FINGERPRINT=$(ssh-keygen -lf "$TEMP_KEY_FILE" 2>/dev/null || true)
+        rm -f "$TEMP_KEY_FILE"
+
+        KEY_INDEX=$((KEY_INDEX + 1))
+
+        echo
+        echo "Key #$KEY_INDEX"
+        echo "Type        : $KEY_TYPE"
+        echo "Fingerprint : ${FINGERPRINT:-unavailable}"
+    done < "$AUTHORIZED_KEYS_FILE"
+
+    echo
+    echo "--------------------------------------"
+
+    if [ "$KEY_INDEX" -eq 0 ]; then
+        echo "No valid public keys were detected."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Enter the number of the key you want to remove."
+    echo "Enter 0 to cancel."
+    echo
+
+    while true; do
+        read -rp "Key number [0-$KEY_INDEX]: " KEY_NUMBER
+
+        if ! [[ "$KEY_NUMBER" =~ ^[0-9]+$ ]] ||
+           [ "$KEY_NUMBER" -gt "$KEY_INDEX" ]; then
+            echo
+            echo "Invalid selection."
+            echo
+            continue
+        fi
+
+        if [ "$KEY_NUMBER" -eq 0 ]; then
+            return
+        fi
+
+        break
+    done
+
+    KEY_INDEX=0
+
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+        [[ "$LINE" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
+
+        KEY_TYPE=""
+        KEY_DATA=""
+
+        for TOKEN in $LINE; do
+            case "$TOKEN" in
+                ssh-rsa|ssh-ed25519|ecdsa-*)
+                    KEY_TYPE="$TOKEN"
+                    ;;
+                sk-ssh-ed25519@openssh.com|sk-ecdsa-*)
+                    KEY_TYPE="$TOKEN"
+                    ;;
+            esac
+
+            if [ -n "$KEY_TYPE" ]; then
+                KEY_DATA=$(printf '%s\n' "$LINE" | awk -v type="$KEY_TYPE" '
+                    {
+                        for (i = 1; i < NF; i++) {
+                            if ($i == type) {
+                                print $(i+1)
+                                exit
+                            }
+                        }
+                    }
+                ')
+                break
+            fi
+        done
+
+        if [ -z "$KEY_TYPE" ] || [ -z "$KEY_DATA" ]; then
+            continue
+        fi
+
+        KEY_INDEX=$((KEY_INDEX + 1))
+
+        if [ "$KEY_INDEX" -eq "$KEY_NUMBER" ]; then
+            SELECTED_LINE="$LINE"
+            break
+        fi
+    done < "$AUTHORIZED_KEYS_FILE"
+
+    if [ -z "$SELECTED_LINE" ]; then
+        echo
+        echo "Error: Selected key could not be found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Selected Key"
+    echo "--------------------------------------"
+    echo "$SELECTED_LINE"
+    echo
+
+    read -rp "Remove this public key? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Operation cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+            ;;
+    esac
+
+    BACKUP_DIR=$(ssh_access_backup_authorized_keys "$AUTHORIZED_KEYS_FILE")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        echo
+        echo "Error: Failed to create SSH key backup."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    TEMP_AUTHORIZED_KEYS=$(mktemp) || {
+        echo
+        echo "Error: Failed to create temporary file."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    local REMOVED=0
+
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+        if [ "$REMOVED" -eq 0 ] && [ "$LINE" = "$SELECTED_LINE" ]; then
+            REMOVED=1
+            continue
+        fi
+
+        printf '%s\n' "$LINE" >> "$TEMP_AUTHORIZED_KEYS"
+    done < "$AUTHORIZED_KEYS_FILE"
+
+    if [ "$REMOVED" -ne 1 ]; then
+        rm -f "$TEMP_AUTHORIZED_KEYS"
+        echo
+        echo "Error: Selected key could not be removed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! chown --reference="$AUTHORIZED_KEYS_FILE" "$TEMP_AUTHORIZED_KEYS" ||
+       ! chmod --reference="$AUTHORIZED_KEYS_FILE" "$TEMP_AUTHORIZED_KEYS"; then
+        rm -f "$TEMP_AUTHORIZED_KEYS"
+        echo
+        echo "Error: Failed to preserve authorized_keys permissions."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! mv -f "$TEMP_AUTHORIZED_KEYS" "$AUTHORIZED_KEYS_FILE"; then
+        rm -f "$TEMP_AUTHORIZED_KEYS"
+        echo
+        echo "Error: Failed to update authorized_keys."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "     Public Key Removed Successfully"
+    echo "======================================"
+    echo
+    echo "User   : $TARGET_USER"
+    echo "Backup : $BACKUP_DIR"
+    echo
+    read -rp "Press Enter to return..."
+}
+
+
+
+
+
+
 
 
 show_ssh_access_menu() {
@@ -816,9 +1107,7 @@ show_ssh_access_menu() {
                 ssh_access_list_public_keys
                 ;;
             5)
-                echo
-                echo "Remove Public Key is not implemented yet."
-                read -rp "Press Enter to return..."
+                ssh_access_remove_public_key
                 ;;
             6)
                 echo
