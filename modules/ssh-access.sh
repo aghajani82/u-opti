@@ -1565,6 +1565,113 @@ ssh_access_change_user_password() {
 
 
 
+ssh_access_authentication_settings() {
+    clear
+
+    echo "======================================"
+    echo "     SSH Authentication Settings"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    local PASSWORD_AUTH
+    local PUBKEY_AUTH
+    local ROOT_LOGIN
+    local TARGET_USER
+    local KEY_COUNT
+    local AUTH_MODE
+
+    TARGET_USER="$(ssh_access_get_target_user)"
+
+    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
+    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
+    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
+
+    KEY_COUNT=0
+
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+
+    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+
+    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+        KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
+    fi
+
+    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Password + Public Key"
+    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Public Key Only"
+    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
+        AUTH_MODE="Password Only"
+    else
+        AUTH_MODE="Custom / Restricted"
+    fi
+
+    echo "Current Status"
+    echo "--------------------------------------"
+    echo "User                      : $TARGET_USER"
+    echo "Root SSH Login            : $ROOT_LOGIN"
+    echo "Public Key Authentication : $PUBKEY_AUTH"
+    echo "Password Authentication   : $PASSWORD_AUTH"
+    echo "Installed Public Keys     : $KEY_COUNT"
+    echo
+    echo "SSH Access Mode           : $AUTH_MODE"
+
+    echo
+    echo "--------------------------------------"
+    echo
+    echo "1) Enable Key-Only Login"
+    echo "2) Enable Password Login"
+    echo "0) Back"
+    echo
+
+    local CHOICE
+
+    read -rp "Please enter your selection [0-2]: " CHOICE
+
+    case "$CHOICE" in
+        1)
+            echo
+            echo "Key-Only Login is not enabled yet."
+            echo
+            echo "The next step will add:"
+            echo "  - Safety checks"
+            echo "  - Automatic SSH backup"
+            echo "  - Public key verification"
+            echo "  - Configuration validation"
+            echo "  - Automatic rollback on failure"
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+        2)
+            echo
+            echo "Password Login is already available through the current SSH configuration."
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            echo
+            echo "Invalid selection."
+            read -rp "Press Enter to return..."
+            ;;
+    esac
+}
+
+
+
+
+
+
+
 
 
 show_ssh_access_menu() {
@@ -1582,11 +1689,12 @@ show_ssh_access_menu() {
         echo "5) Remove Public Key"
         echo "6) Backup & Restore SSH Access"
         echo "7) Change User Password"
+        echo "8) SSH Authentication Settings"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-7]: " SSH_ACCESS_CHOICE
+        read -rp "Please enter your selection [0-8]: " SSH_ACCESS_CHOICE
 
         case "$SSH_ACCESS_CHOICE" in
             1)
@@ -1605,32 +1713,35 @@ show_ssh_access_menu() {
                 ssh_access_remove_public_key
                 ;;
             6)
-         echo
-         echo "1) Create Backup"
-         echo "2) Restore Backup"
-         echo "0) Back"
-         echo
-         read -rp "Please enter your selection [0-2]: " backup_choice
+                echo
+                echo "1) Create Backup"
+                echo "2) Restore Backup"
+                echo "0) Back"
+                echo
+                read -rp "Please enter your selection [0-2]: " backup_choice
 
-         case "$backup_choice" in
-             1)
-            ssh_access_backup_restore
-            ;;
-             2)
-            ssh_access_restore
-            ;;
-             0)
-            ;;
-             *)
-                echo "Invalid selection."
-                read -rp "Press Enter to return..."
+                case "$backup_choice" in
+                    1)
+                        ssh_access_backup_restore
+                        ;;
+                    2)
+                        ssh_access_restore
+                        ;;
+                    0)
+                        ;;
+                    *)
+                        echo "Invalid selection."
+                        read -rp "Press Enter to return..."
+                        ;;
+                esac
                 ;;
-         esac
-         ;;
-             7)
-            ssh_access_change_user_password
-            ;;
-             0)
+            7)
+                ssh_access_change_user_password
+                ;;
+            8)
+                ssh_access_authentication_settings
+                ;;
+            0)
                 return
                 ;;
             *)
