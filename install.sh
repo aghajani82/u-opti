@@ -26,6 +26,7 @@ MODULES=(
     "ssh.sh"
     "ssh-access.sh"
     "firewall.sh"
+    "fail2ban.sh"
     "xui-pro.sh"
     "certificate.sh"
 )
@@ -66,8 +67,9 @@ for MODULE in "${MODULES[@]}"; do
         bbr.sh) LABEL="BBR Management" ;;
         storage.sh) LABEL="Storage Management" ;;
         ssh.sh) LABEL="SSH Management" ;;
-		ssh-access.sh) LABEL="SSH Access Management" ;;
+        ssh-access.sh) LABEL="SSH Access Management" ;;
         firewall.sh) LABEL="Firewall Management" ;;
+        fail2ban.sh) LABEL="Fail2Ban Management" ;;
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
         *) LABEL="$MODULE" ;;
@@ -79,9 +81,16 @@ done
 echo
 echo "Checking downloaded files..."
 REQUIRED_FILES=("$TEMP_DIR/VERSION" "$TEMP_DIR/u-opti" "$TEMP_DIR/common.sh")
-for MODULE in "${MODULES[@]}"; do REQUIRED_FILES+=("$TEMP_DIR/$MODULE"); done
+for MODULE in "${MODULES[@]}"; do
+    REQUIRED_FILES+=("$TEMP_DIR/$MODULE")
+done
+
 for FILE in "${REQUIRED_FILES[@]}"; do
-    if [ ! -s "$FILE" ]; then echo "Error: Required file is missing or empty:"; echo "$FILE"; exit 1; fi
+    if [ ! -s "$FILE" ]; then
+        echo "Error: Required file is missing or empty:"
+        echo "$FILE"
+        exit 1
+    fi
 done
 echo "All required files are present."
 
@@ -89,7 +98,9 @@ echo
 echo "Checking Bash syntax..."
 bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
-for MODULE in "${MODULES[@]}"; do bash -n "$TEMP_DIR/$MODULE"; done
+for MODULE in "${MODULES[@]}"; do
+    bash -n "$TEMP_DIR/$MODULE"
+done
 echo "Bash syntax check passed."
 
 echo
@@ -101,12 +112,16 @@ echo "Installing files..."
 cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
 cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
 cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"; done
+for MODULE in "${MODULES[@]}"; do
+    cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"
+done
 
 echo
 echo "Setting permissions..."
 chmod +x "$INSTALL_PATH" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do chmod +x "$MODULES_PATH/$MODULE"; done
+for MODULE in "${MODULES[@]}"; do
+    chmod +x "$MODULES_PATH/$MODULE"
+done
 
 echo
 echo "======================================"
@@ -115,17 +130,26 @@ echo "======================================"
 echo
 echo "Installed Version: $REMOTE_VERSION"
 echo
-echo "Installation Path:"; echo "$INSTALL_PATH"
+echo "Installation Path:"
+echo "$INSTALL_PATH"
 echo
-echo "Library Path:"; echo "$LIB_PATH"
+echo "Library Path:"
+echo "$LIB_PATH"
 echo
-echo "SSH Module:"; echo "$MODULES_PATH/ssh.sh"
+echo "SSH Module:"
+echo "$MODULES_PATH/ssh.sh"
 echo
-echo "Firewall Module:"; echo "$MODULES_PATH/firewall.sh"
+echo "Firewall Module:"
+echo "$MODULES_PATH/firewall.sh"
 echo
-echo "X-UI PRO Module:"; echo "$MODULES_PATH/xui-pro.sh"
+echo "Fail2Ban Module:"
+echo "$MODULES_PATH/fail2ban.sh"
 echo
-echo "Certificate Module:"; echo "$MODULES_PATH/certificate.sh"
+echo "X-UI PRO Module:"
+echo "$MODULES_PATH/xui-pro.sh"
+echo
+echo "Certificate Module:"
+echo "$MODULES_PATH/certificate.sh"
 echo
 
 "$INSTALL_PATH"
