@@ -134,7 +134,7 @@ fail2ban_install() {
     clear
 
     echo "======================================"
-    echo "       UFW Install / Enable"
+    echo "    Fail2Ban Install / Enable"
     echo "======================================"
     echo
 
