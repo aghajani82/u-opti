@@ -37,6 +37,69 @@ source "$MODULES_PATH/firewall.sh"
 source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 
+show_ssh_security_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "           SSH Security"
+        echo "======================================"
+        echo
+        echo "1) Security Status"
+        echo "2) Authentication Settings"
+        echo "3) Connection Limits"
+        echo "4) Root Login"
+        echo
+        echo "0) Back"
+        echo
+
+        read -rp "Please enter your selection [0-4]: " ssh_security_choice
+
+        case "$ssh_security_choice" in
+
+            1)
+                ssh_access_show_check
+                ;;
+
+            2)
+                ssh_access_authentication_settings
+                ;;
+
+            3)
+                clear
+                echo "======================================"
+                echo "         Connection Limits"
+                echo "======================================"
+                echo
+                echo "Connection Limits Management will be added in a future step."
+                echo
+                read -rp "Press Enter to return..."
+                ;;
+
+            4)
+                clear
+                echo "======================================"
+                echo "             Root Login"
+                echo "======================================"
+                echo
+                echo "Root Login Management will be added in a future step."
+                echo
+                read -rp "Press Enter to return..."
+                ;;
+
+            0)
+                break
+                ;;
+
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
 show_server_security_menu() {
     while true; do
         clear
@@ -57,7 +120,7 @@ show_server_security_menu() {
         case "$security_choice" in
 
             1)
-                show_ssh_menu
+                show_ssh_security_menu
                 ;;
 
             2)
