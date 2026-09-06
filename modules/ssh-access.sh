@@ -95,18 +95,20 @@ ssh_access_show_check() {
     local PASSWORD_AUTH
     local PUBKEY_AUTH
     local ROOT_LOGIN
+    local KBD_INTERACTIVE_AUTH
+    local AUTHORIZED_KEYS_SETTING
     local SERVICE_STATUS
     local SOCKET_STATUS
     local TARGET_USER
     local HOME_DIR
-    local AUTHORIZED_KEYS_SETTING
     local KEY_FILES
     local KEY_FILE
     local KEY_COUNT=0
-    local KEY_FILE_COUNT=0
     local SSH_SESSION_STATUS
+    local SSH_HOST
 
-    SSHD_PATH=$(command -v sshd 2>/dev/null || true)
+    SSHD_PATH="$(command -v sshd 2>/dev/null || true)"
+    SSH_HOST="localhost"
 
     echo "System"
     echo "--------------------------------------"
@@ -118,26 +120,49 @@ ssh_access_show_check() {
     fi
 
     if [ -n "$SSHD_PATH" ]; then
-    if "$SSHD_PATH" -t >/dev/null 2>&1; then
-        SSH_CONFIG_STATUS="valid"
-        echo "✓ SSH Configuration          : valid"
-    else
-        SSH_CONFIG_STATUS="invalid"
-        echo "✗ SSH Configuration          : INVALID"
-    fi
+        if "$SSHD_PATH" -t >/dev/null 2>&1; then
+            SSH_CONFIG_STATUS="valid"
+            echo "✓ SSH Configuration          : valid"
+        else
+            SSH_CONFIG_STATUS="invalid"
+            echo "✗ SSH Configuration          : INVALID"
+        fi
 
-        EFFECTIVE_PORT=$(ssh_get_sshd_effective_port 2>/dev/null || true)
-        PASSWORD_AUTH=$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)
-        PUBKEY_AUTH=$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)
-        ROOT_LOGIN=$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)
-        SERVICE_STATUS=$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null || true)
-        SOCKET_STATUS=$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null || true)
+        EFFECTIVE_PORT="$(ssh_get_sshd_effective_port 2>/dev/null || true)"
+
+        PASSWORD_AUTH="$(
+            "$SSHD_PATH" -T \
+                -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                awk '$1 == "passwordauthentication" {print $2; exit}'
+        )"
+
+        PUBKEY_AUTH="$(
+            "$SSHD_PATH" -T \
+                -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                awk '$1 == "pubkeyauthentication" {print $2; exit}'
+        )"
+
+        ROOT_LOGIN="$(
+            "$SSHD_PATH" -T \
+                -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                awk '$1 == "permitrootlogin" {print $2; exit}'
+        )"
+
+        KBD_INTERACTIVE_AUTH="$(
+            "$SSHD_PATH" -T \
+                -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                awk '$1 == "kbdinteractiveauthentication" {print $2; exit}'
+        )"
+
+        SERVICE_STATUS="$(systemctl is-active "$SSH_SERVICE_UNIT" 2>/dev/null || true)"
+        SOCKET_STATUS="$(systemctl is-active "$SSH_SOCKET_UNIT" 2>/dev/null || true)"
     else
         SSH_CONFIG_STATUS="unknown"
         EFFECTIVE_PORT="unknown"
         PASSWORD_AUTH="unknown"
         PUBKEY_AUTH="unknown"
         ROOT_LOGIN="unknown"
+        KBD_INTERACTIVE_AUTH="unknown"
         SERVICE_STATUS="unknown"
         SOCKET_STATUS="unknown"
     fi
@@ -146,6 +171,7 @@ ssh_access_show_check() {
     [ -z "$PASSWORD_AUTH" ] && PASSWORD_AUTH="unknown"
     [ -z "$PUBKEY_AUTH" ] && PUBKEY_AUTH="unknown"
     [ -z "$ROOT_LOGIN" ] && ROOT_LOGIN="unknown"
+    [ -z "$KBD_INTERACTIVE_AUTH" ] && KBD_INTERACTIVE_AUTH="unknown"
     [ -z "$SERVICE_STATUS" ] && SERVICE_STATUS="inactive/unknown"
     [ -z "$SOCKET_STATUS" ] && SOCKET_STATUS="inactive/unknown"
 
@@ -157,16 +183,18 @@ ssh_access_show_check() {
     echo "Socket                     : $SOCKET_STATUS"
     echo "Password Authentication    : $PASSWORD_AUTH"
     echo "Public Key Authentication  : $PUBKEY_AUTH"
+    echo "Keyboard-Interactive       : $KBD_INTERACTIVE_AUTH"
     echo "Root Login                 : $ROOT_LOGIN"
 
-    if [ "$EFFECTIVE_PORT" != "unknown" ] && ssh_port_is_listening "$EFFECTIVE_PORT"; then
+    if [ "$EFFECTIVE_PORT" != "unknown" ] &&
+       ssh_port_is_listening "$EFFECTIVE_PORT"; then
         echo "✓ SSH Listener              : listening"
     else
         echo "✗ SSH Listener              : not verified"
     fi
 
-    TARGET_USER=$(ssh_access_get_target_user)
-    HOME_DIR=$(ssh_access_get_user_home "$TARGET_USER")
+    TARGET_USER="$(ssh_access_get_target_user)"
+    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
 
     echo
     echo "Current U-OPTI User"
@@ -192,7 +220,18 @@ ssh_access_show_check() {
         echo "⚠ Public key authentication is not enabled."
     fi
 
-    AUTHORIZED_KEYS_SETTING=$(ssh_get_effective_setting "authorizedkeysfile" 2>/dev/null || true)
+    AUTHORIZED_KEYS_SETTING="$(
+        "$SSHD_PATH" -T \
+            -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+            awk '
+                $1 == "authorizedkeysfile" {
+                    $1=""
+                    sub(/^ /, "")
+                    print
+                    exit
+                }
+            '
+    )"
 
     if [ -z "$AUTHORIZED_KEYS_SETTING" ]; then
         AUTHORIZED_KEYS_SETTING="unknown"
@@ -201,18 +240,18 @@ ssh_access_show_check() {
     echo "AuthorizedKeysFile          : $AUTHORIZED_KEYS_SETTING"
 
     if [ "$AUTHORIZED_KEYS_SETTING" != "unknown" ] &&
-       [ -n "$HOME_DIR" ] &&
-       [ "$AUTHORIZED_KEYS_SETTING" != "none" ]; then
+       [ "$AUTHORIZED_KEYS_SETTING" != "none" ] &&
+       [ -n "$HOME_DIR" ]; then
 
         for KEY_FILE in $AUTHORIZED_KEYS_SETTING; do
             local EXPANDED_KEY_FILE
 
-            EXPANDED_KEY_FILE=$(
+            EXPANDED_KEY_FILE="$(
                 ssh_access_expand_authorized_keys_path \
                     "$TARGET_USER" \
                     "$HOME_DIR" \
                     "$KEY_FILE"
-            )
+            )"
 
             KEY_FILES="${KEY_FILES}${EXPANDED_KEY_FILE}"$'\n'
         done
@@ -220,10 +259,9 @@ ssh_access_show_check() {
         while IFS= read -r KEY_FILE; do
             [ -z "$KEY_FILE" ] && continue
 
-            KEY_FILE_COUNT=$((KEY_FILE_COUNT + 1))
-
             local FILE_KEYS
-            FILE_KEYS=$(ssh_access_count_keys_in_file "$KEY_FILE")
+
+            FILE_KEYS="$(ssh_access_count_keys_in_file "$KEY_FILE")"
             KEY_COUNT=$((KEY_COUNT + FILE_KEYS))
 
             if [ -f "$KEY_FILE" ]; then
@@ -235,7 +273,7 @@ ssh_access_show_check() {
             fi
         done <<< "$KEY_FILES"
     else
-        echo "⚠ Unable to resolve authorized key files for this user."
+        echo "⚠ Unable to resolve authorized key files for root."
     fi
 
     if [ "$KEY_COUNT" -gt 0 ]; then
@@ -268,6 +306,15 @@ ssh_access_show_check() {
         echo "⚠ Public key recovery path is not confirmed"
     fi
 
+    if [ "$PASSWORD_AUTH" = "no" ] &&
+       [ "$KBD_INTERACTIVE_AUTH" = "no" ] &&
+       [ "$PUBKEY_AUTH" = "yes" ] &&
+       [ "$ROOT_LOGIN" = "yes" ]; then
+        echo "✓ Root is configured for key-only SSH access"
+    else
+        echo "⚠ Root is not fully configured for key-only SSH access"
+    fi
+
     if [ "$SSH_SESSION_STATUS" = "detected" ]; then
         echo "✓ SSH session environment detected"
     else
@@ -280,12 +327,6 @@ ssh_access_show_check() {
 
     read -rp "Press Enter to return..."
 }
-
-
-
-
-
-
 
 
 ssh_access_generate_key_pair() {
@@ -355,8 +396,8 @@ ssh_access_generate_key_pair() {
     PUBLIC_KEY_PATH="$KEY_PATH.pub"
 
     echo
-    echo "Choose a passphrase for the private key."
-    echo "Leave it empty only if you intentionally want no passphrase."
+    echo "Passphrase is optional."
+    echo "Press Enter twice to create the key without a passphrase."
     echo
 
     while true; do
@@ -490,8 +531,8 @@ ssh_access_backup_authorized_keys() {
     local TIMESTAMP
     local BACKUP_DIR
 
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
-    BACKUP_DIR="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/$TIMESTAMP"
+    TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+    BACKUP_DIR="$SSH_AUTHORIZED_KEYS_BACKUP_DIR/backup-$TIMESTAMP"
 
     mkdir -p "$BACKUP_DIR" || return 1
 
@@ -1582,34 +1623,190 @@ ssh_access_authentication_settings() {
     local HOME_DIR
     local AUTHORIZED_KEYS_FILE
     local PASSWORD_AUTH
+    local KBD_INTERACTIVE_AUTH
     local PUBKEY_AUTH
     local ROOT_LOGIN
+    local AUTH_METHODS
     local KEY_COUNT
     local AUTH_MODE
     local CHOICE
+    local SSHD_PATH
+    local SSH_BACKUP_DIR
+    local BACKUP_PATH
+    local CONFIG_FILE
+    local TEMP_CONFIG
+    local VERIFY_PASSWORD_AUTH
+    local VERIFY_KBD_AUTH
+    local VERIFY_PUBKEY_AUTH
+    local CONFIRM
+    local MARKER_BEGIN
+    local MARKER_END
+    local SSH_HOST
 
     TARGET_USER="$(ssh_access_get_target_user)"
     HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+    SSH_BACKUP_DIR="$SSH_AUTHORIZED_KEYS_BACKUP_DIR"
+    CONFIG_FILE="/etc/ssh/sshd_config"
+    MARKER_BEGIN="# BEGIN U-OPTI MANAGED ROOT SSH AUTH"
+    MARKER_END="# END U-OPTI MANAGED ROOT SSH AUTH"
+    SSH_HOST="localhost"
 
-    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
-    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
-    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
+    SSHD_PATH="$(command -v sshd 2>/dev/null || true)"
+
+    if [ -z "$SSHD_PATH" ]; then
+        echo "✗ OpenSSH server was not found."
+        echo
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    ssh_root_effective_setting() {
+        local SETTING="$1"
+
+        ssh_prepare_runtime_dir >/dev/null 2>&1 || return 1
+
+        "$SSHD_PATH" -T \
+            -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+            awk -v key="$SETTING" '
+                $1 == key {
+                    $1=""
+                    sub(/^ /, "")
+                    print
+                    exit
+                }
+            '
+    }
+
+    ssh_auth_remove_managed_block() {
+        local INPUT_FILE="$1"
+        local OUTPUT_FILE="$2"
+
+        awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
+            $0 == begin {
+                inside=1
+                next
+            }
+
+            $0 == end {
+                inside=0
+                next
+            }
+
+            !inside {
+                print
+            }
+        ' "$INPUT_FILE" > "$OUTPUT_FILE"
+    }
+
+    ssh_auth_build_key_only_config() {
+        local INPUT_FILE="$1"
+        local OUTPUT_FILE="$2"
+
+        if ! ssh_auth_remove_managed_block "$INPUT_FILE" "$OUTPUT_FILE"; then
+            return 1
+        fi
+
+        local INSERTED=0
+        local TEMP_INSERT
+
+        TEMP_INSERT="$(mktemp)" || return 1
+
+        awk \
+            -v begin="$MARKER_BEGIN" \
+            -v end="$MARKER_END" '
+            function print_block() {
+                print begin
+                print "Match User root"
+                print "    PasswordAuthentication no"
+                print "    KbdInteractiveAuthentication no"
+                print "    PubkeyAuthentication yes"
+                print "Match All"
+                print end
+            }
+
+            !inserted &&
+            $0 ~ /^[[:space:]]*PermitRootLogin[[:space:]]+/ {
+                print_block()
+                inserted=1
+            }
+
+            {
+                print
+            }
+
+            END {
+                if (!inserted) {
+                    print ""
+                    print_block()
+                }
+            }
+        ' "$OUTPUT_FILE" > "$TEMP_INSERT"
+
+        mv -f "$TEMP_INSERT" "$OUTPUT_FILE"
+    }
+
+    ssh_auth_create_backup() {
+        local BACKUP_TIMESTAMP
+        local BACKUP_TARGET
+
+        BACKUP_TIMESTAMP="$(date '+%Y-%m-%d_%H-%M-%S')"
+        BACKUP_TARGET="$SSH_BACKUP_DIR/backup-$BACKUP_TIMESTAMP"
+
+        if ! mkdir -p "$BACKUP_TARGET"; then
+            return 1
+        fi
+
+        chmod 700 "$BACKUP_TARGET"
+
+        if [ -f "$CONFIG_FILE" ]; then
+            if ! cp -a "$CONFIG_FILE" "$BACKUP_TARGET/sshd_config"; then
+                rm -rf "$BACKUP_TARGET"
+                return 1
+            fi
+        fi
+
+        if [ -d /etc/ssh/sshd_config.d ]; then
+            if ! cp -a /etc/ssh/sshd_config.d "$BACKUP_TARGET/sshd_config.d"; then
+                rm -rf "$BACKUP_TARGET"
+                return 1
+            fi
+        fi
+
+        if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+            if ! cp -a "$AUTHORIZED_KEYS_FILE" "$BACKUP_TARGET/authorized_keys"; then
+                rm -rf "$BACKUP_TARGET"
+                return 1
+            fi
+        fi
+
+        printf '%s\n' "$BACKUP_TARGET"
+    }
+
+    PASSWORD_AUTH="$(ssh_root_effective_setting "passwordauthentication" || true)"
+    KBD_INTERACTIVE_AUTH="$(ssh_root_effective_setting "kbdinteractiveauthentication" || true)"
+    PUBKEY_AUTH="$(ssh_root_effective_setting "pubkeyauthentication" || true)"
+    ROOT_LOGIN="$(ssh_root_effective_setting "permitrootlogin" || true)"
+    AUTH_METHODS="$(ssh_root_effective_setting "authenticationmethods" || true)"
 
     KEY_COUNT=0
-    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
 
-    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+    if [ "$TARGET_USER" = "root" ] &&
+       [ -f "$AUTHORIZED_KEYS_FILE" ]; then
         KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
     fi
 
-    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+    if [ "$PASSWORD_AUTH" = "yes" ] &&
+       [ "$PUBKEY_AUTH" = "yes" ]; then
         AUTH_MODE="Password + Public Key"
-    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+    elif [ "$PASSWORD_AUTH" = "no" ] &&
+         [ "$PUBKEY_AUTH" = "yes" ]; then
         AUTH_MODE="Public Key Only"
-    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
+    elif [ "$PASSWORD_AUTH" = "yes" ] &&
+         [ "$PUBKEY_AUTH" != "yes" ]; then
         AUTH_MODE="Password Only"
     else
-        AUTH_MODE="Restricted / Custom"
+        AUTH_MODE="Custom / Restricted"
     fi
 
     echo "Current Status"
@@ -1618,7 +1815,10 @@ ssh_access_authentication_settings() {
     echo "Root SSH Login            : $ROOT_LOGIN"
     echo "Public Key Authentication : $PUBKEY_AUTH"
     echo "Password Authentication   : $PASSWORD_AUTH"
+    echo "Keyboard-Interactive      : $KBD_INTERACTIVE_AUTH"
     echo "Installed Public Keys     : $KEY_COUNT"
+    echo
+    echo "Authentication Methods    : ${AUTH_METHODS:-unknown}"
     echo
     echo "SSH Access Mode           : $AUTH_MODE"
 
@@ -1637,25 +1837,17 @@ ssh_access_authentication_settings() {
             clear
 
             echo "======================================"
-            echo "        Key-Only Login Check"
+            echo "        Enable Key-Only Login"
             echo "======================================"
             echo
 
             local CHECK_FAILED=0
-            local SSHD_PATH
-            local SSH_SESSION_STATUS
-
-            SSHD_PATH="$(command -v sshd 2>/dev/null || true)"
+            local CURRENT_CONFIG
+            local BACKUP_RESULT
+            local CURRENT_SESSION
 
             echo "Security Checks"
             echo "--------------------------------------"
-
-            if [ -z "$SSHD_PATH" ]; then
-                echo "✗ OpenSSH Server             : not found"
-                CHECK_FAILED=1
-            else
-                echo "✓ OpenSSH Server             : available"
-            fi
 
             if [ "$TARGET_USER" = "root" ]; then
                 echo "✓ Target User                : root"
@@ -1665,8 +1857,9 @@ ssh_access_authentication_settings() {
                 CHECK_FAILED=1
             fi
 
-            if [ "$ROOT_LOGIN" = "yes" ]; then
-                echo "✓ Root SSH Login             : enabled"
+            if [ "$ROOT_LOGIN" = "yes" ] ||
+               [ "$ROOT_LOGIN" = "prohibit-password" ]; then
+                echo "✓ Root SSH Login             : $ROOT_LOGIN"
             else
                 echo "✗ Root SSH Login             : $ROOT_LOGIN"
                 CHECK_FAILED=1
@@ -1675,7 +1868,7 @@ ssh_access_authentication_settings() {
             if [ "$PUBKEY_AUTH" = "yes" ]; then
                 echo "✓ Public Key Authentication  : enabled"
             else
-                echo "✗ Public Key Authentication : $PUBKEY_AUTH"
+                echo "✗ Public Key Authentication  : $PUBKEY_AUTH"
                 CHECK_FAILED=1
             fi
 
@@ -1687,19 +1880,32 @@ ssh_access_authentication_settings() {
             fi
 
             if [ -n "$SSH_CONNECTION" ]; then
-                SSH_SESSION_STATUS="detected"
+                CURRENT_SESSION="detected"
                 echo "✓ Current SSH Session        : detected"
             else
-                SSH_SESSION_STATUS="not detected"
+                CURRENT_SESSION="not detected"
                 echo "✗ Current SSH Session        : not detected"
                 CHECK_FAILED=1
             fi
 
-            if [ -n "$SSHD_PATH" ] && "$SSHD_PATH" -t >/dev/null 2>&1; then
+            if "$SSHD_PATH" -t >/dev/null 2>&1; then
                 echo "✓ SSH Configuration          : valid"
             else
                 echo "✗ SSH Configuration          : invalid"
                 CHECK_FAILED=1
+            fi
+
+            if [ -z "$AUTH_METHODS" ] ||
+               [ "$AUTH_METHODS" = "any" ]; then
+                echo "✓ Authentication Methods     : compatible"
+            elif [[ "$AUTH_METHODS" == *password* ]] ||
+                 [[ "$AUTH_METHODS" == *keyboard-interactive* ]]; then
+                echo "✗ Authentication Methods     : password-based method required"
+                echo "  Current value: $AUTH_METHODS"
+                CHECK_FAILED=1
+            else
+                echo "⚠ Authentication Methods     : custom"
+                echo "  Current value: $AUTH_METHODS"
             fi
 
             echo
@@ -1718,28 +1924,352 @@ ssh_access_authentication_settings() {
             echo
             echo "✓ All safety checks passed."
             echo
-            echo "The next step will:"
-            echo "  - Create an automatic SSH backup"
-            echo "  - Disable root password authentication"
+            echo "This operation will:"
+            echo "  - Create a full SSH safety backup"
+            echo "  - Add a U-OPTI managed root authentication policy"
+            echo "  - Disable password authentication for root"
+            echo "  - Disable keyboard-interactive authentication for root"
             echo "  - Keep public key authentication enabled"
-            echo "  - Validate the SSH configuration"
-            echo "  - Roll back automatically if validation fails"
+            echo "  - Keep UsePAM unchanged"
+            echo "  - Validate the new configuration before applying it"
+            echo "  - Reload SSH"
+            echo "  - Verify the effective root authentication settings"
+            echo "  - Roll back automatically on failure"
             echo
-            echo "No SSH settings have been changed yet."
+            echo "Your current SSH session will remain open."
             echo
+            read -rp "Enable Key-Only Login now? [y/N]: " CONFIRM
+
+            case "$CONFIRM" in
+                y|Y|yes|YES)
+                    ;;
+                *)
+                    echo
+                    echo "Operation cancelled."
+                    read -rp "Press Enter to return..."
+                    return 0
+                    ;;
+            esac
+
+            BACKUP_RESULT="$(ssh_auth_create_backup)"
+
+            if [ -z "$BACKUP_RESULT" ]; then
+                echo
+                echo "✗ Failed to create SSH safety backup."
+                echo "No SSH settings were changed."
+                echo
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            BACKUP_PATH="$BACKUP_RESULT"
+
+            echo
+            echo "Creating SSH safety backup..."
+            echo "✓ Safety backup created:"
+            echo "  $BACKUP_PATH"
+
+            TEMP_CONFIG="$(mktemp)" || {
+                echo
+                echo "✗ Failed to create temporary SSH configuration."
+                read -rp "Press Enter to return..."
+                return 1
+            }
+
+            if ! ssh_auth_build_key_only_config "$CONFIG_FILE" "$TEMP_CONFIG"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to build new SSH configuration."
+                echo "No SSH settings were changed."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            if ! chown --reference="$CONFIG_FILE" "$TEMP_CONFIG" ||
+               ! chmod --reference="$CONFIG_FILE" "$TEMP_CONFIG"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to preserve SSH configuration permissions."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            echo
+            echo "Validating new SSH configuration..."
+
+            if ! "$SSHD_PATH" -t -f "$TEMP_CONFIG" >/dev/null 2>&1; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ New SSH configuration is invalid."
+                echo "No SSH settings were changed."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            VERIFY_PASSWORD_AUTH="$(
+                "$SSHD_PATH" -T -f "$TEMP_CONFIG" \
+                    -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                    awk '$1 == "passwordauthentication" {print $2; exit}'
+            )"
+
+            VERIFY_KBD_AUTH="$(
+                "$SSHD_PATH" -T -f "$TEMP_CONFIG" \
+                    -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                    awk '$1 == "kbdinteractiveauthentication" {print $2; exit}'
+            )"
+
+            VERIFY_PUBKEY_AUTH="$(
+                "$SSHD_PATH" -T -f "$TEMP_CONFIG" \
+                    -C "user=root,host=$SSH_HOST,addr=127.0.0.1" 2>/dev/null |
+                    awk '$1 == "pubkeyauthentication" {print $2; exit}'
+            )"
+
+            if [ "$VERIFY_PASSWORD_AUTH" != "no" ] ||
+               [ "$VERIFY_KBD_AUTH" != "no" ] ||
+               [ "$VERIFY_PUBKEY_AUTH" != "yes" ]; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Pre-apply authentication verification failed."
+                echo
+                echo "Expected:"
+                echo "  passwordauthentication no"
+                echo "  kbdinteractiveauthentication no"
+                echo "  pubkeyauthentication yes"
+                echo
+                echo "No SSH settings were changed."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            if ! mv -f "$TEMP_CONFIG" "$CONFIG_FILE"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to apply SSH configuration."
+                echo "No SSH reload was performed."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            echo "✓ New SSH configuration applied."
+
+            echo
+            echo "Reloading SSH service..."
+
+            if ! systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1; then
+                echo "✗ SSH service reload failed."
+                echo "Rolling back automatically..."
+
+                cp -a "$BACKUP_PATH/sshd_config" "$CONFIG_FILE"
+                systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+                echo "✓ Previous SSH configuration restored."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            VERIFY_PASSWORD_AUTH="$(ssh_root_effective_setting "passwordauthentication" || true)"
+            VERIFY_KBD_AUTH="$(ssh_root_effective_setting "kbdinteractiveauthentication" || true)"
+            VERIFY_PUBKEY_AUTH="$(ssh_root_effective_setting "pubkeyauthentication" || true)"
+
+            echo
+            echo "Verifying effective root SSH settings..."
+            echo
+
+            if [ "$VERIFY_PASSWORD_AUTH" = "no" ]; then
+                echo "✓ Root Password Authentication : disabled"
+            else
+                echo "✗ Root Password Authentication : $VERIFY_PASSWORD_AUTH"
+                CHECK_FAILED=1
+            fi
+
+            if [ "$VERIFY_KBD_AUTH" = "no" ]; then
+                echo "✓ Root Keyboard-Interactive    : disabled"
+            else
+                echo "✗ Root Keyboard-Interactive    : $VERIFY_KBD_AUTH"
+                CHECK_FAILED=1
+            fi
+
+            if [ "$VERIFY_PUBKEY_AUTH" = "yes" ]; then
+                echo "✓ Root Public Key              : enabled"
+            else
+                echo "✗ Root Public Key              : $VERIFY_PUBKEY_AUTH"
+                CHECK_FAILED=1
+            fi
+
+            if [ "$CHECK_FAILED" -ne 0 ]; then
+                echo
+                echo "✗ Effective SSH authentication verification failed."
+                echo "Rolling back automatically..."
+
+                if [ -f "$BACKUP_PATH/sshd_config" ]; then
+                    cp -a "$BACKUP_PATH/sshd_config" "$CONFIG_FILE"
+                fi
+
+                systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+                echo "✓ Rollback completed."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            echo
+            echo "======================================"
+            echo "       Key-Only Mode Enabled"
+            echo "======================================"
+            echo
+            echo "Backup:"
+            echo "  $BACKUP_PATH"
+            echo
+            echo "Your current SSH session is still active."
+            echo
+            echo "NOW TEST A SECOND SSH SESSION"
+            echo "using your private key (kolbe)."
+            echo
+            echo "Do NOT close this current session."
+            echo
+            echo "Test the second connection and return here."
+            echo
+
+            read -rp "Did key-based SSH login succeed? [y/N]: " CONFIRM
+
+            case "$CONFIRM" in
+                y|Y|yes|YES)
+                    echo
+                    echo "✓ Key-based SSH login confirmed."
+                    echo
+                    echo "Root is now configured for key-only SSH access."
+                    ;;
+
+                *)
+                    echo
+                    echo "Key-based SSH login was not confirmed."
+                    echo "Rolling back SSH authentication settings..."
+
+                    if [ -f "$BACKUP_PATH/sshd_config" ]; then
+                        cp -a "$BACKUP_PATH/sshd_config" "$CONFIG_FILE"
+                    fi
+
+                    if systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1; then
+                        echo "✓ Rollback completed."
+                    else
+                        echo "⚠ Configuration rollback completed on disk, but SSH reload failed."
+                        echo "Keep this session open."
+                    fi
+
+                    echo
+                    echo "Previous SSH authentication settings have been restored."
+                    ;;
+            esac
 
             read -rp "Press Enter to return..."
             ;;
 
         2)
+            clear
+
+            echo "======================================"
+            echo "        Enable Password Login"
+            echo "======================================"
             echo
-            echo "Password Login"
-            echo "--------------------------------------"
+
+            if [ "$TARGET_USER" != "root" ]; then
+                echo "✗ Target user is not root."
+                echo "This setting is restricted to root."
+                echo
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            CURRENT_AUTH="$(grep -nF "$MARKER_BEGIN" "$CONFIG_FILE" 2>/dev/null || true)"
+
+            if [ -z "$CURRENT_AUTH" ]; then
+                echo "Password authentication is not disabled by U-OPTI."
+                echo "No changes were made."
+                echo
+                read -rp "Press Enter to return..."
+                return 0
+            fi
+
+            echo "This will remove the U-OPTI root key-only policy."
+            echo "The previous global SSH authentication settings will remain unchanged."
             echo
-            echo "Password authentication is currently:"
-            echo "  $PASSWORD_AUTH"
+            echo "Your current SSH session will remain open."
             echo
-            echo "No SSH settings have been changed."
+
+            read -rp "Restore Password Login? [y/N]: " CONFIRM
+
+            case "$CONFIRM" in
+                y|Y|yes|YES)
+                    ;;
+                *)
+                    echo
+                    echo "Operation cancelled."
+                    read -rp "Press Enter to return..."
+                    return 0
+                    ;;
+            esac
+
+            TEMP_CONFIG="$(mktemp)" || {
+                echo
+                echo "✗ Failed to create temporary SSH configuration."
+                read -rp "Press Enter to return..."
+                return 1
+            }
+
+            if ! ssh_auth_remove_managed_block "$CONFIG_FILE" "$TEMP_CONFIG"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to prepare SSH configuration."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            if ! chown --reference="$CONFIG_FILE" "$TEMP_CONFIG" ||
+               ! chmod --reference="$CONFIG_FILE" "$TEMP_CONFIG"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to preserve SSH configuration permissions."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            if ! "$SSHD_PATH" -t -f "$TEMP_CONFIG" >/dev/null 2>&1; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Resulting SSH configuration is invalid."
+                echo "No changes were made."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            if ! mv -f "$TEMP_CONFIG" "$CONFIG_FILE"; then
+                rm -f "$TEMP_CONFIG"
+                echo
+                echo "✗ Failed to apply SSH configuration."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            echo "✓ U-OPTI root authentication policy removed."
+
+            if ! systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1; then
+                echo
+                echo "✗ SSH service reload failed."
+                echo "Keep this session open and inspect the SSH configuration."
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
+            PASSWORD_AUTH="$(ssh_root_effective_setting "passwordauthentication" || true)"
+            PUBKEY_AUTH="$(ssh_root_effective_setting "pubkeyauthentication" || true)"
+
+            echo
+            echo "======================================"
+            echo "        Password Login Restored"
+            echo "======================================"
+            echo
+            echo "Root Password Authentication : $PASSWORD_AUTH"
+            echo "Root Public Key              : $PUBKEY_AUTH"
             echo
             read -rp "Press Enter to return..."
             ;;
@@ -1755,235 +2285,6 @@ ssh_access_authentication_settings() {
             ;;
     esac
 }
-
-
-
-
-
-ssh_access_authentication_settings() {
-    clear
-
-    echo "======================================"
-    echo "     SSH Authentication Settings"
-    echo "======================================"
-    echo
-
-    if ! ssh_access_require_root; then
-        read -rp "Press Enter to return..."
-        return 1
-    fi
-
-    local TARGET_USER
-    local HOME_DIR
-    local AUTHORIZED_KEYS_FILE
-    local PASSWORD_AUTH
-    local PUBKEY_AUTH
-    local ROOT_LOGIN
-    local KEY_COUNT
-    local AUTH_MODE
-    local CHOICE
-
-    TARGET_USER="$(ssh_access_get_target_user)"
-    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
-
-    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
-    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
-    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
-
-    KEY_COUNT=0
-    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
-
-    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
-        KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
-    fi
-
-    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
-        AUTH_MODE="Password + Public Key"
-    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
-        AUTH_MODE="Public Key Only"
-    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
-        AUTH_MODE="Password Only"
-    else
-        AUTH_MODE="Restricted / Custom"
-    fi
-
-    echo "Current Status"
-    echo "--------------------------------------"
-    echo "User                      : $TARGET_USER"
-    echo "Root SSH Login            : $ROOT_LOGIN"
-    echo "Public Key Authentication : $PUBKEY_AUTH"
-    echo "Password Authentication   : $PASSWORD_AUTH"
-    echo "Installed Public Keys     : $KEY_COUNT"
-    echo
-    echo "SSH Access Mode           : $AUTH_MODE"
-
-    echo
-    echo "--------------------------------------"
-    echo
-    echo "1) Enable Key-Only Login"
-    echo "2) Enable Password Login"
-    echo "0) Back"
-    echo
-
-    read -rp "Please enter your selection [0-2]: " CHOICE
-
-    case "$CHOICE" in
-        1)
-            echo
-            echo "Key-Only Login"
-            echo "--------------------------------------"
-            echo
-            echo "This option will disable SSH password authentication"
-            echo "for the root account and keep public key authentication enabled."
-            echo
-            echo "Safety checks and automatic rollback will be added"
-            echo "before the actual configuration change."
-            echo
-            echo "No SSH settings have been changed."
-            echo
-            read -rp "Press Enter to return..."
-            ;;
-
-        2)
-            echo
-            echo "Password Login"
-            echo "--------------------------------------"
-            echo
-            echo "Password authentication is currently:"
-            echo "  $PASSWORD_AUTH"
-            echo
-            echo "No SSH settings have been changed."
-            echo
-            read -rp "Press Enter to return..."
-            ;;
-
-        0)
-            return 0
-            ;;
-
-        *)
-            echo
-            echo "Invalid selection."
-            read -rp "Press Enter to return..."
-            ;;
-    esac
-}
-
-ssh_access_authentication_settings() {
-    clear
-
-    echo "======================================"
-    echo "     SSH Authentication Settings"
-    echo "======================================"
-    echo
-
-    if ! ssh_access_require_root; then
-        read -rp "Press Enter to return..."
-        return 1
-    fi
-
-    local TARGET_USER
-    local HOME_DIR
-    local AUTHORIZED_KEYS_FILE
-    local PASSWORD_AUTH
-    local PUBKEY_AUTH
-    local ROOT_LOGIN
-    local KEY_COUNT
-    local AUTH_MODE
-    local CHOICE
-
-    TARGET_USER="$(ssh_access_get_target_user)"
-    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
-
-    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
-    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
-    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
-
-    KEY_COUNT=0
-    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
-
-    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
-        KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
-    fi
-
-    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
-        AUTH_MODE="Password + Public Key"
-    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
-        AUTH_MODE="Public Key Only"
-    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
-        AUTH_MODE="Password Only"
-    else
-        AUTH_MODE="Restricted / Custom"
-    fi
-
-    echo "Current Status"
-    echo "--------------------------------------"
-    echo "User                      : $TARGET_USER"
-    echo "Root SSH Login            : $ROOT_LOGIN"
-    echo "Public Key Authentication : $PUBKEY_AUTH"
-    echo "Password Authentication   : $PASSWORD_AUTH"
-    echo "Installed Public Keys     : $KEY_COUNT"
-    echo
-    echo "SSH Access Mode           : $AUTH_MODE"
-
-    echo
-    echo "--------------------------------------"
-    echo
-    echo "1) Enable Key-Only Login"
-    echo "2) Enable Password Login"
-    echo "0) Back"
-    echo
-
-    read -rp "Please enter your selection [0-2]: " CHOICE
-
-    case "$CHOICE" in
-        1)
-            echo
-            echo "Key-Only Login"
-            echo "--------------------------------------"
-            echo
-            echo "This option will disable SSH password authentication"
-            echo "for the root account and keep public key authentication enabled."
-            echo
-            echo "Safety checks and automatic rollback will be added"
-            echo "before the actual configuration change."
-            echo
-            echo "No SSH settings have been changed."
-            echo
-            read -rp "Press Enter to return..."
-            ;;
-
-        2)
-            echo
-            echo "Password Login"
-            echo "--------------------------------------"
-            echo
-            echo "Password authentication is currently:"
-            echo "  $PASSWORD_AUTH"
-            echo
-            echo "No SSH settings have been changed."
-            echo
-            read -rp "Press Enter to return..."
-            ;;
-
-        0)
-            return 0
-            ;;
-
-        *)
-            echo
-            echo "Invalid selection."
-            read -rp "Press Enter to return..."
-            ;;
-    esac
-}
-
-
-
-
-
-
-
 
 
 show_ssh_access_menu() {
