@@ -34,6 +34,272 @@ firewall_prepare_backup_dir() {
     mkdir -p "$UOPTI_FIREWALL_BACKUP_DIR"
 }
 
+firewall_install_ufw() {
+    clear
+
+    echo "======================================"
+    echo "       UFW Install / Enable"
+    echo "======================================"
+    echo
+
+    if ! firewall_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo "Error: apt-get was not found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        echo "UFW is installed."
+    else
+        echo "UFW is not installed."
+        echo
+        read -rp "Install UFW now? [y/N]: " INSTALL_CONFIRM
+
+        case "$INSTALL_CONFIRM" in
+            y|Y|yes|YES)
+                echo
+                echo "Installing UFW..."
+                echo
+
+                if ! apt-get update; then
+                    echo
+                    echo "Error: apt package index update failed."
+                    echo
+                    read -rp "Press Enter to return..."
+                    return
+                fi
+
+                if ! apt-get install -y ufw; then
+                    echo
+                    echo "Error: UFW installation failed."
+                    echo
+                    read -rp "Press Enter to return..."
+                    return
+                fi
+
+                echo
+                echo "UFW installed successfully."
+                ;;
+            *)
+                echo
+                echo "UFW installation cancelled."
+                echo
+                read -rp "Press Enter to return..."
+                return
+                ;;
+        esac
+    fi
+
+    local UFW_STATUS
+    local SSH_PORT
+
+    UFW_STATUS=$(ufw status | head -n 1)
+    SSH_PORT=$(firewall_get_ssh_port)
+
+    echo
+    echo "Current UFW status:"
+    echo "$UFW_STATUS"
+    echo
+
+    if [[ "$UFW_STATUS" == "Status: active" ]]; then
+        echo "UFW is already active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -z "$SSH_PORT" ]; then
+        echo "Error: Unable to determine the current SSH port."
+        echo "UFW will NOT be enabled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Current SSH port: $SSH_PORT/tcp"
+    echo
+    echo "Before enabling UFW, U-OPTI will:"
+    echo "  - Back up the current UFW configuration"
+    echo "  - Set default incoming policy to deny"
+    echo "  - Set default outgoing policy to allow"
+    echo "  - Ensure the current SSH port is allowed"
+    echo "  - Allow HTTP 80/tcp and HTTPS 443/tcp"
+    echo
+    echo "This is a safety operation to reduce the risk of SSH lockout."
+    echo
+
+    read -rp "Enable UFW with these base rules? [y/N]: " ENABLE_CONFIRM
+
+    case "$ENABLE_CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "UFW enable operation cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+            ;;
+    esac
+
+    firewall_prepare_backup_dir || {
+        echo
+        echo "Error: Unable to prepare firewall backup directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    local TIMESTAMP
+    local BACKUP_DIR
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
+    BACKUP_DIR="$UOPTI_FIREWALL_BACKUP_DIR/$TIMESTAMP"
+
+    echo
+    echo "Creating firewall backup..."
+
+    if ! firewall_backup_state "$BACKUP_DIR"; then
+        echo
+        echo "Error: Firewall backup failed."
+        echo "UFW will NOT be enabled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Backup created:"
+    echo "$BACKUP_DIR"
+
+    echo
+    echo "Preparing safe UFW rules..."
+
+    local APPLY_FAILED=false
+
+    if ! ufw default deny incoming; then
+        APPLY_FAILED=true
+    fi
+
+    if ! ufw default allow outgoing; then
+        APPLY_FAILED=true
+    fi
+
+    if [ "$APPLY_FAILED" = "false" ] && ! firewall_rule_exists "$SSH_PORT"; then
+        if ! ufw allow "$SSH_PORT/tcp"; then
+            APPLY_FAILED=true
+        fi
+    fi
+
+    if [ "$APPLY_FAILED" = "false" ] && ! firewall_rule_exists "80"; then
+        if ! ufw allow "80/tcp"; then
+            APPLY_FAILED=true
+        fi
+    fi
+
+    if [ "$APPLY_FAILED" = "false" ] && ! firewall_rule_exists "443"; then
+        if ! ufw allow "443/tcp"; then
+            APPLY_FAILED=true
+        fi
+    fi
+
+    if [ "$APPLY_FAILED" = "true" ]; then
+        echo
+        echo "Failed while preparing UFW rules."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Checking required SSH rule..."
+
+    if ! firewall_rule_exists "$SSH_PORT"; then
+        echo
+        echo "ERROR: SSH port $SSH_PORT/tcp was not found in UFW rules."
+        echo "UFW will NOT be enabled."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "SSH rule confirmed."
+
+    echo
+    echo "Enabling UFW..."
+
+    if ! ufw --force enable; then
+        echo
+        echo "ERROR: Failed to enable UFW."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    UFW_STATUS=$(ufw status | head -n 1)
+
+    if [[ "$UFW_STATUS" != "Status: active" ]]; then
+        echo
+        echo "ERROR: UFW did not report an active status after enabling."
+        echo "Restoring previous firewall configuration..."
+
+        if firewall_restore_state "$BACKUP_DIR"; then
+            echo "Previous firewall configuration restored."
+        else
+            echo "ERROR: Previous firewall configuration could not be fully restored."
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "          UFW Enabled"
+    echo "======================================"
+    echo
+    echo "Status : active"
+    echo "SSH    : $SSH_PORT/tcp"
+    echo "HTTP   : 80/tcp"
+    echo "HTTPS  : 443/tcp"
+    echo
+    echo "Backup:"
+    echo "$BACKUP_DIR"
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
 firewall_get_ssh_port() {
     if command -v sshd >/dev/null 2>&1; then
         if [ ! -d /run/sshd ]; then
@@ -760,31 +1026,35 @@ show_firewall_menu() {
         echo "======================================"
         echo
 
-        echo "1) Firewall Status"
-        echo "2) Configure Firewall"
-        echo "3) Show Rules"
-        echo "4) Add Port"
-        echo "5) Remove Port"
+        echo "1) UFW Install / Enable"
+        echo "2) Firewall Status"
+        echo "3) Configure Firewall"
+        echo "4) Show Rules"
+        echo "5) Add Port"
+        echo "6) Remove Port"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-5]: " FIREWALL_CHOICE
+        read -rp "Please enter your selection [0-6]: " FIREWALL_CHOICE
 
         case "$FIREWALL_CHOICE" in
             1)
-                firewall_show_status
+                firewall_install_ufw
                 ;;
             2)
-                firewall_configure
+                firewall_show_status
                 ;;
             3)
-                firewall_show_rules
+                firewall_configure
                 ;;
             4)
-                firewall_add_ports
+                firewall_show_rules
                 ;;
             5)
+                firewall_add_ports
+                ;;
+            6)
                 firewall_remove_ports
                 ;;
             0)
