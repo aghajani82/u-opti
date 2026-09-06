@@ -66,14 +66,7 @@ show_ssh_security_menu() {
                 ;;
 
             3)
-                clear
-                echo "======================================"
-                echo "         Connection Limits"
-                echo "======================================"
-                echo
-                echo "Connection Limits Management will be added in a future step."
-                echo
-                read -rp "Press Enter to return..."
+                ssh_security_connection_limits_menu
                 ;;
 
             4)
@@ -85,6 +78,691 @@ show_ssh_security_menu() {
                 echo "Root Login Management will be added in a future step."
                 echo
                 read -rp "Press Enter to return..."
+                ;;
+
+            0)
+                break
+                ;;
+
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
+SSH_SECURITY_DIR="/etc/u-opti/ssh-security"
+SSH_SECURITY_BACKUP_DIR="$SSH_SECURITY_DIR/backups"
+
+SSH_SECURITY_MARKER_BEGIN="# BEGIN U-OPTI MANAGED SSH CONNECTION LIMITS"
+SSH_SECURITY_MARKER_END="# END U-OPTI MANAGED SSH CONNECTION LIMITS"
+
+ssh_security_get_limit_setting() {
+    local SETTING="$1"
+
+    if ! command -v sshd >/dev/null 2>&1; then
+        return 1
+    fi
+
+    if [ ! -d /run/sshd ]; then
+        mkdir -p /run/sshd || return 1
+        chmod 0755 /run/sshd || return 1
+    fi
+
+    sshd -T 2>/dev/null |
+        awk -v setting="$SETTING" '$1 == setting {print $2; exit}'
+}
+
+ssh_security_get_connection_marker_state() {
+    if [ ! -f "$SSH_CONFIG" ]; then
+        echo "missing-config"
+        return 0
+    fi
+
+    awk -v begin="$SSH_SECURITY_MARKER_BEGIN" -v end="$SSH_SECURITY_MARKER_END" '
+        $0 == begin { begins++; if (inside) broken=1; inside=1; next }
+        $0 == end { ends++; if (!inside) broken=1; inside=0; next }
+        END {
+            if (inside) broken=1
+            if (begins == 0 && ends == 0) {
+                print "none"
+            } else if (begins == 1 && ends == 1 && !broken) {
+                print "valid"
+            } else {
+                print "broken"
+            }
+        }
+    ' "$SSH_CONFIG"
+}
+
+ssh_security_has_manual_connection_limit() {
+    awk '
+        /^[[:space:]]*#/ {
+            next
+        }
+
+        /^[[:space:]]*MaxAuthTries[[:space:]]+/ {
+            found=1
+        }
+
+        /^[[:space:]]*MaxStartups[[:space:]]+/ {
+            found=1
+        }
+
+        END {
+            exit(found ? 0 : 1)
+        }
+    ' "$SSH_CONFIG"
+}
+
+ssh_security_validate_max_auth_tries() {
+    local VALUE="$1"
+
+    [[ "$VALUE" =~ ^[0-9]+$ ]] || return 1
+
+    [ "$VALUE" -ge 1 ] && [ "$VALUE" -le 100 ]
+}
+
+ssh_security_validate_max_startups() {
+    local VALUE="$1"
+    local START
+    local RATE
+    local FULL
+
+    if [[ "$VALUE" =~ ^[0-9]+$ ]]; then
+        [ "$VALUE" -ge 1 ] && [ "$VALUE" -le 100000 ]
+        return
+    fi
+
+    if [[ "$VALUE" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        START="${BASH_REMATCH[1]}"
+        RATE="${BASH_REMATCH[2]}"
+        FULL="${BASH_REMATCH[3]}"
+
+        [ "$START" -ge 1 ] &&
+        [ "$START" -le 100000 ] &&
+        [ "$RATE" -ge 0 ] &&
+        [ "$RATE" -le 100 ] &&
+        [ "$FULL" -ge "$START" ] &&
+        [ "$FULL" -le 100000 ]
+        return
+    fi
+
+    return 1
+}
+
+ssh_security_backup_connection_state() {
+    local TIMESTAMP="$1"
+    local BACKUP_DIR="$SSH_SECURITY_BACKUP_DIR/$TIMESTAMP"
+
+    if ! mkdir -p "$BACKUP_DIR"; then
+        return 1
+    fi
+
+    if [ ! -f "$SSH_CONFIG" ]; then
+        rm -rf "$BACKUP_DIR"
+        return 1
+    fi
+
+    if ! cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"; then
+        rm -rf "$BACKUP_DIR"
+        return 1
+    fi
+
+    echo "$BACKUP_DIR"
+}
+
+ssh_security_build_connection_config() {
+    local MAX_AUTH_TRIES="$1"
+    local MAX_STARTUPS="$2"
+    local TEMP_CONFIG="$3"
+    local MARKER_STATE
+
+    MARKER_STATE=$(ssh_security_get_connection_marker_state)
+
+    if [ "$MARKER_STATE" = "broken" ]; then
+        echo "Error: U-OPTI connection-limit marker is incomplete or invalid." >&2
+        return 1
+    fi
+
+    if [ "$MARKER_STATE" = "none" ] &&
+       ssh_security_has_manual_connection_limit; then
+        echo "Error: A manual MaxAuthTries or MaxStartups directive was found." >&2
+        echo "U-OPTI will not overwrite an existing manual configuration automatically." >&2
+        return 1
+    fi
+
+    if ! awk \
+        -v begin="$SSH_SECURITY_MARKER_BEGIN" \
+        -v end="$SSH_SECURITY_MARKER_END" '
+            $0 == begin {
+                inside=1
+                next
+            }
+
+            $0 == end {
+                inside=0
+                next
+            }
+
+            !inside &&
+            $0 !~ /^[[:space:]]*#/ &&
+            $0 !~ /^[[:space:]]*MaxAuthTries[[:space:]]+/ &&
+            $0 !~ /^[[:space:]]*MaxStartups[[:space:]]+/ {
+                print
+            }
+        ' "$SSH_CONFIG" > "$TEMP_CONFIG"; then
+        return 1
+    fi
+
+    {
+        echo
+        echo "$SSH_SECURITY_MARKER_BEGIN"
+        echo "MaxAuthTries $MAX_AUTH_TRIES"
+        echo "MaxStartups $MAX_STARTUPS"
+        echo "$SSH_SECURITY_MARKER_END"
+    } >> "$TEMP_CONFIG"
+}
+
+ssh_security_apply_connection_limits() {
+    local MAX_AUTH_TRIES="$1"
+    local MAX_STARTUPS="$2"
+    local TIMESTAMP
+    local BACKUP_DIR
+    local TEMP_CONFIG
+    local EXPECTED_AUTH_TRIES
+    local EXPECTED_STARTUPS
+    local EFFECTIVE_AUTH_TRIES
+    local EFFECTIVE_STARTUPS
+
+    if ! ssh_security_validate_max_auth_tries "$MAX_AUTH_TRIES"; then
+        echo
+        echo "Error: Invalid MaxAuthTries value."
+        echo "Allowed range: 1-100."
+        return 1
+    fi
+
+    if ! ssh_security_validate_max_startups "$MAX_STARTUPS"; then
+        echo
+        echo "Error: Invalid MaxStartups value."
+        echo "Use a single number or start:rate:full."
+        echo "Example: 10:30:60"
+        return 1
+    fi
+
+    if ! ssh_security_require_root; then
+        return 1
+    fi
+
+    if ! ssh_validate_configuration; then
+        echo
+        echo "Current SSH configuration is invalid."
+        echo "Connection limits were not changed."
+        return 1
+    fi
+
+    mkdir -p "$SSH_SECURITY_BACKUP_DIR" || return 1
+
+    TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+    BACKUP_DIR=$(ssh_security_backup_connection_state "$TIMESTAMP")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        echo
+        echo "Error: Failed to create SSH configuration backup."
+        return 1
+    fi
+
+    TEMP_CONFIG=$(mktemp) || {
+        echo
+        echo "Error: Failed to create temporary SSH configuration."
+        return 1
+    }
+
+    if ! ssh_security_build_connection_config \
+        "$MAX_AUTH_TRIES" \
+        "$MAX_STARTUPS" \
+        "$TEMP_CONFIG"; then
+
+        rm -f "$TEMP_CONFIG"
+        return 1
+    fi
+
+    if ! chown --reference="$SSH_CONFIG" "$TEMP_CONFIG" ||
+       ! chmod --reference="$SSH_CONFIG" "$TEMP_CONFIG"; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to preserve SSH configuration permissions."
+        return 1
+    fi
+
+    if ! ssh_prepare_runtime_dir >/dev/null 2>&1 ||
+       ! sshd -t -f "$TEMP_CONFIG" >/dev/null 2>&1; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: New SSH configuration failed validation."
+        echo "No changes were made."
+        return 1
+    fi
+
+    EXPECTED_AUTH_TRIES="$MAX_AUTH_TRIES"
+    EXPECTED_STARTUPS="$MAX_STARTUPS"
+
+    EFFECTIVE_AUTH_TRIES=$(
+        sshd -T -f "$TEMP_CONFIG" 2>/dev/null |
+            awk '$1 == "maxauthtries" {print $2; exit}'
+    )
+
+    EFFECTIVE_STARTUPS=$(
+        sshd -T -f "$TEMP_CONFIG" 2>/dev/null |
+            awk '$1 == "maxstartups" {print $2; exit}'
+    )
+
+    if [ "$EFFECTIVE_AUTH_TRIES" != "$EXPECTED_AUTH_TRIES" ] ||
+       [ "$EFFECTIVE_STARTUPS" != "$EXPECTED_STARTUPS" ]; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Effective SSH connection limits did not match the requested values."
+        echo "No changes were made."
+        return 1
+    fi
+
+    if ! mv -f "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to install the new SSH configuration."
+        return 1
+    fi
+
+    echo
+    echo "Reloading SSH configuration..."
+
+    if ! systemctl reload "$SSH_SERVICE_UNIT"; then
+        echo
+        echo "ERROR: SSH reload failed."
+        echo "Restoring the previous SSH configuration..."
+
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG" >/dev/null 2>&1 || true
+        systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+        echo "Previous SSH configuration restored."
+        return 1
+    fi
+
+    EFFECTIVE_AUTH_TRIES=$(ssh_security_get_limit_setting "maxauthtries")
+    EFFECTIVE_STARTUPS=$(ssh_security_get_limit_setting "maxstartups")
+
+    if [ "$EFFECTIVE_AUTH_TRIES" != "$EXPECTED_AUTH_TRIES" ] ||
+       [ "$EFFECTIVE_STARTUPS" != "$EXPECTED_STARTUPS" ]; then
+
+        echo
+        echo "ERROR: SSH reported unexpected effective connection limits."
+        echo "Restoring the previous SSH configuration..."
+
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG" >/dev/null 2>&1 || true
+        systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+        echo "Previous SSH configuration restored."
+        return 1
+    fi
+
+    echo
+    echo "======================================"
+    echo "     SSH Connection Limits Updated"
+    echo "======================================"
+    echo
+    echo "MaxAuthTries : $EFFECTIVE_AUTH_TRIES"
+    echo "MaxStartups  : $EFFECTIVE_STARTUPS"
+    echo
+    echo "SSH configuration is valid."
+    echo "SSH service reloaded successfully."
+    echo
+    echo "Backup:"
+    echo "$BACKUP_DIR"
+    echo
+    echo "Keep your current SSH session open."
+    echo "Test a new SSH connection before closing this session."
+    echo
+
+    return 0
+}
+
+ssh_security_show_connection_limits() {
+    clear
+
+    echo "======================================"
+    echo "         Connection Limits"
+    echo "======================================"
+    echo
+
+    if ! ssh_security_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v sshd >/dev/null 2>&1; then
+        echo "Error: sshd was not found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local MAX_AUTH_TRIES
+    local MAX_STARTUPS
+    local MARKER_STATE
+
+    MAX_AUTH_TRIES=$(ssh_security_get_limit_setting "maxauthtries")
+    MAX_STARTUPS=$(ssh_security_get_limit_setting "maxstartups")
+
+    [ -z "$MAX_AUTH_TRIES" ] && MAX_AUTH_TRIES="unknown"
+    [ -z "$MAX_STARTUPS" ] && MAX_STARTUPS="unknown"
+
+    MARKER_STATE=$(ssh_security_get_connection_marker_state)
+
+    case "$MARKER_STATE" in
+        valid)
+            MARKER_STATE="managed by U-OPTI"
+            ;;
+        none)
+            MARKER_STATE="system/default or manually configured"
+            ;;
+        broken)
+            MARKER_STATE="BROKEN"
+            ;;
+        *)
+            MARKER_STATE="unknown"
+            ;;
+    esac
+
+    echo "Effective SSH Limits"
+    echo "--------------------------------------"
+    echo "MaxAuthTries : $MAX_AUTH_TRIES"
+    echo "MaxStartups  : $MAX_STARTUPS"
+    echo
+    echo "U-OPTI Config : $MARKER_STATE"
+    echo
+    echo "MaxAuthTries controls authentication attempts per connection."
+    echo "MaxStartups controls concurrent unauthenticated SSH connections."
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
+ssh_security_reset_connection_limits() {
+    clear
+
+    echo "======================================"
+    echo "      Reset Connection Limits"
+    echo "======================================"
+    echo
+
+    if ! ssh_security_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local MARKER_STATE
+    MARKER_STATE=$(ssh_security_get_connection_marker_state)
+
+    if [ "$MARKER_STATE" = "none" ]; then
+        echo "No U-OPTI-managed connection limits were found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$MARKER_STATE" = "broken" ]; then
+        echo "Error: U-OPTI connection-limit marker is incomplete or invalid."
+        echo "Reset was cancelled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "This will remove the U-OPTI-managed MaxAuthTries and"
+    echo "MaxStartups settings and return those settings to the"
+    echo "system/default configuration."
+    echo
+    read -rp "Continue? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Reset cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+            ;;
+    esac
+
+    local TIMESTAMP
+    local BACKUP_DIR
+    local TEMP_CONFIG
+
+    mkdir -p "$SSH_SECURITY_BACKUP_DIR" || {
+        echo
+        echo "Error: Failed to prepare backup directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+    BACKUP_DIR=$(ssh_security_backup_connection_state "$TIMESTAMP")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        echo
+        echo "Error: Failed to create SSH configuration backup."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    TEMP_CONFIG=$(mktemp) || {
+        echo
+        echo "Error: Failed to create temporary SSH configuration."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    if ! awk \
+        -v begin="$SSH_SECURITY_MARKER_BEGIN" \
+        -v end="$SSH_SECURITY_MARKER_END" '
+            $0 == begin {
+                inside=1
+                next
+            }
+
+            $0 == end {
+                inside=0
+                next
+            }
+
+            !inside {
+                print
+            }
+        ' "$SSH_CONFIG" > "$TEMP_CONFIG"; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to build the reset configuration."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! chown --reference="$SSH_CONFIG" "$TEMP_CONFIG" ||
+       ! chmod --reference="$SSH_CONFIG" "$TEMP_CONFIG" ||
+       ! sshd -t -f "$TEMP_CONFIG" >/dev/null 2>&1; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Reset configuration failed validation."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! mv -f "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to install the reset configuration."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl reload "$SSH_SERVICE_UNIT"; then
+        echo
+        echo "ERROR: SSH reload failed."
+        echo "Restoring the previous SSH configuration..."
+
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG" >/dev/null 2>&1 || true
+        systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+        echo "Previous SSH configuration restored."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Connection limits were reset successfully."
+    echo
+    echo "Current effective values:"
+    echo "MaxAuthTries : $(ssh_security_get_limit_setting "maxauthtries")"
+    echo "MaxStartups  : $(ssh_security_get_limit_setting "maxstartups")"
+    echo
+    echo "Backup:"
+    echo "$BACKUP_DIR"
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
+ssh_security_connection_limits_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "         Connection Limits"
+        echo "======================================"
+        echo
+        echo "1) Security Status"
+        echo "2) Apply Recommended Limits"
+        echo "3) Custom Limits"
+        echo "4) Reset to System Defaults"
+        echo
+        echo "0) Back"
+        echo
+
+        local CONNECTION_LIMIT_CHOICE
+        read -rp "Please enter your selection [0-4]: " CONNECTION_LIMIT_CHOICE
+
+        case "$CONNECTION_LIMIT_CHOICE" in
+            1)
+                ssh_security_show_connection_limits
+                ;;
+
+            2)
+                clear
+
+                echo "======================================"
+                echo "     Recommended SSH Limits"
+                echo "======================================"
+                echo
+                echo "MaxAuthTries : 4"
+                echo "MaxStartups  : 10:30:60"
+                echo
+                echo "These limits reduce repeated authentication attempts"
+                echo "and limit concurrent unauthenticated SSH connections."
+                echo
+                read -rp "Apply these settings? [y/N]: " CONFIRM
+
+                case "$CONFIRM" in
+                    y|Y|yes|YES)
+                        ssh_security_apply_connection_limits "4" "10:30:60"
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                    *)
+                        echo
+                        echo "Operation cancelled."
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                esac
+                ;;
+
+            3)
+                clear
+
+                echo "======================================"
+                echo "          Custom SSH Limits"
+                echo "======================================"
+                echo
+                echo "MaxAuthTries example : 4"
+                echo "MaxStartups example  : 10:30:60"
+                echo
+
+                local CUSTOM_MAX_AUTH_TRIES
+                local CUSTOM_MAX_STARTUPS
+
+                read -rp "MaxAuthTries: " CUSTOM_MAX_AUTH_TRIES
+                read -rp "MaxStartups : " CUSTOM_MAX_STARTUPS
+
+                if ! ssh_security_validate_max_auth_tries "$CUSTOM_MAX_AUTH_TRIES"; then
+                    echo
+                    echo "Invalid MaxAuthTries value."
+                    echo
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+
+                if ! ssh_security_validate_max_startups "$CUSTOM_MAX_STARTUPS"; then
+                    echo
+                    echo "Invalid MaxStartups value."
+                    echo
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "New values:"
+                echo "MaxAuthTries : $CUSTOM_MAX_AUTH_TRIES"
+                echo "MaxStartups  : $CUSTOM_MAX_STARTUPS"
+                echo
+
+                read -rp "Apply these settings? [y/N]: " CONFIRM
+
+                case "$CONFIRM" in
+                    y|Y|yes|YES)
+                        ssh_security_apply_connection_limits \
+                            "$CUSTOM_MAX_AUTH_TRIES" \
+                            "$CUSTOM_MAX_STARTUPS"
+
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                    *)
+                        echo
+                        echo "Operation cancelled."
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                esac
+                ;;
+
+            4)
+                ssh_security_reset_connection_limits
                 ;;
 
             0)
