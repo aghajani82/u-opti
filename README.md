@@ -6,7 +6,7 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, and maintainin
 
 ## Current Version
 
-**v0.10.0**
+**v0.11.0**
 
 ## Features
 
@@ -50,6 +50,34 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, and maintainin
 - Backup SSH configuration before changes
 - Protect against invalid or conflicting ports
 
+### SSH Access Management
+
+- Check current SSH access configuration
+- Detect effective root SSH authentication settings
+- Generate Ed25519 SSH key pairs
+- Optional private-key passphrase protection
+- Display SSH key fingerprints
+- Display public keys for safe installation
+- Add public keys to `authorized_keys`
+- Validate public keys before installation
+- List installed public keys
+- Display key fingerprints
+- Remove selected public keys
+- Automatically back up `authorized_keys` before changes
+- Create full SSH access backups
+- Restore previous SSH access configuration
+- Create safety backups before restore operations
+- Validate restored SSH configuration
+- Automatic rollback when restore validation fails
+- Change the password of the target user
+- Enable root key-only SSH authentication
+- Disable root password authentication
+- Disable root keyboard-interactive authentication
+- Keep public key authentication enabled
+- Verify effective SSH authentication settings before and after changes
+- Require an active SSH session before enabling key-only access
+- Require at least one root public key before enabling key-only access
+
 ### Firewall Management
 
 U-OPTI uses UFW for firewall management.
@@ -73,3 +101,62 @@ Multiple ports can be entered in a single line using spaces:
 
 ```text
 2087 2096 2053 8443
+```
+
+## Installation
+
+### Stable Version
+
+Install the latest stable version from the `main` branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/main/install.sh -o /tmp/u-opti-install.sh
+bash /tmp/u-opti-install.sh
+```
+
+After installation, run:
+
+```bash
+u-opti
+```
+
+### Development / Testing Version
+
+For testing the current development branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/refactor/v0.11.0-ssh-access/install.sh -o /tmp/u-opti-install.sh
+bash /tmp/u-opti-install.sh
+```
+
+After installation, run:
+
+```bash
+u-opti
+```
+
+## SSH Key Notes
+
+When generating an SSH key pair, the private key must be stored securely.
+
+Do not upload or commit private SSH keys to GitHub.
+
+If a passphrase is used, keep it separate from the private key and store both securely.
+
+## Safety
+
+U-OPTI validates important configuration changes before applying them whenever possible.
+
+For SSH access operations, the tool can create backups, validate the resulting configuration, verify effective authentication settings, and automatically roll back failed changes.
+
+When enabling root key-only SSH access, keep the current SSH session open until a second SSH connection using the private key has been successfully tested.
+
+## Development
+
+Development work is performed on dedicated version or feature branches and tested on clean Ubuntu servers before release.
+
+The `main` branch contains the stable release.
+
+## License
+
+See the repository license for details.
