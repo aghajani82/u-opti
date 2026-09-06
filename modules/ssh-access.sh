@@ -1670,6 +1670,228 @@ ssh_access_authentication_settings() {
 
 
 
+ssh_access_authentication_settings() {
+    clear
+
+    echo "======================================"
+    echo "     SSH Authentication Settings"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+    local PASSWORD_AUTH
+    local PUBKEY_AUTH
+    local ROOT_LOGIN
+    local KEY_COUNT
+    local AUTH_MODE
+    local CHOICE
+
+    TARGET_USER="$(ssh_access_get_target_user)"
+    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
+
+    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
+    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
+    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
+
+    KEY_COUNT=0
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+
+    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+        KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
+    fi
+
+    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Password + Public Key"
+    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Public Key Only"
+    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
+        AUTH_MODE="Password Only"
+    else
+        AUTH_MODE="Restricted / Custom"
+    fi
+
+    echo "Current Status"
+    echo "--------------------------------------"
+    echo "User                      : $TARGET_USER"
+    echo "Root SSH Login            : $ROOT_LOGIN"
+    echo "Public Key Authentication : $PUBKEY_AUTH"
+    echo "Password Authentication   : $PASSWORD_AUTH"
+    echo "Installed Public Keys     : $KEY_COUNT"
+    echo
+    echo "SSH Access Mode           : $AUTH_MODE"
+
+    echo
+    echo "--------------------------------------"
+    echo
+    echo "1) Enable Key-Only Login"
+    echo "2) Enable Password Login"
+    echo "0) Back"
+    echo
+
+    read -rp "Please enter your selection [0-2]: " CHOICE
+
+    case "$CHOICE" in
+        1)
+            echo
+            echo "Key-Only Login"
+            echo "--------------------------------------"
+            echo
+            echo "This option will disable SSH password authentication"
+            echo "for the root account and keep public key authentication enabled."
+            echo
+            echo "Safety checks and automatic rollback will be added"
+            echo "before the actual configuration change."
+            echo
+            echo "No SSH settings have been changed."
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+
+        2)
+            echo
+            echo "Password Login"
+            echo "--------------------------------------"
+            echo
+            echo "Password authentication is currently:"
+            echo "  $PASSWORD_AUTH"
+            echo
+            echo "No SSH settings have been changed."
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+
+        0)
+            return 0
+            ;;
+
+        *)
+            echo
+            echo "Invalid selection."
+            read -rp "Press Enter to return..."
+            ;;
+    esac
+}
+
+ssh_access_authentication_settings() {
+    clear
+
+    echo "======================================"
+    echo "     SSH Authentication Settings"
+    echo "======================================"
+    echo
+
+    if ! ssh_access_require_root; then
+        read -rp "Press Enter to return..."
+        return 1
+    fi
+
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
+    local PASSWORD_AUTH
+    local PUBKEY_AUTH
+    local ROOT_LOGIN
+    local KEY_COUNT
+    local AUTH_MODE
+    local CHOICE
+
+    TARGET_USER="$(ssh_access_get_target_user)"
+    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
+
+    PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
+    PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
+    ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
+
+    KEY_COUNT=0
+    AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
+
+    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+        KEY_COUNT="$(ssh_access_count_keys_in_file "$AUTHORIZED_KEYS_FILE")"
+    fi
+
+    if [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Password + Public Key"
+    elif [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+        AUTH_MODE="Public Key Only"
+    elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
+        AUTH_MODE="Password Only"
+    else
+        AUTH_MODE="Restricted / Custom"
+    fi
+
+    echo "Current Status"
+    echo "--------------------------------------"
+    echo "User                      : $TARGET_USER"
+    echo "Root SSH Login            : $ROOT_LOGIN"
+    echo "Public Key Authentication : $PUBKEY_AUTH"
+    echo "Password Authentication   : $PASSWORD_AUTH"
+    echo "Installed Public Keys     : $KEY_COUNT"
+    echo
+    echo "SSH Access Mode           : $AUTH_MODE"
+
+    echo
+    echo "--------------------------------------"
+    echo
+    echo "1) Enable Key-Only Login"
+    echo "2) Enable Password Login"
+    echo "0) Back"
+    echo
+
+    read -rp "Please enter your selection [0-2]: " CHOICE
+
+    case "$CHOICE" in
+        1)
+            echo
+            echo "Key-Only Login"
+            echo "--------------------------------------"
+            echo
+            echo "This option will disable SSH password authentication"
+            echo "for the root account and keep public key authentication enabled."
+            echo
+            echo "Safety checks and automatic rollback will be added"
+            echo "before the actual configuration change."
+            echo
+            echo "No SSH settings have been changed."
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+
+        2)
+            echo
+            echo "Password Login"
+            echo "--------------------------------------"
+            echo
+            echo "Password authentication is currently:"
+            echo "  $PASSWORD_AUTH"
+            echo
+            echo "No SSH settings have been changed."
+            echo
+            read -rp "Press Enter to return..."
+            ;;
+
+        0)
+            return 0
+            ;;
+
+        *)
+            echo
+            echo "Invalid selection."
+            read -rp "Press Enter to return..."
+            ;;
+    esac
+}
+
+
+
+
+
 
 
 
