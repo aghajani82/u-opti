@@ -533,8 +533,9 @@ while true; do
             echo
             echo "All U-OPTI modules were updated successfully."
             echo
-
-            read -rp "Press Enter to return..."
+            echo "Restarting U-OPTI with the new version..."
+            sleep 1
+            exec "$INSTALL_PATH"
             ;;
 
         7)
