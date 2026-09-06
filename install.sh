@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="refactor/v0.11.0-ssh-access"
+BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
