@@ -1578,25 +1578,24 @@ ssh_access_authentication_settings() {
         return 1
     fi
 
+    local TARGET_USER
+    local HOME_DIR
+    local AUTHORIZED_KEYS_FILE
     local PASSWORD_AUTH
     local PUBKEY_AUTH
     local ROOT_LOGIN
-    local TARGET_USER
     local KEY_COUNT
     local AUTH_MODE
+    local CHOICE
 
     TARGET_USER="$(ssh_access_get_target_user)"
+    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
 
     PASSWORD_AUTH="$(ssh_get_effective_setting "passwordauthentication" 2>/dev/null || true)"
     PUBKEY_AUTH="$(ssh_get_effective_setting "pubkeyauthentication" 2>/dev/null || true)"
     ROOT_LOGIN="$(ssh_get_effective_setting "permitrootlogin" 2>/dev/null || true)"
 
     KEY_COUNT=0
-
-    local HOME_DIR
-    local AUTHORIZED_KEYS_FILE
-
-    HOME_DIR="$(ssh_access_get_user_home "$TARGET_USER")"
     AUTHORIZED_KEYS_FILE="$HOME_DIR/.ssh/authorized_keys"
 
     if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
@@ -1610,7 +1609,7 @@ ssh_access_authentication_settings() {
     elif [ "$PASSWORD_AUTH" = "yes" ] && [ "$PUBKEY_AUTH" != "yes" ]; then
         AUTH_MODE="Password Only"
     else
-        AUTH_MODE="Custom / Restricted"
+        AUTH_MODE="Restricted / Custom"
     fi
 
     echo "Current Status"
@@ -1631,33 +1630,124 @@ ssh_access_authentication_settings() {
     echo "0) Back"
     echo
 
-    local CHOICE
-
     read -rp "Please enter your selection [0-2]: " CHOICE
 
     case "$CHOICE" in
         1)
+            clear
+
+            echo "======================================"
+            echo "        Key-Only Login Check"
+            echo "======================================"
             echo
-            echo "Key-Only Login is not enabled yet."
+
+            local CHECK_FAILED=0
+            local SSHD_PATH
+            local SSH_SESSION_STATUS
+
+            SSHD_PATH="$(command -v sshd 2>/dev/null || true)"
+
+            echo "Security Checks"
+            echo "--------------------------------------"
+
+            if [ -z "$SSHD_PATH" ]; then
+                echo "✗ OpenSSH Server             : not found"
+                CHECK_FAILED=1
+            else
+                echo "✓ OpenSSH Server             : available"
+            fi
+
+            if [ "$TARGET_USER" = "root" ]; then
+                echo "✓ Target User                : root"
+            else
+                echo "✗ Target User                : $TARGET_USER"
+                echo "  Key-Only Login is restricted to root."
+                CHECK_FAILED=1
+            fi
+
+            if [ "$ROOT_LOGIN" = "yes" ]; then
+                echo "✓ Root SSH Login             : enabled"
+            else
+                echo "✗ Root SSH Login             : $ROOT_LOGIN"
+                CHECK_FAILED=1
+            fi
+
+            if [ "$PUBKEY_AUTH" = "yes" ]; then
+                echo "✓ Public Key Authentication  : enabled"
+            else
+                echo "✗ Public Key Authentication : $PUBKEY_AUTH"
+                CHECK_FAILED=1
+            fi
+
+            if [ "$KEY_COUNT" -gt 0 ]; then
+                echo "✓ Root Public Keys           : $KEY_COUNT found"
+            else
+                echo "✗ Root Public Keys           : none found"
+                CHECK_FAILED=1
+            fi
+
+            if [ -n "$SSH_CONNECTION" ]; then
+                SSH_SESSION_STATUS="detected"
+                echo "✓ Current SSH Session        : detected"
+            else
+                SSH_SESSION_STATUS="not detected"
+                echo "✗ Current SSH Session        : not detected"
+                CHECK_FAILED=1
+            fi
+
+            if [ -n "$SSHD_PATH" ] && "$SSHD_PATH" -t >/dev/null 2>&1; then
+                echo "✓ SSH Configuration          : valid"
+            else
+                echo "✗ SSH Configuration          : invalid"
+                CHECK_FAILED=1
+            fi
+
             echo
-            echo "The next step will add:"
-            echo "  - Safety checks"
-            echo "  - Automatic SSH backup"
-            echo "  - Public key verification"
-            echo "  - Configuration validation"
-            echo "  - Automatic rollback on failure"
+            echo "--------------------------------------"
+
+            if [ "$CHECK_FAILED" -ne 0 ]; then
+                echo
+                echo "✗ Key-Only Login cannot be enabled."
+                echo
+                echo "No SSH settings were changed."
+                echo
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+
             echo
+            echo "✓ All safety checks passed."
+            echo
+            echo "The next step will:"
+            echo "  - Create an automatic SSH backup"
+            echo "  - Disable root password authentication"
+            echo "  - Keep public key authentication enabled"
+            echo "  - Validate the SSH configuration"
+            echo "  - Roll back automatically if validation fails"
+            echo
+            echo "No SSH settings have been changed yet."
+            echo
+
             read -rp "Press Enter to return..."
             ;;
+
         2)
             echo
-            echo "Password Login is already available through the current SSH configuration."
+            echo "Password Login"
+            echo "--------------------------------------"
+            echo
+            echo "Password authentication is currently:"
+            echo "  $PASSWORD_AUTH"
+            echo
+            echo "No SSH settings have been changed."
             echo
             read -rp "Press Enter to return..."
             ;;
+
         0)
             return 0
             ;;
+
         *)
             echo
             echo "Invalid selection."
