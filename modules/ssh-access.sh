@@ -370,10 +370,16 @@ ssh_access_generate_key_pair() {
 
     echo "Enter a name for the key."
     echo "Example: my-server"
+    echo "0) Back"
     echo
 
     while true; do
         read -rp "Key name: " KEY_NAME
+
+        if [ "$KEY_NAME" = "0" ]; then
+            rm -rf "$KEY_DIR"
+            return
+        fi
 
         if [ -z "$KEY_NAME" ]; then
             echo
