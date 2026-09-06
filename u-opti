@@ -37,6 +37,401 @@ source "$MODULES_PATH/firewall.sh"
 source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 
+ssh_security_show_root_login() {
+    clear
+
+    echo "======================================"
+    echo "             Root Login"
+    echo "======================================"
+    echo
+
+    if ! ssh_security_require_root; then
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local ROOT_LOGIN
+    local PASSWORD_AUTH
+    local PUBKEY_AUTH
+    local CURRENT_USER
+
+    ROOT_LOGIN=$(ssh_security_get_limit_setting "permitrootlogin")
+    CURRENT_USER=$(id -un)
+
+    PASSWORD_AUTH=$(
+        if [ -d /run/sshd ] || mkdir -p /run/sshd 2>/dev/null; then
+            sshd -T -C "user=root,host=localhost,addr=127.0.0.1" 2>/dev/null |
+                awk '$1 == "passwordauthentication" {print $2; exit}'
+        fi
+    )
+
+    PUBKEY_AUTH=$(
+        sshd -T -C "user=root,host=localhost,addr=127.0.0.1" 2>/dev/null |
+            awk '$1 == "pubkeyauthentication" {print $2; exit}'
+    )
+
+    [ -z "$ROOT_LOGIN" ] && ROOT_LOGIN="unknown"
+    [ -z "$PASSWORD_AUTH" ] && PASSWORD_AUTH="unknown"
+    [ -z "$PUBKEY_AUTH" ] && PUBKEY_AUTH="unknown"
+
+    echo "Effective Root SSH Login"
+    echo "--------------------------------------"
+    echo "PermitRootLogin          : $ROOT_LOGIN"
+    echo "Password Authentication  : $PASSWORD_AUTH"
+    echo "Public Key Authentication: $PUBKEY_AUTH"
+    echo
+    echo "Current User             : $CURRENT_USER"
+    echo
+
+    case "$ROOT_LOGIN" in
+        yes)
+            echo "Root SSH login is enabled."
+            if [ "$PASSWORD_AUTH" = "no" ] && [ "$PUBKEY_AUTH" = "yes" ]; then
+                echo "Password login is disabled; root access is key-based."
+            fi
+            ;;
+        prohibit-password|without-password)
+            echo "Root SSH login is allowed with public key authentication."
+            echo "Root password authentication is prohibited."
+            ;;
+        no)
+            echo "Root SSH login is disabled."
+            ;;
+        *)
+            echo "Root SSH login state could not be determined."
+            ;;
+    esac
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
+ssh_security_backup_root_login_state() {
+    local TIMESTAMP="$1"
+    local BACKUP_DIR="$SSH_SECURITY_BACKUP_DIR/root-login/$TIMESTAMP"
+
+    if ! mkdir -p "$BACKUP_DIR"; then
+        return 1
+    fi
+
+    if [ ! -f "$SSH_CONFIG" ]; then
+        rm -rf "$BACKUP_DIR"
+        return 1
+    fi
+
+    if ! cp -a "$SSH_CONFIG" "$BACKUP_DIR/sshd_config"; then
+        rm -rf "$BACKUP_DIR"
+        return 1
+    fi
+
+    echo "$BACKUP_DIR"
+}
+
+ssh_security_root_login_build_config() {
+    local NEW_ROOT_LOGIN="$1"
+    local TEMP_CONFIG="$2"
+
+    if ! awk \
+        -v mode="$NEW_ROOT_LOGIN" '
+            /^[[:space:]]*#/ {
+                print
+                next
+            }
+
+            /^[[:space:]]*PermitRootLogin[[:space:]]+/ {
+                print "PermitRootLogin " mode
+                found=1
+                next
+            }
+
+            {
+                print
+            }
+
+            END {
+                if (!found) {
+                    print "PermitRootLogin " mode
+                }
+            }
+        ' "$SSH_CONFIG" > "$TEMP_CONFIG"; then
+        return 1
+    fi
+}
+
+ssh_security_set_root_login() {
+    local NEW_ROOT_LOGIN="$1"
+    local CURRENT_ROOT_LOGIN
+    local CURRENT_USER
+    local TIMESTAMP
+    local BACKUP_DIR
+    local TEMP_CONFIG
+    local EFFECTIVE_ROOT_LOGIN
+    local EFFECTIVE_PASSWORD_AUTH
+    local EFFECTIVE_PUBKEY_AUTH
+
+    case "$NEW_ROOT_LOGIN" in
+        yes|prohibit-password|no)
+            ;;
+        *)
+            echo
+            echo "Error: Invalid root login mode."
+            return 1
+            ;;
+    esac
+
+    if ! ssh_security_require_root; then
+        return 1
+    fi
+
+    CURRENT_USER=$(id -un)
+
+    if [ "$NEW_ROOT_LOGIN" = "no" ] && [ "$CURRENT_USER" = "root" ]; then
+        echo
+        echo "You are currently logged in as root."
+        echo "Disabling root SSH login will not terminate this session,"
+        echo "but you must have another administrative account or"
+        echo "another recovery path before doing this."
+        echo
+        read -rp "Continue? [y/N]: " ROOT_CONFIRM
+
+        case "$ROOT_CONFIRM" in
+            y|Y|yes|YES)
+                ;;
+            *)
+                echo
+                echo "Operation cancelled."
+                return 1
+                ;;
+        esac
+    fi
+
+    if ! ssh_validate_configuration; then
+        echo
+        echo "Current SSH configuration is invalid."
+        echo "Root login settings were not changed."
+        return 1
+    fi
+
+    CURRENT_ROOT_LOGIN=$(ssh_security_get_limit_setting "permitrootlogin")
+
+    if [ "$CURRENT_ROOT_LOGIN" = "$NEW_ROOT_LOGIN" ]; then
+        echo
+        echo "Root Login is already set to: $NEW_ROOT_LOGIN"
+        return 0
+    fi
+
+    mkdir -p "$SSH_SECURITY_BACKUP_DIR/root-login" || return 1
+
+    TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+    BACKUP_DIR=$(ssh_security_backup_root_login_state "$TIMESTAMP")
+
+    if [ -z "$BACKUP_DIR" ]; then
+        echo
+        echo "Error: Failed to create SSH configuration backup."
+        return 1
+    fi
+
+    TEMP_CONFIG=$(mktemp) || {
+        echo
+        echo "Error: Failed to create temporary SSH configuration."
+        return 1
+    }
+
+    if ! ssh_security_root_login_build_config "$NEW_ROOT_LOGIN" "$TEMP_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to build new SSH configuration."
+        return 1
+    fi
+
+    if ! chown --reference="$SSH_CONFIG" "$TEMP_CONFIG" ||
+       ! chmod --reference="$SSH_CONFIG" "$TEMP_CONFIG" ||
+       ! sshd -t -f "$TEMP_CONFIG" >/dev/null 2>&1; then
+
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: New SSH configuration failed validation."
+        echo "No changes were made."
+        return 1
+    fi
+
+    EFFECTIVE_ROOT_LOGIN=$(
+        sshd -T -f "$TEMP_CONFIG" -C "user=root,host=localhost,addr=127.0.0.1" 2>/dev/null |
+            awk '$1 == "permitrootlogin" {print $2; exit}'
+    )
+
+    EFFECTIVE_PASSWORD_AUTH=$(
+        sshd -T -f "$TEMP_CONFIG" -C "user=root,host=localhost,addr=127.0.0.1" 2>/dev/null |
+            awk '$1 == "passwordauthentication" {print $2; exit}'
+    )
+
+    EFFECTIVE_PUBKEY_AUTH=$(
+        sshd -T -f "$TEMP_CONFIG" -C "user=root,host=localhost,addr=127.0.0.1" 2>/dev/null |
+            awk '$1 == "pubkeyauthentication" {print $2; exit}'
+    )
+
+    if [ "$EFFECTIVE_ROOT_LOGIN" != "$NEW_ROOT_LOGIN" ]; then
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Effective PermitRootLogin did not match the requested value."
+        echo "No changes were made."
+        return 1
+    fi
+
+    if ! mv -f "$TEMP_CONFIG" "$SSH_CONFIG"; then
+        rm -f "$TEMP_CONFIG"
+        echo
+        echo "Error: Failed to install the new SSH configuration."
+        return 1
+    fi
+
+    echo
+    echo "Reloading SSH configuration..."
+
+    if ! systemctl reload "$SSH_SERVICE_UNIT"; then
+        echo
+        echo "ERROR: SSH reload failed."
+        echo "Restoring the previous SSH configuration..."
+
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG" >/dev/null 2>&1 || true
+        systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+        echo "Previous SSH configuration restored."
+        return 1
+    fi
+
+    CURRENT_ROOT_LOGIN=$(ssh_security_get_limit_setting "permitrootlogin")
+
+    if [ "$CURRENT_ROOT_LOGIN" != "$NEW_ROOT_LOGIN" ]; then
+        echo
+        echo "ERROR: SSH reported an unexpected PermitRootLogin value."
+        echo "Restoring the previous SSH configuration..."
+
+        cp -a "$BACKUP_DIR/sshd_config" "$SSH_CONFIG" >/dev/null 2>&1 || true
+        systemctl reload "$SSH_SERVICE_UNIT" >/dev/null 2>&1 || true
+
+        echo "Previous SSH configuration restored."
+        return 1
+    fi
+
+    echo
+    echo "======================================"
+    echo "      Root Login Setting Updated"
+    echo "======================================"
+    echo
+    echo "PermitRootLogin          : $CURRENT_ROOT_LOGIN"
+    echo "Password Authentication  : $EFFECTIVE_PASSWORD_AUTH"
+    echo "Public Key Authentication: $EFFECTIVE_PUBKEY_AUTH"
+    echo
+    echo "SSH configuration is valid."
+    echo "SSH service reloaded successfully."
+    echo
+    echo "Backup:"
+    echo "$BACKUP_DIR"
+    echo
+    echo "Keep your current SSH session open."
+    echo "Test a new SSH connection before closing this session."
+    echo
+
+    return 0
+}
+
+ssh_security_root_login_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "             Root Login"
+        echo "======================================"
+        echo
+        echo "1) Security Status"
+        echo "2) Allow Root Login (Key / Policy)"
+        echo "3) Disable Root SSH Login"
+        echo
+        echo "0) Back"
+        echo
+
+        local ROOT_LOGIN_CHOICE
+        read -rp "Please enter your selection [0-3]: " ROOT_LOGIN_CHOICE
+
+        case "$ROOT_LOGIN_CHOICE" in
+            1)
+                ssh_security_show_root_login
+                ;;
+
+            2)
+                clear
+                echo "======================================"
+                echo "      Allow Root SSH Login"
+                echo "======================================"
+                echo
+                echo "This sets:"
+                echo "PermitRootLogin yes"
+                echo
+                echo "Your current authentication settings are preserved."
+                echo "PasswordAuthentication is not changed."
+                echo
+                read -rp "Apply this setting? [y/N]: " CONFIRM
+
+                case "$CONFIRM" in
+                    y|Y|yes|YES)
+                        ssh_security_set_root_login "yes"
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                    *)
+                        echo
+                        echo "Operation cancelled."
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                esac
+                ;;
+
+            3)
+                clear
+                echo "======================================"
+                echo "      Disable Root SSH Login"
+                echo "======================================"
+                echo
+                echo "This sets:"
+                echo "PermitRootLogin no"
+                echo
+                echo "Root will no longer be allowed to log in through SSH."
+                echo "Your current SSH session will not be terminated."
+                echo
+                echo "Make sure another administrative/recovery path exists."
+                echo
+                read -rp "Disable root SSH login? [y/N]: " CONFIRM
+
+                case "$CONFIRM" in
+                    y|Y|yes|YES)
+                        ssh_security_set_root_login "no"
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                    *)
+                        echo
+                        echo "Operation cancelled."
+                        echo
+                        read -rp "Press Enter to return..."
+                        ;;
+                esac
+                ;;
+
+            0)
+                break
+                ;;
+
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
 show_ssh_security_menu() {
     while true; do
         clear
@@ -70,14 +465,7 @@ show_ssh_security_menu() {
                 ;;
 
             4)
-                clear
-                echo "======================================"
-                echo "             Root Login"
-                echo "======================================"
-                echo
-                echo "Root Login Management will be added in a future step."
-                echo
-                read -rp "Press Enter to return..."
+                ssh_security_root_login_menu
                 ;;
 
             0)
