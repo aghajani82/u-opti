@@ -518,6 +518,7 @@ ssh_access_generate_key_pair() {
                 return
                 ;;
             0)
+                rm -rf "$KEY_DIR"
                 return
                 ;;
             *)
@@ -584,11 +585,13 @@ ssh_access_add_public_key() {
     local TEMP_KEY_FILE
     local BACKUP_DIR
     local SSH_DIR
+    local GROUP_NAME
 
     TARGET_USER=$(ssh_access_get_target_user)
     HOME_DIR=$(ssh_access_get_user_home "$TARGET_USER")
+    GROUP_NAME=$(id -gn "$TARGET_USER" 2>/dev/null || true)
 
-    if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+    if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ] || [ -z "$GROUP_NAME" ]; then
         echo "Error: Unable to determine the user's home directory."
         echo
         read -rp "Press Enter to return..."
@@ -603,9 +606,14 @@ ssh_access_add_public_key() {
     echo
     echo "Paste the PUBLIC key below."
     echo "Example: ssh-ed25519 AAAA... comment"
+    echo "0) Back"
     echo
 
     read -r PUBLIC_KEY
+
+    if [ "$PUBLIC_KEY" = "0" ]; then
+        return
+    fi
 
     if [ -z "$PUBLIC_KEY" ]; then
         echo
@@ -670,7 +678,7 @@ ssh_access_add_public_key() {
         fi
 
         chmod 700 "$SSH_DIR"
-        chown "$TARGET_USER:$TARGET_USER" "$SSH_DIR"
+        chown "$TARGET_USER:$GROUP_NAME" "$SSH_DIR"
     fi
 
     if [ ! -f "$AUTHORIZED_KEYS_FILE" ]; then
@@ -683,7 +691,7 @@ ssh_access_add_public_key() {
         }
 
         chmod 600 "$AUTHORIZED_KEYS_FILE"
-        chown "$TARGET_USER:$TARGET_USER" "$AUTHORIZED_KEYS_FILE"
+        chown "$TARGET_USER:$GROUP_NAME" "$AUTHORIZED_KEYS_FILE"
     fi
 
     if ! cat "$TEMP_KEY_FILE" >> "$AUTHORIZED_KEYS_FILE"; then
@@ -698,7 +706,7 @@ ssh_access_add_public_key() {
     rm -f "$TEMP_KEY_FILE"
 
     chmod 600 "$AUTHORIZED_KEYS_FILE"
-    chown "$TARGET_USER:$TARGET_USER" "$AUTHORIZED_KEYS_FILE"
+    chown "$TARGET_USER:$GROUP_NAME" "$AUTHORIZED_KEYS_FILE"
 
     echo
     echo "======================================"
