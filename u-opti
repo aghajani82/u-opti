@@ -134,22 +134,18 @@ while true; do
             ;;
 
         3)
-            show_ssh_menu
+            show_server_security_menu
             ;;
 
         4)
-            show_firewall_menu
-            ;;
-
-        5)
             show_xui_pro_menu
             ;;
 
-        6)
+        5)
             show_certificate_menu
             ;;
 
-        7)
+        6)
             clear
 
             echo "======================================"
@@ -483,7 +479,7 @@ while true; do
             read -rp "Press Enter to return..."
             ;;
 
-        8)
+        7)
             clear
 
             echo "======================================"
