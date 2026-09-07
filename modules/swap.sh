@@ -79,7 +79,11 @@ show_swap_menu() {
                     continue
                 fi
 
-                read -rp "Enter Swap size (e.g. 1G, 2G, 4G): " SWAP_SIZE
+                read -rp "Enter Swap size (e.g. 1G, 2G, 4G) or 0 to go back: " SWAP_SIZE
+
+                if [ "$SWAP_SIZE" = "0" ]; then
+                    continue
+                fi
 
                 if [[ ! "$SWAP_SIZE" =~ ^[0-9]+[MG]$ ]]; then
                     echo
