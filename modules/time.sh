@@ -117,6 +117,25 @@ show_time_menu() {
                 echo "      Time Synchronization"
                 echo "======================================"
                 echo
+                echo "Press 0 to return without changing time synchronization."
+                echo
+                read -rp "Continue with NTP synchronization? [y/N]: " NTP_CONFIRM
+
+                case "$NTP_CONFIRM" in
+                    y|Y|yes|YES)
+                        ;;
+                    0|n|N|no|NO|"")
+                        continue
+                        ;;
+                    *)
+                        echo
+                        echo "Operation cancelled."
+                        sleep 1
+                        continue
+                        ;;
+                esac
+
+                echo
                 echo "Enabling NTP time synchronization..."
                 echo
 
