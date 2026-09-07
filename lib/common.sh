@@ -69,7 +69,7 @@ backup_create() {
         printf '  %s\n' "$PATH_ITEM" >> "$MANIFEST"
     done
 
-    if ! tar -C / -czf "$ARCHIVE" "${@#/}"; then
+    if ! tar -C / --exclude="etc/u-opti/backups" -czf "$ARCHIVE" "${@#/}"; then
         echo "Error: Failed to create backup archive." >&2
         rm -rf "$BACKUP_DIR"
         return 1
