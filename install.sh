@@ -29,6 +29,7 @@ MODULES=(
     "fail2ban.sh"
     "xui-pro.sh"
     "certificate.sh"
+    "backup.sh"
 )
 
 echo "======================================"
@@ -72,6 +73,7 @@ for MODULE in "${MODULES[@]}"; do
         fail2ban.sh) LABEL="Fail2Ban Management" ;;
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
+        backup.sh) LABEL="Backup & Restore" ;;
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
@@ -150,6 +152,9 @@ echo "$MODULES_PATH/xui-pro.sh"
 echo
 echo "Certificate Module:"
 echo "$MODULES_PATH/certificate.sh"
+echo
+echo "Backup & Restore Module:"
+echo "$MODULES_PATH/backup.sh"
 echo
 
 "$INSTALL_PATH"
