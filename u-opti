@@ -37,6 +37,7 @@ source "$MODULES_PATH/firewall.sh"
 source "$MODULES_PATH/fail2ban.sh"
 source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
+source "$MODULES_PATH/backup.sh"
 
 while true; do
     clear
@@ -52,13 +53,14 @@ while true; do
     echo "3) Server Security"
     echo "4) X-UI PRO Management"
     echo "5) Certificate Management"
-    echo "6) Update U-OPTI"
-    echo "7) Uninstall U-OPTI"
+    echo "6) Backup & Restore"
+    echo "7) Update U-OPTI"
+    echo "8) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-7]: " choice
+    read -rp "Please enter your selection [0-8]: " choice
 
     case "$choice" in
 
@@ -187,6 +189,10 @@ while true; do
             ;;
 
         6)
+            show_backup_menu
+            ;;
+
+        7)
             clear
 
             echo "======================================"
@@ -252,6 +258,7 @@ while true; do
                 "fail2ban.sh"
                 "xui-pro.sh"
                 "certificate.sh"
+                "backup.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
@@ -331,6 +338,7 @@ while true; do
                 ["fail2ban.sh"]="$BASE_URL/modules/fail2ban.sh"
                 ["xui-pro.sh"]="$BASE_URL/modules/xui-pro.sh"
                 ["certificate.sh"]="$BASE_URL/modules/certificate.sh"
+                ["backup.sh"]="$BASE_URL/modules/backup.sh"
             )
 
             declare -A UPDATE_TARGETS=(
@@ -346,6 +354,7 @@ while true; do
                 ["fail2ban.sh"]="$TEMP_DIR/fail2ban.sh"
                 ["xui-pro.sh"]="$TEMP_DIR/xui-pro.sh"
                 ["certificate.sh"]="$TEMP_DIR/certificate.sh"
+                ["backup.sh"]="$TEMP_DIR/backup.sh"
             )
 
             for FILE in u-opti common.sh "${UPDATE_FILE_NAMES[@]}"; do
@@ -378,6 +387,7 @@ while true; do
                 "$TEMP_DIR/fail2ban.sh"
                 "$TEMP_DIR/xui-pro.sh"
                 "$TEMP_DIR/certificate.sh"
+                "$TEMP_DIR/backup.sh"
             )
 
             UPDATE_FILES_OK=true
@@ -444,6 +454,7 @@ while true; do
                 "fail2ban.sh"
                 "xui-pro.sh"
                 "certificate.sh"
+                "backup.sh"
             )
 
             BACKUP_OK=true
@@ -481,7 +492,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 14 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 15 ]; then
                 BACKUP_OK=false
             fi
 
@@ -617,7 +628,7 @@ while true; do
             exec "$INSTALL_PATH"
             ;;
 
-        7)
+        8)
             clear
 
             echo "======================================"
