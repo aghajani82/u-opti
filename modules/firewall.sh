@@ -561,7 +561,11 @@ firewall_configure() {
     echo "  HTTPS : 443/tcp"
     echo
 
-    read -rp "Additional TCP ports (optional, space-separated): " EXTRA_INPUT
+    read -rp "Additional TCP ports (optional, space-separated; or 0 to go back): " EXTRA_INPUT
+
+    if [ "$EXTRA_INPUT" = "0" ]; then
+        return
+    fi
 
     local EXTRA_PORTS
     local EXTRA_OUTPUT
@@ -897,7 +901,11 @@ firewall_remove_ports() {
     local SSH_PORT
     SSH_PORT=$(firewall_get_ssh_port)
 
-    read -rp "TCP ports to remove (space-separated): " PORT_INPUT
+    read -rp "TCP ports to remove (space-separated; or 0 to go back): " PORT_INPUT
+
+    if [ "$PORT_INPUT" = "0" ]; then
+        return
+    fi
 
     if [ -z "$PORT_INPUT" ]; then
         echo
