@@ -515,7 +515,11 @@ ssh_change_port() {
     echo "Current SSH Port: $CURRENT_PORT"
     echo
 
-    read -rp "Enter new SSH port: " NEW_PORT
+    read -rp "Enter new SSH port (or 0 to go back): " NEW_PORT
+
+    if [ "$NEW_PORT" = "0" ]; then
+        return
+    fi
 
     if ! ssh_port_is_valid "$NEW_PORT"; then
         echo
