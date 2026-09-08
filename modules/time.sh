@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Time & Date Module
-# v0.11.1
+# v0.12.0
 
 time_pause() {
     echo
