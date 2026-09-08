@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="main"
+BRANCH="v0.13-dev"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -30,6 +30,7 @@ MODULES=(
     "xui-pro.sh"
     "certificate.sh"
     "backup.sh"
+    "docker.sh"
 )
 
 echo "======================================"
@@ -74,6 +75,7 @@ for MODULE in "${MODULES[@]}"; do
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
         backup.sh) LABEL="Backup & Restore" ;;
+        docker.sh) LABEL="Docker Management" ;;
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
@@ -155,6 +157,9 @@ echo "$MODULES_PATH/certificate.sh"
 echo
 echo "Backup & Restore Module:"
 echo "$MODULES_PATH/backup.sh"
+echo
+echo "Docker Module:"
+echo "$MODULES_PATH/docker.sh"
 echo
 
 "$INSTALL_PATH"
