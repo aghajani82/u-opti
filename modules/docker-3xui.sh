@@ -275,6 +275,49 @@ Started: {{.State.StartedAt}}' 2>/dev/null || true
     read -rp "Press Enter to return..."
 }
 
+
+docker_3xui_sanaei_management() {
+    clear
+
+    echo "======================================"
+    echo "       Sanaei 3x-UI Management"
+    echo "======================================"
+    echo
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: 3x-UI Docker container is not installed."
+        echo
+        echo "Please install 3x-UI first."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_running; then
+        echo "Error: 3x-UI Docker container is not running."
+        echo
+        echo "Please start 3x-UI first."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Opening Sanaei 3x-UI management menu..."
+    echo
+
+    docker exec -it "$DOCKER_3XUI_CONTAINER" x-ui
+
+    echo
+    read -rp "Press Enter to return..."
+}
+
 docker_3xui_start() {
     clear
 
@@ -427,6 +470,7 @@ show_docker_3xui_menu() {
         echo "7) Restore 3x-UI"
         echo "8) Uninstall 3x-UI"
         echo "9) Show Status"
+        echo "10) Sanaei 3x-UI Management"
         echo
         echo "0) Back"
         echo
@@ -443,6 +487,7 @@ show_docker_3xui_menu() {
             7) docker_3xui_restore ;;
             8) docker_3xui_uninstall ;;
             9) docker_3xui_status ;;
+            10) docker_3xui_sanaei_management ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
