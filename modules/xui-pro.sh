@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - X-UI PRO Management
-# v0.11.1
+# v0.12.0
 
 XUI_PRO_URL="https://raw.githubusercontent.com/aghajani82/x-ui-pro/master/x-ui-pro.sh"
 
