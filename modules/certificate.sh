@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # U-OPTI - Certificate Management
-# v0.11.1
+# v0.12.0
 
 CERTBOT_BIN=""
 ACME_WEBROOT="/var/www/u-opti-acme"
