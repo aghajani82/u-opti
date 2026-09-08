@@ -6,13 +6,31 @@
 DOCKER_3XUI_IMAGE="ghcr.io/mhsanaei/3x-ui:latest"
 DOCKER_3XUI_CONTAINER="3xui"
 DOCKER_3XUI_DIR="/opt/3x-ui"
+DOCKER_3XUI_COMPOSE_FILE="$DOCKER_3XUI_DIR/docker-compose.yml"
+DOCKER_3XUI_PANEL_PORT="2053"
 
 docker_3xui_is_installed() {
-    docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$DOCKER_3XUI_CONTAINER"
+    docker ps -a --format '{{.Names}}' 2>/dev/null |
+        grep -Fxq "$DOCKER_3XUI_CONTAINER"
 }
 
 docker_3xui_is_running() {
-    docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$DOCKER_3XUI_CONTAINER"
+    docker ps --format '{{.Names}}' 2>/dev/null |
+        grep -Fxq "$DOCKER_3XUI_CONTAINER"
+}
+
+docker_3xui_port_is_in_use() {
+    local PORT="$1"
+
+    ss -lntp 2>/dev/null |
+        awk -v port=":$PORT" '
+            NR > 1 && $4 ~ port"$" {
+                found=1
+            }
+            END {
+                exit(found ? 0 : 1)
+            }
+        '
 }
 
 docker_3xui_install() {
@@ -23,13 +41,235 @@ docker_3xui_install() {
     echo "======================================"
     echo
 
-    echo "This installation workflow is not implemented yet."
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: Root privileges are required."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        echo "Please install Docker first from:"
+        echo "Docker Management > Install Docker"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker compose version >/dev/null 2>&1; then
+        echo "Error: Docker Compose plugin is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if docker_3xui_is_installed; then
+        echo "3x-UI Docker is already installed."
+        echo
+        echo "Container: $DOCKER_3XUI_CONTAINER"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Checking panel port $DOCKER_3XUI_PANEL_PORT/tcp..."
+
+    if docker_3xui_port_is_in_use "$DOCKER_3XUI_PANEL_PORT"; then
+        echo
+        echo "ERROR: Port $DOCKER_3XUI_PANEL_PORT/tcp is already in use."
+        echo
+        echo "3x-UI uses Host Network, so this port must be available."
+        echo
+        echo "Current listener:"
+        ss -lntp 2>/dev/null | grep ":$DOCKER_3XUI_PANEL_PORT " || true
+        echo
+        echo "Installation cancelled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Port $DOCKER_3XUI_PANEL_PORT/tcp is available."
     echo
-    echo "Planned configuration:"
-    echo "  Image    : $DOCKER_3XUI_IMAGE"
-    echo "  Container: $DOCKER_3XUI_CONTAINER"
-    echo "  Network  : host"
-    echo "  Data Dir : $DOCKER_3XUI_DIR"
+
+    if [ -e "$DOCKER_3XUI_DIR" ]; then
+        if [ -n "$(find "$DOCKER_3XUI_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            echo "Directory already exists and contains data:"
+            echo "$DOCKER_3XUI_DIR"
+            echo
+            echo "U-OPTI will not overwrite existing data."
+            echo "Installation cancelled."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo "3x-UI installation plan:"
+    echo
+    echo "Image       : $DOCKER_3XUI_IMAGE"
+    echo "Container   : $DOCKER_3XUI_CONTAINER"
+    echo "Network     : host"
+    echo "Panel Port  : $DOCKER_3XUI_PANEL_PORT"
+    echo "Data Dir    : $DOCKER_3XUI_DIR"
+    echo "Database    : $DOCKER_3XUI_DIR/db"
+    echo "Certificates: $DOCKER_3XUI_DIR/cert"
+    echo
+
+    read -rp "Continue with installation? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Installation cancelled."
+            sleep 1
+            return
+            ;;
+    esac
+
+    echo
+    echo "Creating 3x-UI directories..."
+
+    mkdir -p \
+        "$DOCKER_3XUI_DIR/db" \
+        "$DOCKER_3XUI_DIR/cert" || {
+        echo "Error: Failed to create 3x-UI directories."
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    echo "Creating Docker Compose file..."
+
+    cat > "$DOCKER_3XUI_COMPOSE_FILE" <<EOF
+services:
+  3xui:
+    image: $DOCKER_3XUI_IMAGE
+    container_name: $DOCKER_3XUI_CONTAINER
+
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+    volumes:
+      - $DOCKER_3XUI_DIR/db:/etc/x-ui/
+      - $DOCKER_3XUI_DIR/cert:/root/cert/
+
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+
+    tty: true
+    network_mode: host
+    restart: unless-stopped
+EOF
+
+    if [ ! -s "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        echo "Error: Docker Compose file was not created."
+        echo "Installation cancelled."
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Pulling 3x-UI Docker image..."
+
+    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" pull; then
+        echo
+        echo "Error: Failed to pull 3x-UI image."
+        echo "Installation was not completed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Starting 3x-UI container..."
+
+    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d; then
+        echo
+        echo "Error: Failed to start 3x-UI container."
+        echo
+        echo "Docker Compose status:"
+        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" ps || true
+        echo
+        echo "Container logs:"
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Verifying 3x-UI container..."
+
+    sleep 3
+
+    if ! docker_3xui_is_running; then
+        echo
+        echo "ERROR: 3x-UI container is not running."
+        echo
+        echo "Docker Compose status:"
+        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" ps || true
+        echo
+        echo "Container logs:"
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Checking panel port..."
+
+    if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_PANEL_PORT"; then
+        echo
+        echo "WARNING: 3x-UI container is running, but panel port"
+        echo "$DOCKER_3XUI_PANEL_PORT is not listening yet."
+        echo
+        echo "The container may still be initializing."
+        echo
+        echo "Container status:"
+        docker inspect "$DOCKER_3XUI_CONTAINER" \
+            --format 'Status: {{.State.Status}}
+Started: {{.State.StartedAt}}' 2>/dev/null || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "      3x-UI Installation OK"
+    echo "======================================"
+    echo
+    echo "Container    : $DOCKER_3XUI_CONTAINER"
+    echo "Status       : Running"
+    echo "Image        : $DOCKER_3XUI_IMAGE"
+    echo "Network      : host"
+    echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
+    echo "Data Dir     : $DOCKER_3XUI_DIR/db"
+    echo "Cert Dir     : $DOCKER_3XUI_DIR/cert"
+    echo
+    echo "Panel URL:"
+    echo "http://<SERVER-IP>:$DOCKER_3XUI_PANEL_PORT"
+    echo
+    echo "Important:"
+    echo "Log in to the panel and immediately change"
+    echo "the default/generated administrator credentials."
+    echo
+    echo "Docker Compose:"
+    echo "$DOCKER_3XUI_COMPOSE_FILE"
     echo
 
     read -rp "Press Enter to return..."
