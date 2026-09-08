@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - System Information Module
-# v0.8.0
+# v0.12.0
 
 show_system_information() {
     clear
