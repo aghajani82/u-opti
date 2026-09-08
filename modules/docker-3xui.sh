@@ -837,15 +837,75 @@ docker_3xui_backup() {
     echo "======================================"
     echo
 
+    echo "Backup 3x-UI is not implemented yet."
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
+docker_3xui_backup_validate() {
+    local BACKUP_DIR="$1"
+    local BACKUP_OK=true
+
+    if [ ! -d "$BACKUP_DIR" ]; then
+        echo "ERROR: Backup directory does not exist:"
+        echo "$BACKUP_DIR"
+        return 1
+    fi
+
+    for FILE in \
+        "$BACKUP_DIR/docker-compose.yml" \
+        "$BACKUP_DIR/db.tar.gz" \
+        "$BACKUP_DIR/cert.tar.gz" \
+        "$BACKUP_DIR/backup-info.txt"; do
+
+        if [ ! -s "$FILE" ]; then
+            echo "ERROR: Missing or empty backup file:"
+            echo "$FILE"
+            BACKUP_OK=false
+        fi
+    done
+
+    if [ "$BACKUP_OK" != "true" ]; then
+        return 1
+    fi
+
+    if ! tar -tzf "$BACKUP_DIR/db.tar.gz" >/dev/null 2>&1; then
+        echo "ERROR: Database backup archive is invalid."
+        return 1
+    fi
+
+    if ! tar -tzf "$BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1; then
+        echo "ERROR: Certificate backup archive is invalid."
+        return 1
+    fi
+
+    if ! grep -q '^services:' "$BACKUP_DIR/docker-compose.yml"; then
+        echo "ERROR: Docker Compose file does not appear to be valid."
+        return 1
+    fi
+
+    return 0
+}
+
+docker_3xui_restore() {
+    clear
+
+    echo "======================================"
+    echo "          Restore 3x-UI"
+    echo "======================================"
+    echo
+
     if ! command -v docker >/dev/null 2>&1; then
         echo "Error: Docker is not installed."
         echo
+        echo "Please install Docker first."
         read -rp "Press Enter to return..."
         return
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
         echo
         read -rp "Press Enter to return..."
         return
@@ -858,165 +918,429 @@ docker_3xui_backup() {
         return
     fi
 
-    if [ ! -d "$DOCKER_3XUI_DIR" ]; then
-        echo "Error: 3x-UI data directory was not found:"
-        echo "$DOCKER_3XUI_DIR"
+    if [ ! -d "$DOCKER_3XUI_DIR/backups" ]; then
+        echo "No 3x-UI backups were found."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$TIMESTAMP"
+    mapfile -t BACKUP_DIRS < <(
+        find "$DOCKER_3XUI_DIR/backups" \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -type d \
+            -printf '%T@ %p\n' 2>/dev/null |
+        sort -nr |
+        cut -d' ' -f2-
+    )
 
-    echo "Preparing backup..."
-    echo
-    echo "Backup Directory:"
-    echo "$BACKUP_DIR"
-    echo
-
-    if ! mkdir -p "$BACKUP_DIR"; then
-        echo "Error: Failed to create backup directory."
+    if [ "${#BACKUP_DIRS[@]}" -eq 0 ]; then
+        echo "No 3x-UI backups were found."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    BACKUP_FAILED=false
+    echo "Available 3x-UI backups:"
+    echo
 
-    echo "Backing up Docker Compose file..."
+    VALID_BACKUPS=()
+
+    for BACKUP_DIR in "${BACKUP_DIRS[@]}"; do
+        if docker_3xui_backup_validate "$BACKUP_DIR" >/dev/null 2>&1; then
+            VALID_BACKUPS+=("$BACKUP_DIR")
+        fi
+    done
+
+    if [ "${#VALID_BACKUPS[@]}" -eq 0 ]; then
+        echo "No valid 3x-UI backups were found."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    INDEX=1
+
+    for BACKUP_DIR in "${VALID_BACKUPS[@]}"; do
+        BACKUP_NAME="$(basename "$BACKUP_DIR")"
+        BACKUP_TIME=""
+
+        if [ -f "$BACKUP_DIR/backup-info.txt" ]; then
+            BACKUP_TIME=$(sed -n 's/^Backup Time:[[:space:]]*//p' \
+                "$BACKUP_DIR/backup-info.txt" | head -n 1)
+        fi
+
+        echo "$INDEX) $BACKUP_NAME"
+
+        if [ -n "$BACKUP_TIME" ]; then
+            echo "   Backup Time: $BACKUP_TIME"
+        fi
+
+        INDEX=$((INDEX + 1))
+    done
+
+    echo
+    echo "0) Cancel"
+    echo
+
+    read -rp "Please select a backup [0-${#VALID_BACKUPS[@]}]: " RESTORE_CHOICE
+
+    if [ "$RESTORE_CHOICE" = "0" ]; then
+        echo
+        echo "Restore cancelled."
+        sleep 1
+        return
+    fi
+
+    if ! [[ "$RESTORE_CHOICE" =~ ^[0-9]+$ ]] || \
+       [ "$RESTORE_CHOICE" -lt 1 ] || \
+       [ "$RESTORE_CHOICE" -gt "${#VALID_BACKUPS[@]}" ]; then
+
+        echo
+        echo "Invalid backup selection."
+        sleep 2
+        return
+    fi
+
+    SELECTED_BACKUP="${VALID_BACKUPS[$((RESTORE_CHOICE - 1))]}"
+
+    echo
+    echo "Selected Backup:"
+    echo "$SELECTED_BACKUP"
+    echo
+
+    if ! docker_3xui_backup_validate "$SELECTED_BACKUP"; then
+        echo
+        echo "Restore cancelled because the selected backup is invalid."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -f "$SELECTED_BACKUP/backup-info.txt" ]; then
+        echo "Backup Information:"
+        sed -n '1,20p' "$SELECTED_BACKUP/backup-info.txt"
+        echo
+    fi
+
+    echo "WARNING:"
+    echo "Restoring this backup will replace the current 3x-UI"
+    echo "database, certificates, and Docker Compose configuration."
+    echo
+    echo "Current data will first be backed up as a safety copy."
+    echo
+
+    read -rp "Continue with restore? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Restore cancelled."
+            sleep 1
+            return
+            ;;
+    esac
+
+    SAFETY_BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$(date '+%Y%m%d-%H%M%S-%N')-pre-restore"
+
+    echo
+    echo "Creating pre-restore safety backup..."
+    echo "$SAFETY_BACKUP_DIR"
+
+    mkdir -p "$SAFETY_BACKUP_DIR" || {
+        echo "ERROR: Failed to create pre-restore safety backup directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    }
+
+    SAFETY_BACKUP_OK=true
 
     if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" "$BACKUP_DIR/docker-compose.yml"; then
-            echo "ERROR: Failed to back up Docker Compose file."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Docker Compose file was not found."
+        cp -f "$DOCKER_3XUI_COMPOSE_FILE" \
+            "$SAFETY_BACKUP_DIR/docker-compose.yml" ||
+            SAFETY_BACKUP_OK=false
     fi
-
-    echo "Backing up database..."
 
     if [ -d "$DOCKER_3XUI_DIR/db" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$BACKUP_DIR/db.tar.gz" \
-            db; then
-            echo "ERROR: Failed to back up database."
-            BACKUP_FAILED=true
-        fi
+        tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$SAFETY_BACKUP_DIR/db.tar.gz" \
+            db || SAFETY_BACKUP_OK=false
     else
-        echo "WARNING: Database directory was not found."
-        BACKUP_FAILED=true
+        SAFETY_BACKUP_OK=false
     fi
-
-    echo "Backing up certificates..."
 
     if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$BACKUP_DIR/cert.tar.gz" \
-            cert; then
-            echo "ERROR: Failed to back up certificate directory."
-            BACKUP_FAILED=true
-        fi
+        tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$SAFETY_BACKUP_DIR/cert.tar.gz" \
+            cert || SAFETY_BACKUP_OK=false
     else
-        echo "WARNING: Certificate directory was not found."
-        BACKUP_FAILED=true
+        SAFETY_BACKUP_OK=false
     fi
 
-    IMAGE_NAME=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Config.Image}}' 2>/dev/null || true)
+    cat > "$SAFETY_BACKUP_DIR/backup-info.txt" <<EOF
+Backup Type: Pre-Restore Safety Backup
+Backup Time: $(date --iso-8601=seconds)
+Source Backup: $SELECTED_BACKUP
+EOF
 
-    IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Image}}' 2>/dev/null || true)
+    if [ "$SAFETY_BACKUP_OK" != "true" ]; then
+        echo
+        echo "ERROR: Pre-restore safety backup could not be completed."
+        echo "Restore was NOT performed."
+        echo
+        echo "Safety backup directory:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
 
-    CONTAINER_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.State.Status}}' 2>/dev/null || true)
+    chmod 700 "$SAFETY_BACKUP_DIR"
+    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \;
+
+    echo "Pre-restore safety backup created successfully."
+
+    CONTAINER_WAS_RUNNING=false
+
+    if docker_3xui_is_running; then
+        CONTAINER_WAS_RUNNING=true
+        echo
+        echo "Stopping current 3x-UI container..."
+
+        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop the current 3x-UI container."
+            echo "Restore was NOT performed."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo
+    echo "Restoring Docker Compose file..."
+
+    if ! cp -f "$SELECTED_BACKUP/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"; then
+        echo "ERROR: Failed to restore Docker Compose file."
+        echo "Attempting to restore the safety backup..."
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
+            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Restoring database..."
+
+    rm -rf "$DOCKER_3XUI_DIR/db"
+
+    if ! tar -C "$DOCKER_3XUI_DIR" \
+        -xzf "$SELECTED_BACKUP/db.tar.gz"; then
+
+        echo "ERROR: Failed to restore database."
+        echo "Attempting automatic rollback..."
+
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
+            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Restoring certificates..."
+
+    rm -rf "$DOCKER_3XUI_DIR/cert"
+
+    if ! tar -C "$DOCKER_3XUI_DIR" \
+        -xzf "$SELECTED_BACKUP/cert.tar.gz"; then
+
+        echo "ERROR: Failed to restore certificates."
+        echo "Attempting automatic rollback..."
+
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        rm -rf "$DOCKER_3XUI_DIR/cert"
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
+            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Validating restored Docker Compose file..."
+
+    if ! grep -q '^services:' "$DOCKER_3XUI_COMPOSE_FILE"; then
+        echo "ERROR: Restored Docker Compose file appears to be invalid."
+        echo "Attempting automatic rollback..."
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        rm -rf "$DOCKER_3XUI_DIR/cert"
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
+
+        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
+            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Starting restored 3x-UI container..."
+
+    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d; then
+        echo
+        echo "ERROR: Failed to start restored 3x-UI container."
+        echo "Attempting automatic rollback..."
+
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        rm -rf "$DOCKER_3XUI_DIR/cert"
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
+
+        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+
+        echo
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Verifying restored 3x-UI container..."
+
+    sleep 3
+
+    if ! docker_3xui_is_running; then
+        echo "ERROR: Restored 3x-UI container is not running."
+        echo "Attempting automatic rollback..."
+
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
+
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        rm -rf "$DOCKER_3XUI_DIR/cert"
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
+
+        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+
+        echo
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
 
     PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
     SUBSCRIPTION_PORT="2096"
-    WEB_BASE_PATH="/"
 
     TEMP_SETTINGS_FILE=$(mktemp)
 
-    if docker_3xui_is_running; then
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >"$TEMP_SETTINGS_FILE" 2>/dev/null; then
+    if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+        'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
+        >"$TEMP_SETTINGS_FILE" 2>/dev/null; then
 
-            DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
-                "$TEMP_SETTINGS_FILE" | head -n 1)
+        DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
+            "$TEMP_SETTINGS_FILE" | head -n 1)
 
-            if [ -n "$DETECTED_PANEL_PORT" ]; then
-                PANEL_PORT="$DETECTED_PANEL_PORT"
-            fi
+        if [ -n "$DETECTED_PANEL_PORT" ]; then
+            PANEL_PORT="$DETECTED_PANEL_PORT"
+        fi
 
-            DETECTED_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' \
-                "$TEMP_SETTINGS_FILE" | head -n 1)
+        DETECTED_SUB_PORT=$(grep -i 'sub.*port' \
+            "$TEMP_SETTINGS_FILE" | \
+            sed -n 's/.*:[[:space:]]*//p' | head -n 1)
 
-            if [ -n "$DETECTED_BASE_PATH" ]; then
-                WEB_BASE_PATH="$DETECTED_BASE_PATH"
-            fi
+        if [ -n "$DETECTED_SUB_PORT" ]; then
+            SUBSCRIPTION_PORT="$DETECTED_SUB_PORT"
         fi
     fi
 
     rm -f "$TEMP_SETTINGS_FILE"
 
-    cat > "$BACKUP_DIR/backup-info.txt" <<EOF
-3x-UI Container: $DOCKER_3XUI_CONTAINER
-Image: $IMAGE_NAME
-Image ID: $IMAGE_ID
-Container Status: $CONTAINER_STATUS
-Panel Port: $PANEL_PORT
-Subscription Port: $SUBSCRIPTION_PORT
-Web Base Path: $WEB_BASE_PATH
-Backup Time: $(date --iso-8601=seconds)
-Compose File: $DOCKER_3XUI_COMPOSE_FILE
-Data Directory: $DOCKER_3XUI_DIR/db
-Certificate Directory: $DOCKER_3XUI_DIR/cert
-EOF
-
-    if [ "$BACKUP_FAILED" = "true" ]; then
-        echo
-        echo "======================================"
-        echo "           Backup Failed"
-        echo "======================================"
-        echo
-        echo "The backup could not be completed successfully."
-        echo "Incomplete backup retained at:"
-        echo "$BACKUP_DIR"
-        echo
-        chmod 700 "$BACKUP_DIR"
-        find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    chmod 700 "$BACKUP_DIR"
-    find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
-
     echo
-    echo "Validating backup..."
+    echo "Checking restored panel port..."
 
-    BACKUP_OK=true
+    if ! docker_3xui_port_is_in_use "$PANEL_PORT"; then
+        echo "ERROR: Restored panel port $PANEL_PORT is not listening."
+        echo "Attempting automatic rollback..."
 
-    for FILE in \
-        "$BACKUP_DIR/docker-compose.yml" \
-        "$BACKUP_DIR/db.tar.gz" \
-        "$BACKUP_DIR/cert.tar.gz" \
-        "$BACKUP_DIR/backup-info.txt"; do
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
 
-        if [ ! -s "$FILE" ]; then
-            echo "Missing or empty backup file:"
-            echo "$FILE"
-            BACKUP_OK=false
-        fi
-    done
+        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
 
-    if [ "$BACKUP_OK" != "true" ]; then
+        rm -rf "$DOCKER_3XUI_DIR/db"
+        rm -rf "$DOCKER_3XUI_DIR/cert"
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
+
+        tar -C "$DOCKER_3XUI_DIR" \
+            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
+
+        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
+
         echo
-        echo "ERROR: Backup validation failed."
-        echo "Backup retained at:"
-        echo "$BACKUP_DIR"
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
         echo
         read -rp "Press Enter to return..."
         return
@@ -1024,31 +1348,21 @@ EOF
 
     echo
     echo "======================================"
-    echo "          3x-UI Backup OK"
+    echo "         3x-UI Restore OK"
     echo "======================================"
     echo
-    echo "Backup Directory:"
-    echo "$BACKUP_DIR"
+    echo "Backup Restored : $SELECTED_BACKUP"
+    echo "Container       : $DOCKER_3XUI_CONTAINER"
+    echo "Status          : Running"
+    echo "Panel Port      : $PANEL_PORT"
+    echo "Subscription    : $SUBSCRIPTION_PORT"
     echo
-    echo "Files:"
-    echo "  - docker-compose.yml"
-    echo "  - db.tar.gz"
-    echo "  - cert.tar.gz"
-    echo "  - backup-info.txt"
+    echo "Database restored successfully."
+    echo "Certificates restored successfully."
+    echo "Docker Compose restored successfully."
     echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_restore() {
-    clear
-
-    echo "======================================"
-    echo "          Restore 3x-UI"
-    echo "======================================"
-    echo
-
-    echo "Restore 3x-UI is not implemented yet."
+    echo "Pre-restore safety backup retained at:"
+    echo "$SAFETY_BACKUP_DIR"
     echo
 
     read -rp "Press Enter to return..."
