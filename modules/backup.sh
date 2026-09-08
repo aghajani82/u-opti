@@ -200,7 +200,7 @@ backup_restore() {
     fi
 
     echo
-    echo "Restoring backup..."
+    echo "Restoring backup files..."
     if ! tar -C / -xzf "$ARCHIVE" --same-owner --preserve-permissions; then
         echo; echo "ERROR: Restore failed."
         echo "Safety backup retained at: $SAFETY_DIR"
@@ -208,8 +208,88 @@ backup_restore() {
         return
     fi
 
+    # Re-validate SSH configuration before restarting the SSH backend.
+    if command -v sshd >/dev/null 2>&1; then
+        echo
+        echo "Validating restored SSH configuration..."
+        if ! sshd -t; then
+            echo "ERROR: Restored SSH configuration is invalid."
+            echo "Safety backup retained at: $SAFETY_DIR"
+            echo "The restored files were kept in place for manual recovery."
+            backup_pause
+            return
+        fi
+        echo "SSH configuration validation: OK"
+
+        echo
+        echo "Reloading systemd SSH socket configuration..."
+        if ! systemctl daemon-reload; then
+            echo "ERROR: Failed to reload systemd configuration."
+            echo "Safety backup retained at: $SAFETY_DIR"
+            backup_pause
+            return
+        fi
+
+        if systemctl is-active --quiet ssh.socket || systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+            echo "Restarting ssh.socket..."
+            if ! systemctl restart ssh.socket; then
+                echo "ERROR: Failed to restart ssh.socket."
+                echo "Safety backup retained at: $SAFETY_DIR"
+                backup_pause
+                return
+            fi
+        else
+            echo "Restarting ssh.service..."
+            if ! systemctl restart ssh.service; then
+                echo "ERROR: Failed to restart ssh.service."
+                echo "Safety backup retained at: $SAFETY_DIR"
+                backup_pause
+                return
+            fi
+        fi
+
+        sleep 2
+
+        local RESTORED_SSH_PORT
+        RESTORED_SSH_PORT=$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2; exit}')
+
+        if [ -n "$RESTORED_SSH_PORT" ]; then
+            echo "Restored SSH port: $RESTORED_SSH_PORT"
+            if ! ss -lntH 2>/dev/null | awk -v port="$RESTORED_SSH_PORT" '$4 ~ ("(^|:)" port "$") {found=1} END {exit(found ? 0 : 1)}'; then
+                echo "WARNING: Restored SSH port $RESTORED_SSH_PORT is not currently listening."
+                echo "Safety backup retained at: $SAFETY_DIR"
+                backup_pause
+                return
+            fi
+            echo "Restored SSH port is listening: OK"
+        fi
+    fi
+
+    # UFW stores persistent rules on disk, but active kernel rules must also be reloaded.
+    if command -v ufw >/dev/null 2>&1 && [ -d /etc/ufw ]; then
+        echo
+        echo "Reloading UFW rules..."
+        if ufw status 2>/dev/null | grep -q "Status: active"; then
+            if ! ufw reload >/dev/null 2>&1; then
+                echo "WARNING: UFW reload failed."
+                echo "Safety backup retained at: $SAFETY_DIR"
+                backup_pause
+                return
+            fi
+            echo "UFW reload: OK"
+        else
+            echo "UFW is not active; no reload was required."
+        fi
+    fi
+
     echo
-    echo "Restore completed successfully."
+    echo "======================================"
+    echo "        Restore Completed"
+    echo "======================================"
+    echo
+    echo "Backup files restored successfully."
+    echo "SSH runtime configuration was reloaded."
+    echo "Firewall runtime rules were reloaded when UFW was active."
     echo "Safety backup retained at: $SAFETY_DIR"
     backup_pause
 }
