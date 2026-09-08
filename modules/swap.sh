@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Swap Management Module
-# v0.8.0
+# v0.12.0
 
 show_swap_menu() {
     while true; do
