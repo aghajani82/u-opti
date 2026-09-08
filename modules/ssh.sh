@@ -538,6 +538,10 @@ ssh_ufw_restore_state() {
         return 1
     fi
 
+    if ! ufw --force enable >/dev/null 2>&1; then
+        return 1
+    fi
+
     ufw reload >/dev/null 2>&1 || true
     return 0
 }
@@ -555,108 +559,6 @@ ssh_restore_firewall_if_needed() {
     fi
 
     ssh_ufw_restore_state "$FIREWALL_BACKUP_DIR"
-}
-
-ssh_ufw_prepare_new_port() {
-    local CURRENT_PORT="$1"
-    local NEW_PORT="$2"
-    local FIREWALL_STATUS
-    local TIMESTAMP
-    local FIREWALL_BACKUP_DIR=""
-
-    FIREWALL_STATUS=$(ssh_ufw_status)
-
-    if [ "$FIREWALL_STATUS" != "active" ]; then
-        return 0
-    fi
-
-    if ssh_ufw_rule_exists "$NEW_PORT"; then
-        echo
-        echo "UFW is active and port $NEW_PORT/tcp is already allowed."
-        return 0
-    fi
-
-    echo
-    echo "======================================"
-    echo "       Firewall Safety Check"
-    echo "======================================"
-    echo
-    echo "WARNING: UFW is currently active."
-    echo
-    echo "New SSH port: $NEW_PORT/tcp"
-    echo "This port is NOT currently allowed by UFW."
-    echo
-    echo "Without a UFW rule for $NEW_PORT/tcp, the new SSH"
-    echo "connection may be blocked after the SSH port change."
-    echo
-    echo "1) Allow $NEW_PORT/tcp in UFW and continue"
-    echo "2) Cancel SSH port change"
-    echo
-
-    local FIREWALL_CHOICE
-    read -rp "Please enter your selection [1-2]: " FIREWALL_CHOICE
-
-    case "$FIREWALL_CHOICE" in
-        1)
-            ;;
-        2|0)
-            echo
-            echo "SSH port change cancelled."
-            return 1
-            ;;
-        *)
-            echo
-            echo "Invalid selection. SSH port change cancelled."
-            return 1
-            ;;
-    esac
-
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    FIREWALL_BACKUP_DIR=$(ssh_ufw_backup_state "$TIMESTAMP")
-
-    if [ -z "$FIREWALL_BACKUP_DIR" ]; then
-        echo
-        echo "Error: Failed to create a firewall safety backup."
-        echo "SSH port change cancelled."
-        return 1
-    fi
-
-    echo
-    echo "Firewall safety backup created:"
-    echo "$FIREWALL_BACKUP_DIR"
-    echo
-    echo "Allowing $NEW_PORT/tcp in UFW..."
-
-    if ! ufw allow "$NEW_PORT/tcp"; then
-        echo
-        echo "Error: Failed to allow $NEW_PORT/tcp in UFW."
-        echo "Restoring previous firewall configuration..."
-
-        if ssh_ufw_restore_state "$FIREWALL_BACKUP_DIR"; then
-            echo "Previous firewall configuration restored."
-        else
-            echo "WARNING: Automatic firewall restore failed."
-        fi
-
-        return 1
-    fi
-
-    if ! ssh_ufw_rule_exists "$NEW_PORT"; then
-        echo
-        echo "Error: UFW rule verification failed for $NEW_PORT/tcp."
-        echo "Restoring previous firewall configuration..."
-
-        if ssh_ufw_restore_state "$FIREWALL_BACKUP_DIR"; then
-            echo "Previous firewall configuration restored."
-        else
-            echo "WARNING: Automatic firewall restore failed."
-        fi
-
-        return 1
-    fi
-
-    echo "UFW rule confirmed: $NEW_PORT/tcp"
-    return 0
 }
 
 ssh_ufw_status() {
