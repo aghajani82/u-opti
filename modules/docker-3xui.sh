@@ -275,12 +275,11 @@ Started: {{.State.StartedAt}}' 2>/dev/null || true
     read -rp "Press Enter to return..."
 }
 
-
-docker_3xui_sanaei_management() {
+docker_3xui_start() {
     clear
 
     echo "======================================"
-    echo "       Sanaei 3x-UI Management"
+    echo "            Start 3x-UI"
     echo "======================================"
     echo
 
@@ -292,41 +291,55 @@ docker_3xui_sanaei_management() {
     fi
 
     if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI Docker container is not installed."
-        echo
-        echo "Please install 3x-UI first."
+        echo "Error: 3x-UI container is not installed."
         echo
         read -rp "Press Enter to return..."
         return
     fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if docker_3xui_is_running; then
+        echo "3x-UI is already running."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Starting 3x-UI container..."
+    echo
+
+    if ! docker start "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo "Error: Failed to start 3x-UI container."
+        echo
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    sleep 2
 
     if ! docker_3xui_is_running; then
-        echo "Error: 3x-UI Docker container is not running."
         echo
-        echo "Please start 3x-UI first."
+        echo "ERROR: 3x-UI container did not remain running."
+        echo
+        docker inspect "$DOCKER_3XUI_CONTAINER" \
+            --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
+        echo
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    echo "Opening Sanaei 3x-UI management menu..."
-    echo
-
-    docker exec -it "$DOCKER_3XUI_CONTAINER" x-ui
-
-    echo
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_start() {
-    clear
-
-    echo "======================================"
-    echo "            Start 3x-UI"
-    echo "======================================"
-    echo
-
-    echo "Start 3x-UI is not implemented yet."
+    echo "3x-UI started successfully."
+    echo "Status: Running"
     echo
 
     read -rp "Press Enter to return..."
@@ -340,7 +353,55 @@ docker_3xui_stop() {
     echo "======================================"
     echo
 
-    echo "Stop 3x-UI is not implemented yet."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: 3x-UI container is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_running; then
+        echo "3x-UI is already stopped."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Stopping 3x-UI container..."
+    echo
+
+    if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo "Error: Failed to stop 3x-UI container."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    sleep 1
+
+    if docker_3xui_is_running; then
+        echo "ERROR: 3x-UI container is still running."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "3x-UI stopped successfully."
+    echo "Status: Stopped"
     echo
 
     read -rp "Press Enter to return..."
@@ -354,7 +415,56 @@ docker_3xui_restart() {
     echo "======================================"
     echo
 
-    echo "Restart 3x-UI is not implemented yet."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: 3x-UI container is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Restarting 3x-UI container..."
+    echo
+
+    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo "Error: Failed to restart 3x-UI container."
+        echo
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    sleep 2
+
+    if ! docker_3xui_is_running; then
+        echo
+        echo "ERROR: 3x-UI container did not remain running after restart."
+        echo
+        docker inspect "$DOCKER_3XUI_CONTAINER" \
+            --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
+        echo
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "3x-UI restarted successfully."
+    echo "Status: Running"
     echo
 
     read -rp "Press Enter to return..."
@@ -470,7 +580,6 @@ show_docker_3xui_menu() {
         echo "7) Restore 3x-UI"
         echo "8) Uninstall 3x-UI"
         echo "9) Show Status"
-        echo "10) Sanaei 3x-UI Management"
         echo
         echo "0) Back"
         echo
@@ -487,7 +596,6 @@ show_docker_3xui_menu() {
             7) docker_3xui_restore ;;
             8) docker_3xui_uninstall ;;
             9) docker_3xui_status ;;
-            10) docker_3xui_sanaei_management ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
