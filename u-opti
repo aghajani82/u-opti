@@ -55,8 +55,9 @@ while true; do
     echo "4) X-UI PRO Management"
     echo "5) Certificate Management"
     echo "6) Backup & Restore"
-    echo "7) Update U-OPTI"
-    echo "8) Uninstall U-OPTI"
+    echo "7) Docker Management"
+    echo "8) Update U-OPTI"
+    echo "9) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
