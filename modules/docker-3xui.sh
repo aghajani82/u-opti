@@ -1719,7 +1719,7 @@ Uninstall Choice: $UNINSTALL_CHOICE
 EOF
 
     chmod 700 "$SAFETY_BACKUP_DIR"
-    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \\;
+    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \;
 
     if [ "$BACKUP_FAILED" = "true" ]; then
         echo
