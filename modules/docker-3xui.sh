@@ -543,21 +543,105 @@ docker_3xui_status() {
         return
     fi
 
-    if docker_3xui_is_running; then
-        echo "3x-UI Container: Running"
-    elif docker_3xui_is_installed; then
-        echo "3x-UI Container: Stopped"
-    else
+    if ! docker_3xui_is_installed; then
         echo "3x-UI Container: Not Installed"
+        echo
+        read -rp "Press Enter to return..."
+        return
     fi
 
-    if docker_3xui_is_installed; then
-        echo
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
-            --format 'Image : {{.Config.Image}}
-Network: {{.HostConfig.NetworkMode}}
-Status : {{.State.Status}}' 2>/dev/null || true
+    if docker_3xui_is_running; then
+        CONTAINER_STATUS="Running"
+    else
+        CONTAINER_STATUS="Stopped"
     fi
+
+    echo "Container       : $CONTAINER_STATUS"
+
+    docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format 'Image           : {{.Config.Image}}
+Network         : {{.HostConfig.NetworkMode}}
+Restart Policy  : {{.HostConfig.RestartPolicy.Name}}
+Started At      : {{.State.StartedAt}}
+Finished At     : {{.State.FinishedAt}}' 2>/dev/null || true
+
+    echo
+
+    if docker_3xui_is_running; then
+        echo "Service Status:"
+        echo
+
+        PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
+        SUBSCRIPTION_PORT="2096"
+
+        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
+            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
+
+            if grep -q '^port:' /tmp/u-opti-3xui-settings.txt; then
+                PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
+            fi
+
+            if grep -qi 'sub.*port' /tmp/u-opti-3xui-settings.txt; then
+                SUBSCRIPTION_PORT=$(grep -i 'sub.*port' /tmp/u-opti-3xui-settings.txt | \
+                    sed -n 's/.*:[[:space:]]*//p' | head -n 1)
+            fi
+        fi
+
+        rm -f /tmp/u-opti-3xui-settings.txt
+
+        if docker_3xui_port_is_in_use "$PANEL_PORT"; then
+            echo "Panel           : Running on $PANEL_PORT"
+        else
+            echo "Panel           : Not listening on $PANEL_PORT"
+        fi
+
+        if docker_3xui_port_is_in_use "$SUBSCRIPTION_PORT"; then
+            echo "Subscription    : Listening on $SUBSCRIPTION_PORT"
+        else
+            echo "Subscription    : Not listening on $SUBSCRIPTION_PORT"
+        fi
+
+        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
+            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
+
+            WEB_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
+
+            DATABASE_LINE=$(grep -E '^Database:' /tmp/u-opti-3xui-settings.txt | head -n 1)
+
+            if [ -n "$WEB_BASE_PATH" ]; then
+                echo "Web Base Path   : $WEB_BASE_PATH"
+            fi
+
+            if [ -n "$DATABASE_LINE" ]; then
+                echo "$DATABASE_LINE"
+            fi
+        fi
+
+        rm -f /tmp/u-opti-3xui-settings.txt
+
+        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+            'command -v x-ui >/dev/null 2>&1 && x-ui status' \
+            >/tmp/u-opti-3xui-state.txt 2>/dev/null; then
+
+            XRAY_STATE=$(grep -i '^xray state:' /tmp/u-opti-3xui-state.txt | \
+                sed 's/^[^:]*:[[:space:]]*//' | head -n 1)
+
+            if [ -n "$XRAY_STATE" ]; then
+                echo "Xray            : $XRAY_STATE"
+            fi
+        fi
+
+        rm -f /tmp/u-opti-3xui-state.txt
+    else
+        echo "Service Status  : Container is stopped."
+    fi
+
+    echo
+    echo "Data Directory  : $DOCKER_3XUI_DIR/db"
+    echo "Certificate Dir : $DOCKER_3XUI_DIR/cert"
+    echo "Compose File    : $DOCKER_3XUI_COMPOSE_FILE"
 
     echo
     read -rp "Press Enter to return..."
