@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - SSH Access Management Module
-# v0.11.0
+# v0.12.0
 
 SSH_ACCESS_DIR="/etc/u-opti/ssh"
 SSH_AUTHORIZED_KEYS_BACKUP_DIR="$SSH_ACCESS_DIR/authorized_keys-backups"
