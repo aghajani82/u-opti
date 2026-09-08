@@ -635,26 +635,91 @@ while true; do
             echo "          Uninstall U-OPTI"
             echo "======================================"
             echo
+            echo "U-OPTI will remove only its own installation files:"
+            echo "  - $INSTALL_PATH"
+            echo "  - $LIB_PATH"
+            echo
+            echo "The following are NOT removed by U-OPTI:"
+            echo "  - Nginx"
+            echo "  - Certbot / Let's Encrypt certificates"
+            echo "  - 3x-UI / Xray"
+            echo "  - Docker"
+            echo "  - Your server data and other services"
+            echo
+            echo "U-OPTI backup data under /etc/u-opti is retained."
+            echo
 
-            read -rp "Are you sure you want to uninstall U-OPTI? [y/N]: " UNINSTALL_CONFIRM
+            read -rp "Type UNINSTALL to continue: " UNINSTALL_CONFIRM
 
-            case "$UNINSTALL_CONFIRM" in
+            if [ "$UNINSTALL_CONFIRM" != "UNINSTALL" ]; then
+                echo
+                echo "Uninstall cancelled."
+                sleep 2
+                continue
+            fi
 
-                y|Y|yes|YES)
-                    rm -f "$INSTALL_PATH"
-                    rm -rf "$LIB_PATH"
+            echo
+            echo "Creating a final U-OPTI safety backup..."
 
-                    echo
-                    echo "U-OPTI has been uninstalled."
-                    exit 0
-                    ;;
+            FINAL_BACKUP_DIR=""
+            if [ -d "/etc/u-opti" ]; then
+                FINAL_BACKUP_DIR="/etc/u-opti/backups/$(date '+%Y%m%d-%H%M%S-%N')-pre-uninstall"
+                mkdir -p "$FINAL_BACKUP_DIR" || FINAL_BACKUP_DIR=""
 
-                *)
-                    echo
-                    echo "Uninstall cancelled."
-                    sleep 2
-                    ;;
-            esac
+                if [ -n "$FINAL_BACKUP_DIR" ]; then
+                    if ! tar -C / --exclude="etc/u-opti/backups" -czf "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" \
+                        "usr/local/bin/u-opti" "usr/local/lib/u-opti" "etc/u-opti" 2>/dev/null; then
+                        rm -rf "$FINAL_BACKUP_DIR"
+                        FINAL_BACKUP_DIR=""
+                    fi
+                fi
+            fi
+
+            if [ -n "$FINAL_BACKUP_DIR" ] && [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
+                chmod 700 "$FINAL_BACKUP_DIR"
+                chmod 600 "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+                echo "Safety backup created:"
+                echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+            else
+                echo "WARNING: Final safety backup could not be created."
+                echo "U-OPTI was NOT uninstalled."
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            rm -f "$INSTALL_PATH"
+            rm -rf "$LIB_PATH"
+
+            if [ -e "$INSTALL_PATH" ] || [ -e "$LIB_PATH" ]; then
+                echo
+                echo "ERROR: U-OPTI files could not be fully removed."
+                echo "Safety backup retained at:"
+                echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo
+            echo "======================================"
+            echo "       U-OPTI Uninstalled Safely"
+            echo "======================================"
+            echo
+            echo "Removed:"
+            echo "  - $INSTALL_PATH"
+            echo "  - $LIB_PATH"
+            echo
+            echo "Retained:"
+            echo "  - /etc/u-opti and its backups"
+            echo "  - Nginx / Certbot"
+            echo "  - 3x-UI / Xray"
+            echo "  - Docker and other services"
+            echo
+            echo "Safety backup retained at:"
+            echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+            echo
+            exit 0
             ;;
 
         0)
