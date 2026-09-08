@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Fail2Ban Management Module
-# v0.11.1
+# v0.12.0
 
 FAIL2BAN_DIR="/etc/u-opti/fail2ban"
 FAIL2BAN_BACKUP_DIR="$FAIL2BAN_DIR/backups"
