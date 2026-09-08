@@ -837,7 +837,204 @@ docker_3xui_backup() {
     echo "======================================"
     echo
 
-    echo "Backup 3x-UI is not implemented yet."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: 3x-UI container is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker compose version >/dev/null 2>&1; then
+        echo "Error: Docker Compose plugin is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ ! -d "$DOCKER_3XUI_DIR" ]; then
+        echo "Error: 3x-UI data directory was not found:"
+        echo "$DOCKER_3XUI_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
+    BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$TIMESTAMP"
+
+    echo "Preparing backup..."
+    echo
+    echo "Backup Directory:"
+    echo "$BACKUP_DIR"
+    echo
+
+    if ! mkdir -p "$BACKUP_DIR"; then
+        echo "Error: Failed to create backup directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    BACKUP_FAILED=false
+
+    echo "Backing up Docker Compose file..."
+
+    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" "$BACKUP_DIR/docker-compose.yml"; then
+            echo "ERROR: Failed to back up Docker Compose file."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Docker Compose file was not found."
+    fi
+
+    echo "Backing up database..."
+
+    if [ -d "$DOCKER_3XUI_DIR/db" ]; then
+        if ! tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$BACKUP_DIR/db.tar.gz" \
+            db; then
+            echo "ERROR: Failed to back up database."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Database directory was not found."
+        BACKUP_FAILED=true
+    fi
+
+    echo "Backing up certificates..."
+
+    if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
+        if ! tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$BACKUP_DIR/cert.tar.gz" \
+            cert; then
+            echo "ERROR: Failed to back up certificate directory."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Certificate directory was not found."
+        BACKUP_FAILED=true
+    fi
+
+    IMAGE_NAME=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Config.Image}}' 2>/dev/null || true)
+
+    IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Image}}' 2>/dev/null || true)
+
+    CONTAINER_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.State.Status}}' 2>/dev/null || true)
+
+    PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
+    SUBSCRIPTION_PORT="2096"
+    WEB_BASE_PATH="/"
+
+    TEMP_SETTINGS_FILE=$(mktemp)
+
+    if docker_3xui_is_running; then
+        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
+            >"$TEMP_SETTINGS_FILE" 2>/dev/null; then
+
+            DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
+                "$TEMP_SETTINGS_FILE" | head -n 1)
+
+            if [ -n "$DETECTED_PANEL_PORT" ]; then
+                PANEL_PORT="$DETECTED_PANEL_PORT"
+            fi
+
+            DETECTED_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' \
+                "$TEMP_SETTINGS_FILE" | head -n 1)
+
+            if [ -n "$DETECTED_BASE_PATH" ]; then
+                WEB_BASE_PATH="$DETECTED_BASE_PATH"
+            fi
+        fi
+    fi
+
+    rm -f "$TEMP_SETTINGS_FILE"
+
+    cat > "$BACKUP_DIR/backup-info.txt" <<EOF
+3x-UI Container: $DOCKER_3XUI_CONTAINER
+Image: $IMAGE_NAME
+Image ID: $IMAGE_ID
+Container Status: $CONTAINER_STATUS
+Panel Port: $PANEL_PORT
+Subscription Port: $SUBSCRIPTION_PORT
+Web Base Path: $WEB_BASE_PATH
+Backup Time: $(date --iso-8601=seconds)
+Compose File: $DOCKER_3XUI_COMPOSE_FILE
+Data Directory: $DOCKER_3XUI_DIR/db
+Certificate Directory: $DOCKER_3XUI_DIR/cert
+EOF
+
+    if [ "$BACKUP_FAILED" = "true" ]; then
+        echo
+        echo "======================================"
+        echo "           Backup Failed"
+        echo "======================================"
+        echo
+        echo "The backup could not be completed successfully."
+        echo "Incomplete backup retained at:"
+        echo "$BACKUP_DIR"
+        echo
+        chmod 700 "$BACKUP_DIR"
+        find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    chmod 700 "$BACKUP_DIR"
+    find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
+
+    echo
+    echo "Validating backup..."
+
+    BACKUP_OK=true
+
+    for FILE in \
+        "$BACKUP_DIR/docker-compose.yml" \
+        "$BACKUP_DIR/db.tar.gz" \
+        "$BACKUP_DIR/cert.tar.gz" \
+        "$BACKUP_DIR/backup-info.txt"; do
+
+        if [ ! -s "$FILE" ]; then
+            echo "Missing or empty backup file:"
+            echo "$FILE"
+            BACKUP_OK=false
+        fi
+    done
+
+    if [ "$BACKUP_OK" != "true" ]; then
+        echo
+        echo "ERROR: Backup validation failed."
+        echo "Backup retained at:"
+        echo "$BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "          3x-UI Backup OK"
+    echo "======================================"
+    echo
+    echo "Backup Directory:"
+    echo "$BACKUP_DIR"
+    echo
+    echo "Files:"
+    echo "  - docker-compose.yml"
+    echo "  - db.tar.gz"
+    echo "  - cert.tar.gz"
+    echo "  - backup-info.txt"
     echo
 
     read -rp "Press Enter to return..."
