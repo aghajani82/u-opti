@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Firewall Management Module
-# v0.9.0
+# v0.12.0
 
 UOPTI_FIREWALL_DIR="/etc/u-opti/firewall"
 UOPTI_FIREWALL_BACKUP_DIR="$UOPTI_FIREWALL_DIR/backups"
@@ -28,6 +28,60 @@ firewall_require_ufw() {
     fi
 
     return 0
+}
+
+firewall_is_active() {
+    command -v ufw >/dev/null 2>&1 &&
+        [ "$(ufw status 2>/dev/null | head -n 1)" = "Status: active" ]
+}
+
+firewall_get_status() {
+    if ! command -v ufw >/dev/null 2>&1; then
+        echo "not-installed"
+        return 0
+    fi
+
+    local STATUS
+    STATUS=$(ufw status 2>/dev/null | head -n 1)
+
+    if [ "$STATUS" = "Status: active" ]; then
+        echo "active"
+    elif [ "$STATUS" = "Status: inactive" ]; then
+        echo "inactive"
+    else
+        echo "unknown"
+    fi
+}
+
+firewall_allow_tcp_port() {
+    local PORT="$1"
+
+    if ! firewall_port_is_valid "$PORT"; then
+        echo "Error: Invalid TCP port: $PORT" >&2
+        return 1
+    fi
+
+    if ! command -v ufw >/dev/null 2>&1; then
+        echo "Error: UFW is not installed." >&2
+        return 1
+    fi
+
+    if firewall_rule_exists "$PORT"; then
+        return 0
+    fi
+
+    ufw allow "$PORT/tcp"
+}
+
+firewall_remove_tcp_port() {
+    local PORT="$1"
+
+    if ! command -v ufw >/dev/null 2>&1; then
+        return 1
+    fi
+
+    firewall_rule_exists "$PORT" || return 0
+    ufw delete allow "$PORT/tcp"
 }
 
 firewall_prepare_backup_dir() {
