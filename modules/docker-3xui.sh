@@ -1572,7 +1572,319 @@ docker_3xui_uninstall() {
     echo "======================================"
     echo
 
-    echo "Uninstall 3x-UI is not implemented yet."
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: Root privileges are required."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "3x-UI container is not installed."
+        echo
+        if [ -d "$DOCKER_3XUI_DIR" ]; then
+            echo "Data directory still exists:"
+            echo "$DOCKER_3XUI_DIR"
+            echo
+            echo "No changes were made."
+        fi
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    IMAGE_NAME=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Config.Image}}' 2>/dev/null || true)
+
+    CONTAINER_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.State.Status}}' 2>/dev/null || true)
+
+    echo "Container : $DOCKER_3XUI_CONTAINER"
+    echo "Image     : ${IMAGE_NAME:-Unknown}"
+    echo "Status    : ${CONTAINER_STATUS:-Unknown}"
+    echo "Data Dir  : $DOCKER_3XUI_DIR"
+    echo
+
+    echo "What should be removed?"
+    echo
+    echo "1) Remove 3x-UI container + Compose file"
+    echo "   Keep database, certificates, and backups"
+    echo
+    echo "2) Complete uninstall"
+    echo "   Remove container + Compose file + 3x-UI data"
+    echo "   A final safety backup will be kept outside /opt/3x-ui"
+    echo
+    echo "0) Cancel"
+    echo
+
+    read -rp "Please enter your selection [0-2]: " UNINSTALL_CHOICE
+
+    case "$UNINSTALL_CHOICE" in
+        1|2)
+            ;;
+        0|*)
+            echo
+            echo "Uninstall cancelled."
+            sleep 1
+            return
+            ;;
+    esac
+
+    echo
+    echo "Safety policy:"
+    echo "A final backup of the current 3x-UI data will be created before removal."
+    echo "Docker itself will NOT be removed."
+    echo "Other containers, images, volumes, networks, and U-OPTI will NOT be removed."
+    echo
+
+    read -rp "Type UNINSTALL to continue: " CONFIRM
+
+    if [ "$CONFIRM" != "UNINSTALL" ]; then
+        echo
+        echo "Uninstall cancelled."
+        sleep 1
+        return
+    fi
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
+    SAFETY_ROOT="/root/u-opti-backups/3x-ui"
+    SAFETY_BACKUP_DIR="$SAFETY_ROOT/$TIMESTAMP-pre-uninstall"
+
+    echo
+    echo "Creating final safety backup..."
+    echo "Backup Directory:"
+    echo "$SAFETY_BACKUP_DIR"
+    echo
+
+    if ! mkdir -p "$SAFETY_BACKUP_DIR"; then
+        echo "ERROR: Failed to create safety backup directory."
+        echo "Nothing was removed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    BACKUP_FAILED=false
+
+    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" \
+            "$SAFETY_BACKUP_DIR/docker-compose.yml"; then
+            echo "ERROR: Failed to back up Docker Compose file."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Docker Compose file was not found."
+    fi
+
+    if [ -d "$DOCKER_3XUI_DIR/db" ]; then
+        if ! tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$SAFETY_BACKUP_DIR/db.tar.gz" \
+            db; then
+            echo "ERROR: Failed to back up 3x-UI database."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Database directory was not found."
+        BACKUP_FAILED=true
+    fi
+
+    if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
+        if ! tar -C "$DOCKER_3XUI_DIR" \
+            -czf "$SAFETY_BACKUP_DIR/cert.tar.gz" \
+            cert; then
+            echo "ERROR: Failed to back up 3x-UI certificate directory."
+            BACKUP_FAILED=true
+        fi
+    else
+        echo "WARNING: Certificate directory was not found."
+        BACKUP_FAILED=true
+    fi
+
+    cat > "$SAFETY_BACKUP_DIR/backup-info.txt" <<EOF
+3x-UI Container: $DOCKER_3XUI_CONTAINER
+Image: $IMAGE_NAME
+Container Status: $CONTAINER_STATUS
+Backup Time: $(date --iso-8601=seconds)
+Compose File: $DOCKER_3XUI_COMPOSE_FILE
+Data Directory: $DOCKER_3XUI_DIR/db
+Certificate Directory: $DOCKER_3XUI_DIR/cert
+Uninstall Choice: $UNINSTALL_CHOICE
+EOF
+
+    chmod 700 "$SAFETY_BACKUP_DIR"
+    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \\;
+
+    if [ "$BACKUP_FAILED" = "true" ]; then
+        echo
+        echo "ERROR: Final safety backup failed."
+        echo "Nothing was removed."
+        echo "Incomplete backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Validating final safety backup..."
+
+    BACKUP_OK=true
+
+    for FILE in \
+        "$SAFETY_BACKUP_DIR/docker-compose.yml" \
+        "$SAFETY_BACKUP_DIR/db.tar.gz" \
+        "$SAFETY_BACKUP_DIR/cert.tar.gz" \
+        "$SAFETY_BACKUP_DIR/backup-info.txt"; do
+
+        if [ ! -s "$FILE" ]; then
+            echo "Missing or empty safety backup file:"
+            echo "$FILE"
+            BACKUP_OK=false
+        fi
+    done
+
+    if [ "$BACKUP_OK" = "true" ]; then
+        if ! tar -tzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1; then
+            echo "Invalid database archive:"
+            echo "$SAFETY_BACKUP_DIR/db.tar.gz"
+            BACKUP_OK=false
+        fi
+
+        if ! tar -tzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1; then
+            echo "Invalid certificate archive:"
+            echo "$SAFETY_BACKUP_DIR/cert.tar.gz"
+            BACKUP_OK=false
+        fi
+
+        if ! grep -q '^services:' "$SAFETY_BACKUP_DIR/docker-compose.yml"; then
+            echo "Invalid Docker Compose file:"
+            echo "$SAFETY_BACKUP_DIR/docker-compose.yml"
+            BACKUP_OK=false
+        fi
+    fi
+
+    if [ "$BACKUP_OK" != "true" ]; then
+        echo
+        echo "ERROR: Safety backup validation failed."
+        echo "Nothing was removed."
+        echo "Backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Safety backup validated successfully."
+    echo
+    echo "Stopping 3x-UI container..."
+
+    if docker_3xui_is_running; then
+        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop 3x-UI container."
+            echo "Nothing else was removed."
+            echo "Safety backup retained at:"
+            echo "$SAFETY_BACKUP_DIR"
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo "Removing 3x-UI container..."
+
+    if ! docker rm "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo "ERROR: Failed to remove 3x-UI container."
+        echo "The container may still exist."
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        echo "Removing Docker Compose file..."
+        rm -f "$DOCKER_3XUI_COMPOSE_FILE"
+    fi
+
+    echo "Removing 3x-UI Docker image tag..."
+
+    if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+        if docker image rm "$IMAGE_NAME" >/dev/null 2>&1; then
+            IMAGE_REMOVED=true
+        else
+            IMAGE_REMOVED=false
+            echo "WARNING: The image tag could not be removed."
+            echo "It may still be referenced by another Docker resource."
+        fi
+    else
+        IMAGE_REMOVED=true
+    fi
+
+    if [ "$UNINSTALL_CHOICE" = "2" ]; then
+        echo "Removing 3x-UI data directory..."
+        rm -rf "$DOCKER_3XUI_DIR"
+    fi
+
+    echo
+    echo "Verifying uninstall..."
+
+    if docker_3xui_is_installed; then
+        echo "ERROR: 3x-UI container still exists."
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        echo "ERROR: Docker Compose file still exists:"
+        echo "$DOCKER_3XUI_COMPOSE_FILE"
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$UNINSTALL_CHOICE" = "2" ] && [ -e "$DOCKER_3XUI_DIR" ]; then
+        echo "ERROR: 3x-UI data directory still exists:"
+        echo "$DOCKER_3XUI_DIR"
+        echo "Safety backup retained at:"
+        echo "$SAFETY_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "       3x-UI Uninstall OK"
+    echo "======================================"
+    echo
+    echo "Container removed   : Yes"
+    echo "Compose file removed: Yes"
+    echo "Image tag removed   : $([ "$IMAGE_REMOVED" = "true" ] && echo "Yes" || echo "No")"
+
+    if [ "$UNINSTALL_CHOICE" = "1" ]; then
+        echo "Data removed       : No"
+        echo "Data retained at   : $DOCKER_3XUI_DIR"
+    else
+        echo "Data removed       : Yes"
+    fi
+
+    echo "Docker removed     : No"
+    echo "U-OPTI removed     : No"
+    echo
+    echo "Final safety backup:"
+    echo "$SAFETY_BACKUP_DIR"
     echo
 
     read -rp "Press Enter to return..."
