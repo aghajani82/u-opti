@@ -478,7 +478,352 @@ docker_3xui_update() {
     echo "======================================"
     echo
 
-    echo "Update 3x-UI is not implemented yet."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: 3x-UI container is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker compose version >/dev/null 2>&1; then
+        echo "Error: Docker Compose plugin is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ ! -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        echo "Error: Docker Compose file was not found:"
+        echo "$DOCKER_3XUI_COMPOSE_FILE"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    CURRENT_IMAGE=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Config.Image}}' 2>/dev/null || true)
+
+    CURRENT_IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Image}}' 2>/dev/null || true)
+
+    CURRENT_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.State.Status}}' 2>/dev/null || true)
+
+    if [ -z "$CURRENT_IMAGE" ] || [ -z "$CURRENT_IMAGE_ID" ]; then
+        echo "Error: Unable to determine the current 3x-UI image."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Current Image : $CURRENT_IMAGE"
+    echo "Container     : $DOCKER_3XUI_CONTAINER"
+    echo "Status        : ${CURRENT_STATUS:-Unknown}"
+    echo
+
+    echo "3x-UI Docker update will:"
+    echo "  1. Create a backup of the current 3x-UI data and Compose file."
+    echo "  2. Pull the latest Docker image."
+    echo "  3. Recreate the container using the existing persistent data."
+    echo "  4. Verify the new container and panel port."
+    echo "  5. Restore the previous image automatically if the update fails."
+    echo
+
+    read -rp "Continue with 3x-UI update? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Update cancelled."
+            sleep 1
+            return
+            ;;
+    esac
+
+    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
+    UPDATE_BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$TIMESTAMP-pre-update"
+    ROLLBACK_IMAGE="u-opti/3x-ui-rollback:$TIMESTAMP"
+
+    echo
+    echo "Creating update backup..."
+
+    if ! mkdir -p "$UPDATE_BACKUP_DIR"; then
+        echo "Error: Failed to create update backup directory."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
+        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" "$UPDATE_BACKUP_DIR/docker-compose.yml"; then
+            echo "Error: Failed to back up Docker Compose file."
+            rm -rf "$UPDATE_BACKUP_DIR"
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo "Backing up database..."
+
+    if ! tar -C "$DOCKER_3XUI_DIR" \
+        -czf "$UPDATE_BACKUP_DIR/db.tar.gz" \
+        db; then
+        echo "Error: Failed to back up the 3x-UI database."
+        rm -rf "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Backing up certificates..."
+
+    if ! tar -C "$DOCKER_3XUI_DIR" \
+        -czf "$UPDATE_BACKUP_DIR/cert.tar.gz" \
+        cert; then
+        echo "Error: Failed to back up the 3x-UI certificate directory."
+        rm -rf "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    cat > "$UPDATE_BACKUP_DIR/update-info.txt" <<EOF
+3x-UI Container: $DOCKER_3XUI_CONTAINER
+Previous Image: $CURRENT_IMAGE
+Previous Image ID: $CURRENT_IMAGE_ID
+Previous Status: $CURRENT_STATUS
+Backup Time: $(date --iso-8601=seconds)
+EOF
+
+    chmod 700 "$UPDATE_BACKUP_DIR"
+    chmod 600 "$UPDATE_BACKUP_DIR"/*
+
+    echo
+    echo "Update backup created:"
+    echo "$UPDATE_BACKUP_DIR"
+
+    echo
+    echo "Preparing rollback image..."
+
+    if ! docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_IMAGE"; then
+        echo "Error: Failed to prepare rollback image."
+        echo "The current container was not changed."
+        rm -rf "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Pulling latest 3x-UI image..."
+
+    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" pull; then
+        echo
+        echo "ERROR: Failed to pull the latest 3x-UI image."
+        echo "The running container was not changed."
+        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+        echo
+        echo "Backup retained at:"
+        echo "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    NEW_IMAGE_ID=$(docker image inspect "$DOCKER_3XUI_IMAGE" \
+        --format '{{.Id}}' 2>/dev/null || true)
+
+    echo
+    echo "Image pull completed."
+
+    if [ -n "$NEW_IMAGE_ID" ] && [ "$NEW_IMAGE_ID" = "$CURRENT_IMAGE_ID" ]; then
+        echo "3x-UI image is already up to date."
+        echo "No container recreation was required."
+        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+        rm -rf "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Stopping current 3x-UI container..."
+
+    if docker_3xui_is_running; then
+        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop the current 3x-UI container."
+            docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo
+    echo "Recreating 3x-UI container..."
+
+    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
+        echo
+        echo "ERROR: Failed to start the new 3x-UI container."
+        echo "Starting automatic rollback..."
+
+        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
+
+        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
+            echo "Rollback container started successfully."
+            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
+        else
+            echo "WARNING: Automatic rollback could not start the container."
+            echo "Previous Compose file retained at:"
+            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
+        fi
+
+        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+
+        echo
+        echo "Update failed."
+        echo "Backup retained at:"
+        echo "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Verifying updated container..."
+
+    sleep 3
+
+    if ! docker_3xui_is_running; then
+        echo "ERROR: Updated 3x-UI container is not running."
+        echo "Starting automatic rollback..."
+
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
+
+        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
+            echo "Rollback container started successfully."
+            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
+        else
+            echo "WARNING: Automatic rollback could not start the container."
+            echo "Previous Compose file retained at:"
+            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
+        fi
+
+        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+
+        echo
+        echo "Update failed."
+        echo "Backup retained at:"
+        echo "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
+
+    if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
+        'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
+        >/tmp/u-opti-3xui-update-settings.txt 2>/dev/null; then
+
+        DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
+            /tmp/u-opti-3xui-update-settings.txt | head -n 1)
+
+        if [ -n "$DETECTED_PANEL_PORT" ]; then
+            PANEL_PORT="$DETECTED_PANEL_PORT"
+        fi
+    fi
+
+    rm -f /tmp/u-opti-3xui-update-settings.txt
+
+    if ! docker_3xui_port_is_in_use "$PANEL_PORT"; then
+        echo
+        echo "ERROR: Updated 3x-UI container is running, but panel port"
+        echo "$PANEL_PORT is not listening."
+        echo "Starting automatic rollback..."
+
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
+
+        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
+            echo "Rollback container started successfully."
+            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
+        else
+            echo "WARNING: Automatic rollback could not start the container."
+            echo "Previous Compose file retained at:"
+            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
+        fi
+
+        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+
+        echo
+        echo "Update failed."
+        echo "Backup retained at:"
+        echo "$UPDATE_BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    NEW_IMAGE=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Config.Image}}' 2>/dev/null || true)
+
+    NEW_IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
+        --format '{{.Image}}' 2>/dev/null || true)
+
+    echo
+    echo "======================================"
+    echo "         3x-UI Update OK"
+    echo "======================================"
+    echo
+    echo "Previous Image : $CURRENT_IMAGE"
+    echo "New Image      : $NEW_IMAGE"
+    echo "Container      : $DOCKER_3XUI_CONTAINER"
+    echo "Status         : Running"
+    echo "Panel Port     : $PANEL_PORT"
+    echo
+    echo "Persistent data was preserved."
+    echo "Database backup:"
+    echo "$UPDATE_BACKUP_DIR/db.tar.gz"
+    echo
+    echo "Update backup:"
+    echo "$UPDATE_BACKUP_DIR"
+
+    cat > "$UPDATE_BACKUP_DIR/update-info.txt" <<EOF
+3x-UI Container: $DOCKER_3XUI_CONTAINER
+Previous Image: $CURRENT_IMAGE
+Previous Image ID: $CURRENT_IMAGE_ID
+New Image: $NEW_IMAGE
+New Image ID: $NEW_IMAGE_ID
+Update Time: $(date --iso-8601=seconds)
+Panel Port: $PANEL_PORT
+EOF
+
+    chmod 600 "$UPDATE_BACKUP_DIR/update-info.txt"
+
+    docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
+
+    echo
+    echo "Note: The previous Docker image is retained by Docker until it is"
+    echo "manually removed or cleaned up."
     echo
 
     read -rp "Press Enter to return..."
