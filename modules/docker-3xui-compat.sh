@@ -354,9 +354,104 @@ docker_3xui_compat_configure_metrics() {
         "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" \
         2>/dev/null || true)
 
+    # On a fresh Sanaei 3x-UI installation, xrayTemplateConfig is not
+    # necessarily stored in the database. The official panel keeps the
+    # factory template embedded in the /app/x-ui binary and exposes it via
+    # the authenticated getDefaultJsonConfig API.
+    #
+    # The installer has no authenticated panel session yet, so the helper
+    # uses the official factory template shipped with the Sanaei panel and
+    # changes only metrics.listen. This preserves the expected API, routing,
+    # outbound, policy, and metrics defaults on a fresh installation.
     if [ -z "$CURRENT_TEMPLATE" ]; then
-        echo "ERROR: xrayTemplateConfig was not found in the 3x-UI database."
-        return 1
+        CURRENT_TEMPLATE='{
+  "api": {
+    "services": [
+      "HandlerService",
+      "LoggerService",
+      "StatsService",
+      "RoutingService"
+    ],
+    "tag": "api"
+  },
+  "inbounds": [{
+    "listen": "127.0.0.1",
+    "port": 62789,
+    "protocol": "tunnel",
+    "settings": {
+      "rewriteAddress": "127.0.0.1"
+    },
+    "tag": "api"
+  }],
+  "log": {
+    "access": "none",
+    "dnsLog": false,
+    "error": "",
+    "loglevel": "warning",
+    "maskAddress": ""
+  },
+  "metrics": {
+    "listen": "127.0.0.1:11111",
+    "tag": "metrics_out"
+  },
+  "outbounds": [{
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "AsIs",
+        "finalRules": [
+          { "action": "block", "ip": ["geoip:private"] },
+          { "action": "allow" }
+        ]
+      },
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "settings": {},
+      "tag": "blocked"
+    }
+  ],
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserDownlink": true,
+        "statsUserUplink": true
+      }
+    },
+    "system": {
+      "statsInboundDownlink": true,
+      "statsInboundUplink": true,
+      "statsOutboundDownlink": false,
+      "statsOutboundUplink": false
+    }
+  },
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [{
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api",
+        "type": "field"
+      },
+      {
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "blocked",
+        "type": "field"
+      },
+      {
+        "outboundTag": "blocked",
+        "protocol": [
+          "bittorrent"
+        ],
+        "type": "field"
+      }
+    ]
+  },
+  "stats": {}
+}'
     fi
 
     if ! printf '%s\n' "$CURRENT_TEMPLATE" | jq empty >/dev/null 2>&1; then
@@ -385,9 +480,15 @@ docker_3xui_compat_configure_metrics() {
     ESCAPED_TEMPLATE=$(printf '%s' "$UPDATED_TEMPLATE" | sed "s/'/''/g")
 
     if ! sqlite3 "$DB_FILE" <<EOF
-UPDATE settings
-SET value = '$ESCAPED_TEMPLATE'
+BEGIN;
+
+DELETE FROM settings
 WHERE key = 'xrayTemplateConfig';
+
+INSERT INTO settings (key, value)
+VALUES ('xrayTemplateConfig', '$ESCAPED_TEMPLATE');
+
+COMMIT;
 EOF
     then
         echo "ERROR: Failed to save the updated Xray template."
