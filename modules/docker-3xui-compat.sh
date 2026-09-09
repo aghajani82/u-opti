@@ -1,80 +1,45 @@
 #!/bin/bash
 
-# U-OPTI - 3x-UI Docker Management
+# U-OPTI - 3x-UI Docker Compatibility Helpers
 # v0.13.0
 
-DOCKER_3XUI_IMAGE="ghcr.io/mhsanaei/3x-ui:latest"
-DOCKER_3XUI_CONTAINER="3xui"
-DOCKER_3XUI_DIR="/opt/3x-ui"
-DOCKER_3XUI_COMPOSE_FILE="$DOCKER_3XUI_DIR/docker-compose.yml"
-DOCKER_3XUI_PANEL_PORT="2053"
+# -----------------------------------------------------------------------------
+# Purpose
+# -----------------------------------------------------------------------------
+# Keeps Sanaei 3x-UI Docker compatible with an existing X-UI PRO installation
+# on the same server without modifying the PRO installation.
+#
+# Design:
+#   Panel        : fixed at 2053
+#   Subscription : prefer 2096, then 2095, then 2097-2099
+#   Metrics      : prefer 11111, then 11112, then 11113-11115
+#
+# Subscription is kept on localhost and published through Nginx :443.
+# Xray metrics are kept on localhost.
+#
+# These are library functions only. Nothing runs automatically when sourced.
+# -----------------------------------------------------------------------------
 
-DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
-DOCKER_3XUI_COMPAT_HELPER=""
+DOCKER_3XUI_COMPAT_PANEL_PORT="2053"
 
-docker_3xui_load_compat() {
-    local SCRIPT_DIR
+DOCKER_3XUI_COMPAT_SUB_PRIMARY="2096"
+DOCKER_3XUI_COMPAT_SUB_FALLBACK="2095"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_1="2097"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_2="2098"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_3="2099"
 
-    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
-    DOCKER_3XUI_COMPAT_HELPER="$SCRIPT_DIR/docker-3xui-compat.sh"
+DOCKER_3XUI_COMPAT_METRICS_PRIMARY="11111"
+DOCKER_3XUI_COMPAT_METRICS_FALLBACK="11112"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_1="11113"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_2="11114"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_3="11115"
 
-    if [ ! -f "$DOCKER_3XUI_COMPAT_HELPER" ]; then
-        echo
-        echo "ERROR: 3x-UI compatibility helper was not found:"
-        echo "$DOCKER_3XUI_COMPAT_HELPER"
-        return 1
-    fi
-
-    # shellcheck disable=SC1090
-    source "$DOCKER_3XUI_COMPAT_HELPER"
-}
-
-docker_3xui_valid_domain() {
-    [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]
-}
-
-docker_3xui_save_compat_state() {
-    local DOMAIN="$1"
-    local SUB_PORT="$2"
-    local METRICS_PORT="$3"
-
-    mkdir -p "$DOCKER_3XUI_DIR" || return 1
-
-    cat > "$DOCKER_3XUI_COMPAT_ENV" <<EOF
-DOMAIN=$DOMAIN
-PANEL_PORT=$DOCKER_3XUI_PANEL_PORT
-SUBSCRIPTION_PORT=$SUB_PORT
-METRICS_PORT=$METRICS_PORT
-EOF
-
-    chmod 600 "$DOCKER_3XUI_COMPAT_ENV"
-}
-
-docker_3xui_load_compat_state() {
-    if [ ! -f "$DOCKER_3XUI_COMPAT_ENV" ]; then
-        return 1
-    fi
-
-    # shellcheck disable=SC1090
-    source "$DOCKER_3XUI_COMPAT_ENV"
-}
-
-docker_3xui_is_installed() {
-    docker ps -a --format '{{.Names}}' 2>/dev/null |
-        grep -Fxq "$DOCKER_3XUI_CONTAINER"
-}
-
-docker_3xui_is_running() {
-    docker ps --format '{{.Names}}' 2>/dev/null |
-        grep -Fxq "$DOCKER_3XUI_CONTAINER"
-}
-
-docker_3xui_port_is_in_use() {
+docker_3xui_compat_port_is_in_use() {
     local PORT="$1"
 
     ss -lntp 2>/dev/null |
         awk -v port=":$PORT" '
-            NR > 1 && $4 ~ port"$" {
+            NR > 1 && $4 ~ port "$" {
                 found=1
             }
             END {
@@ -83,2211 +48,448 @@ docker_3xui_port_is_in_use() {
         '
 }
 
-docker_3xui_install() {
-    clear
+docker_3xui_compat_require_free_port() {
+    local PORT="$1"
+    local LABEL="$2"
 
-    echo "======================================"
-    echo "       Install 3x-UI in Docker"
-    echo "======================================"
-    echo
-
-    if [ "$EUID" -ne 0 ]; then
-        echo "Error: Root privileges are required."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        echo "Please install Docker first from:"
-        echo "Docker Management > Install Docker"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker compose version >/dev/null 2>&1; then
-        echo "Error: Docker Compose plugin is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if docker_3xui_is_installed; then
-        echo "3x-UI Docker is already installed."
-        echo
-        echo "Container: $DOCKER_3XUI_CONTAINER"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_load_compat; then
-        echo
-        echo "Installation cancelled because the compatibility helper"
-        echo "could not be loaded."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Checking 3x-UI Docker panel port $DOCKER_3XUI_PANEL_PORT/tcp..."
-
-    if ! docker_3xui_compat_check_panel_port; then
-        echo
-        echo "Installation cancelled."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_compat_select_subscription_port; then
-        echo
-        echo "Installation cancelled."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_compat_select_metrics_port; then
-        echo
-        echo "Installation cancelled."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    read -r -p "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back): " DOMAIN
-
-    if [ "$DOMAIN" = "0" ]; then
-        return
-    fi
-
-    if ! docker_3xui_valid_domain "$DOMAIN"; then
-        echo
-        echo "Error: Invalid domain format."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -e "$DOCKER_3XUI_DIR" ]; then
-        if [ -n "$(find "$DOCKER_3XUI_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-            echo
-            echo "Directory already exists and contains data:"
-            echo "$DOCKER_3XUI_DIR"
-            echo
-            echo "U-OPTI will not overwrite existing data."
-            echo "Installation cancelled."
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
-
-    echo
-    echo "3x-UI installation plan:"
-    echo
-    echo "Image        : $DOCKER_3XUI_IMAGE"
-    echo "Container    : $DOCKER_3XUI_CONTAINER"
-    echo "Network      : host"
-    echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
-    echo "Subscription: $DOCKER_3XUI_COMPAT_SUB_PORT"
-    echo "Metrics      : $DOCKER_3XUI_COMPAT_METRICS_PORT"
-    echo "Domain       : $DOMAIN"
-    echo "Data Dir     : $DOCKER_3XUI_DIR"
-    echo "Database     : $DOCKER_3XUI_DIR/db"
-    echo "Certificates : $DOCKER_3XUI_DIR/cert"
-    echo
-    echo "Note:"
-    echo "  - Existing X-UI/PRO ports are not changed."
-    echo "  - Subscription and Metrics are kept on localhost."
-    echo "  - Nginx configuration is not modified by this install step."
-    echo
-
-    read -rp "Continue with installation? [y/N]: " CONFIRM
-
-    case "$CONFIRM" in
-        y|Y|yes|YES)
-            ;;
-        *)
-            echo
-            echo "Installation cancelled."
-            sleep 1
-            return
-            ;;
-    esac
-
-    echo
-    echo "Creating 3x-UI directories..."
-
-    mkdir -p \
-        "$DOCKER_3XUI_DIR/db" \
-        "$DOCKER_3XUI_DIR/cert" || {
-        echo "Error: Failed to create 3x-UI directories."
-        read -rp "Press Enter to return..."
-        return
-    }
-
-    echo "Creating Docker Compose file..."
-
-    cat > "$DOCKER_3XUI_COMPOSE_FILE" <<EOF
-services:
-  3xui:
-    image: $DOCKER_3XUI_IMAGE
-    container_name: $DOCKER_3XUI_CONTAINER
-
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-
-    volumes:
-      - $DOCKER_3XUI_DIR/db:/etc/x-ui/
-      - $DOCKER_3XUI_DIR/cert:/root/cert/
-
-    environment:
-      XRAY_VMESS_AEAD_FORCED: "false"
-      XUI_ENABLE_FAIL2BAN: "true"
-
-    tty: true
-    network_mode: host
-    restart: unless-stopped
-EOF
-
-    if [ ! -s "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        echo "Error: Docker Compose file was not created."
-        echo "Installation cancelled."
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Pulling 3x-UI Docker image..."
-
-    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" pull; then
-        echo
-        echo "Error: Failed to pull 3x-UI image."
-        echo "Installation was not completed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Starting 3x-UI container..."
-
-    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d; then
-        echo
-        echo "Error: Failed to start 3x-UI container."
-        echo
-        echo "Docker Compose status:"
-        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" ps || true
-        echo
-        echo "Container logs:"
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Verifying 3x-UI container..."
-    sleep 3
-
-    if ! docker_3xui_is_running; then
-        echo
-        echo "ERROR: 3x-UI container is not running."
-        echo
-        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" ps || true
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    DB_FILE="$DOCKER_3XUI_DIR/db/x-ui.db"
-
-    echo
-    echo "Waiting for 3x-UI database..."
-
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        if [ -s "$DB_FILE" ]; then
-            break
-        fi
-        sleep 1
-    done
-
-    if [ ! -s "$DB_FILE" ]; then
-        echo "ERROR: 3x-UI database was not created:"
-        echo "$DB_FILE"
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Applying Sanaei compatibility settings..."
-
-    if ! docker_3xui_compat_configure \
-        "$DB_FILE" \
-        "$DOMAIN"; then
-
-        echo
-        echo "ERROR: Compatibility configuration failed."
-        echo "The container will be stopped to avoid leaving a partial configuration."
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_save_compat_state \
-        "$DOMAIN" \
-        "$DOCKER_3XUI_COMPAT_SUB_PORT" \
-        "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
-
-        echo
-        echo "ERROR: Failed to save 3x-UI compatibility state."
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Restarting 3x-UI to apply Xray template changes..."
-
-    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo
-        echo "ERROR: Failed to restart 3x-UI after compatibility configuration."
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    sleep 3
-
-    echo
-    echo "Verifying final 3x-UI listeners..."
-
-    if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_PANEL_PORT"; then
-        echo "ERROR: Panel port $DOCKER_3XUI_PANEL_PORT is not listening."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_COMPAT_SUB_PORT"; then
-        echo "ERROR: Subscription port $DOCKER_3XUI_COMPAT_SUB_PORT is not listening."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    METRICS_CHECK_PORT="$(docker_3xui_compat_get_metrics_port "$DB_FILE" || true)"
-
-    if [ "$METRICS_CHECK_PORT" != "$DOCKER_3XUI_COMPAT_METRICS_PORT" ]; then
-        echo "ERROR: Metrics configuration verification failed."
-        echo "Expected: 127.0.0.1:$DOCKER_3XUI_COMPAT_METRICS_PORT"
-        echo "Detected : ${METRICS_CHECK_PORT:-Not detected}"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "======================================"
-    echo "      3x-UI Installation OK"
-    echo "======================================"
-    echo
-    echo "Container     : $DOCKER_3XUI_CONTAINER"
-    echo "Status        : Running"
-    echo "Image         : $DOCKER_3XUI_IMAGE"
-    echo "Network       : host"
-    echo "Panel Port    : $DOCKER_3XUI_PANEL_PORT"
-    echo "Subscription  : $DOCKER_3XUI_COMPAT_SUB_PORT"
-    echo "Metrics       : $DOCKER_3XUI_COMPAT_METRICS_PORT"
-    echo "Domain        : $DOMAIN"
-    echo "Data Dir      : $DOCKER_3XUI_DIR/db"
-    echo "Cert Dir      : $DOCKER_3XUI_DIR/cert"
-    echo
-    echo "Panel URL:"
-    echo "http://<SERVER-IP>:$DOCKER_3XUI_PANEL_PORT"
-    echo
-    echo "Subscription URI:"
-    echo "https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
-    echo
-    echo "Nginx:"
-    echo "Not modified by the installer."
-    echo "Configure the domain/proxy through the certificate/Nginx workflow."
-    echo
-    echo "Docker Compose:"
-    echo "$DOCKER_3XUI_COMPOSE_FILE"
-    echo
-    echo "Compatibility state:"
-    echo "$DOCKER_3XUI_COMPAT_ENV"
-    echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_start() {
-    clear
-
-    echo "======================================"
-    echo "            Start 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if docker_3xui_is_running; then
-        echo "3x-UI is already running."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Starting 3x-UI container..."
-    echo
-
-    if ! docker start "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to start 3x-UI container."
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    sleep 2
-
-    if ! docker_3xui_is_running; then
-        echo
-        echo "ERROR: 3x-UI container did not remain running."
-        echo
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
-            --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "3x-UI started successfully."
-    echo "Status: Running"
-    echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_stop() {
-    clear
-
-    echo "======================================"
-    echo "             Stop 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_running; then
-        echo "3x-UI is already stopped."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Stopping 3x-UI container..."
-    echo
-
-    if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to stop 3x-UI container."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    sleep 1
-
-    if docker_3xui_is_running; then
-        echo "ERROR: 3x-UI container is still running."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "3x-UI stopped successfully."
-    echo "Status: Stopped"
-    echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_restart() {
-    clear
-
-    echo "======================================"
-    echo "           Restart 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Restarting 3x-UI container..."
-    echo
-
-    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to restart 3x-UI container."
-        echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    sleep 2
-
-    if ! docker_3xui_is_running; then
-        echo
-        echo "ERROR: 3x-UI container did not remain running after restart."
-        echo
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
-            --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
+    if docker_3xui_compat_port_is_in_use "$PORT"; then
         echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo "ERROR: $LABEL port $PORT/tcp is already in use."
         echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "3x-UI restarted successfully."
-    echo "Status: Running"
-    echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_update() {
-    clear
-
-    echo "======================================"
-    echo "            Update 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker compose version >/dev/null 2>&1; then
-        echo "Error: Docker Compose plugin is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ ! -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        echo "Error: Docker Compose file was not found:"
-        echo "$DOCKER_3XUI_COMPOSE_FILE"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    CURRENT_IMAGE=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Config.Image}}' 2>/dev/null || true)
-
-    CURRENT_IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Image}}' 2>/dev/null || true)
-
-    CURRENT_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.State.Status}}' 2>/dev/null || true)
-
-    if [ -z "$CURRENT_IMAGE" ] || [ -z "$CURRENT_IMAGE_ID" ]; then
-        echo "Error: Unable to determine the current 3x-UI image."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Current Image : $CURRENT_IMAGE"
-    echo "Container     : $DOCKER_3XUI_CONTAINER"
-    echo "Status        : ${CURRENT_STATUS:-Unknown}"
-    echo
-
-    echo "3x-UI Docker update will:"
-    echo "  1. Create a backup of the current 3x-UI data and Compose file."
-    echo "  2. Pull the latest Docker image."
-    echo "  3. Recreate the container using the existing persistent data."
-    echo "  4. Verify the new container and panel port."
-    echo "  5. Restore the previous image automatically if the update fails."
-    echo
-
-    read -rp "Continue with 3x-UI update? [y/N]: " CONFIRM
-
-    case "$CONFIRM" in
-        y|Y|yes|YES)
-            ;;
-        *)
-            echo
-            echo "Update cancelled."
-            sleep 1
-            return
-            ;;
-    esac
-
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    UPDATE_BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$TIMESTAMP-pre-update"
-    ROLLBACK_IMAGE="u-opti/3x-ui-rollback:$TIMESTAMP"
-
-    echo
-    echo "Creating update backup..."
-
-    if ! mkdir -p "$UPDATE_BACKUP_DIR"; then
-        echo "Error: Failed to create update backup directory."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" "$UPDATE_BACKUP_DIR/docker-compose.yml"; then
-            echo "Error: Failed to back up Docker Compose file."
-            rm -rf "$UPDATE_BACKUP_DIR"
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
-
-    echo "Backing up database..."
-
-    if ! tar -C "$DOCKER_3XUI_DIR" \
-        -czf "$UPDATE_BACKUP_DIR/db.tar.gz" \
-        db; then
-        echo "Error: Failed to back up the 3x-UI database."
-        rm -rf "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Backing up certificates..."
-
-    if ! tar -C "$DOCKER_3XUI_DIR" \
-        -czf "$UPDATE_BACKUP_DIR/cert.tar.gz" \
-        cert; then
-        echo "Error: Failed to back up the 3x-UI certificate directory."
-        rm -rf "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    cat > "$UPDATE_BACKUP_DIR/update-info.txt" <<EOF
-3x-UI Container: $DOCKER_3XUI_CONTAINER
-Previous Image: $CURRENT_IMAGE
-Previous Image ID: $CURRENT_IMAGE_ID
-Previous Status: $CURRENT_STATUS
-Backup Time: $(date --iso-8601=seconds)
-EOF
-
-    chmod 700 "$UPDATE_BACKUP_DIR"
-    chmod 600 "$UPDATE_BACKUP_DIR"/*
-
-    echo
-    echo "Update backup created:"
-    echo "$UPDATE_BACKUP_DIR"
-
-    echo
-    echo "Preparing rollback image..."
-
-    if ! docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_IMAGE"; then
-        echo "Error: Failed to prepare rollback image."
-        echo "The current container was not changed."
-        rm -rf "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Pulling latest 3x-UI image..."
-
-    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" pull; then
-        echo
-        echo "ERROR: Failed to pull the latest 3x-UI image."
-        echo "The running container was not changed."
-        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-        echo
-        echo "Backup retained at:"
-        echo "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    NEW_IMAGE_ID=$(docker image inspect "$DOCKER_3XUI_IMAGE" \
-        --format '{{.Id}}' 2>/dev/null || true)
-
-    echo
-    echo "Image pull completed."
-
-    if [ -n "$NEW_IMAGE_ID" ] && [ "$NEW_IMAGE_ID" = "$CURRENT_IMAGE_ID" ]; then
-        echo "3x-UI image is already up to date."
-        echo "No container recreation was required."
-        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-        rm -rf "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Stopping current 3x-UI container..."
-
-    if docker_3xui_is_running; then
-        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-            echo "ERROR: Failed to stop the current 3x-UI container."
-            docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
-
-    echo
-    echo "Recreating 3x-UI container..."
-
-    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
-        echo
-        echo "ERROR: Failed to start the new 3x-UI container."
-        echo "Starting automatic rollback..."
-
-        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
-
-        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
-            echo "Rollback container started successfully."
-            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
-        else
-            echo "WARNING: Automatic rollback could not start the container."
-            echo "Previous Compose file retained at:"
-            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
-        fi
-
-        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-
-        echo
-        echo "Update failed."
-        echo "Backup retained at:"
-        echo "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Verifying updated container..."
-
-    sleep 3
-
-    if ! docker_3xui_is_running; then
-        echo "ERROR: Updated 3x-UI container is not running."
-        echo "Starting automatic rollback..."
-
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
-
-        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
-            echo "Rollback container started successfully."
-            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
-        else
-            echo "WARNING: Automatic rollback could not start the container."
-            echo "Previous Compose file retained at:"
-            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
-        fi
-
-        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-
-        echo
-        echo "Update failed."
-        echo "Backup retained at:"
-        echo "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-
-    if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-        'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-        >/tmp/u-opti-3xui-update-settings.txt 2>/dev/null; then
-
-        DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
-            /tmp/u-opti-3xui-update-settings.txt | head -n 1)
-
-        if [ -n "$DETECTED_PANEL_PORT" ]; then
-            PANEL_PORT="$DETECTED_PANEL_PORT"
-        fi
-    fi
-
-    rm -f /tmp/u-opti-3xui-update-settings.txt
-
-    if ! docker_3xui_port_is_in_use "$PANEL_PORT"; then
-        echo
-        echo "ERROR: Updated 3x-UI container is running, but panel port"
-        echo "$PANEL_PORT is not listening."
-        echo "Starting automatic rollback..."
-
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-        sed -i "s|^[[:space:]]*image:.*|    image: $ROLLBACK_IMAGE|" "$DOCKER_3XUI_COMPOSE_FILE"
-
-        if docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d --force-recreate; then
-            echo "Rollback container started successfully."
-            cp -f "$UPDATE_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"
-        else
-            echo "WARNING: Automatic rollback could not start the container."
-            echo "Previous Compose file retained at:"
-            echo "$UPDATE_BACKUP_DIR/docker-compose.yml"
-        fi
-
-        docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-
-        echo
-        echo "Update failed."
-        echo "Backup retained at:"
-        echo "$UPDATE_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    NEW_IMAGE=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Config.Image}}' 2>/dev/null || true)
-
-    NEW_IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Image}}' 2>/dev/null || true)
-
-    echo
-    echo "======================================"
-    echo "         3x-UI Update OK"
-    echo "======================================"
-    echo
-    echo "Previous Image : $CURRENT_IMAGE"
-    echo "New Image      : $NEW_IMAGE"
-    echo "Container      : $DOCKER_3XUI_CONTAINER"
-    echo "Status         : Running"
-    echo "Panel Port     : $PANEL_PORT"
-    echo
-    echo "Persistent data was preserved."
-    echo "Database backup:"
-    echo "$UPDATE_BACKUP_DIR/db.tar.gz"
-    echo
-    echo "Update backup:"
-    echo "$UPDATE_BACKUP_DIR"
-
-    cat > "$UPDATE_BACKUP_DIR/update-info.txt" <<EOF
-3x-UI Container: $DOCKER_3XUI_CONTAINER
-Previous Image: $CURRENT_IMAGE
-Previous Image ID: $CURRENT_IMAGE_ID
-New Image: $NEW_IMAGE
-New Image ID: $NEW_IMAGE_ID
-Update Time: $(date --iso-8601=seconds)
-Panel Port: $PANEL_PORT
-EOF
-
-    chmod 600 "$UPDATE_BACKUP_DIR/update-info.txt"
-
-    docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
-
-    echo
-    echo "Note: The previous Docker image is retained by Docker until it is"
-    echo "manually removed or cleaned up."
-    echo
-
-    read -rp "Press Enter to return..."
-}
-
-docker_3xui_backup() {
-    clear
-
-    echo "======================================"
-    echo "           Backup 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker compose version >/dev/null 2>&1; then
-        echo "Error: Docker Compose plugin is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ ! -d "$DOCKER_3XUI_DIR" ]; then
-        echo "Error: 3x-UI data directory was not found:"
-        echo "$DOCKER_3XUI_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$TIMESTAMP"
-
-    echo "Preparing backup..."
-    echo
-    echo "Backup Directory:"
-    echo "$BACKUP_DIR"
-    echo
-
-    if ! mkdir -p "$BACKUP_DIR"; then
-        echo "Error: Failed to create backup directory."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    BACKUP_FAILED=false
-
-    echo "Backing up Docker Compose file..."
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" "$BACKUP_DIR/docker-compose.yml"; then
-            echo "ERROR: Failed to back up Docker Compose file."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Docker Compose file was not found."
-    fi
-
-    echo "Backing up database..."
-
-    if [ -d "$DOCKER_3XUI_DIR/db" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$BACKUP_DIR/db.tar.gz" \
-            db; then
-            echo "ERROR: Failed to back up database."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Database directory was not found."
-        BACKUP_FAILED=true
-    fi
-
-    echo "Backing up certificates..."
-
-    if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$BACKUP_DIR/cert.tar.gz" \
-            cert; then
-            echo "ERROR: Failed to back up certificate directory."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Certificate directory was not found."
-        BACKUP_FAILED=true
-    fi
-
-    IMAGE_NAME=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Config.Image}}' 2>/dev/null || true)
-
-    IMAGE_ID=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Image}}' 2>/dev/null || true)
-
-    CONTAINER_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.State.Status}}' 2>/dev/null || true)
-
-    PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-    SUBSCRIPTION_PORT=""
-    METRICS_PORT=""
-    WEB_BASE_PATH="/"
-
-    if docker_3xui_load_compat_state; then
-        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
-        METRICS_PORT="${METRICS_PORT:-}"
-    fi
-
-    SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
-
-    TEMP_SETTINGS_FILE=$(mktemp)
-
-    if docker_3xui_is_running; then
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >"$TEMP_SETTINGS_FILE" 2>/dev/null; then
-
-            DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
-                "$TEMP_SETTINGS_FILE" | head -n 1)
-
-            if [ -n "$DETECTED_PANEL_PORT" ]; then
-                PANEL_PORT="$DETECTED_PANEL_PORT"
-            fi
-
-            DETECTED_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' \
-                "$TEMP_SETTINGS_FILE" | head -n 1)
-
-            if [ -n "$DETECTED_BASE_PATH" ]; then
-                WEB_BASE_PATH="$DETECTED_BASE_PATH"
-            fi
-        fi
-    fi
-
-    rm -f "$TEMP_SETTINGS_FILE"
-
-    cat > "$BACKUP_DIR/backup-info.txt" <<EOF
-3x-UI Container: $DOCKER_3XUI_CONTAINER
-Image: $IMAGE_NAME
-Image ID: $IMAGE_ID
-Container Status: $CONTAINER_STATUS
-Panel Port: $PANEL_PORT
-Subscription Port: $SUBSCRIPTION_PORT
-Web Base Path: $WEB_BASE_PATH
-Backup Time: $(date --iso-8601=seconds)
-Compose File: $DOCKER_3XUI_COMPOSE_FILE
-Data Directory: $DOCKER_3XUI_DIR/db
-Certificate Directory: $DOCKER_3XUI_DIR/cert
-EOF
-
-    if [ "$BACKUP_FAILED" = "true" ]; then
-        echo
-        echo "======================================"
-        echo "           Backup Failed"
-        echo "======================================"
-        echo
-        echo "The backup could not be completed successfully."
-        echo "Incomplete backup retained at:"
-        echo "$BACKUP_DIR"
-        echo
-        chmod 700 "$BACKUP_DIR"
-        find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    chmod 700 "$BACKUP_DIR"
-    find "$BACKUP_DIR" -type f -exec chmod 600 {} \;
-
-    echo
-    echo "Validating backup..."
-
-    BACKUP_OK=true
-
-    for FILE in \
-        "$BACKUP_DIR/docker-compose.yml" \
-        "$BACKUP_DIR/db.tar.gz" \
-        "$BACKUP_DIR/cert.tar.gz" \
-        "$BACKUP_DIR/backup-info.txt"; do
-
-        if [ ! -s "$FILE" ]; then
-            echo "Missing or empty backup file:"
-            echo "$FILE"
-            BACKUP_OK=false
-        fi
-    done
-
-    if [ "$BACKUP_OK" != "true" ]; then
-        echo
-        echo "ERROR: Backup validation failed."
-        echo "Backup retained at:"
-        echo "$BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "======================================"
-    echo "          3x-UI Backup OK"
-    echo "======================================"
-    echo
-    echo "Backup Directory:"
-    echo "$BACKUP_DIR"
-    echo
-    echo "Files:"
-    echo "  - docker-compose.yml"
-    echo "  - db.tar.gz"
-    echo "  - cert.tar.gz"
-    echo "  - backup-info.txt"
-    echo
-
-    read -rp "Press Enter to return..."
-}
-docker_3xui_backup_validate() {
-    local BACKUP_DIR="$1"
-    local BACKUP_OK=true
-
-    if [ ! -d "$BACKUP_DIR" ]; then
-        echo "ERROR: Backup directory does not exist:"
-        echo "$BACKUP_DIR"
-        return 1
-    fi
-
-    for FILE in \
-        "$BACKUP_DIR/docker-compose.yml" \
-        "$BACKUP_DIR/db.tar.gz" \
-        "$BACKUP_DIR/cert.tar.gz" \
-        "$BACKUP_DIR/backup-info.txt"; do
-
-        if [ ! -s "$FILE" ]; then
-            echo "ERROR: Missing or empty backup file:"
-            echo "$FILE"
-            BACKUP_OK=false
-        fi
-    done
-
-    if [ "$BACKUP_OK" != "true" ]; then
-        return 1
-    fi
-
-    if ! tar -tzf "$BACKUP_DIR/db.tar.gz" >/dev/null 2>&1; then
-        echo "ERROR: Database backup archive is invalid."
-        return 1
-    fi
-
-    if ! tar -tzf "$BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1; then
-        echo "ERROR: Certificate backup archive is invalid."
-        return 1
-    fi
-
-    if ! grep -q '^services:' "$BACKUP_DIR/docker-compose.yml"; then
-        echo "ERROR: Docker Compose file does not appear to be valid."
+        echo "Current listener:"
+        ss -lntp 2>/dev/null | grep ":$PORT " || true
         return 1
     fi
 
     return 0
 }
 
-docker_3xui_restore() {
-    clear
-
-    echo "======================================"
-    echo "          Restore 3x-UI"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        echo "Please install Docker first."
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker compose version >/dev/null 2>&1; then
-        echo "Error: Docker Compose plugin is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ ! -d "$DOCKER_3XUI_DIR/backups" ]; then
-        echo "No 3x-UI backups were found."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    mapfile -t BACKUP_DIRS < <(
-        find "$DOCKER_3XUI_DIR/backups" \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d \
-            -printf '%T@ %p\n' 2>/dev/null |
-        sort -nr |
-        cut -d' ' -f2-
+docker_3xui_compat_select_subscription_port() {
+    local CANDIDATE
+    local CANDIDATES=(
+        "$DOCKER_3XUI_COMPAT_SUB_PRIMARY"
+        "$DOCKER_3XUI_COMPAT_SUB_FALLBACK"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_1"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_2"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_3"
     )
 
-    if [ "${#BACKUP_DIRS[@]}" -eq 0 ]; then
-        echo "No 3x-UI backups were found."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
+    unset DOCKER_3XUI_COMPAT_SUB_PORT
 
-    echo "Available 3x-UI backups:"
-    echo
-
-    VALID_BACKUPS=()
-
-    for BACKUP_DIR in "${BACKUP_DIRS[@]}"; do
-        if docker_3xui_backup_validate "$BACKUP_DIR" >/dev/null 2>&1; then
-            VALID_BACKUPS+=("$BACKUP_DIR")
+    for CANDIDATE in "${CANDIDATES[@]}"; do
+        if ! docker_3xui_compat_port_is_in_use "$CANDIDATE"; then
+            DOCKER_3XUI_COMPAT_SUB_PORT="$CANDIDATE"
+            return 0
         fi
     done
 
-    if [ "${#VALID_BACKUPS[@]}" -eq 0 ]; then
-        echo "No valid 3x-UI backups were found."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
+    echo
+    echo "ERROR: No preferred 3x-UI Subscription port is available."
+    echo
+    echo "Checked:"
+    printf '  - %s/tcp\n' "${CANDIDATES[@]}"
+    echo
+    echo "U-OPTI will not change an existing service port automatically."
+    return 1
+}
 
-    INDEX=1
+docker_3xui_compat_select_metrics_port() {
+    local CANDIDATE
+    local CANDIDATES=(
+        "$DOCKER_3XUI_COMPAT_METRICS_PRIMARY"
+        "$DOCKER_3XUI_COMPAT_METRICS_FALLBACK"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_1"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_2"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_3"
+    )
 
-    for BACKUP_DIR in "${VALID_BACKUPS[@]}"; do
-        BACKUP_NAME="$(basename "$BACKUP_DIR")"
-        BACKUP_TIME=""
+    unset DOCKER_3XUI_COMPAT_METRICS_PORT
 
-        if [ -f "$BACKUP_DIR/backup-info.txt" ]; then
-            BACKUP_TIME=$(sed -n 's/^Backup Time:[[:space:]]*//p' \
-                "$BACKUP_DIR/backup-info.txt" | head -n 1)
+    for CANDIDATE in "${CANDIDATES[@]}"; do
+        if ! docker_3xui_compat_port_is_in_use "$CANDIDATE"; then
+            DOCKER_3XUI_COMPAT_METRICS_PORT="$CANDIDATE"
+            return 0
         fi
-
-        echo "$INDEX) $BACKUP_NAME"
-
-        if [ -n "$BACKUP_TIME" ]; then
-            echo "   Backup Time: $BACKUP_TIME"
-        fi
-
-        INDEX=$((INDEX + 1))
     done
 
     echo
-    echo "0) Cancel"
+    echo "ERROR: No preferred Xray Metrics port is available."
     echo
+    echo "Checked:"
+    printf '  - %s/tcp\n' "${CANDIDATES[@]}"
+    echo
+    echo "U-OPTI will not change an existing service port automatically."
+    return 1
+}
 
-    read -rp "Please select a backup [0-${#VALID_BACKUPS[@]}]: " RESTORE_CHOICE
+docker_3xui_compat_check_panel_port() {
+    local PORT="$DOCKER_3XUI_COMPAT_PANEL_PORT"
 
-    if [ "$RESTORE_CHOICE" = "0" ]; then
+    if docker_3xui_compat_port_is_in_use "$PORT"; then
         echo
-        echo "Restore cancelled."
-        sleep 1
-        return
+        echo "ERROR: 3x-UI Docker panel port $PORT/tcp is already in use."
+        echo
+        echo "This usually means another 3x-UI/X-UI installation is already"
+        echo "using the standard Sanaei panel port."
+        echo
+        echo "Current listener:"
+        ss -lntp 2>/dev/null | grep ":$PORT " || true
+        return 1
     fi
 
-    if ! [[ "$RESTORE_CHOICE" =~ ^[0-9]+$ ]] || \
-       [ "$RESTORE_CHOICE" -lt 1 ] || \
-       [ "$RESTORE_CHOICE" -gt "${#VALID_BACKUPS[@]}" ]; then
+    return 0
+}
 
-        echo
-        echo "Invalid backup selection."
-        sleep 2
-        return
-    fi
-
-    SELECTED_BACKUP="${VALID_BACKUPS[$((RESTORE_CHOICE - 1))]}"
-
+docker_3xui_compat_show_port_plan() {
     echo
-    echo "Selected Backup:"
-    echo "$SELECTED_BACKUP"
+    echo "3x-UI Docker compatibility plan:"
     echo
+    echo "Panel Port       : $DOCKER_3XUI_COMPAT_PANEL_PORT"
 
-    if ! docker_3xui_backup_validate "$SELECTED_BACKUP"; then
-        echo
-        echo "Restore cancelled because the selected backup is invalid."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -f "$SELECTED_BACKUP/backup-info.txt" ]; then
-        echo "Backup Information:"
-        sed -n '1,20p' "$SELECTED_BACKUP/backup-info.txt"
-        echo
-    fi
-
-    echo "WARNING:"
-    echo "Restoring this backup will replace the current 3x-UI"
-    echo "database, certificates, and Docker Compose configuration."
-    echo
-    echo "Current data will first be backed up as a safety copy."
-    echo
-
-    read -rp "Continue with restore? [y/N]: " CONFIRM
-
-    case "$CONFIRM" in
-        y|Y|yes|YES)
-            ;;
-        *)
-            echo
-            echo "Restore cancelled."
-            sleep 1
-            return
-            ;;
-    esac
-
-    SAFETY_BACKUP_DIR="$DOCKER_3XUI_DIR/backups/$(date '+%Y%m%d-%H%M%S-%N')-pre-restore"
-
-    echo
-    echo "Creating pre-restore safety backup..."
-    echo "$SAFETY_BACKUP_DIR"
-
-    mkdir -p "$SAFETY_BACKUP_DIR" || {
-        echo "ERROR: Failed to create pre-restore safety backup directory."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    }
-
-    SAFETY_BACKUP_OK=true
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        cp -f "$DOCKER_3XUI_COMPOSE_FILE" \
-            "$SAFETY_BACKUP_DIR/docker-compose.yml" ||
-            SAFETY_BACKUP_OK=false
-    fi
-
-    if [ -d "$DOCKER_3XUI_DIR/db" ]; then
-        tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$SAFETY_BACKUP_DIR/db.tar.gz" \
-            db || SAFETY_BACKUP_OK=false
+    if [ -n "${DOCKER_3XUI_COMPAT_SUB_PORT:-}" ]; then
+        echo "Subscription     : $DOCKER_3XUI_COMPAT_SUB_PORT"
     else
-        SAFETY_BACKUP_OK=false
+        echo "Subscription     : Not selected yet"
     fi
 
-    if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
-        tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$SAFETY_BACKUP_DIR/cert.tar.gz" \
-            cert || SAFETY_BACKUP_OK=false
+    if [ -n "${DOCKER_3XUI_COMPAT_METRICS_PORT:-}" ]; then
+        echo "Metrics          : $DOCKER_3XUI_COMPAT_METRICS_PORT"
     else
-        SAFETY_BACKUP_OK=false
+        echo "Metrics          : Not selected yet"
     fi
 
-    cat > "$SAFETY_BACKUP_DIR/backup-info.txt" <<EOF
-Backup Type: Pre-Restore Safety Backup
-Backup Time: $(date --iso-8601=seconds)
-Source Backup: $SELECTED_BACKUP
+    echo
+}
+
+docker_3xui_compat_prepare_ports() {
+    unset DOCKER_3XUI_COMPAT_SUB_PORT
+    unset DOCKER_3XUI_COMPAT_METRICS_PORT
+
+    if ! docker_3xui_compat_check_panel_port; then
+        return 1
+    fi
+
+    if ! docker_3xui_compat_select_subscription_port; then
+        return 1
+    fi
+
+    if ! docker_3xui_compat_select_metrics_port; then
+        return 1
+    fi
+
+    docker_3xui_compat_show_port_plan
+
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Subscription configuration
+# -----------------------------------------------------------------------------
+
+docker_3xui_compat_configure_subscription() {
+    local DB_FILE="$1"
+    local DOMAIN="$2"
+    local SUB_PORT="$3"
+
+    if [ -z "$DB_FILE" ] || [ -z "$DOMAIN" ] || [ -z "$SUB_PORT" ]; then
+        echo "ERROR: Missing arguments for Subscription configuration."
+        echo "Usage: docker_3xui_compat_configure_subscription DB_FILE DOMAIN PORT"
+        return 1
+    fi
+
+    if [ ! -f "$DB_FILE" ]; then
+        echo "ERROR: 3x-UI database was not found:"
+        echo "$DB_FILE"
+        return 1
+    fi
+
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "ERROR: sqlite3 is required for 3x-UI configuration."
+        return 1
+    fi
+
+    local DOMAIN_SQL
+    DOMAIN_SQL=$(printf '%s' "$DOMAIN" | sed "s/'/''/g")
+
+    if ! sqlite3 "$DB_FILE" <<EOF
+BEGIN;
+
+DELETE FROM settings
+WHERE key IN (
+    'subEnable',
+    'subListen',
+    'subPort',
+    'subPath',
+    'subDomain',
+    'subURI'
+);
+
+INSERT INTO settings (key, value)
+VALUES ('subEnable', 'true');
+
+INSERT INTO settings (key, value)
+VALUES ('subListen', '127.0.0.1');
+
+INSERT INTO settings (key, value)
+VALUES ('subPort', '$SUB_PORT');
+
+INSERT INTO settings (key, value)
+VALUES ('subPath', '/sub/');
+
+INSERT INTO settings (key, value)
+VALUES ('subDomain', '$DOMAIN_SQL');
+
+INSERT INTO settings (key, value)
+VALUES ('subURI', 'https://$DOMAIN_SQL/$SUB_PORT/sub/');
+
+COMMIT;
 EOF
-
-    if [ "$SAFETY_BACKUP_OK" != "true" ]; then
-        echo
-        echo "ERROR: Pre-restore safety backup could not be completed."
-        echo "Restore was NOT performed."
-        echo
-        echo "Safety backup directory:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
+    then
+        echo "ERROR: Failed to save 3x-UI Subscription settings."
+        return 1
     fi
 
-    chmod 700 "$SAFETY_BACKUP_DIR"
-    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \;
-
-    echo "Pre-restore safety backup created successfully."
-
-    CONTAINER_WAS_RUNNING=false
-
-    if docker_3xui_is_running; then
-        CONTAINER_WAS_RUNNING=true
-        echo
-        echo "Stopping current 3x-UI container..."
-
-        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-            echo "ERROR: Failed to stop the current 3x-UI container."
-            echo "Restore was NOT performed."
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
-
-    echo
-    echo "Restoring Docker Compose file..."
-
-    if ! cp -f "$SELECTED_BACKUP/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE"; then
-        echo "ERROR: Failed to restore Docker Compose file."
-        echo "Attempting to restore the safety backup..."
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
-            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-        fi
-
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Restoring database..."
-
-    rm -rf "$DOCKER_3XUI_DIR/db"
-
-    if ! tar -C "$DOCKER_3XUI_DIR" \
-        -xzf "$SELECTED_BACKUP/db.tar.gz"; then
-
-        echo "ERROR: Failed to restore database."
-        echo "Attempting automatic rollback..."
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
-            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-        fi
-
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Restoring certificates..."
-
-    rm -rf "$DOCKER_3XUI_DIR/cert"
-
-    if ! tar -C "$DOCKER_3XUI_DIR" \
-        -xzf "$SELECTED_BACKUP/cert.tar.gz"; then
-
-        echo "ERROR: Failed to restore certificates."
-        echo "Attempting automatic rollback..."
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        rm -rf "$DOCKER_3XUI_DIR/cert"
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
-            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-        fi
-
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Validating restored Docker Compose file..."
-
-    if ! grep -q '^services:' "$DOCKER_3XUI_COMPOSE_FILE"; then
-        echo "ERROR: Restored Docker Compose file appears to be invalid."
-        echo "Attempting automatic rollback..."
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        rm -rf "$DOCKER_3XUI_DIR/cert"
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
-
-        if [ "$CONTAINER_WAS_RUNNING" = "true" ]; then
-            docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-        fi
-
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Starting restored 3x-UI container..."
-
-    if ! docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d; then
-        echo
-        echo "ERROR: Failed to start restored 3x-UI container."
-        echo "Attempting automatic rollback..."
-
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        rm -rf "$DOCKER_3XUI_DIR/cert"
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
-
-        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-
-        echo
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "Verifying restored 3x-UI container..."
-
-    sleep 3
-
-    if ! docker_3xui_is_running; then
-        echo "ERROR: Restored 3x-UI container is not running."
-        echo "Attempting automatic rollback..."
-
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        rm -rf "$DOCKER_3XUI_DIR/cert"
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
-
-        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-
-        echo
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-    SUBSCRIPTION_PORT=""
-
-    if docker_3xui_load_compat_state; then
-        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
-    fi
-
-    SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
-
-    TEMP_SETTINGS_FILE=$(mktemp)
-
-    if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-        'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-        >"$TEMP_SETTINGS_FILE" 2>/dev/null; then
-
-        DETECTED_PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' \
-            "$TEMP_SETTINGS_FILE" | head -n 1)
-
-        if [ -n "$DETECTED_PANEL_PORT" ]; then
-            PANEL_PORT="$DETECTED_PANEL_PORT"
-        fi
-
-        DETECTED_SUB_PORT=$(grep -i 'sub.*port' \
-            "$TEMP_SETTINGS_FILE" | \
-            sed -n 's/.*:[[:space:]]*//p' | head -n 1)
-
-        if [ -n "$DETECTED_SUB_PORT" ]; then
-            SUBSCRIPTION_PORT="$DETECTED_SUB_PORT"
-        fi
-    fi
-
-    rm -f "$TEMP_SETTINGS_FILE"
-
-    echo
-    echo "Checking restored panel port..."
-
-    if ! docker_3xui_port_is_in_use "$PANEL_PORT"; then
-        echo "ERROR: Restored panel port $PANEL_PORT is not listening."
-        echo "Attempting automatic rollback..."
-
-        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
-
-        cp -f "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-            "$DOCKER_3XUI_COMPOSE_FILE" 2>/dev/null || true
-
-        rm -rf "$DOCKER_3XUI_DIR/db"
-        rm -rf "$DOCKER_3XUI_DIR/cert"
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1 || true
-
-        tar -C "$DOCKER_3XUI_DIR" \
-            -xzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1 || true
-
-        docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" up -d >/dev/null 2>&1 || true
-
-        echo
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "======================================"
-    echo "         3x-UI Restore OK"
-    echo "======================================"
-    echo
-    echo "Backup Restored : $SELECTED_BACKUP"
-    echo "Container       : $DOCKER_3XUI_CONTAINER"
-    echo "Status          : Running"
-    echo "Panel Port      : $PANEL_PORT"
-    echo "Subscription    : $SUBSCRIPTION_PORT"
-    echo
-    echo "Database restored successfully."
-    echo "Certificates restored successfully."
-    echo "Docker Compose restored successfully."
-    echo
-    echo "Pre-restore safety backup retained at:"
-    echo "$SAFETY_BACKUP_DIR"
-    echo
-
-    read -rp "Press Enter to return..."
+    return 0
 }
 
-docker_3xui_uninstall() {
-    clear
+docker_3xui_compat_verify_subscription() {
+    local DB_FILE="$1"
+    local EXPECTED_DOMAIN="$2"
+    local EXPECTED_PORT="$3"
 
-    echo "======================================"
-    echo "          Uninstall 3x-UI"
-    echo "======================================"
-    echo
-
-    if [ "$EUID" -ne 0 ]; then
-        echo "Error: Root privileges are required."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if [ ! -f "$DB_FILE" ]; then
+        echo "ERROR: 3x-UI database was not found:"
+        echo "$DB_FILE"
+        return 1
     fi
 
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "ERROR: sqlite3 is required."
+        return 1
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "3x-UI container is not installed."
-        echo
-        if [ -d "$DOCKER_3XUI_DIR" ]; then
-            echo "Data directory still exists:"
-            echo "$DOCKER_3XUI_DIR"
-            echo
-            echo "No changes were made."
-        fi
-        echo
-        read -rp "Press Enter to return..."
-        return
+    local ACTUAL_ENABLE
+    local ACTUAL_LISTEN
+    local ACTUAL_PORT
+    local ACTUAL_PATH
+    local ACTUAL_DOMAIN
+    local ACTUAL_URI
+
+    ACTUAL_ENABLE=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subEnable' LIMIT 1;" \
+        2>/dev/null || true)
+
+    ACTUAL_LISTEN=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subListen' LIMIT 1;" \
+        2>/dev/null || true)
+
+    ACTUAL_PORT=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subPort' LIMIT 1;" \
+        2>/dev/null || true)
+
+    ACTUAL_PATH=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subPath' LIMIT 1;" \
+        2>/dev/null || true)
+
+    ACTUAL_DOMAIN=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subDomain' LIMIT 1;" \
+        2>/dev/null || true)
+
+    ACTUAL_URI=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='subURI' LIMIT 1;" \
+        2>/dev/null || true)
+
+    [ "$ACTUAL_ENABLE" = "true" ] || return 1
+    [ "$ACTUAL_LISTEN" = "127.0.0.1" ] || return 1
+    [ "$ACTUAL_PORT" = "$EXPECTED_PORT" ] || return 1
+    [ "$ACTUAL_PATH" = "/sub/" ] || return 1
+    [ "$ACTUAL_DOMAIN" = "$EXPECTED_DOMAIN" ] || return 1
+    [ "$ACTUAL_URI" = "https://$EXPECTED_DOMAIN/$EXPECTED_PORT/sub/" ] || return 1
+
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Xray Metrics configuration
+# -----------------------------------------------------------------------------
+# 3x-UI stores its Xray template in the xrayTemplateConfig setting.
+# We update only the metrics.listen value and preserve the rest of the template.
+#
+# This is intentionally conservative:
+# - No other Xray template fields are changed.
+# - No existing PRO database is touched.
+# -----------------------------------------------------------------------------
+
+docker_3xui_compat_configure_metrics() {
+    local DB_FILE="$1"
+    local METRICS_PORT="$2"
+
+    if [ -z "$DB_FILE" ] || [ -z "$METRICS_PORT" ]; then
+        echo "ERROR: Missing arguments for Metrics configuration."
+        echo "Usage: docker_3xui_compat_configure_metrics DB_FILE PORT"
+        return 1
     fi
 
-    IMAGE_NAME=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.Config.Image}}' 2>/dev/null || true)
-
-    CONTAINER_STATUS=$(docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format '{{.State.Status}}' 2>/dev/null || true)
-
-    echo "Container : $DOCKER_3XUI_CONTAINER"
-    echo "Image     : ${IMAGE_NAME:-Unknown}"
-    echo "Status    : ${CONTAINER_STATUS:-Unknown}"
-    echo "Data Dir  : $DOCKER_3XUI_DIR"
-    echo
-
-    echo "What should be removed?"
-    echo
-    echo "1) Remove 3x-UI container + Compose file"
-    echo "   Keep database, certificates, and backups"
-    echo
-    echo "2) Complete uninstall"
-    echo "   Remove container + Compose file + 3x-UI data"
-    echo "   A final safety backup will be kept outside /opt/3x-ui"
-    echo
-    echo "0) Cancel"
-    echo
-
-    read -rp "Please enter your selection [0-2]: " UNINSTALL_CHOICE
-
-    case "$UNINSTALL_CHOICE" in
-        1|2)
-            ;;
-        0|*)
-            echo
-            echo "Uninstall cancelled."
-            sleep 1
-            return
-            ;;
-    esac
-
-    echo
-    echo "Safety policy:"
-    echo "A final backup of the current 3x-UI data will be created before removal."
-    echo "Docker itself will NOT be removed."
-    echo "Other containers, images, volumes, networks, and U-OPTI will NOT be removed."
-    echo
-
-    read -rp "Type UNINSTALL to continue: " CONFIRM
-
-    if [ "$CONFIRM" != "UNINSTALL" ]; then
-        echo
-        echo "Uninstall cancelled."
-        sleep 1
-        return
+    if [ ! -f "$DB_FILE" ]; then
+        echo "ERROR: 3x-UI database was not found:"
+        echo "$DB_FILE"
+        return 1
     fi
 
-    TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    SAFETY_ROOT="/root/u-opti-backups/3x-ui"
-    SAFETY_BACKUP_DIR="$SAFETY_ROOT/$TIMESTAMP-pre-uninstall"
-
-    echo
-    echo "Creating final safety backup..."
-    echo "Backup Directory:"
-    echo "$SAFETY_BACKUP_DIR"
-    echo
-
-    if ! mkdir -p "$SAFETY_BACKUP_DIR"; then
-        echo "ERROR: Failed to create safety backup directory."
-        echo "Nothing was removed."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "ERROR: sqlite3 is required for Xray Metrics configuration."
+        return 1
     fi
 
-    BACKUP_FAILED=false
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        if ! cp -f "$DOCKER_3XUI_COMPOSE_FILE" \
-            "$SAFETY_BACKUP_DIR/docker-compose.yml"; then
-            echo "ERROR: Failed to back up Docker Compose file."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Docker Compose file was not found."
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "ERROR: jq is required for Xray Metrics configuration."
+        return 1
     fi
 
-    if [ -d "$DOCKER_3XUI_DIR/db" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$SAFETY_BACKUP_DIR/db.tar.gz" \
-            db; then
-            echo "ERROR: Failed to back up 3x-UI database."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Database directory was not found."
-        BACKUP_FAILED=true
+    local CURRENT_TEMPLATE
+    local UPDATED_TEMPLATE
+    local ESCAPED_TEMPLATE
+
+    CURRENT_TEMPLATE=$(sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" \
+        2>/dev/null || true)
+
+    if [ -z "$CURRENT_TEMPLATE" ]; then
+        echo "ERROR: xrayTemplateConfig was not found in the 3x-UI database."
+        return 1
     fi
 
-    if [ -d "$DOCKER_3XUI_DIR/cert" ]; then
-        if ! tar -C "$DOCKER_3XUI_DIR" \
-            -czf "$SAFETY_BACKUP_DIR/cert.tar.gz" \
-            cert; then
-            echo "ERROR: Failed to back up 3x-UI certificate directory."
-            BACKUP_FAILED=true
-        fi
-    else
-        echo "WARNING: Certificate directory was not found."
-        BACKUP_FAILED=true
+    if ! printf '%s\n' "$CURRENT_TEMPLATE" | jq empty >/dev/null 2>&1; then
+        echo "ERROR: Existing xrayTemplateConfig is not valid JSON."
+        return 1
     fi
 
-    cat > "$SAFETY_BACKUP_DIR/backup-info.txt" <<EOF
-3x-UI Container: $DOCKER_3XUI_CONTAINER
-Image: $IMAGE_NAME
-Container Status: $CONTAINER_STATUS
-Backup Time: $(date --iso-8601=seconds)
-Compose File: $DOCKER_3XUI_COMPOSE_FILE
-Data Directory: $DOCKER_3XUI_DIR/db
-Certificate Directory: $DOCKER_3XUI_DIR/cert
-Uninstall Choice: $UNINSTALL_CHOICE
+    UPDATED_TEMPLATE=$(
+        printf '%s\n' "$CURRENT_TEMPLATE" |
+            jq --arg listen "127.0.0.1:$METRICS_PORT" \
+                '.metrics = (.metrics // {})
+                 | .metrics.listen = $listen
+                 | .metrics.tag = (.metrics.tag // "metrics_out")'
+    )
+
+    if [ -z "$UPDATED_TEMPLATE" ]; then
+        echo "ERROR: Failed to generate the updated Xray template."
+        return 1
+    fi
+
+    if ! printf '%s\n' "$UPDATED_TEMPLATE" | jq empty >/dev/null 2>&1; then
+        echo "ERROR: Generated xrayTemplateConfig is invalid JSON."
+        return 1
+    fi
+
+    ESCAPED_TEMPLATE=$(printf '%s' "$UPDATED_TEMPLATE" | sed "s/'/''/g")
+
+    if ! sqlite3 "$DB_FILE" <<EOF
+UPDATE settings
+SET value = '$ESCAPED_TEMPLATE'
+WHERE key = 'xrayTemplateConfig';
 EOF
-
-    chmod 700 "$SAFETY_BACKUP_DIR"
-    find "$SAFETY_BACKUP_DIR" -type f -exec chmod 600 {} \;
-
-    if [ "$BACKUP_FAILED" = "true" ]; then
-        echo
-        echo "ERROR: Final safety backup failed."
-        echo "Nothing was removed."
-        echo "Incomplete backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
+    then
+        echo "ERROR: Failed to save the updated Xray template."
+        return 1
     fi
 
-    echo "Validating final safety backup..."
-
-    BACKUP_OK=true
-
-    for FILE in \
-        "$SAFETY_BACKUP_DIR/docker-compose.yml" \
-        "$SAFETY_BACKUP_DIR/db.tar.gz" \
-        "$SAFETY_BACKUP_DIR/cert.tar.gz" \
-        "$SAFETY_BACKUP_DIR/backup-info.txt"; do
-
-        if [ ! -s "$FILE" ]; then
-            echo "Missing or empty safety backup file:"
-            echo "$FILE"
-            BACKUP_OK=false
-        fi
-    done
-
-    if [ "$BACKUP_OK" = "true" ]; then
-        if ! tar -tzf "$SAFETY_BACKUP_DIR/db.tar.gz" >/dev/null 2>&1; then
-            echo "Invalid database archive:"
-            echo "$SAFETY_BACKUP_DIR/db.tar.gz"
-            BACKUP_OK=false
-        fi
-
-        if ! tar -tzf "$SAFETY_BACKUP_DIR/cert.tar.gz" >/dev/null 2>&1; then
-            echo "Invalid certificate archive:"
-            echo "$SAFETY_BACKUP_DIR/cert.tar.gz"
-            BACKUP_OK=false
-        fi
-
-        if ! grep -q '^services:' "$SAFETY_BACKUP_DIR/docker-compose.yml"; then
-            echo "Invalid Docker Compose file:"
-            echo "$SAFETY_BACKUP_DIR/docker-compose.yml"
-            BACKUP_OK=false
-        fi
-    fi
-
-    if [ "$BACKUP_OK" != "true" ]; then
-        echo
-        echo "ERROR: Safety backup validation failed."
-        echo "Nothing was removed."
-        echo "Backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Safety backup validated successfully."
-    echo
-    echo "Stopping 3x-UI container..."
-
-    if docker_3xui_is_running; then
-        if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-            echo "ERROR: Failed to stop 3x-UI container."
-            echo "Nothing else was removed."
-            echo "Safety backup retained at:"
-            echo "$SAFETY_BACKUP_DIR"
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
-
-    echo "Removing 3x-UI container..."
-
-    if ! docker rm "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "ERROR: Failed to remove 3x-UI container."
-        echo "The container may still exist."
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        echo "Removing Docker Compose file..."
-        rm -f "$DOCKER_3XUI_COMPOSE_FILE"
-    fi
-
-    echo "Removing 3x-UI Docker image tag..."
-
-    if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-        if docker image rm "$IMAGE_NAME" >/dev/null 2>&1; then
-            IMAGE_REMOVED=true
-        else
-            IMAGE_REMOVED=false
-            echo "WARNING: The image tag could not be removed."
-            echo "It may still be referenced by another Docker resource."
-        fi
-    else
-        IMAGE_REMOVED=true
-    fi
-
-    if [ "$UNINSTALL_CHOICE" = "2" ]; then
-        echo "Removing 3x-UI data directory..."
-        rm -rf "$DOCKER_3XUI_DIR"
-    fi
-
-    echo
-    echo "Verifying uninstall..."
-
-    if docker_3xui_is_installed; then
-        echo "ERROR: 3x-UI container still exists."
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -f "$DOCKER_3XUI_COMPOSE_FILE" ]; then
-        echo "ERROR: Docker Compose file still exists:"
-        echo "$DOCKER_3XUI_COMPOSE_FILE"
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ "$UNINSTALL_CHOICE" = "2" ] && [ -e "$DOCKER_3XUI_DIR" ]; then
-        echo "ERROR: 3x-UI data directory still exists:"
-        echo "$DOCKER_3XUI_DIR"
-        echo "Safety backup retained at:"
-        echo "$SAFETY_BACKUP_DIR"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo
-    echo "======================================"
-    echo "       3x-UI Uninstall OK"
-    echo "======================================"
-    echo
-    echo "Container removed   : Yes"
-    echo "Compose file removed: Yes"
-    echo "Image tag removed   : $([ "$IMAGE_REMOVED" = "true" ] && echo "Yes" || echo "No")"
-
-    if [ "$UNINSTALL_CHOICE" = "1" ]; then
-        echo "Data removed       : No"
-        echo "Data retained at   : $DOCKER_3XUI_DIR"
-    else
-        echo "Data removed       : Yes"
-    fi
-
-    echo "Docker removed     : No"
-    echo "U-OPTI removed     : No"
-    echo
-    echo "Final safety backup:"
-    echo "$SAFETY_BACKUP_DIR"
-    echo
-
-    read -rp "Press Enter to return..."
+    return 0
 }
 
-docker_3xui_status() {
-    clear
+docker_3xui_compat_get_metrics_port() {
+    local DB_FILE="$1"
 
-    echo "======================================"
-    echo "            3x-UI Status"
-    echo "======================================"
-    echo
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Docker : Not Installed"
-        echo
-        echo "3x-UI Docker cannot be checked because Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if [ ! -f "$DB_FILE" ] ||
+       ! command -v sqlite3 >/dev/null 2>&1 ||
+       ! command -v jq >/dev/null 2>&1; then
+        return 1
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "3x-UI Container: Not Installed"
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if docker_3xui_is_running; then
-        CONTAINER_STATUS="Running"
-    else
-        CONTAINER_STATUS="Stopped"
-    fi
-
-    echo "Container       : $CONTAINER_STATUS"
-
-    docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format 'Image           : {{.Config.Image}}
-Network         : {{.HostConfig.NetworkMode}}
-Restart Policy  : {{.HostConfig.RestartPolicy.Name}}
-Started At      : {{.State.StartedAt}}
-Finished At     : {{.State.FinishedAt}}' 2>/dev/null || true
-
-    echo
-
-    if docker_3xui_is_running; then
-        echo "Service Status:"
-        echo
-
-        PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-        SUBSCRIPTION_PORT=""
-        METRICS_PORT=""
-
-        if docker_3xui_load_compat_state; then
-            PANEL_PORT="${PANEL_PORT:-$DOCKER_3XUI_PANEL_PORT}"
-            SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
-            METRICS_PORT="${METRICS_PORT:-}"
-        fi
-
-        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
-
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
-
-            if grep -q '^port:' /tmp/u-opti-3xui-settings.txt; then
-                PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
-            fi
-
-            if grep -qi 'sub.*port' /tmp/u-opti-3xui-settings.txt; then
-                SUBSCRIPTION_PORT=$(grep -i 'sub.*port' /tmp/u-opti-3xui-settings.txt | \
-                    sed -n 's/.*:[[:space:]]*//p' | head -n 1)
-            fi
-        fi
-
-        rm -f /tmp/u-opti-3xui-settings.txt
-
-        if docker_3xui_port_is_in_use "$PANEL_PORT"; then
-            echo "Panel           : Running on $PANEL_PORT"
-        else
-            echo "Panel           : Not listening on $PANEL_PORT"
-        fi
-
-        if docker_3xui_port_is_in_use "$SUBSCRIPTION_PORT"; then
-            echo "Subscription    : Listening on $SUBSCRIPTION_PORT"
-        else
-            echo "Subscription    : Not listening on $SUBSCRIPTION_PORT"
-        fi
-
-        if [ -n "$METRICS_PORT" ]; then
-            if docker_3xui_load_compat >/dev/null 2>&1 &&
-               [ -f "$DOCKER_3XUI_DIR/db/x-ui.db" ]; then
-                DETECTED_METRICS_PORT="$(docker_3xui_compat_get_metrics_port "$DOCKER_3XUI_DIR/db/x-ui.db" 2>/dev/null || true)"
-                if [ -n "$DETECTED_METRICS_PORT" ]; then
-                    METRICS_PORT="$DETECTED_METRICS_PORT"
-                fi
-            fi
-            echo "Metrics         : 127.0.0.1:$METRICS_PORT"
-        fi
-
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
-
-            WEB_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
-
-            DATABASE_LINE=$(grep -E '^Database:' /tmp/u-opti-3xui-settings.txt | head -n 1)
-
-            if [ -n "$WEB_BASE_PATH" ]; then
-                echo "Web Base Path   : $WEB_BASE_PATH"
-            fi
-
-            if [ -n "$DATABASE_LINE" ]; then
-                echo "$DATABASE_LINE"
-            fi
-        fi
-
-        rm -f /tmp/u-opti-3xui-settings.txt
-
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui status' \
-            >/tmp/u-opti-3xui-state.txt 2>/dev/null; then
-
-            XRAY_STATE=$(grep -i '^xray state:' /tmp/u-opti-3xui-state.txt | \
-                sed 's/^[^:]*:[[:space:]]*//' | head -n 1)
-
-            if [ -n "$XRAY_STATE" ]; then
-                echo "Xray            : $XRAY_STATE"
-            fi
-        fi
-
-        rm -f /tmp/u-opti-3xui-state.txt
-    else
-        echo "Service Status  : Container is stopped."
-    fi
-
-    echo
-    echo "Data Directory  : $DOCKER_3XUI_DIR/db"
-    echo "Certificate Dir : $DOCKER_3XUI_DIR/cert"
-    echo "Compose File    : $DOCKER_3XUI_COMPOSE_FILE"
-
-    echo
-    read -rp "Press Enter to return..."
+    sqlite3 "$DB_FILE" \
+        "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" \
+        2>/dev/null |
+        jq -r '.metrics.listen // empty' 2>/dev/null |
+        sed -n 's/.*://p' |
+        head -n 1
 }
 
+# -----------------------------------------------------------------------------
+# Final compatibility configuration
+# -----------------------------------------------------------------------------
 
-docker_3xui_sanaei_management() {
-    clear
+docker_3xui_compat_configure() {
+    local DB_FILE="$1"
+    local DOMAIN="$2"
 
+    if [ -z "$DB_FILE" ] || [ -z "$DOMAIN" ]; then
+        echo "ERROR: Missing arguments."
+        echo "Usage: docker_3xui_compat_configure DB_FILE DOMAIN"
+        return 1
+    fi
+
+    if [ -z "${DOCKER_3XUI_COMPAT_SUB_PORT:-}" ] ||
+       [ -z "${DOCKER_3XUI_COMPAT_METRICS_PORT:-}" ]; then
+
+        if ! docker_3xui_compat_prepare_ports; then
+            return 1
+        fi
+    fi
+
+    echo
+    echo "Applying 3x-UI compatibility settings..."
+    echo
+
+    echo "Subscription:"
+    echo "  Listen Domain : $DOMAIN"
+    echo "  Listen IP     : 127.0.0.1"
+    echo "  Port          : $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "  Path          : /sub/"
+    echo "  Public URI    : https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
+    echo
+
+    if ! docker_3xui_compat_configure_subscription \
+        "$DB_FILE" \
+        "$DOMAIN" \
+        "$DOCKER_3XUI_COMPAT_SUB_PORT"; then
+
+        echo "ERROR: Subscription configuration failed."
+        return 1
+    fi
+
+    echo "Xray Metrics:"
+    echo "  Listen        : 127.0.0.1:$DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo
+
+    if ! docker_3xui_compat_configure_metrics \
+        "$DB_FILE" \
+        "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
+
+        echo "ERROR: Metrics configuration failed."
+        return 1
+    fi
+
+    if ! docker_3xui_compat_verify_subscription \
+        "$DB_FILE" \
+        "$DOMAIN" \
+        "$DOCKER_3XUI_COMPAT_SUB_PORT"; then
+
+        echo "ERROR: Subscription configuration verification failed."
+        return 1
+    fi
+
+    echo
     echo "======================================"
-    echo "       Sanaei 3x-UI Management"
+    echo "   3x-UI Compatibility Configuration"
+    echo "             Successful"
     echo "======================================"
     echo
 
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_running; then
-        echo "Error: 3x-UI container is not running."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    echo "Opening Sanaei 3x-UI management menu..."
+    echo "Panel Port       : $DOCKER_3XUI_COMPAT_PANEL_PORT"
+    echo "Subscription     : $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "Metrics          : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo "Subscription URI : https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
     echo
-    docker exec -it "$DOCKER_3XUI_CONTAINER" x-ui
-}
 
-show_docker_3xui_menu() {
-    while true; do
-        clear
-
-        echo "======================================"
-        echo "       3x-UI Docker Management"
-        echo "======================================"
-        echo
-        echo "1) Install 3x-UI in Docker"
-        echo "2) Start 3x-UI"
-        echo "3) Stop 3x-UI"
-        echo "4) Restart 3x-UI"
-        echo "5) Update 3x-UI"
-        echo "6) Backup 3x-UI"
-        echo "7) Restore 3x-UI"
-        echo "8) Uninstall 3x-UI"
-        echo "9) Show Status"
-        echo "10) Sanaei 3x-UI Management"
-        echo
-        echo "0) Back"
-        echo
-
-        read -rp "Please enter your selection [0-9]: " DOCKER_3XUI_CHOICE
-
-        case "$DOCKER_3XUI_CHOICE" in
-            1) docker_3xui_install ;;
-            2) docker_3xui_start ;;
-            3) docker_3xui_stop ;;
-            4) docker_3xui_restart ;;
-            5) docker_3xui_update ;;
-            6) docker_3xui_backup ;;
-            7) docker_3xui_restore ;;
-            8) docker_3xui_uninstall ;;
-            9) docker_3xui_status ;;
-            10) docker_3xui_sanaei_management ;;
-            0) break ;;
-            *) echo; echo "Invalid selection!"; sleep 2 ;;
-        esac
-    done
+    return 0
 }
