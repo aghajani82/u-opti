@@ -430,6 +430,31 @@ EOF
     fi
 
     echo
+    echo "Configuring Nginx / SSL public access..."
+    echo
+
+    if ! docker_3xui_load_nginx; then
+        echo
+        echo "WARNING: Sanaei Nginx / SSL module could not be loaded."
+        echo "3x-UI installation completed, but public HTTPS access was not configured."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_nginx_setup; then
+        echo
+        echo "WARNING: Sanaei Nginx / SSL configuration failed."
+        echo "3x-UI installation completed, but public HTTPS access was not configured."
+        echo
+        echo "You can retry it later from:"
+        echo "3x-UI Docker Management > 11) Nginx / SSL Configuration"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
     echo "======================================"
     echo "      3x-UI Installation OK"
     echo "======================================"
@@ -452,8 +477,8 @@ EOF
     echo "https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
     echo
     echo "Nginx:"
-    echo "Not modified by the installer."
-    echo "Configure the domain/proxy through the certificate/Nginx workflow."
+    echo "Configured automatically."
+    echo "SSL: Let's Encrypt"
     echo
     echo "Docker Compose:"
     echo "$DOCKER_3XUI_COMPOSE_FILE"
