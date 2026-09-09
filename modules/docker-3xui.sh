@@ -231,7 +231,7 @@ docker_3xui_install() {
     echo "Note:"
     echo "  - Existing X-UI/PRO ports are not changed."
     echo "  - Subscription and Metrics are kept on localhost."
-    echo "  - Nginx configuration is not modified by this install step."
+    echo "  - Nginx and SSL are configured automatically after installation."
     echo
 
     read -rp "Continue with installation? [y/N]: " CONFIRM
