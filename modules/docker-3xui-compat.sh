@@ -11,8 +11,8 @@
 #
 # Design:
 #   Panel        : fixed at 2053
-#   Subscription : prefer 2096, fallback to 2095
-#   Metrics      : prefer 11111, fallback to 11112
+#   Subscription : prefer 2096, then 2095, then 2097-2099
+#   Metrics      : prefer 11111, then 11112, then 11113-11115
 #
 # Subscription is kept on localhost and published through Nginx :443.
 # Xray metrics are kept on localhost.
@@ -24,9 +24,15 @@ DOCKER_3XUI_COMPAT_PANEL_PORT="2053"
 
 DOCKER_3XUI_COMPAT_SUB_PRIMARY="2096"
 DOCKER_3XUI_COMPAT_SUB_FALLBACK="2095"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_1="2097"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_2="2098"
+DOCKER_3XUI_COMPAT_SUB_EXTRA_3="2099"
 
 DOCKER_3XUI_COMPAT_METRICS_PRIMARY="11111"
 DOCKER_3XUI_COMPAT_METRICS_FALLBACK="11112"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_1="11113"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_2="11114"
+DOCKER_3XUI_COMPAT_METRICS_EXTRA_3="11115"
 
 docker_3xui_compat_port_is_in_use() {
     local PORT="$1"
@@ -59,46 +65,58 @@ docker_3xui_compat_require_free_port() {
 }
 
 docker_3xui_compat_select_subscription_port() {
-    local PRIMARY="$DOCKER_3XUI_COMPAT_SUB_PRIMARY"
-    local FALLBACK="$DOCKER_3XUI_COMPAT_SUB_FALLBACK"
+    local CANDIDATE
+    local CANDIDATES=(
+        "$DOCKER_3XUI_COMPAT_SUB_PRIMARY"
+        "$DOCKER_3XUI_COMPAT_SUB_FALLBACK"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_1"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_2"
+        "$DOCKER_3XUI_COMPAT_SUB_EXTRA_3"
+    )
 
-    if ! docker_3xui_compat_port_is_in_use "$PRIMARY"; then
-        DOCKER_3XUI_COMPAT_SUB_PORT="$PRIMARY"
-        return 0
-    fi
+    unset DOCKER_3XUI_COMPAT_SUB_PORT
 
-    if ! docker_3xui_compat_port_is_in_use "$FALLBACK"; then
-        DOCKER_3XUI_COMPAT_SUB_PORT="$FALLBACK"
-        return 0
-    fi
+    for CANDIDATE in "${CANDIDATES[@]}"; do
+        if ! docker_3xui_compat_port_is_in_use "$CANDIDATE"; then
+            DOCKER_3XUI_COMPAT_SUB_PORT="$CANDIDATE"
+            return 0
+        fi
+    done
 
     echo
-    echo "ERROR: Both preferred 3x-UI Subscription ports are in use:"
-    echo "  - $PRIMARY/tcp"
-    echo "  - $FALLBACK/tcp"
+    echo "ERROR: No preferred 3x-UI Subscription port is available."
+    echo
+    echo "Checked:"
+    printf '  - %s/tcp\n' "${CANDIDATES[@]}"
     echo
     echo "U-OPTI will not change an existing service port automatically."
     return 1
 }
 
 docker_3xui_compat_select_metrics_port() {
-    local PRIMARY="$DOCKER_3XUI_COMPAT_METRICS_PRIMARY"
-    local FALLBACK="$DOCKER_3XUI_COMPAT_METRICS_FALLBACK"
+    local CANDIDATE
+    local CANDIDATES=(
+        "$DOCKER_3XUI_COMPAT_METRICS_PRIMARY"
+        "$DOCKER_3XUI_COMPAT_METRICS_FALLBACK"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_1"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_2"
+        "$DOCKER_3XUI_COMPAT_METRICS_EXTRA_3"
+    )
 
-    if ! docker_3xui_compat_port_is_in_use "$PRIMARY"; then
-        DOCKER_3XUI_COMPAT_METRICS_PORT="$PRIMARY"
-        return 0
-    fi
+    unset DOCKER_3XUI_COMPAT_METRICS_PORT
 
-    if ! docker_3xui_compat_port_is_in_use "$FALLBACK"; then
-        DOCKER_3XUI_COMPAT_METRICS_PORT="$FALLBACK"
-        return 0
-    fi
+    for CANDIDATE in "${CANDIDATES[@]}"; do
+        if ! docker_3xui_compat_port_is_in_use "$CANDIDATE"; then
+            DOCKER_3XUI_COMPAT_METRICS_PORT="$CANDIDATE"
+            return 0
+        fi
+    done
 
     echo
-    echo "ERROR: Both preferred Xray Metrics ports are in use:"
-    echo "  - $PRIMARY/tcp"
-    echo "  - $FALLBACK/tcp"
+    echo "ERROR: No preferred Xray Metrics port is available."
+    echo
+    echo "Checked:"
+    printf '  - %s/tcp\n' "${CANDIDATES[@]}"
     echo
     echo "U-OPTI will not change an existing service port automatically."
     return 1
@@ -144,6 +162,9 @@ docker_3xui_compat_show_port_plan() {
 }
 
 docker_3xui_compat_prepare_ports() {
+    unset DOCKER_3XUI_COMPAT_SUB_PORT
+    unset DOCKER_3XUI_COMPAT_METRICS_PORT
+
     if ! docker_3xui_compat_check_panel_port; then
         return 1
     fi
@@ -187,7 +208,10 @@ docker_3xui_compat_configure_subscription() {
         return 1
     fi
 
-    sqlite3 "$DB_FILE" <<EOF
+    local DOMAIN_SQL
+    DOMAIN_SQL=$(printf '%s' "$DOMAIN" | sed "s/'/''/g")
+
+    if ! sqlite3 "$DB_FILE" <<EOF
 BEGIN;
 
 INSERT OR REPLACE INTO settings (key, value)
@@ -203,15 +227,14 @@ INSERT OR REPLACE INTO settings (key, value)
 VALUES ('subPath', '/sub/');
 
 INSERT OR REPLACE INTO settings (key, value)
-VALUES ('subDomain', '$DOMAIN');
+VALUES ('subDomain', '$DOMAIN_SQL');
 
 INSERT OR REPLACE INTO settings (key, value)
-VALUES ('subURI', 'https://$DOMAIN/$SUB_PORT/sub/');
+VALUES ('subURI', 'https://$DOMAIN_SQL/$SUB_PORT/sub/');
 
 COMMIT;
 EOF
-
-    if [ "$?" -ne 0 ]; then
+    then
         echo "ERROR: Failed to save 3x-UI Subscription settings."
         return 1
     fi
@@ -243,22 +266,28 @@ docker_3xui_compat_verify_subscription() {
     local ACTUAL_URI
 
     ACTUAL_ENABLE=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subEnable' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subEnable' LIMIT 1;" \
+        2>/dev/null || true)
 
     ACTUAL_LISTEN=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subListen' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subListen' LIMIT 1;" \
+        2>/dev/null || true)
 
     ACTUAL_PORT=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subPort' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subPort' LIMIT 1;" \
+        2>/dev/null || true)
 
     ACTUAL_PATH=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subPath' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subPath' LIMIT 1;" \
+        2>/dev/null || true)
 
     ACTUAL_DOMAIN=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subDomain' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subDomain' LIMIT 1;" \
+        2>/dev/null || true)
 
     ACTUAL_URI=$(sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='subURI' LIMIT 1;" 2>/dev/null || true)
+        "SELECT value FROM settings WHERE key='subURI' LIMIT 1;" \
+        2>/dev/null || true)
 
     [ "$ACTUAL_ENABLE" = "true" ] || return 1
     [ "$ACTUAL_LISTEN" = "127.0.0.1" ] || return 1
@@ -309,7 +338,7 @@ docker_3xui_compat_configure_metrics() {
 
     local CURRENT_TEMPLATE
     local UPDATED_TEMPLATE
-    local TEMP_FILE
+    local ESCAPED_TEMPLATE
 
     CURRENT_TEMPLATE=$(sqlite3 "$DB_FILE" \
         "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" \
@@ -325,9 +354,12 @@ docker_3xui_compat_configure_metrics() {
         return 1
     fi
 
-    UPDATED_TEMPLATE=$(printf '%s\n' "$CURRENT_TEMPLATE" |
-        jq --arg listen "127.0.0.1:$METRICS_PORT" \
-            '.metrics = (.metrics // {}) | .metrics.listen = $listen | .metrics.tag = (.metrics.tag // "metrics_out")'
+    UPDATED_TEMPLATE=$(
+        printf '%s\n' "$CURRENT_TEMPLATE" |
+            jq --arg listen "127.0.0.1:$METRICS_PORT" \
+                '.metrics = (.metrics // {})
+                 | .metrics.listen = $listen
+                 | .metrics.tag = (.metrics.tag // "metrics_out")'
     )
 
     if [ -z "$UPDATED_TEMPLATE" ]; then
@@ -335,28 +367,22 @@ docker_3xui_compat_configure_metrics() {
         return 1
     fi
 
-    TEMP_FILE=$(mktemp)
-
-    printf '%s\n' "$UPDATED_TEMPLATE" > "$TEMP_FILE"
-
-    if ! sqlite3 "$DB_FILE" \
-        "UPDATE settings SET value=$(printf '%s' "$UPDATED_TEMPLATE" | sqlite3 "$DB_FILE" '.quote' 2>/dev/null) WHERE key='xrayTemplateConfig';" \
-        >/dev/null 2>&1; then
-
-        # Fallback to a safer temporary SQL file when shell quoting is rejected.
-        if ! sqlite3 "$DB_FILE" <<EOF
-UPDATE settings
-SET value = '$(printf '%s' "$UPDATED_TEMPLATE" | sed "s/'/''/g")'
-WHERE key = 'xrayTemplateConfig';
-EOF
-        then
-            rm -f "$TEMP_FILE"
-            echo "ERROR: Failed to save the updated Xray template."
-            return 1
-        fi
+    if ! printf '%s\n' "$UPDATED_TEMPLATE" | jq empty >/dev/null 2>&1; then
+        echo "ERROR: Generated xrayTemplateConfig is invalid JSON."
+        return 1
     fi
 
-    rm -f "$TEMP_FILE"
+    ESCAPED_TEMPLATE=$(printf '%s' "$UPDATED_TEMPLATE" | sed "s/'/''/g")
+
+    if ! sqlite3 "$DB_FILE" <<EOF
+UPDATE settings
+SET value = '$ESCAPED_TEMPLATE'
+WHERE key = 'xrayTemplateConfig';
+EOF
+    then
+        echo "ERROR: Failed to save the updated Xray template."
+        return 1
+    fi
 
     return 0
 }
@@ -364,12 +390,15 @@ EOF
 docker_3xui_compat_get_metrics_port() {
     local DB_FILE="$1"
 
-    if [ ! -f "$DB_FILE" ] || ! command -v sqlite3 >/dev/null 2>&1; then
+    if [ ! -f "$DB_FILE" ] ||
+       ! command -v sqlite3 >/dev/null 2>&1 ||
+       ! command -v jq >/dev/null 2>&1; then
         return 1
     fi
 
     sqlite3 "$DB_FILE" \
-        "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" 2>/dev/null |
+        "SELECT value FROM settings WHERE key='xrayTemplateConfig' LIMIT 1;" \
+        2>/dev/null |
         jq -r '.metrics.listen // empty' 2>/dev/null |
         sed -n 's/.*://p' |
         head -n 1
