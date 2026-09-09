@@ -16,7 +16,8 @@ MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
 BRANCH="v0.13-dev"
-BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+BASE_URL="https://api.github.com/repos/aghajani82/u-opti/contents"
+RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
 if [ -f "$VERSION_FILE" ]; then
     VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
@@ -216,6 +217,13 @@ while true; do
 
             TEMP_DIR=$(mktemp -d)
 
+            download_repo_file() {
+                local REPO_PATH="$1"
+                local DESTINATION="$2"
+
+                curl -fsSL                     -H "Accept: application/vnd.github.raw+json"                     "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}"                     -o "$DESTINATION"
+            }
+
             cleanup_update_temp() {
                 rm -rf "$TEMP_DIR"
             }
@@ -280,6 +288,7 @@ while true; do
                 "backup.sh"
                 "docker.sh"
                 "docker-3xui.sh"
+                "docker-3xui-compat.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
@@ -289,7 +298,7 @@ while true; do
 
             echo "Downloading VERSION..."
 
-            if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
+            if ! download_repo_file "VERSION" "$TEMP_DIR/VERSION"; then
                 echo
                 echo "Failed to download VERSION."
                 cleanup_update_temp
@@ -363,6 +372,7 @@ while true; do
                 ["backup.sh"]="$BASE_URL/modules/backup.sh"
                 ["docker.sh"]="$BASE_URL/modules/docker.sh"
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
+                ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
             )
 
             declare -A UPDATE_TARGETS=(
@@ -382,10 +392,11 @@ while true; do
                 ["backup.sh"]="$TEMP_DIR/backup.sh"
                 ["docker.sh"]="$TEMP_DIR/docker.sh"
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
+                ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
             )
 
             echo "Downloading u-opti..."
-            if ! curl -fsSL "${UPDATE_URLS[u-opti]}" -o "${UPDATE_TARGETS[u-opti]}"; then
+            if ! download_repo_file "u-opti" "${UPDATE_TARGETS[u-opti]}"; then
                 echo
                 echo "Failed to download u-opti."
                 cleanup_update_temp
@@ -395,7 +406,7 @@ while true; do
             fi
 
             echo "Downloading common.sh..."
-            if ! curl -fsSL "${UPDATE_URLS[common.sh]}" -o "${UPDATE_TARGETS[common.sh]}"; then
+            if ! download_repo_file "lib/common.sh" "${UPDATE_TARGETS[common.sh]}"; then
                 echo
                 echo "Failed to download common.sh."
                 cleanup_update_temp
@@ -407,7 +418,16 @@ while true; do
             for FILE in "${UPDATE_FILE_NAMES[@]}"; do
                 echo "Downloading $FILE..."
 
-                if ! curl -fsSL "${UPDATE_URLS[$FILE]}" -o "${UPDATE_TARGETS[$FILE]}"; then
+                case "$FILE" in
+                    "docker-3xui-compat.sh")
+                        REPO_PATH="modules/docker-3xui-compat.sh"
+                        ;;
+                    *)
+                        REPO_PATH="modules/$FILE"
+                        ;;
+                esac
+
+                if ! download_repo_file "$REPO_PATH" "${UPDATE_TARGETS[$FILE]}"; then
                     echo
                     echo "Failed to download $FILE."
                     cleanup_update_temp
@@ -534,7 +554,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 17 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 18 ]; then
                 BACKUP_OK=false
             fi
 
