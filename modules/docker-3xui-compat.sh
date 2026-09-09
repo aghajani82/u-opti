@@ -214,22 +214,32 @@ docker_3xui_compat_configure_subscription() {
     if ! sqlite3 "$DB_FILE" <<EOF
 BEGIN;
 
-INSERT OR REPLACE INTO settings (key, value)
+DELETE FROM settings
+WHERE key IN (
+    'subEnable',
+    'subListen',
+    'subPort',
+    'subPath',
+    'subDomain',
+    'subURI'
+);
+
+INSERT INTO settings (key, value)
 VALUES ('subEnable', 'true');
 
-INSERT OR REPLACE INTO settings (key, value)
+INSERT INTO settings (key, value)
 VALUES ('subListen', '127.0.0.1');
 
-INSERT OR REPLACE INTO settings (key, value)
+INSERT INTO settings (key, value)
 VALUES ('subPort', '$SUB_PORT');
 
-INSERT OR REPLACE INTO settings (key, value)
+INSERT INTO settings (key, value)
 VALUES ('subPath', '/sub/');
 
-INSERT OR REPLACE INTO settings (key, value)
+INSERT INTO settings (key, value)
 VALUES ('subDomain', '$DOMAIN_SQL');
 
-INSERT OR REPLACE INTO settings (key, value)
+INSERT INTO settings (key, value)
 VALUES ('subURI', 'https://$DOMAIN_SQL/$SUB_PORT/sub/');
 
 COMMIT;
