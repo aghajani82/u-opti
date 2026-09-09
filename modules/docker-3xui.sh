@@ -9,6 +9,56 @@ DOCKER_3XUI_DIR="/opt/3x-ui"
 DOCKER_3XUI_COMPOSE_FILE="$DOCKER_3XUI_DIR/docker-compose.yml"
 DOCKER_3XUI_PANEL_PORT="2053"
 
+DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
+DOCKER_3XUI_COMPAT_HELPER=""
+
+docker_3xui_load_compat() {
+    local SCRIPT_DIR
+
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+    DOCKER_3XUI_COMPAT_HELPER="$SCRIPT_DIR/docker-3xui-compat.sh"
+
+    if [ ! -f "$DOCKER_3XUI_COMPAT_HELPER" ]; then
+        echo
+        echo "ERROR: 3x-UI compatibility helper was not found:"
+        echo "$DOCKER_3XUI_COMPAT_HELPER"
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_COMPAT_HELPER"
+}
+
+docker_3xui_valid_domain() {
+    [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]
+}
+
+docker_3xui_save_compat_state() {
+    local DOMAIN="$1"
+    local SUB_PORT="$2"
+    local METRICS_PORT="$3"
+
+    mkdir -p "$DOCKER_3XUI_DIR" || return 1
+
+    cat > "$DOCKER_3XUI_COMPAT_ENV" <<EOF
+DOMAIN=$DOMAIN
+PANEL_PORT=$DOCKER_3XUI_PANEL_PORT
+SUBSCRIPTION_PORT=$SUB_PORT
+METRICS_PORT=$METRICS_PORT
+EOF
+
+    chmod 600 "$DOCKER_3XUI_COMPAT_ENV"
+}
+
+docker_3xui_load_compat_state() {
+    if [ ! -f "$DOCKER_3XUI_COMPAT_ENV" ]; then
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_COMPAT_ENV"
+}
+
 docker_3xui_is_installed() {
     docker ps -a --format '{{.Names}}' 2>/dev/null |
         grep -Fxq "$DOCKER_3XUI_CONTAINER"
@@ -81,16 +131,18 @@ docker_3xui_install() {
         return
     fi
 
-    echo "Checking panel port $DOCKER_3XUI_PANEL_PORT/tcp..."
+    if ! docker_3xui_load_compat; then
+        echo
+        echo "Installation cancelled because the compatibility helper"
+        echo "could not be loaded."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
 
-    if docker_3xui_port_is_in_use "$DOCKER_3XUI_PANEL_PORT"; then
-        echo
-        echo "ERROR: Port $DOCKER_3XUI_PANEL_PORT/tcp is already in use."
-        echo
-        echo "3x-UI uses Host Network, so this port must be available."
-        echo
-        echo "Current listener:"
-        ss -lntp 2>/dev/null | grep ":$DOCKER_3XUI_PANEL_PORT " || true
+    echo "Checking 3x-UI Docker panel port $DOCKER_3XUI_PANEL_PORT/tcp..."
+
+    if ! docker_3xui_compat_check_panel_port; then
         echo
         echo "Installation cancelled."
         echo
@@ -98,11 +150,40 @@ docker_3xui_install() {
         return
     fi
 
-    echo "Port $DOCKER_3XUI_PANEL_PORT/tcp is available."
+    if ! docker_3xui_compat_select_subscription_port; then
+        echo
+        echo "Installation cancelled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_compat_select_metrics_port; then
+        echo
+        echo "Installation cancelled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
     echo
+    read -r -p "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back): " DOMAIN
+
+    if [ "$DOMAIN" = "0" ]; then
+        return
+    fi
+
+    if ! docker_3xui_valid_domain "$DOMAIN"; then
+        echo
+        echo "Error: Invalid domain format."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
 
     if [ -e "$DOCKER_3XUI_DIR" ]; then
         if [ -n "$(find "$DOCKER_3XUI_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            echo
             echo "Directory already exists and contains data:"
             echo "$DOCKER_3XUI_DIR"
             echo
@@ -114,15 +195,24 @@ docker_3xui_install() {
         fi
     fi
 
+    echo
     echo "3x-UI installation plan:"
     echo
-    echo "Image       : $DOCKER_3XUI_IMAGE"
-    echo "Container   : $DOCKER_3XUI_CONTAINER"
-    echo "Network     : host"
-    echo "Panel Port  : $DOCKER_3XUI_PANEL_PORT"
-    echo "Data Dir    : $DOCKER_3XUI_DIR"
-    echo "Database    : $DOCKER_3XUI_DIR/db"
-    echo "Certificates: $DOCKER_3XUI_DIR/cert"
+    echo "Image        : $DOCKER_3XUI_IMAGE"
+    echo "Container    : $DOCKER_3XUI_CONTAINER"
+    echo "Network      : host"
+    echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
+    echo "Subscription: $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "Metrics      : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo "Domain       : $DOMAIN"
+    echo "Data Dir     : $DOCKER_3XUI_DIR"
+    echo "Database     : $DOCKER_3XUI_DIR/db"
+    echo "Certificates : $DOCKER_3XUI_DIR/cert"
+    echo
+    echo "Note:"
+    echo "  - Existing X-UI/PRO ports are not changed."
+    echo "  - Subscription and Metrics are kept on localhost."
+    echo "  - Nginx configuration is not modified by this install step."
     echo
 
     read -rp "Continue with installation? [y/N]: " CONFIRM
@@ -212,17 +302,36 @@ EOF
 
     echo
     echo "Verifying 3x-UI container..."
-
     sleep 3
 
     if ! docker_3xui_is_running; then
         echo
         echo "ERROR: 3x-UI container is not running."
         echo
-        echo "Docker Compose status:"
         docker compose -f "$DOCKER_3XUI_COMPOSE_FILE" ps || true
         echo
-        echo "Container logs:"
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    DB_FILE="$DOCKER_3XUI_DIR/db/x-ui.db"
+
+    echo
+    echo "Waiting for 3x-UI database..."
+
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if [ -s "$DB_FILE" ]; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [ ! -s "$DB_FILE" ]; then
+        echo "ERROR: 3x-UI database was not created:"
+        echo "$DB_FILE"
+        echo
         docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
@@ -230,19 +339,72 @@ EOF
     fi
 
     echo
-    echo "Checking panel port..."
+    echo "Applying Sanaei compatibility settings..."
+
+    if ! docker_3xui_compat_configure \
+        "$DB_FILE" \
+        "$DOMAIN"; then
+
+        echo
+        echo "ERROR: Compatibility configuration failed."
+        echo "The container will be stopped to avoid leaving a partial configuration."
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_save_compat_state \
+        "$DOMAIN" \
+        "$DOCKER_3XUI_COMPAT_SUB_PORT" \
+        "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
+
+        echo
+        echo "ERROR: Failed to save 3x-UI compatibility state."
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Restarting 3x-UI to apply Xray template changes..."
+
+    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo
+        echo "ERROR: Failed to restart 3x-UI after compatibility configuration."
+        echo
+        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    sleep 3
+
+    echo
+    echo "Verifying final 3x-UI listeners..."
 
     if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_PANEL_PORT"; then
+        echo "ERROR: Panel port $DOCKER_3XUI_PANEL_PORT is not listening."
         echo
-        echo "WARNING: 3x-UI container is running, but panel port"
-        echo "$DOCKER_3XUI_PANEL_PORT is not listening yet."
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_COMPAT_SUB_PORT"; then
+        echo "ERROR: Subscription port $DOCKER_3XUI_COMPAT_SUB_PORT is not listening."
         echo
-        echo "The container may still be initializing."
-        echo
-        echo "Container status:"
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
-            --format 'Status: {{.State.Status}}
-Started: {{.State.StartedAt}}' 2>/dev/null || true
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    METRICS_CHECK_PORT="$(docker_3xui_compat_get_metrics_port "$DB_FILE" || true)"
+
+    if [ "$METRICS_CHECK_PORT" != "$DOCKER_3XUI_COMPAT_METRICS_PORT" ]; then
+        echo "ERROR: Metrics configuration verification failed."
+        echo "Expected: 127.0.0.1:$DOCKER_3XUI_COMPAT_METRICS_PORT"
+        echo "Detected : ${METRICS_CHECK_PORT:-Not detected}"
         echo
         read -rp "Press Enter to return..."
         return
@@ -253,23 +415,32 @@ Started: {{.State.StartedAt}}' 2>/dev/null || true
     echo "      3x-UI Installation OK"
     echo "======================================"
     echo
-    echo "Container    : $DOCKER_3XUI_CONTAINER"
-    echo "Status       : Running"
-    echo "Image        : $DOCKER_3XUI_IMAGE"
-    echo "Network      : host"
-    echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
-    echo "Data Dir     : $DOCKER_3XUI_DIR/db"
-    echo "Cert Dir     : $DOCKER_3XUI_DIR/cert"
+    echo "Container     : $DOCKER_3XUI_CONTAINER"
+    echo "Status        : Running"
+    echo "Image         : $DOCKER_3XUI_IMAGE"
+    echo "Network       : host"
+    echo "Panel Port    : $DOCKER_3XUI_PANEL_PORT"
+    echo "Subscription  : $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "Metrics       : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo "Domain        : $DOMAIN"
+    echo "Data Dir      : $DOCKER_3XUI_DIR/db"
+    echo "Cert Dir      : $DOCKER_3XUI_DIR/cert"
     echo
     echo "Panel URL:"
     echo "http://<SERVER-IP>:$DOCKER_3XUI_PANEL_PORT"
     echo
-    echo "Important:"
-    echo "Log in to the panel and immediately change"
-    echo "the default/generated administrator credentials."
+    echo "Subscription URI:"
+    echo "https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
+    echo
+    echo "Nginx:"
+    echo "Not modified by the installer."
+    echo "Configure the domain/proxy through the certificate/Nginx workflow."
     echo
     echo "Docker Compose:"
     echo "$DOCKER_3XUI_COMPOSE_FILE"
+    echo
+    echo "Compatibility state:"
+    echo "$DOCKER_3XUI_COMPAT_ENV"
     echo
 
     read -rp "Press Enter to return..."
@@ -933,8 +1104,16 @@ docker_3xui_backup() {
         --format '{{.State.Status}}' 2>/dev/null || true)
 
     PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-    SUBSCRIPTION_PORT="2096"
+    SUBSCRIPTION_PORT=""
+    METRICS_PORT=""
     WEB_BASE_PATH="/"
+
+    if docker_3xui_load_compat_state; then
+        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
+        METRICS_PORT="${METRICS_PORT:-}"
+    fi
+
+    SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
 
     TEMP_SETTINGS_FILE=$(mktemp)
 
@@ -1485,7 +1664,13 @@ EOF
     fi
 
     PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-    SUBSCRIPTION_PORT="2096"
+    SUBSCRIPTION_PORT=""
+
+    if docker_3xui_load_compat_state; then
+        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
+    fi
+
+    SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
 
     TEMP_SETTINGS_FILE=$(mktemp)
 
@@ -1936,7 +2121,16 @@ Finished At     : {{.State.FinishedAt}}' 2>/dev/null || true
         echo
 
         PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-        SUBSCRIPTION_PORT="2096"
+        SUBSCRIPTION_PORT=""
+        METRICS_PORT=""
+
+        if docker_3xui_load_compat_state; then
+            PANEL_PORT="${PANEL_PORT:-$DOCKER_3XUI_PANEL_PORT}"
+            SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
+            METRICS_PORT="${METRICS_PORT:-}"
+        fi
+
+        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
 
         if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
             'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
@@ -1964,6 +2158,17 @@ Finished At     : {{.State.FinishedAt}}' 2>/dev/null || true
             echo "Subscription    : Listening on $SUBSCRIPTION_PORT"
         else
             echo "Subscription    : Not listening on $SUBSCRIPTION_PORT"
+        fi
+
+        if [ -n "$METRICS_PORT" ]; then
+            if docker_3xui_load_compat >/dev/null 2>&1 &&
+               [ -f "$DOCKER_3XUI_DIR/db/x-ui.db" ]; then
+                DETECTED_METRICS_PORT="$(docker_3xui_compat_get_metrics_port "$DOCKER_3XUI_DIR/db/x-ui.db" 2>/dev/null || true)"
+                if [ -n "$DETECTED_METRICS_PORT" ]; then
+                    METRICS_PORT="$DETECTED_METRICS_PORT"
+                fi
+            fi
+            echo "Metrics         : 127.0.0.1:$METRICS_PORT"
         fi
 
         if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
