@@ -8,11 +8,10 @@ if [ "$EUID" -ne 0 ]; then
         echo "Error: Root privileges are required, but sudo is not installed."
         exit 1
     fi
-
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="v0.13-dev"
+BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -31,8 +30,6 @@ MODULES=(
     "xui-pro.sh"
     "certificate.sh"
     "backup.sh"
-    "docker.sh"
-    "docker-3xui.sh"
 )
 
 echo "======================================"
@@ -47,38 +44,21 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 TEMP_DIR=$(mktemp -d)
-cleanup() {
-    rm -rf "$TEMP_DIR"
-}
+cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
 echo "Downloading VERSION..."
-curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION" || {
-    echo "Failed to download VERSION."
-    exit 1
-}
-
+curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
 REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
-
-[ -n "$REMOTE_VERSION" ] || {
-    echo "Error: Unable to determine U-OPTI version."
-    exit 1
-}
-
+[ -n "$REMOTE_VERSION" ] || { echo "Error: Unable to determine U-OPTI version."; exit 1; }
 echo "Remote Version: $REMOTE_VERSION"
 echo
 
 echo "Downloading U-OPTI..."
-curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti" || {
-    echo "Failed to download u-opti."
-    exit 1
-}
+curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
 
 echo "Downloading common library..."
-curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh" || {
-    echo "Failed to download common.sh."
-    exit 1
-}
+curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
 
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
@@ -94,28 +74,15 @@ for MODULE in "${MODULES[@]}"; do
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
         backup.sh) LABEL="Backup & Restore" ;;
-        docker.sh) LABEL="Docker Management" ;;
-        docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
         *) LABEL="$MODULE" ;;
     esac
-
     echo "Downloading $LABEL module..."
-
-    curl -fsSL "$BASE_URL/modules/$MODULE" -o "$TEMP_DIR/$MODULE" || {
-        echo "Failed to download $MODULE."
-        exit 1
-    }
+    curl -fsSL "$BASE_URL/modules/$MODULE" -o "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
 done
 
 echo
 echo "Checking downloaded files..."
-
-REQUIRED_FILES=(
-    "$TEMP_DIR/VERSION"
-    "$TEMP_DIR/u-opti"
-    "$TEMP_DIR/common.sh"
-)
-
+REQUIRED_FILES=("$TEMP_DIR/VERSION" "$TEMP_DIR/u-opti" "$TEMP_DIR/common.sh")
 for MODULE in "${MODULES[@]}"; do
     REQUIRED_FILES+=("$TEMP_DIR/$MODULE")
 done
@@ -127,42 +94,33 @@ for FILE in "${REQUIRED_FILES[@]}"; do
         exit 1
     fi
 done
-
 echo "All required files are present."
 
 echo
 echo "Checking Bash syntax..."
-
 bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
-
 for MODULE in "${MODULES[@]}"; do
     bash -n "$TEMP_DIR/$MODULE"
 done
-
 echo "Bash syntax check passed."
 
 echo
 echo "Creating directories..."
-
 mkdir -p "$LIB_PATH" "$MODULES_PATH"
 
 echo
 echo "Installing files..."
-
 cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
 cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
 cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
-
 for MODULE in "${MODULES[@]}"; do
     cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"
 done
 
 echo
 echo "Setting permissions..."
-
 chmod +x "$INSTALL_PATH" "$LIB_PATH/common.sh"
-
 for MODULE in "${MODULES[@]}"; do
     chmod +x "$MODULES_PATH/$MODULE"
 done
@@ -172,49 +130,31 @@ echo "======================================"
 echo "       Installation completed"
 echo "======================================"
 echo
-
 echo "Installed Version: $REMOTE_VERSION"
-
 echo
 echo "Installation Path:"
 echo "$INSTALL_PATH"
-
 echo
 echo "Library Path:"
 echo "$LIB_PATH"
-
 echo
 echo "SSH Module:"
 echo "$MODULES_PATH/ssh.sh"
-
 echo
 echo "Firewall Module:"
 echo "$MODULES_PATH/firewall.sh"
-
 echo
 echo "Fail2Ban Module:"
 echo "$MODULES_PATH/fail2ban.sh"
-
 echo
 echo "X-UI PRO Module:"
 echo "$MODULES_PATH/xui-pro.sh"
-
 echo
 echo "Certificate Module:"
 echo "$MODULES_PATH/certificate.sh"
-
 echo
 echo "Backup & Restore Module:"
 echo "$MODULES_PATH/backup.sh"
-
-echo
-echo "Docker Module:"
-echo "$MODULES_PATH/docker.sh"
-
-echo
-echo "3x-UI Docker Module:"
-echo "$MODULES_PATH/docker-3xui.sh"
-
 echo
 
 "$INSTALL_PATH"
