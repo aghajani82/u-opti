@@ -517,6 +517,7 @@ while true; do
                 "backup.sh"
                 "docker.sh"
                 "docker-3xui.sh"
+                "docker-3xui-compat.sh"
             )
 
             BACKUP_OK=true
