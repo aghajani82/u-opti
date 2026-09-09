@@ -41,6 +41,7 @@ source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 source "$MODULES_PATH/backup.sh"
 source "$MODULES_PATH/docker.sh"
+source "$MODULES_PATH/docker-3xui-nginx.sh"
 
 while true; do
     clear
@@ -289,6 +290,7 @@ while true; do
                 "docker.sh"
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
+                "docker-3xui-nginx.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
@@ -373,6 +375,7 @@ while true; do
                 ["docker.sh"]="$BASE_URL/modules/docker.sh"
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
+                ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
             )
 
             declare -A UPDATE_TARGETS=(
@@ -393,6 +396,7 @@ while true; do
                 ["docker.sh"]="$TEMP_DIR/docker.sh"
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
+                ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
             )
 
             echo "Downloading u-opti..."
@@ -518,6 +522,7 @@ while true; do
                 "docker.sh"
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
+                "docker-3xui-nginx.sh"
             )
 
             BACKUP_OK=true
@@ -555,7 +560,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 18 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 19 ]; then
                 BACKUP_OK=false
             fi
 
