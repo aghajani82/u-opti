@@ -11,6 +11,25 @@ DOCKER_3XUI_PANEL_PORT="2053"
 
 DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
 DOCKER_3XUI_COMPAT_HELPER=""
+DOCKER_3XUI_NGINX_MODULE=""
+
+docker_3xui_load_nginx() {
+    local SCRIPT_DIR
+
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+
+    DOCKER_3XUI_NGINX_MODULE="$SCRIPT_DIR/docker-3xui-nginx.sh"
+
+    if [ ! -f "$DOCKER_3XUI_NGINX_MODULE" ]; then
+        echo
+        echo "ERROR: 3x-UI Nginx module was not found:"
+        echo "$DOCKER_3XUI_NGINX_MODULE"
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_NGINX_MODULE"
+}
 
 docker_3xui_load_compat() {
     local SCRIPT_DIR
@@ -2269,6 +2288,7 @@ show_docker_3xui_menu() {
         echo "8) Uninstall 3x-UI"
         echo "9) Show Status"
         echo "10) Sanaei 3x-UI Management"
+        echo "11) Nginx / SSL Configuration"
         echo
         echo "0) Back"
         echo
@@ -2286,6 +2306,14 @@ show_docker_3xui_menu() {
             8) docker_3xui_uninstall ;;
             9) docker_3xui_status ;;
             10) docker_3xui_sanaei_management ;;
+            11)
+                if docker_3xui_load_nginx; then
+                    docker_3xui_nginx_setup
+                else
+                    echo
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
