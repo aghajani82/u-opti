@@ -409,8 +409,8 @@ $DOCKER_3XUI_NGINX_MARKER
 server {
     server_tokens off;
 
-    listen 443 ssl;
-    listen [::]:443 ssl;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
 
     server_name $DOCKER_3XUI_NGINX_DOMAIN;
 
