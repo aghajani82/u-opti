@@ -124,15 +124,21 @@ docker_3xui_nginx_check_prerequisites() {
 
 docker_3xui_nginx_install_packages() {
     local need_install=0
+    local missing_packages=()
 
-    command -v nginx >/dev/null 2>&1 || need_install=1
-    docker_3xui_nginx_get_certbot || need_install=1
+    command -v nginx >/dev/null 2>&1 || missing_packages+=("nginx")
+    command -v certbot >/dev/null 2>&1 || missing_packages+=("certbot")
+    command -v curl >/dev/null 2>&1 || missing_packages+=("curl")
+    command -v openssl >/dev/null 2>&1 || missing_packages+=("openssl")
 
-    if [[ "$need_install" -eq 0 ]]; then
+    if [[ "${#missing_packages[@]}" -eq 0 ]]; then
+        DOCKER_3XUI_NGINX_CERTBOT_BIN="$(command -v certbot)"
         return 0
     fi
 
     echo "Installing required packages..."
+    echo
+    echo "Missing: ${missing_packages[*]}"
     echo
 
     if ! apt update; then
@@ -140,13 +146,18 @@ docker_3xui_nginx_install_packages() {
         return 1
     fi
 
-    if ! apt install -y nginx certbot curl openssl; then
+    if ! apt install -y "${missing_packages[@]}"; then
         echo "Error: Failed to install required packages."
         return 1
     fi
 
     if ! docker_3xui_nginx_get_certbot; then
         echo "Error: Certbot installation could not be verified."
+        return 1
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo "Error: Nginx is required but was not found."
         return 1
     fi
 
