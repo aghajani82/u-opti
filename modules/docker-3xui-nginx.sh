@@ -335,22 +335,38 @@ EOF_CONF
 docker_3xui_nginx_test_acme() {
     local test_file
     local response=""
+    local curl_status=0
+    local attempt
 
     test_file="$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test"
 
     printf '%s\n' "u-opti-test" > "$test_file" || return 1
 
-    response="$(
-        curl -fsS \
-            --max-time 10 \
-            -H "Host: $DOCKER_3XUI_NGINX_DOMAIN" \
-            "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
-            2>/dev/null || true
-    )"
+    for attempt in {1..20}; do
+        response="$(
+            curl -fsS \
+                --max-time 10 \
+                -H "Host: $DOCKER_3XUI_NGINX_DOMAIN" \
+                "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+                2>/dev/null
+        )"
+        curl_status=$?
+
+        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-test" ]]; then
+            rm -f "$test_file"
+            return 0
+        fi
+
+        sleep 0.5
+    done
 
     rm -f "$test_file"
 
-    [[ "$response" == "u-opti-test" ]]
+    echo "Error: ACME challenge path did not become reachable through Nginx."
+    echo "Last curl status: $curl_status"
+    echo "Last response: ${response:-<empty>}"
+
+    return 1
 }
 
 
