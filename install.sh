@@ -32,6 +32,7 @@ MODULES=(
     "backup.sh"
     "docker.sh"
     "docker-3xui.sh"
+    "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
 )
 
@@ -79,6 +80,7 @@ for MODULE in "${MODULES[@]}"; do
         backup.sh) LABEL="Backup & Restore" ;;
         docker.sh) LABEL="Docker Management" ;;
         docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
+        docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
         docker-3xui-nginx.sh) LABEL="3x-UI Nginx / SSL Integration" ;;
         *) LABEL="$MODULE" ;;
     esac
