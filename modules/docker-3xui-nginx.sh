@@ -116,16 +116,6 @@ docker_3xui_nginx_check_prerequisites() {
         return 1
     fi
 
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Error: curl is required."
-        return 1
-    fi
-
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo "Error: openssl is required."
-        return 1
-    fi
-
     return 0
 }
 
@@ -155,6 +145,16 @@ docker_3xui_nginx_install_packages() {
 
     if ! docker_3xui_nginx_get_certbot; then
         echo "Error: Certbot installation could not be verified."
+        return 1
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "Error: curl is required but was not found."
+        return 1
+    fi
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "Error: openssl is required but was not found."
         return 1
     fi
 
