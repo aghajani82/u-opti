@@ -34,6 +34,8 @@ DOCKER_3XUI_NGINX_METRICS_PORT=""
 
 DOCKER_3XUI_NGINX_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
 
+DOCKER_3XUI_NGINX_AUTO_MODE=0
+
 
 docker_3xui_nginx_pause() {
     echo
@@ -615,7 +617,24 @@ docker_3xui_nginx_show_result() {
 }
 
 
+docker_3xui_nginx_pause_if_needed() {
+    if [[ "${DOCKER_3XUI_NGINX_AUTO_MODE:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    docker_3xui_nginx_pause
+}
+
+
 docker_3xui_nginx_setup() {
+    local auto_mode="${1:-0}"
+
+    if [[ "$auto_mode" == "1" ]]; then
+        DOCKER_3XUI_NGINX_AUTO_MODE=1
+    else
+        DOCKER_3XUI_NGINX_AUTO_MODE=0
+    fi
+
     clear
 
     echo "======================================"
@@ -624,12 +643,12 @@ docker_3xui_nginx_setup() {
     echo
 
     if ! docker_3xui_nginx_check_prerequisites; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
     if ! docker_3xui_nginx_load_compat; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
@@ -644,17 +663,17 @@ docker_3xui_nginx_setup() {
     echo
 
     if ! docker_3xui_nginx_install_packages; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
     if ! docker_3xui_nginx_ensure_service; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
     if ! docker_3xui_nginx_existing_domain_conflict; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
@@ -662,12 +681,12 @@ docker_3xui_nginx_setup() {
 
     if ! docker_3xui_nginx_prepare_acme; then
         echo "Error: Failed to prepare Nginx ACME configuration."
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
     if ! docker_3xui_nginx_issue_certificate; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
@@ -675,7 +694,7 @@ docker_3xui_nginx_setup() {
     echo "Writing HTTPS Nginx configuration..."
 
     if ! docker_3xui_nginx_write_site; then
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
@@ -683,7 +702,7 @@ docker_3xui_nginx_setup() {
 
     if ! docker_3xui_nginx_install_renewal_hook; then
         echo "Error: Failed to install certificate renewal hook."
-        docker_3xui_nginx_pause
+        docker_3xui_nginx_pause_if_needed
         return 1
     fi
 
@@ -696,7 +715,7 @@ docker_3xui_nginx_setup() {
     fi
 
     docker_3xui_nginx_show_result
-    docker_3xui_nginx_pause
+    docker_3xui_nginx_pause_if_needed
 }
 
 
