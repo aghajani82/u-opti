@@ -442,7 +442,7 @@ EOF
         return
     fi
 
-    if ! docker_3xui_nginx_setup; then
+    if ! docker_3xui_nginx_setup 1; then
         echo
         echo "WARNING: Sanaei Nginx / SSL configuration failed."
         echo "3x-UI installation completed, but public HTTPS access was not configured."
