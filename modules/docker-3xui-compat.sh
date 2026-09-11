@@ -841,10 +841,29 @@ docker_3xui_compat_configure_web_base_path() {
         return 1
     fi
 
-    if ! docker exec "$CONTAINER" sh -c \
-        'x-ui setting -webBasePath "$1" >/dev/null 2>&1' \
-        sh "$BASE_PATH"; then
+    local XUI_MAIN_FOLDER=""
+    local XUI_BINARY=""
+
+    XUI_MAIN_FOLDER="$(
+        docker exec "$CONTAINER" sh -c             'printf "%s" "${XUI_MAIN_FOLDER:-/app}"'             2>/dev/null || true
+    )"
+
+    if [ -z "$XUI_MAIN_FOLDER" ]; then
+        XUI_MAIN_FOLDER="/app"
+    fi
+
+    XUI_BINARY="${XUI_MAIN_FOLDER%/}/x-ui"
+
+    if ! docker exec "$CONTAINER" sh -c         '[ -x "$1" ]'         sh "$XUI_BINARY"; then
+        echo "ERROR: Sanaei X-UI binary was not found or is not executable:"
+        echo "$XUI_BINARY"
+        return 1
+    fi
+
+    if ! docker exec "$CONTAINER" sh -c         '"$1" setting -webBasePath "$2"'         sh "$XUI_BINARY" "$BASE_PATH"; then
         echo "ERROR: Failed to configure Web Base Path in Sanaei 3x-UI."
+        echo "X-UI binary:"
+        echo "$XUI_BINARY"
         return 1
     fi
 
