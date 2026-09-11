@@ -31,6 +31,7 @@ DOCKER_3XUI_NGINX_DOMAIN=""
 DOCKER_3XUI_NGINX_PANEL_PORT=""
 DOCKER_3XUI_NGINX_SUB_PORT=""
 DOCKER_3XUI_NGINX_METRICS_PORT=""
+DOCKER_3XUI_NGINX_WEB_BASE_PATH="/"
 
 DOCKER_3XUI_NGINX_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
 
@@ -64,6 +65,7 @@ docker_3xui_nginx_load_compat() {
     local panel_port=""
     local sub_port=""
     local metrics_port=""
+    local web_base_path="/"
     local compat_env="${DOCKER_3XUI_COMPAT_ENV:-${DOCKER_3XUI_NGINX_COMPAT_ENV:-}}"
 
     # Instance-aware mode:
@@ -94,6 +96,7 @@ docker_3xui_nginx_load_compat() {
     panel_port="${PANEL_PORT:-2053}"
     sub_port="${SUBSCRIPTION_PORT:-}"
     metrics_port="${METRICS_PORT:-}"
+    web_base_path="${WEB_BASE_PATH:-/}"
 
     if ! docker_3xui_nginx_valid_domain "$domain"; then
         echo "Error: Invalid or missing domain in compatibility state."
@@ -112,10 +115,17 @@ docker_3xui_nginx_load_compat() {
         return 1
     fi
 
+    if [ "$web_base_path" != "/" ] &&
+       [[ ! "$web_base_path" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]]; then
+        echo "Error: Invalid Web Base Path in compatibility state: $web_base_path"
+        return 1
+    fi
+
     DOCKER_3XUI_NGINX_DOMAIN="$domain"
     DOCKER_3XUI_NGINX_PANEL_PORT="$panel_port"
     DOCKER_3XUI_NGINX_SUB_PORT="$sub_port"
     DOCKER_3XUI_NGINX_METRICS_PORT="$metrics_port"
+    DOCKER_3XUI_NGINX_WEB_BASE_PATH="$web_base_path"
 
     return 0
 }
@@ -447,6 +457,7 @@ $DOCKER_3XUI_NGINX_MARKER
 # Domain: $DOCKER_3XUI_NGINX_DOMAIN
 # Panel: $DOCKER_3XUI_NGINX_PANEL_PORT
 # Subscription: $DOCKER_3XUI_NGINX_SUB_PORT
+# Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH
 
 server {
     server_tokens off;
@@ -462,6 +473,10 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
+EOF_CONF
+
+    if [ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]; then
+        cat >> "$temp_path" <<EOF_PANEL_ROOT
 
     # Sanaei Panel
     location / {
@@ -483,6 +498,43 @@ server {
         proxy_buffering off;
         proxy_redirect off;
     }
+EOF_PANEL_ROOT
+    else
+        cat >> "$temp_path" <<EOF_PANEL_PATH
+
+    # Sanaei Panel
+    location = ${DOCKER_3XUI_NGINX_WEB_BASE_PATH%/} {
+        return 301 $DOCKER_3XUI_NGINX_WEB_BASE_PATH;
+    }
+
+    location ^~ $DOCKER_3XUI_NGINX_WEB_BASE_PATH {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_PANEL_PORT;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_buffering off;
+        proxy_redirect off;
+    }
+
+    # Do not expose the Sanaei panel at the domain root when a base path is set.
+    location / {
+        return 404;
+    }
+EOF_PANEL_PATH
+    fi
+
+    cat >> "$temp_path" <<EOF_CONF
 
     # Sanaei Subscription
     location ^~ /sub/ {
@@ -638,7 +690,12 @@ docker_3xui_nginx_show_result() {
 
     echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
     echo
-    echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN/"
+    if [[ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]]; then
+        echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN/"
+    else
+        echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN$DOCKER_3XUI_NGINX_WEB_BASE_PATH"
+    fi
+    echo "Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH"
     echo "Subscription : https://$DOCKER_3XUI_NGINX_DOMAIN/sub/"
     echo
 
@@ -786,6 +843,7 @@ docker_3xui_nginx_status() {
     echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
     echo "Panel Port   : $DOCKER_3XUI_NGINX_PANEL_PORT"
     echo "Sub Port     : $DOCKER_3XUI_NGINX_SUB_PORT"
+    echo "Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH"
 
     if [[ -n "${DOCKER_3XUI_NGINX_METRICS_PORT:-}" ]]; then
         echo "Metrics      : 127.0.0.1:$DOCKER_3XUI_NGINX_METRICS_PORT"
