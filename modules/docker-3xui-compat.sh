@@ -886,7 +886,8 @@ docker_3xui_compat_verify_web_base_path() {
         docker exec "$CONTAINER" sh -c \
             'x-ui settings' 2>/dev/null |
             sed -n 's/^webBasePath:[[:space:]]*//p' |
-            sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' |
+            tr -d '\033' |
+            sed -E 's/\[[0-9;]*[[:alpha:]]//g' |
             sed 's/[[:space:]]*$//' |
             head -n 1
     )"
