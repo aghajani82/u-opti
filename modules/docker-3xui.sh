@@ -71,14 +71,135 @@ docker_3xui_valid_domain() {
     [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]
 }
 
+docker_3xui_generate_random_web_base_path() {
+    local random_part=""
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "ERROR: openssl is required to generate a random Web Base Path."
+        return 1
+    fi
+
+    while [ "${#random_part}" -lt 18 ]; do
+        random_part="$(
+            openssl rand -base64 36 2>/dev/null |
+                tr -dc 'a-zA-Z0-9' |
+                head -c 18
+        )"
+    done
+
+    printf '/%s/\n' "$random_part"
+}
+
+
+docker_3xui_normalize_web_base_path() {
+    local INPUT_PATH="$1"
+    local NORMALIZED_PATH="$INPUT_PATH"
+    local FIRST_SEGMENT=""
+
+    if [ "$NORMALIZED_PATH" = "/" ]; then
+        printf '/\n'
+        return 0
+    fi
+
+    NORMALIZED_PATH="${NORMALIZED_PATH#/}"
+    NORMALIZED_PATH="${NORMALIZED_PATH%/}"
+
+    if [ -z "$NORMALIZED_PATH" ]; then
+        printf '/\n'
+        return 0
+    fi
+
+    if [[ ! "$NORMALIZED_PATH" =~ ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]]; then
+        echo "ERROR: Invalid Web Base Path."
+        echo "Allowed characters: A-Z, a-z, 0-9, _ and -."
+        echo "Examples: /panel/ or /secret/panel/"
+        return 1
+    fi
+
+    FIRST_SEGMENT="${NORMALIZED_PATH%%/*}"
+
+    if [ "$FIRST_SEGMENT" = "sub" ] || [[ "$FIRST_SEGMENT" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: This Web Base Path conflicts with a reserved U-OPTI path."
+        echo "Do not use a path whose first segment is 'sub' or only digits."
+        return 1
+    fi
+
+    printf '/%s/\n' "$NORMALIZED_PATH"
+}
+
+
+docker_3xui_select_web_base_path() {
+    local CHOICE=""
+    local CUSTOM_PATH=""
+
+    while true; do
+        echo
+        echo "======================================"
+        echo "        Web Base Path"
+        echo "======================================"
+        echo
+        echo "1) Random (Recommended)"
+        echo "2) Root (/)"
+        echo "3) Custom"
+        echo "0) Cancel installation"
+        echo
+
+        echo "Select Web Base Path option [0-3]:"
+        read -r CHOICE
+
+        case "$CHOICE" in
+            1)
+                DOCKER_3XUI_WEB_BASE_PATH="$(
+                    docker_3xui_generate_random_web_base_path
+                )" || return 1
+                echo
+                echo "Selected Web Base Path:"
+                echo "$DOCKER_3XUI_WEB_BASE_PATH"
+                return 0
+                ;;
+            2)
+                DOCKER_3XUI_WEB_BASE_PATH="/"
+                echo
+                echo "Selected Web Base Path:"
+                echo "/"
+                return 0
+                ;;
+            3)
+                echo
+                echo "Enter custom Web Base Path (example: /panel/):"
+                read -r CUSTOM_PATH
+
+                if DOCKER_3XUI_WEB_BASE_PATH="$(
+                    docker_3xui_normalize_web_base_path "$CUSTOM_PATH"
+                )"; then
+                    echo
+                    echo "Selected Web Base Path:"
+                    echo "$DOCKER_3XUI_WEB_BASE_PATH"
+                    return 0
+                fi
+                ;;
+            0)
+                return 1
+                ;;
+            *)
+                echo
+                echo "Invalid selection."
+                ;;
+        esac
+    done
+}
+
+
 docker_3xui_save_compat_state() {
     local DOMAIN="$1"
     local SUB_PORT="$2"
     local METRICS_PORT="$3"
     local API_PORT="${4:-$DOCKER_3XUI_API_PORT}"
+    local WEB_BASE_PATH="${5:-${DOCKER_3XUI_WEB_BASE_PATH:-/}}"
 
     if [ -z "$DOMAIN" ] || [ -z "$SUB_PORT" ] ||
-       [ -z "$METRICS_PORT" ] || [ -z "$API_PORT" ]; then
+       [ -z "$METRICS_PORT" ] || [ -z "$API_PORT" ] ||
+       [ -z "$WEB_BASE_PATH" ]; then
         echo "ERROR: Missing compatibility state information."
         return 1
     fi
@@ -91,6 +212,7 @@ PANEL_PORT=$DOCKER_3XUI_PANEL_PORT
 API_PORT=$API_PORT
 SUBSCRIPTION_PORT=$SUB_PORT
 METRICS_PORT=$METRICS_PORT
+WEB_BASE_PATH=$WEB_BASE_PATH
 EOF
 
     chmod 600 "$DOCKER_3XUI_COMPAT_ENV"
@@ -170,6 +292,7 @@ docker_3xui_install() {
 
     local INSTANCE_ID=""
     local INSTANCE_DOMAIN=""
+    local DOCKER_3XUI_WEB_BASE_PATH="/"
 
     echo
     echo "Enter 3x-UI Instance ID [01-99]:"
@@ -212,6 +335,14 @@ docker_3xui_install() {
         return
     fi
 
+    if ! docker_3xui_select_web_base_path; then
+        echo
+        echo "Installation cancelled because Web Base Path configuration was cancelled."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
     echo
     echo "Preparing Instance $INSTANCE_ID..."
 
@@ -231,6 +362,7 @@ docker_3xui_install() {
     echo "API    : $DOCKER_3XUI_API_PORT"
     echo "Sub    : $DOCKER_3XUI_SUBSCRIPTION_PORT"
     echo "Metrics: $DOCKER_3XUI_METRICS_PORT"
+    echo "Web Base Path: $DOCKER_3XUI_WEB_BASE_PATH"
     echo
 
     # Re-apply the Instance runtime context explicitly before any
@@ -300,6 +432,7 @@ docker_3xui_install() {
     echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
     echo "Subscription: $DOCKER_3XUI_SUBSCRIPTION_PORT"
     echo "Metrics      : $DOCKER_3XUI_METRICS_PORT"
+    echo "Web Base Path: $DOCKER_3XUI_WEB_BASE_PATH"
     echo "Domain       : $DOCKER_3XUI_DOMAIN"
     echo "Data Dir     : $DOCKER_3XUI_DIR"
     echo "Database     : $DOCKER_3XUI_DIR/db"
@@ -475,7 +608,9 @@ EOF
 
     if ! docker_3xui_compat_configure \
         "$DB_FILE" \
-        "$DOCKER_3XUI_DOMAIN"; then
+        "$DOCKER_3XUI_DOMAIN" \
+        "$DOCKER_3XUI_WEB_BASE_PATH" \
+        "$DOCKER_3XUI_CONTAINER"; then
 
         echo
         echo "ERROR: Compatibility configuration failed."
@@ -490,7 +625,8 @@ EOF
         "$DOCKER_3XUI_DOMAIN" \
         "$DOCKER_3XUI_COMPAT_SUB_PORT" \
         "$DOCKER_3XUI_COMPAT_METRICS_PORT" \
-        "$DOCKER_3XUI_COMPAT_API_PORT"; then
+        "$DOCKER_3XUI_COMPAT_API_PORT" \
+        "$DOCKER_3XUI_WEB_BASE_PATH"; then
 
         echo
         echo "ERROR: Failed to save 3x-UI compatibility state."
@@ -501,7 +637,7 @@ EOF
     fi
 
     echo
-    echo "Restarting 3x-UI to apply Xray template changes..."
+    echo "Restarting 3x-UI to apply Panel and Xray settings..."
 
     if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
         echo
@@ -604,12 +740,17 @@ EOF
     echo "Panel Port    : $DOCKER_3XUI_PANEL_PORT"
     echo "Subscription  : $DOCKER_3XUI_COMPAT_SUB_PORT"
     echo "Metrics       : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo "Web Base Path : $DOCKER_3XUI_WEB_BASE_PATH"
     echo "Domain        : $DOMAIN"
     echo "Data Dir      : $DOCKER_3XUI_DIR/db"
     echo "Cert Dir      : $DOCKER_3XUI_DIR/cert"
     echo
     echo "Panel URL:"
-    echo "https://$DOMAIN/"
+    if [ "$DOCKER_3XUI_WEB_BASE_PATH" = "/" ]; then
+        echo "https://$DOMAIN/"
+    else
+        echo "https://$DOMAIN$DOCKER_3XUI_WEB_BASE_PATH"
+    fi
     echo
     echo "Subscription URI:"
     echo "https://$DOMAIN/sub/"
