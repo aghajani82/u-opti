@@ -309,13 +309,29 @@ docker_3xui_install() {
     echo "  - Nginx and SSL are configured automatically after installation."
     echo
 
-    read -rp "Continue with installation? [y/N]: " CONFIRM
+    echo
+    echo "======================================"
+    echo "   Continue with installation?"
+    echo "======================================"
+    echo
+    echo "Press Enter or type y to continue."
+    echo "Type n to cancel."
+    echo
+
+    read -r -p "Continue [Y/n]: " CONFIRM
 
     case "$CONFIRM" in
-        y|Y|yes|YES)
+        ""|y|Y|yes|YES)
+            ;;
+        n|N|no|NO)
+            echo
+            echo "Installation cancelled."
+            sleep 1
+            return
             ;;
         *)
             echo
+            echo "Invalid selection."
             echo "Installation cancelled."
             sleep 1
             return
@@ -590,10 +606,10 @@ EOF
     echo "Cert Dir      : $DOCKER_3XUI_DIR/cert"
     echo
     echo "Panel URL:"
-    echo "http://<SERVER-IP>:$DOCKER_3XUI_PANEL_PORT"
+    echo "https://$DOMAIN/"
     echo
     echo "Subscription URI:"
-    echo "https://$DOMAIN/$DOCKER_3XUI_COMPAT_SUB_PORT/sub/"
+    echo "https://$DOMAIN/sub/"
     echo
     echo "Nginx:"
     echo "Configured automatically."
