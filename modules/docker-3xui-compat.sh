@@ -818,14 +818,79 @@ docker_3xui_compat_verify_panel() {
     return 0
 }
 
+# -----------------------------------------------------------------------------
+# Web Base Path configuration
+# -----------------------------------------------------------------------------
+# Sanaei manages Web Base Path through the official x-ui setting command.
+# Do not modify the SQLite database directly for this setting.
+# -----------------------------------------------------------------------------
+
+docker_3xui_compat_configure_web_base_path() {
+    local CONTAINER="$1"
+    local BASE_PATH="$2"
+
+    if [ -z "$CONTAINER" ] || [ -z "$BASE_PATH" ]; then
+        echo "ERROR: Missing arguments for Web Base Path configuration."
+        echo "Usage: docker_3xui_compat_configure_web_base_path CONTAINER BASE_PATH"
+        return 1
+    fi
+
+    if [ "$BASE_PATH" != "/" ] &&
+       [[ ! "$BASE_PATH" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]]; then
+        echo "ERROR: Invalid Web Base Path: $BASE_PATH"
+        return 1
+    fi
+
+    if ! docker exec "$CONTAINER" sh -c \
+        'x-ui setting -webBasePath "$1" >/dev/null 2>&1' \
+        sh "$BASE_PATH"; then
+        echo "ERROR: Failed to configure Web Base Path in Sanaei 3x-UI."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_compat_verify_web_base_path() {
+    local CONTAINER="$1"
+    local EXPECTED_PATH="$2"
+    local ACTUAL_PATH=""
+
+    if [ -z "$CONTAINER" ] || [ -z "$EXPECTED_PATH" ]; then
+        echo "ERROR: Missing arguments for Web Base Path verification."
+        echo "Usage: docker_3xui_compat_verify_web_base_path CONTAINER BASE_PATH"
+        return 1
+    fi
+
+    ACTUAL_PATH="$(
+        docker exec "$CONTAINER" sh -c \
+            'x-ui settings' 2>/dev/null |
+            sed -n 's/^webBasePath:[[:space:]]*//p' |
+            head -n 1
+    )"
+
+    if [ "$ACTUAL_PATH" != "$EXPECTED_PATH" ]; then
+        echo "ERROR: Web Base Path configuration verification failed."
+        echo "Expected: $EXPECTED_PATH"
+        echo "Detected : ${ACTUAL_PATH:-Not detected}"
+        return 1
+    fi
+
+    return 0
+}
+
 
 docker_3xui_compat_configure() {
     local DB_FILE="$1"
     local DOMAIN="$2"
+    local WEB_BASE_PATH="${3:-/}"
+    local CONTAINER="${4:-${DOCKER_3XUI_CONTAINER:-}}"
 
-    if [ -z "$DB_FILE" ] || [ -z "$DOMAIN" ]; then
+    if [ -z "$DB_FILE" ] || [ -z "$DOMAIN" ] ||
+       [ -z "$WEB_BASE_PATH" ] || [ -z "$CONTAINER" ]; then
         echo "ERROR: Missing arguments."
-        echo "Usage: docker_3xui_compat_configure DB_FILE DOMAIN"
+        echo "Usage: docker_3xui_compat_configure DB_FILE DOMAIN WEB_BASE_PATH CONTAINER"
         return 1
     fi
 
@@ -860,6 +925,18 @@ docker_3xui_compat_configure() {
     if ! docker_3xui_compat_configure_panel         "$DB_FILE"         "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
 
         echo "ERROR: Panel webPort configuration failed."
+        return 1
+    fi
+
+    echo "Web Base Path:"
+    echo "  Path          : $WEB_BASE_PATH"
+    echo
+
+    if ! docker_3xui_compat_configure_web_base_path \
+        "$CONTAINER" \
+        "$WEB_BASE_PATH"; then
+
+        echo "ERROR: Web Base Path configuration failed."
         return 1
     fi
 
@@ -912,6 +989,13 @@ docker_3xui_compat_configure() {
         return 1
     fi
 
+    if ! docker_3xui_compat_verify_web_base_path \
+        "$CONTAINER" \
+        "$WEB_BASE_PATH"; then
+
+        return 1
+    fi
+
     if ! docker_3xui_compat_verify_api \
         "$DB_FILE" \
         "$DOCKER_3XUI_COMPAT_API_PORT"; then
@@ -936,6 +1020,7 @@ docker_3xui_compat_configure() {
     echo
 
     echo "Panel Port       : $DOCKER_3XUI_COMPAT_PANEL_PORT"
+    echo "Web Base Path    : $WEB_BASE_PATH"
     echo "Xray API Port    : $DOCKER_3XUI_COMPAT_API_PORT"
     echo "Subscription     : $DOCKER_3XUI_COMPAT_SUB_PORT"
     echo "Metrics          : $DOCKER_3XUI_COMPAT_METRICS_PORT"
