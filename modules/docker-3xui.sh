@@ -172,7 +172,8 @@ docker_3xui_install() {
     local INSTANCE_DOMAIN=""
 
     echo
-    read -r -p "Enter 3x-UI Instance ID [01-99]: " INSTANCE_ID
+    echo "Enter 3x-UI Instance ID [01-99]:"
+    read -r INSTANCE_ID
 
     if [ "$INSTANCE_ID" = "0" ]; then
         return
@@ -196,7 +197,8 @@ docker_3xui_install() {
         return
     fi
 
-    read -r -p "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back): " INSTANCE_DOMAIN
+    echo "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back):"
+    read -r INSTANCE_DOMAIN
 
     if [ "$INSTANCE_DOMAIN" = "0" ]; then
         return
@@ -318,7 +320,8 @@ docker_3xui_install() {
     echo "Type n to cancel."
     echo
 
-    read -r -p "Continue [Y/n]: " CONFIRM
+    echo "Continue [Y/n]:"
+    read -r CONFIRM
 
     case "$CONFIRM" in
         ""|y|Y|yes|YES)
