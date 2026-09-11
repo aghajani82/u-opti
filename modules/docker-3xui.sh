@@ -621,8 +621,9 @@ EOF
     echo "Compatibility state:"
     echo "$DOCKER_3XUI_COMPAT_ENV"
     echo
-
-    read -rp "Press Enter to return..."
+    echo "Installation completed successfully."
+    echo "Press Enter to return to the Docker 3x-UI menu..."
+    read -r
 }
 
 docker_3xui_start() {
