@@ -12,6 +12,25 @@ DOCKER_3XUI_PANEL_PORT="2053"
 DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
 DOCKER_3XUI_COMPAT_HELPER=""
 DOCKER_3XUI_NGINX_MODULE=""
+DOCKER_3XUI_INSTANCE_MODULE=""
+
+docker_3xui_load_instance() {
+    local SCRIPT_DIR
+
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+
+    DOCKER_3XUI_INSTANCE_MODULE="$SCRIPT_DIR/docker-3xui-instance.sh"
+
+    if [ ! -f "$DOCKER_3XUI_INSTANCE_MODULE" ]; then
+        echo
+        echo "ERROR: 3x-UI Instance module was not found:"
+        echo "$DOCKER_3XUI_INSTANCE_MODULE"
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_INSTANCE_MODULE"
+}
 
 docker_3xui_load_nginx() {
     local SCRIPT_DIR
@@ -56,12 +75,20 @@ docker_3xui_save_compat_state() {
     local DOMAIN="$1"
     local SUB_PORT="$2"
     local METRICS_PORT="$3"
+    local API_PORT="${4:-$DOCKER_3XUI_API_PORT}"
+
+    if [ -z "$DOMAIN" ] || [ -z "$SUB_PORT" ] ||
+       [ -z "$METRICS_PORT" ] || [ -z "$API_PORT" ]; then
+        echo "ERROR: Missing compatibility state information."
+        return 1
+    fi
 
     mkdir -p "$DOCKER_3XUI_DIR" || return 1
 
     cat > "$DOCKER_3XUI_COMPAT_ENV" <<EOF
 DOMAIN=$DOMAIN
 PANEL_PORT=$DOCKER_3XUI_PANEL_PORT
+API_PORT=$API_PORT
 SUBSCRIPTION_PORT=$SUB_PORT
 METRICS_PORT=$METRICS_PORT
 EOF
@@ -141,6 +168,80 @@ docker_3xui_install() {
         return
     fi
 
+    local INSTANCE_ID=""
+    local INSTANCE_DOMAIN=""
+
+    echo
+    read -r -p "Enter 3x-UI Instance ID [01-99]: " INSTANCE_ID
+
+    if [ "$INSTANCE_ID" = "0" ]; then
+        return
+    fi
+
+    if ! docker_3xui_load_instance; then
+        echo
+        echo "Installation cancelled because the Instance module"
+        echo "could not be loaded."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_instance_validate_id "$INSTANCE_ID"; then
+        echo
+        echo "Error: Invalid Instance ID."
+        echo "Expected format: 01, 02, 03 ..."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    read -r -p "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back): " INSTANCE_DOMAIN
+
+    if [ "$INSTANCE_DOMAIN" = "0" ]; then
+        return
+    fi
+
+    if ! docker_3xui_valid_domain "$INSTANCE_DOMAIN"; then
+        echo
+        echo "Error: Invalid domain format."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Preparing Instance $INSTANCE_ID..."
+
+    if ! docker_3xui_instance_prepare_for_install         "$INSTANCE_ID"         "$INSTANCE_DOMAIN"; then
+
+        echo
+        echo "Installation cancelled because the Instance could not be prepared."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Instance $INSTANCE_ID is ready."
+    echo "Domain : $DOCKER_3XUI_DOMAIN"
+    echo "Panel  : $DOCKER_3XUI_PANEL_PORT"
+    echo "API    : $DOCKER_3XUI_API_PORT"
+    echo "Sub    : $DOCKER_3XUI_SUBSCRIPTION_PORT"
+    echo "Metrics: $DOCKER_3XUI_METRICS_PORT"
+    echo
+
+    # Re-apply the Instance runtime context explicitly before any
+    # installation-state checks. This prevents the legacy "3xui"
+    # container name from being used for a new Instance.
+    if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID"; then
+        echo
+        echo "ERROR: Failed to restore Instance $INSTANCE_ID runtime context."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
     if docker_3xui_is_installed; then
         echo "3x-UI Docker is already installed."
         echo
@@ -159,60 +260,34 @@ docker_3xui_install() {
         return
     fi
 
-    echo "Checking 3x-UI Docker panel port $DOCKER_3XUI_PANEL_PORT/tcp..."
-
-    if ! docker_3xui_compat_check_panel_port; then
+    # Instance context was prepared above.
+    # Port allocation and domain validation are handled by the instance layer.
+    if ! docker_3xui_instance_load_state "$INSTANCE_ID"; then
         echo
-        echo "Installation cancelled."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_compat_select_subscription_port; then
-        echo
-        echo "Installation cancelled."
+        echo "Error: Failed to load Instance $INSTANCE_ID state."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    if ! docker_3xui_compat_select_metrics_port; then
+    if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID"; then
         echo
-        echo "Installation cancelled."
+        echo "Error: Failed to apply Instance $INSTANCE_ID runtime context."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
     echo
-    read -r -p "Enter the domain for this Sanaei 3x-UI instance (or 0 to go back): " DOMAIN
-
-    if [ "$DOMAIN" = "0" ]; then
-        return
-    fi
-
-    if ! docker_3xui_valid_domain "$DOMAIN"; then
-        echo
-        echo "Error: Invalid domain format."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if [ -e "$DOCKER_3XUI_DIR" ]; then
-        if [ -n "$(find "$DOCKER_3XUI_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-            echo
-            echo "Directory already exists and contains data:"
-            echo "$DOCKER_3XUI_DIR"
-            echo
-            echo "U-OPTI will not overwrite existing data."
-            echo "Installation cancelled."
-            echo
-            read -rp "Press Enter to return..."
-            return
-        fi
-    fi
+    echo "Using Instance $DOCKER_3XUI_INSTANCE_ID:"
+    echo "  Domain        : $DOCKER_3XUI_DOMAIN"
+    echo "  Container     : $DOCKER_3XUI_CONTAINER"
+    echo "  Panel Port    : $DOCKER_3XUI_PANEL_PORT"
+    echo "  API Port      : $DOCKER_3XUI_API_PORT"
+    echo "  Subscription  : $DOCKER_3XUI_SUBSCRIPTION_PORT"
+    echo "  Metrics       : $DOCKER_3XUI_METRICS_PORT"
+    echo "  Data Dir      : $DOCKER_3XUI_DIR"
+    echo
 
     echo
     echo "3x-UI installation plan:"
@@ -221,9 +296,9 @@ docker_3xui_install() {
     echo "Container    : $DOCKER_3XUI_CONTAINER"
     echo "Network      : host"
     echo "Panel Port   : $DOCKER_3XUI_PANEL_PORT"
-    echo "Subscription: $DOCKER_3XUI_COMPAT_SUB_PORT"
-    echo "Metrics      : $DOCKER_3XUI_COMPAT_METRICS_PORT"
-    echo "Domain       : $DOMAIN"
+    echo "Subscription: $DOCKER_3XUI_SUBSCRIPTION_PORT"
+    echo "Metrics      : $DOCKER_3XUI_METRICS_PORT"
+    echo "Domain       : $DOCKER_3XUI_DOMAIN"
     echo "Data Dir     : $DOCKER_3XUI_DIR"
     echo "Database     : $DOCKER_3XUI_DIR/db"
     echo "Certificates : $DOCKER_3XUI_DIR/cert"
@@ -359,10 +434,29 @@ EOF
 
     echo
     echo "Applying Sanaei compatibility settings..."
+    echo
+
+    # Ensure the compatibility layer uses the ports reserved for this instance.
+    if ! docker_3xui_instance_apply_compat_context "$INSTANCE_ID"; then
+        echo
+        echo "ERROR: Failed to apply Instance $INSTANCE_ID compatibility context."
+        echo "The container will be stopped to avoid leaving a partial configuration."
+        docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Instance compatibility ports:"
+    echo "  Panel        : $DOCKER_3XUI_COMPAT_PANEL_PORT"
+    echo "  API          : $DOCKER_3XUI_COMPAT_API_PORT"
+    echo "  Subscription : $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "  Metrics      : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo
 
     if ! docker_3xui_compat_configure \
         "$DB_FILE" \
-        "$DOMAIN"; then
+        "$DOCKER_3XUI_DOMAIN"; then
 
         echo
         echo "ERROR: Compatibility configuration failed."
@@ -374,9 +468,10 @@ EOF
     fi
 
     if ! docker_3xui_save_compat_state \
-        "$DOMAIN" \
+        "$DOCKER_3XUI_DOMAIN" \
         "$DOCKER_3XUI_COMPAT_SUB_PORT" \
-        "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
+        "$DOCKER_3XUI_COMPAT_METRICS_PORT" \
+        "$DOCKER_3XUI_COMPAT_API_PORT"; then
 
         echo
         echo "ERROR: Failed to save 3x-UI compatibility state."
@@ -411,6 +506,23 @@ EOF
         return
     fi
 
+    if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_COMPAT_API_PORT"; then
+        echo "ERROR: Xray API port $DOCKER_3XUI_COMPAT_API_PORT is not listening."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_compat_verify_api \
+        "$DB_FILE" \
+        "$DOCKER_3XUI_COMPAT_API_PORT"; then
+
+        echo "ERROR: Xray API configuration verification failed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
     if ! docker_3xui_port_is_in_use "$DOCKER_3XUI_COMPAT_SUB_PORT"; then
         echo "ERROR: Subscription port $DOCKER_3XUI_COMPAT_SUB_PORT is not listening."
         echo
@@ -429,6 +541,13 @@ EOF
         return
     fi
 
+    echo
+    echo "All Instance $INSTANCE_ID listeners verified successfully."
+    echo "  Panel        : $DOCKER_3XUI_PANEL_PORT"
+    echo "  API          : $DOCKER_3XUI_COMPAT_API_PORT"
+    echo "  Subscription : $DOCKER_3XUI_COMPAT_SUB_PORT"
+    echo "  Metrics      : $DOCKER_3XUI_COMPAT_METRICS_PORT"
+    echo
     echo
     echo "Configuring Nginx / SSL public access..."
     echo

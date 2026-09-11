@@ -64,14 +64,28 @@ docker_3xui_nginx_load_compat() {
     local panel_port=""
     local sub_port=""
     local metrics_port=""
+    local compat_env="${DOCKER_3XUI_COMPAT_ENV:-${DOCKER_3XUI_NGINX_COMPAT_ENV:-}}"
 
-    if [[ ! -f "$DOCKER_3XUI_NGINX_COMPAT_ENV" ]]; then
+    # Instance-aware mode:
+    # docker_3xui_instance_apply_runtime_context() sets
+    # DOCKER_3XUI_COMPAT_ENV to the selected Instance's compat.env.
+    #
+    # Legacy fallback:
+    # If no Instance context is active, use the original
+    # /opt/3x-ui/compat.env location.
+    if [[ -z "$compat_env" ]]; then
+        compat_env="/opt/3x-ui/compat.env"
+    fi
+
+    if [[ ! -f "$compat_env" ]]; then
         echo "Error: 3x-UI compatibility state was not found:"
-        echo "$DOCKER_3XUI_NGINX_COMPAT_ENV"
+        echo "$compat_env"
         echo
         echo "Install Sanaei 3x-UI through U-OPTI first."
         return 1
     fi
+
+    DOCKER_3XUI_NGINX_COMPAT_ENV="$compat_env"
 
     # shellcheck disable=SC1090
     source "$DOCKER_3XUI_NGINX_COMPAT_ENV"
@@ -105,6 +119,7 @@ docker_3xui_nginx_load_compat() {
 
     return 0
 }
+
 
 
 docker_3xui_nginx_check_prerequisites() {
