@@ -1797,6 +1797,21 @@ docker_3xui_restore() {
         return
     fi
 
+    if ! docker_3xui_select_instance; then
+        echo
+        echo "Restore cancelled."
+        sleep 1
+        return
+    fi
+
+    echo
+    echo "Selected Instance:"
+    echo "  Instance  : ${DOCKER_3XUI_INSTANCE_ID}"
+    echo "  Domain    : ${DOCKER_3XUI_DOMAIN:-Unknown}"
+    echo "  Container : ${DOCKER_3XUI_CONTAINER}"
+    echo "  Data Dir  : ${DOCKER_3XUI_DIR}"
+    echo
+
     if [ ! -d "$DOCKER_3XUI_DIR/backups" ]; then
         echo "No 3x-UI backups were found."
         echo
