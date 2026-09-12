@@ -2363,7 +2363,8 @@ docker_3xui_uninstall() {
     echo "Other containers, images, volumes, networks, and U-OPTI will NOT be removed."
     echo
 
-    read -rp "Type UNINSTALL to continue: " CONFIRM
+    echo -n "Type UNINSTALL to continue: "
+    read -r CONFIRM
 
     if [ "$CONFIRM" != "UNINSTALL" ]; then
         echo
