@@ -1093,19 +1093,12 @@ docker_3xui_update() {
     clear
 
     echo "======================================"
-    echo "            Update 3x-UI"
+    echo "       Update 3x-UI Instance"
     echo "======================================"
     echo
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
         echo
         read -rp "Press Enter to return..."
         return
@@ -1117,6 +1110,35 @@ docker_3xui_update() {
         read -rp "Press Enter to return..."
         return
     fi
+
+    if ! docker_3xui_select_instance; then
+        echo
+        echo "Update cancelled."
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    INSTANCE_ID="$DOCKER_3XUI_SELECTED_INSTANCE_ID"
+
+    if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1; then
+        echo
+        echo "ERROR: Failed to load Instance $INSTANCE_ID runtime context."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    CONTAINER="$DOCKER_3XUI_CONTAINER"
+    COMPOSE_FILE="$DOCKER_3XUI_COMPOSE_FILE"
+    DATA_DIR="$DOCKER_3XUI_DIR"
+
+    echo
+    echo "Instance       : $INSTANCE_ID"
+    echo "Domain         : ${DOCKER_3XUI_DOMAIN:-Unknown}"
+    echo "Container      : $CONTAINER"
+    echo "Data Directory : $DATA_DIR"
+    echo "Compose File   : $COMPOSE_FILE"
+    echo
 
     if ! docker compose version >/dev/null 2>&1; then
         echo "Error: Docker Compose plugin is not installed."
@@ -1452,7 +1474,7 @@ docker_3xui_backup() {
     clear
 
     echo "======================================"
-    echo "           Backup 3x-UI"
+    echo "        Backup 3x-UI Instance"
     echo "======================================"
     echo
 
@@ -1463,8 +1485,8 @@ docker_3xui_backup() {
         return
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
         echo
         read -rp "Press Enter to return..."
         return
@@ -1476,6 +1498,34 @@ docker_3xui_backup() {
         read -rp "Press Enter to return..."
         return
     fi
+
+    if ! docker_3xui_load_instance >/dev/null 2>&1; then
+        echo "ERROR: 3x-UI Instance module could not be loaded."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_select_instance; then
+        return
+    fi
+
+    INSTANCE_ID="$DOCKER_3XUI_SELECTED_INSTANCE_ID"
+
+    if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1; then
+        echo "ERROR: Failed to load selected Instance context."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Instance       : $DOCKER_3XUI_INSTANCE_ID"
+    echo "Domain         : ${DOCKER_3XUI_INSTANCE_DOMAIN:-Unknown}"
+    echo "Container      : $DOCKER_3XUI_CONTAINER"
+    echo "Data Directory : $DOCKER_3XUI_DIR"
+    echo "Compose File   : $DOCKER_3XUI_COMPOSE_FILE"
+    echo
 
     if [ ! -d "$DOCKER_3XUI_DIR" ]; then
         echo "Error: 3x-UI data directory was not found:"
@@ -1559,6 +1609,7 @@ docker_3xui_backup() {
     if docker_3xui_load_compat_state; then
         SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
         METRICS_PORT="${METRICS_PORT:-}"
+        WEB_BASE_PATH="${WEB_BASE_PATH:-/}"
     fi
 
     SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
@@ -1588,19 +1639,22 @@ docker_3xui_backup() {
 
     rm -f "$TEMP_SETTINGS_FILE"
 
-    cat > "$BACKUP_DIR/backup-info.txt" <<EOF
+    cat > "$BACKUP_DIR/backup-info.txt" <<EOF_INFO
+3x-UI Instance ID: $DOCKER_3XUI_INSTANCE_ID
+3x-UI Domain: ${DOCKER_3XUI_INSTANCE_DOMAIN:-}
 3x-UI Container: $DOCKER_3XUI_CONTAINER
 Image: $IMAGE_NAME
 Image ID: $IMAGE_ID
 Container Status: $CONTAINER_STATUS
 Panel Port: $PANEL_PORT
 Subscription Port: $SUBSCRIPTION_PORT
+Metrics Port: $METRICS_PORT
 Web Base Path: $WEB_BASE_PATH
 Backup Time: $(date --iso-8601=seconds)
 Compose File: $DOCKER_3XUI_COMPOSE_FILE
 Data Directory: $DOCKER_3XUI_DIR/db
 Certificate Directory: $DOCKER_3XUI_DIR/cert
-EOF
+EOF_INFO
 
     if [ "$BACKUP_FAILED" = "true" ]; then
         echo
@@ -1654,6 +1708,8 @@ EOF
     echo "          3x-UI Backup OK"
     echo "======================================"
     echo
+    echo "Instance       : $DOCKER_3XUI_INSTANCE_ID"
+    echo "Domain         : ${DOCKER_3XUI_INSTANCE_DOMAIN:-Unknown}"
     echo "Backup Directory:"
     echo "$BACKUP_DIR"
     echo
