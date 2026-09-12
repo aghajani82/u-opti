@@ -2403,7 +2403,7 @@ docker_3xui_status() {
     clear
 
     echo "======================================"
-    echo "            3x-UI Status"
+    echo "       3x-UI Instance Status"
     echo "======================================"
     echo
 
@@ -2416,132 +2416,124 @@ docker_3xui_status() {
         return
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "3x-UI Container: Not Installed"
+    if ! docker_3xui_load_instance >/dev/null 2>&1; then
+        echo "ERROR: 3x-UI Instance module could not be loaded."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    if docker_3xui_is_running; then
-        CONTAINER_STATUS="Running"
-    else
-        CONTAINER_STATUS="Stopped"
+    mapfile -t INSTANCE_IDS < <(docker_3xui_instance_registered_ids 2>/dev/null || true)
+
+    if [ "${#INSTANCE_IDS[@]}" -eq 0 ]; then
+        echo "No registered Docker 3x-UI Instances were found."
+        echo
+        read -rp "Press Enter to return..."
+        return
     fi
 
-    echo "Container       : $CONTAINER_STATUS"
+    for INSTANCE_ID in "${INSTANCE_IDS[@]}"; do
+        echo "--------------------------------------"
 
-    docker inspect "$DOCKER_3XUI_CONTAINER" \
-        --format 'Image           : {{.Config.Image}}
-Network         : {{.HostConfig.NetworkMode}}
-Restart Policy  : {{.HostConfig.RestartPolicy.Name}}
-Started At      : {{.State.StartedAt}}
-Finished At     : {{.State.FinishedAt}}' 2>/dev/null || true
-
-    echo
-
-    if docker_3xui_is_running; then
-        echo "Service Status:"
-        echo
-
-        PANEL_PORT="$DOCKER_3XUI_PANEL_PORT"
-        SUBSCRIPTION_PORT=""
-        METRICS_PORT=""
-
-        if docker_3xui_load_compat_state; then
-            PANEL_PORT="${PANEL_PORT:-$DOCKER_3XUI_PANEL_PORT}"
-            SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-}"
-            METRICS_PORT="${METRICS_PORT:-}"
+        if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1; then
+            echo "Instance $INSTANCE_ID"
+            echo "  State       : ERROR"
+            echo "  Reason      : Failed to load Instance state."
+            echo
+            continue
         fi
 
-        SUBSCRIPTION_PORT="${SUBSCRIPTION_PORT:-2096}"
+        local_container="$DOCKER_3XUI_INSTANCE_CONTAINER"
+        domain="$DOCKER_3XUI_INSTANCE_DOMAIN"
+        panel_port="$DOCKER_3XUI_INSTANCE_PANEL_PORT"
+        api_port="$DOCKER_3XUI_INSTANCE_API_PORT"
+        sub_port="$DOCKER_3XUI_INSTANCE_SUB_PORT"
+        metrics_port="$DOCKER_3XUI_INSTANCE_METRICS_PORT"
+        data_dir="$DOCKER_3XUI_INSTANCE_DIR"
+        web_base_path="/"
 
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
+        if [ -f "$DOCKER_3XUI_INSTANCE_COMPAT_ENV" ]; then
+            # shellcheck disable=SC1090
+            source "$DOCKER_3XUI_INSTANCE_COMPAT_ENV" 2>/dev/null || true
+            web_base_path="${WEB_BASE_PATH:-/}"
+        fi
 
-            if grep -q '^port:' /tmp/u-opti-3xui-settings.txt; then
-                PANEL_PORT=$(sed -n 's/^port:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
+        echo "Instance       : $INSTANCE_ID"
+        echo "Domain         : ${domain:-Unknown}"
+        echo "Container      : ${local_container:-Unknown}"
+        echo "Panel Port     : ${panel_port:-Unknown}"
+        echo "API Port       : ${api_port:-Unknown}"
+        echo "Subscription   : ${sub_port:-Unknown}"
+        echo "Metrics        : ${metrics_port:-Unknown}"
+        echo "Web Base Path  : $web_base_path"
+
+        if ! docker ps -a --format '{{.Names}}' 2>/dev/null |
+            grep -Fxq "$local_container"; then
+            echo "Container      : Not Installed"
+            echo "Xray           : Unknown"
+            echo
+            continue
+        fi
+
+        container_status="$(
+            docker inspect "$local_container" \
+                --format '{{.State.Status}}' 2>/dev/null || true
+        )"
+
+        case "$container_status" in
+            running) echo "Container      : Running" ;;
+            *)       echo "Container      : ${container_status:-Unknown}" ;;
+        esac
+
+        if [ "$container_status" = "running" ]; then
+            if docker_3xui_instance_port_listening "$panel_port" 2>/dev/null; then
+                echo "Panel          : Listening on $panel_port"
+            else
+                echo "Panel          : NOT listening on $panel_port"
             fi
 
-            if grep -qi 'sub.*port' /tmp/u-opti-3xui-settings.txt; then
-                SUBSCRIPTION_PORT=$(grep -i 'sub.*port' /tmp/u-opti-3xui-settings.txt | \
-                    sed -n 's/.*:[[:space:]]*//p' | head -n 1)
+            if docker_3xui_instance_port_listening "$sub_port" 2>/dev/null; then
+                echo "Subscription   : Listening on $sub_port"
+            else
+                echo "Subscription   : NOT listening on $sub_port"
             fi
-        fi
 
-        rm -f /tmp/u-opti-3xui-settings.txt
-
-        if docker_3xui_port_is_in_use "$PANEL_PORT"; then
-            echo "Panel           : Running on $PANEL_PORT"
-        else
-            echo "Panel           : Not listening on $PANEL_PORT"
-        fi
-
-        if docker_3xui_port_is_in_use "$SUBSCRIPTION_PORT"; then
-            echo "Subscription    : Listening on $SUBSCRIPTION_PORT"
-        else
-            echo "Subscription    : Not listening on $SUBSCRIPTION_PORT"
-        fi
-
-        if [ -n "$METRICS_PORT" ]; then
-            if docker_3xui_load_compat >/dev/null 2>&1 &&
-               [ -f "$DOCKER_3XUI_DIR/db/x-ui.db" ]; then
-                DETECTED_METRICS_PORT="$(docker_3xui_compat_get_metrics_port "$DOCKER_3XUI_DIR/db/x-ui.db" 2>/dev/null || true)"
-                if [ -n "$DETECTED_METRICS_PORT" ]; then
-                    METRICS_PORT="$DETECTED_METRICS_PORT"
+            if [ -n "$metrics_port" ]; then
+                if docker_3xui_instance_port_listening "$metrics_port" 2>/dev/null; then
+                    echo "Metrics        : Listening on $metrics_port"
+                else
+                    echo "Metrics        : NOT listening on $metrics_port"
                 fi
             fi
-            echo "Metrics         : 127.0.0.1:$METRICS_PORT"
+
+            xray_state="$(
+                docker exec "$local_container" sh -c \
+                    'command -v x-ui >/dev/null 2>&1 && x-ui status' \
+                    2>/dev/null |
+                    sed -n 's/^Xray State:[[:space:]]*//Ip' |
+                    head -n 1
+            )"
+
+            if [ -n "$xray_state" ]; then
+                echo "Xray           : $xray_state"
+            else
+                echo "Xray           : Not detected"
+            fi
+        else
+            echo "Service        : Container is stopped."
         fi
 
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui settings' \
-            >/tmp/u-opti-3xui-settings.txt 2>/dev/null; then
+        echo "Data Directory : $data_dir"
+        echo
+    done
 
-            WEB_BASE_PATH=$(sed -n 's/^webBasePath:[[:space:]]*//p' /tmp/u-opti-3xui-settings.txt | head -n 1)
-
-            DATABASE_LINE=$(grep -E '^Database:' /tmp/u-opti-3xui-settings.txt | head -n 1)
-
-            if [ -n "$WEB_BASE_PATH" ]; then
-                echo "Web Base Path   : $WEB_BASE_PATH"
-            fi
-
-            if [ -n "$DATABASE_LINE" ]; then
-                echo "$DATABASE_LINE"
-            fi
-        fi
-
-        rm -f /tmp/u-opti-3xui-settings.txt
-
-        if docker exec "$DOCKER_3XUI_CONTAINER" sh -c \
-            'command -v x-ui >/dev/null 2>&1 && x-ui status' \
-            >/tmp/u-opti-3xui-state.txt 2>/dev/null; then
-
-            XRAY_STATE=$(grep -i '^xray state:' /tmp/u-opti-3xui-state.txt | \
-                sed 's/^[^:]*:[[:space:]]*//' | head -n 1)
-
-            if [ -n "$XRAY_STATE" ]; then
-                echo "Xray            : $XRAY_STATE"
-            fi
-        fi
-
-        rm -f /tmp/u-opti-3xui-state.txt
-    else
-        echo "Service Status  : Container is stopped."
-    fi
-
-    echo
-    echo "Data Directory  : $DOCKER_3XUI_DIR/db"
-    echo "Certificate Dir : $DOCKER_3XUI_DIR/cert"
-    echo "Compose File    : $DOCKER_3XUI_COMPOSE_FILE"
-
+    echo "======================================"
     echo
     read -rp "Press Enter to return..."
 }
 
-
 docker_3xui_sanaei_management() {
+
     clear
 
     echo "======================================"
