@@ -871,19 +871,12 @@ docker_3xui_start() {
     clear
 
     echo "======================================"
-    echo "            Start 3x-UI"
+    echo "       Start 3x-UI Instance"
     echo "======================================"
     echo
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
         echo
         read -rp "Press Enter to return..."
         return
@@ -896,20 +889,48 @@ docker_3xui_start() {
         return
     fi
 
-    if docker_3xui_is_running; then
-        echo "3x-UI is already running."
+    if ! docker_3xui_select_instance; then
+        return
+    fi
+
+    if ! docker_3xui_instance_apply_runtime_context "$DOCKER_3XUI_SELECTED_INSTANCE_ID" >/dev/null 2>&1; then
+        echo "Error: Failed to load selected Instance context."
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    echo "Starting 3x-UI container..."
+    local INSTANCE_ID="$DOCKER_3XUI_SELECTED_INSTANCE_ID"
+    local CONTAINER="$DOCKER_3XUI_INSTANCE_CONTAINER"
+    local DOMAIN="$DOCKER_3XUI_INSTANCE_DOMAIN"
+
+    echo
+    echo "Instance       : $INSTANCE_ID"
+    echo "Domain         : ${DOMAIN:-Unknown}"
+    echo "Container      : ${CONTAINER:-Unknown}"
     echo
 
-    if ! docker start "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to start 3x-UI container."
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$CONTAINER"; then
+        echo "Error: Container is not installed for Instance $INSTANCE_ID."
         echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)" = "running" ]; then
+        echo "3x-UI Instance $INSTANCE_ID is already running."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Starting 3x-UI Instance $INSTANCE_ID..."
+    echo
+
+    if ! docker start "$CONTAINER" >/dev/null; then
+        echo "Error: Failed to start Instance $INSTANCE_ID container."
+        echo
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
         return
@@ -917,20 +938,20 @@ docker_3xui_start() {
 
     sleep 2
 
-    if ! docker_3xui_is_running; then
+    if [ "$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)" != "running" ]; then
         echo
-        echo "ERROR: 3x-UI container did not remain running."
+        echo "ERROR: 3x-UI Instance $INSTANCE_ID did not remain running."
         echo
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
+        docker inspect "$CONTAINER" \
             --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
         echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    echo "3x-UI started successfully."
+    echo "3x-UI Instance $INSTANCE_ID started successfully."
     echo "Status: Running"
     echo
 
@@ -939,63 +960,44 @@ docker_3xui_start() {
 
 docker_3xui_stop() {
     clear
-
     echo "======================================"
-    echo "             Stop 3x-UI"
+    echo "       Stop 3x-UI Instance"
     echo "======================================"
     echo
-
     if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
+        echo "Error: Docker is not installed."; echo; read -rp "Press Enter to return..."; return
     fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if ! docker_3xui_select_instance; then return; fi
+    local INSTANCE_ID="${DOCKER_3XUI_SELECTED_INSTANCE_ID:-}"
+    local CONTAINER="${DOCKER_3XUI_INSTANCE_CONTAINER:-}"
+    local DOMAIN="${DOCKER_3XUI_INSTANCE_DOMAIN:-}"
+    if [ -z "$INSTANCE_ID" ] || [ -z "$CONTAINER" ]; then
+        echo "ERROR: Selected Instance context is incomplete."; echo; read -rp "Press Enter to return..."; return
     fi
-
     if ! systemctl is-active --quiet docker 2>/dev/null; then
-        echo "Error: Docker service is not active."
-        echo
-        read -rp "Press Enter to return..."
-        return
+        echo "Error: Docker service is not active."; echo; read -rp "Press Enter to return..."; return
     fi
-
-    if ! docker_3xui_is_running; then
-        echo "3x-UI is already stopped."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    local container_status
+    container_status="$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ -z "$container_status" ]; then
+        echo "Error: Container $CONTAINER was not found."; echo; read -rp "Press Enter to return..."; return
     fi
-
-    echo "Stopping 3x-UI container..."
-    echo
-
-    if ! docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to stop 3x-UI container."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    if [ "$container_status" != "running" ]; then
+        echo; echo "Instance       : $INSTANCE_ID"; echo "Domain         : ${DOMAIN:-Unknown}"; echo "Container      : $CONTAINER"; echo "Status         : ${container_status:-Unknown}"; echo
+        echo "3x-UI Instance $INSTANCE_ID is already stopped."; echo; read -rp "Press Enter to return..."; return
     fi
-
+    echo; echo "Instance       : $INSTANCE_ID"; echo "Domain         : ${DOMAIN:-Unknown}"; echo "Container      : $CONTAINER"; echo; echo "Stopping 3x-UI Instance $INSTANCE_ID..."; echo
+    if ! docker stop "$CONTAINER" >/dev/null; then
+        echo "Error: Failed to stop Instance $INSTANCE_ID container."; echo; read -rp "Press Enter to return..."; return
+    fi
     sleep 1
-
-    if docker_3xui_is_running; then
-        echo "ERROR: 3x-UI container is still running."
-        echo
-        read -rp "Press Enter to return..."
-        return
+    container_status="$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ "$container_status" = "running" ]; then
+        echo "ERROR: 3x-UI Instance $INSTANCE_ID container is still running."; echo; read -rp "Press Enter to return..."; return
     fi
-
-    echo "3x-UI stopped successfully."
-    echo "Status: Stopped"
+    echo "3x-UI Instance $INSTANCE_ID stopped successfully."
+    echo "Status: ${container_status:-stopped}"
     echo
-
     read -rp "Press Enter to return..."
 }
 
