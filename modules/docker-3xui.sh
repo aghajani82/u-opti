@@ -2290,6 +2290,21 @@ docker_3xui_uninstall() {
         return
     fi
 
+    if ! docker_3xui_select_instance; then
+        echo
+        echo "Uninstall cancelled."
+        sleep 1
+        return
+    fi
+
+    echo
+    echo "Selected Instance:"
+    echo "  Instance  : ${DOCKER_3XUI_INSTANCE_ID}"
+    echo "  Domain    : ${DOCKER_3XUI_DOMAIN:-Unknown}"
+    echo "  Container : ${DOCKER_3XUI_CONTAINER}"
+    echo "  Data Dir  : ${DOCKER_3XUI_DIR}"
+    echo
+
     if ! docker_3xui_is_installed; then
         echo "3x-UI container is not installed."
         echo
@@ -2358,7 +2373,7 @@ docker_3xui_uninstall() {
     fi
 
     TIMESTAMP=$(date '+%Y%m%d-%H%M%S-%N')
-    SAFETY_ROOT="/root/u-opti-backups/3x-ui"
+    SAFETY_ROOT="/root/u-opti-backups/3x-ui/instances/$DOCKER_3XUI_INSTANCE_ID"
     SAFETY_BACKUP_DIR="$SAFETY_ROOT/$TIMESTAMP-pre-uninstall"
 
     echo
@@ -2412,6 +2427,8 @@ docker_3xui_uninstall() {
     fi
 
     cat > "$SAFETY_BACKUP_DIR/backup-info.txt" <<EOF
+3x-UI Instance ID: $DOCKER_3XUI_INSTANCE_ID
+3x-UI Domain: ${DOCKER_3XUI_DOMAIN:-Unknown}
 3x-UI Container: $DOCKER_3XUI_CONTAINER
 Image: $IMAGE_NAME
 Container Status: $CONTAINER_STATUS
@@ -2568,6 +2585,22 @@ EOF
         return
     fi
 
+    if [ "$UNINSTALL_CHOICE" = "2" ]; then
+        echo "Releasing Instance reservation..."
+
+        if ! docker_3xui_instance_release_reservation "$DOCKER_3XUI_INSTANCE_ID"; then
+            echo
+            echo "ERROR: 3x-UI resources were removed, but Instance reservation could not be released."
+            echo "Instance ID remains reserved:"
+            echo "$DOCKER_3XUI_INSTANCE_ID"
+            echo "Safety backup retained at:"
+            echo "$SAFETY_BACKUP_DIR"
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
     echo
     echo "======================================"
     echo "       3x-UI Uninstall OK"
@@ -2590,8 +2623,17 @@ EOF
     echo "Final safety backup:"
     echo "$SAFETY_BACKUP_DIR"
     echo
+    echo "Uninstall completed successfully."
 
-    read -rp "Press Enter to return..."
+    if [ "$UNINSTALL_CHOICE" = "2" ]; then
+        echo "Instance $DOCKER_3XUI_INSTANCE_ID has been completely removed."
+        echo "Its Instance reservation has been released."
+    else
+        echo "Instance $DOCKER_3XUI_INSTANCE_ID remains registered with its data retained."
+    fi
+
+    echo
+    read -rp "Press Enter to return to the menu..."
 }
 
 docker_3xui_status() {
