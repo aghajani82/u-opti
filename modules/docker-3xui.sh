@@ -2633,7 +2633,8 @@ EOF
     fi
 
     echo
-    read -rp "Press Enter to return to the menu..."
+    echo "Press Enter to return to the menu..."
+    read -r
 }
 
 docker_3xui_status() {
