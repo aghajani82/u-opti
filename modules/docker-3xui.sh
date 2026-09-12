@@ -1005,19 +1005,12 @@ docker_3xui_restart() {
     clear
 
     echo "======================================"
-    echo "           Restart 3x-UI"
+    echo "       Restart 3x-UI Instance"
     echo "======================================"
     echo
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Error: Docker is not installed."
-        echo
-        read -rp "Press Enter to return..."
-        return
-    fi
-
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
         echo
         read -rp "Press Enter to return..."
         return
@@ -1030,13 +1023,44 @@ docker_3xui_restart() {
         return
     fi
 
-    echo "Restarting 3x-UI container..."
+    if ! docker_3xui_select_instance; then
+        return
+    fi
+
+    local INSTANCE_ID="${DOCKER_3XUI_SELECTED_INSTANCE_ID:-}"
+    local CONTAINER="${DOCKER_3XUI_INSTANCE_CONTAINER:-}"
+    local DOMAIN="${DOCKER_3XUI_INSTANCE_DOMAIN:-}"
+
+    if [[ -z "$INSTANCE_ID" || -z "$CONTAINER" ]]; then
+        echo "ERROR: Selected 3x-UI Instance context is incomplete."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$CONTAINER"; then
+        echo "Instance       : $INSTANCE_ID"
+        echo "Domain         : ${DOMAIN:-Unknown}"
+        echo "Container      : $CONTAINER"
+        echo
+        echo "Error: 3x-UI Instance container is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "Instance       : $INSTANCE_ID"
+    echo "Domain         : ${DOMAIN:-Unknown}"
+    echo "Container      : $CONTAINER"
+    echo
+    echo "Restarting 3x-UI Instance $INSTANCE_ID..."
     echo
 
-    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
-        echo "Error: Failed to restart 3x-UI container."
+    if ! docker restart "$CONTAINER" >/dev/null; then
+        echo "Error: Failed to restart Instance $INSTANCE_ID container."
         echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
         return
@@ -1044,20 +1068,21 @@ docker_3xui_restart() {
 
     sleep 2
 
-    if ! docker_3xui_is_running; then
+    if [ "$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)" != "running" ]; then
         echo
-        echo "ERROR: 3x-UI container did not remain running after restart."
+        echo "ERROR: 3x-UI Instance $INSTANCE_ID did not remain running after restart."
         echo
-        docker inspect "$DOCKER_3XUI_CONTAINER" \
-            --format 'Status: {{.State.Status}}\nStarted: {{.State.StartedAt}}' 2>/dev/null || true
+        docker inspect "$CONTAINER" \
+            --format 'Status: {{.State.Status}}
+Started: {{.State.StartedAt}}' 2>/dev/null || true
         echo
-        docker logs "$DOCKER_3XUI_CONTAINER" 2>&1 | tail -n 50 || true
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
         echo
         read -rp "Press Enter to return..."
         return
     fi
 
-    echo "3x-UI restarted successfully."
+    echo "3x-UI Instance $INSTANCE_ID restarted successfully."
     echo "Status: Running"
     echo
 
