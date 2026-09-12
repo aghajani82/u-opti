@@ -2772,7 +2772,6 @@ docker_3xui_status() {
 }
 
 docker_3xui_sanaei_management() {
-
     clear
 
     echo "======================================"
@@ -2783,26 +2782,52 @@ docker_3xui_sanaei_management() {
     if ! command -v docker >/dev/null 2>&1; then
         echo "Error: Docker is not installed."
         echo
-        read -rp "Press Enter to return..."
+        echo "Press Enter to return to the menu..."
+        read -r
         return
     fi
 
-    if ! docker_3xui_is_installed; then
-        echo "Error: 3x-UI container is not installed."
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
         echo
-        read -rp "Press Enter to return..."
+        echo "Press Enter to return to the menu..."
+        read -r
+        return
+    fi
+
+    if ! docker_3xui_select_instance; then
+        echo
+        echo "Sanaei management cancelled."
+        sleep 1
+        return
+    fi
+
+    echo
+    echo "Selected Instance:"
+    echo "  Instance  : ${DOCKER_3XUI_INSTANCE_ID}"
+    echo "  Domain    : ${DOCKER_3XUI_DOMAIN:-Unknown}"
+    echo "  Container : ${DOCKER_3XUI_CONTAINER}"
+    echo
+
+    if ! docker_3xui_is_installed; then
+        echo "Error: Selected 3x-UI container is not installed."
+        echo
+        echo "Press Enter to return to the menu..."
+        read -r
         return
     fi
 
     if ! docker_3xui_is_running; then
-        echo "Error: 3x-UI container is not running."
+        echo "Error: Selected 3x-UI container is not running."
         echo
-        read -rp "Press Enter to return..."
+        echo "Press Enter to return to the menu..."
+        read -r
         return
     fi
 
     echo "Opening Sanaei 3x-UI management menu..."
     echo
+
     docker exec -it "$DOCKER_3XUI_CONTAINER" x-ui
 }
 
