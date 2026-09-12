@@ -32,6 +32,68 @@ docker_3xui_load_instance() {
     source "$DOCKER_3XUI_INSTANCE_MODULE"
 }
 
+
+docker_3xui_select_instance() {
+    local CHOICE=""
+    local INSTANCE_ID=""
+    local INDEX=1
+    local -a INSTANCE_IDS=()
+
+    if ! docker_3xui_load_instance >/dev/null 2>&1; then
+        echo "ERROR: 3x-UI Instance module could not be loaded."
+        return 1
+    fi
+
+    mapfile -t INSTANCE_IDS < <(docker_3xui_instance_registered_ids 2>/dev/null || true)
+
+    if [ "${#INSTANCE_IDS[@]}" -eq 0 ]; then
+        echo "No registered Docker 3x-UI Instances were found."
+        return 1
+    fi
+
+    while true; do
+        echo
+        echo "======================================"
+        echo "       Select 3x-UI Instance"
+        echo "======================================"
+        echo
+
+        for INSTANCE_ID in "${INSTANCE_IDS[@]}"; do
+            if docker_3xui_instance_load_state "$INSTANCE_ID" >/dev/null 2>&1; then
+                echo "${INDEX}) ${INSTANCE_ID} - ${DOCKER_3XUI_INSTANCE_DOMAIN:-Unknown} - ${DOCKER_3XUI_INSTANCE_CONTAINER:-Unknown}"
+            else
+                echo "${INDEX}) ${INSTANCE_ID} - State unavailable"
+            fi
+            INDEX=$((INDEX + 1))
+        done
+
+        echo "0) Back"
+        echo
+        echo "Select Instance [0-${#INSTANCE_IDS[@]}]:"
+        read -r CHOICE
+
+        if [ "$CHOICE" = "0" ]; then
+            return 1
+        fi
+
+        if [[ "$CHOICE" =~ ^[0-9]+$ ]] &&
+            [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "${#INSTANCE_IDS[@]}" ]; then
+            DOCKER_3XUI_SELECTED_INSTANCE_ID="${INSTANCE_IDS[$((CHOICE - 1))]}"
+
+            if ! docker_3xui_instance_apply_runtime_context "$DOCKER_3XUI_SELECTED_INSTANCE_ID" >/dev/null 2>&1; then
+                echo "ERROR: Failed to load selected Instance context."
+                unset DOCKER_3XUI_SELECTED_INSTANCE_ID
+                return 1
+            fi
+
+            return 0
+        fi
+
+        echo "Invalid selection. Please try again."
+        INDEX=1
+    done
+}
+
 docker_3xui_load_nginx() {
     local SCRIPT_DIR
 
@@ -293,14 +355,8 @@ docker_3xui_install() {
     local INSTANCE_ID=""
     local INSTANCE_DOMAIN=""
     local DOCKER_3XUI_WEB_BASE_PATH="/"
-
-    echo
-    echo "Enter 3x-UI Instance ID [01-99]:"
-    read -r INSTANCE_ID
-
-    if [ "$INSTANCE_ID" = "0" ]; then
-        return
-    fi
+    local NEXT_INSTANCE_ID=""
+    local USED_INSTANCE_IDS=""
 
     if ! docker_3xui_load_instance; then
         echo
@@ -311,10 +367,51 @@ docker_3xui_install() {
         return
     fi
 
+    if NEXT_INSTANCE_ID="$(docker_3xui_instance_next_id 2>/dev/null)"; then
+        :
+    else
+        NEXT_INSTANCE_ID="N/A"
+    fi
+
+    USED_INSTANCE_IDS="$(docker_3xui_instance_registered_ids 2>/dev/null | paste -sd ', ' - || true)"
+
+    echo
+    echo "======================================"
+    echo "       3x-UI Instance ID"
+    echo "======================================"
+    echo
+    if [ -n "$USED_INSTANCE_IDS" ]; then
+        echo "Used Instance IDs : $USED_INSTANCE_IDS"
+    else
+        echo "Used Instance IDs : None"
+    fi
+    echo "Next Available ID : $NEXT_INSTANCE_ID"
+    echo
+    echo "Enter 3x-UI Instance ID [01-99]"
+    if [ "$NEXT_INSTANCE_ID" != "N/A" ]; then
+        echo "Suggested          : $NEXT_INSTANCE_ID"
+    fi
+    echo "0) Cancel installation"
+    echo
+    read -r INSTANCE_ID
+
+    if [ "$INSTANCE_ID" = "0" ]; then
+        return
+    fi
+
     if ! docker_3xui_instance_validate_id "$INSTANCE_ID"; then
         echo
         echo "Error: Invalid Instance ID."
         echo "Expected format: 01, 02, 03 ..."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if docker_3xui_instance_is_registered "$INSTANCE_ID"; then
+        echo
+        echo "Error: Instance ID $INSTANCE_ID is already registered."
+        echo "Please choose an unused Instance ID."
         echo
         read -rp "Press Enter to return..."
         return
