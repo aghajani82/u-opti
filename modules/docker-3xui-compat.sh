@@ -6,8 +6,9 @@
 # -----------------------------------------------------------------------------
 # Purpose
 # -----------------------------------------------------------------------------
-# Keeps Sanaei 3x-UI Docker compatible with an existing X-UI PRO installation
-# on the same server without modifying the PRO installation.
+# Keeps Sanaei 3x-UI Docker compatible with either an existing X-UI PRO
+# installation or a standalone Docker installation on the same server.
+# An existing PRO installation is never modified.
 #
 # Design:
 #   Panel        : fixed at 2053
@@ -519,6 +520,22 @@ docker_3xui_compat_get_metrics_port() {
 # Final compatibility configuration
 # -----------------------------------------------------------------------------
 
+docker_3xui_compat_require_tools() {
+    local MISSING=()
+
+    command -v sqlite3 >/dev/null 2>&1 || MISSING+=("sqlite3")
+    command -v jq >/dev/null 2>&1 || MISSING+=("jq")
+
+    if [ "${#MISSING[@]}" -gt 0 ]; then
+        echo "ERROR: Required compatibility tools are missing: ${MISSING[*]}"
+        echo "The U-OPTI installer should install these packages automatically."
+        echo "Install them with: apt-get install -y ${MISSING[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
 
 # -----------------------------------------------------------------------------
 # Xray API configuration
@@ -913,6 +930,10 @@ docker_3xui_compat_configure() {
        [ -z "$WEB_BASE_PATH" ] || [ -z "$CONTAINER" ]; then
         echo "ERROR: Missing arguments."
         echo "Usage: docker_3xui_compat_configure DB_FILE DOMAIN WEB_BASE_PATH CONTAINER"
+        return 1
+    fi
+
+    if ! docker_3xui_compat_require_tools; then
         return 1
     fi
 
