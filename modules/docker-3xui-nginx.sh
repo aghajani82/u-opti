@@ -1,0 +1,1721 @@
+#!/usr/bin/env bash
+
+# U-OPTI - 3x-UI Docker Nginx / SSL Integration
+# v0.13.0
+#
+# This module configures public HTTPS access for a Sanaei 3x-UI Docker
+# instance managed by docker-3xui.sh.
+#
+# It creates:
+#   - Let's Encrypt certificate
+#   - Nginx HTTPS site
+#   - Panel proxy
+#   - Subscription proxy
+#   - Xray path forwarding
+#
+# Runtime state used by this module is stored in:
+#   /opt/3x-ui/compat.env
+
+DOCKER_3XUI_NGINX_CONTAINER="3xui"
+DOCKER_3XUI_NGINX_DIR="/opt/3x-ui"
+DOCKER_3XUI_NGINX_COMPAT_ENV="$DOCKER_3XUI_NGINX_DIR/compat.env"
+
+DOCKER_3XUI_NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
+DOCKER_3XUI_NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
+
+DOCKER_3XUI_NGINX_ACME_ROOT="/var/www/u-opti-acme"
+DOCKER_3XUI_NGINX_ACME_CONF_DIR="/etc/nginx/conf.d"
+
+DOCKER_3XUI_NGINX_CERTBOT_BIN=""
+DOCKER_3XUI_NGINX_DOMAIN=""
+DOCKER_3XUI_NGINX_PANEL_PORT=""
+DOCKER_3XUI_NGINX_SUB_PORT=""
+DOCKER_3XUI_NGINX_METRICS_PORT=""
+DOCKER_3XUI_NGINX_WEB_BASE_PATH="/"
+
+DOCKER_3XUI_NGINX_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
+
+DOCKER_3XUI_NGINX_AUTO_MODE=0
+
+DOCKER_3XUI_CUSTOM_DOMAIN=""
+DOCKER_3XUI_CUSTOM_MODE=""
+DOCKER_3XUI_CUSTOM_TARGET_PORT=""
+DOCKER_3XUI_CUSTOM_SUB_PORT=""
+DOCKER_3XUI_CUSTOM_WEB_BASE_PATH="/"
+DOCKER_3XUI_CUSTOM_PROXY_PATH="/app/"
+
+
+docker_3xui_nginx_pause() {
+    echo
+    read -r -p "Press Enter to return..." _
+}
+
+
+docker_3xui_nginx_valid_domain() {
+    [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]
+}
+
+
+docker_3xui_nginx_get_certbot() {
+    if command -v certbot >/dev/null 2>&1; then
+        DOCKER_3XUI_NGINX_CERTBOT_BIN="$(command -v certbot)"
+        return 0
+    fi
+
+    DOCKER_3XUI_NGINX_CERTBOT_BIN=""
+    return 1
+}
+
+
+docker_3xui_nginx_load_compat() {
+    local domain=""
+    local panel_port=""
+    local sub_port=""
+    local metrics_port=""
+    local web_base_path="/"
+    local compat_env="${DOCKER_3XUI_COMPAT_ENV:-${DOCKER_3XUI_NGINX_COMPAT_ENV:-}}"
+
+    # Instance-aware mode:
+    # docker_3xui_instance_apply_runtime_context() sets
+    # DOCKER_3XUI_COMPAT_ENV to the selected Instance's compat.env.
+    #
+    # Legacy fallback:
+    # If no Instance context is active, use the original
+    # /opt/3x-ui/compat.env location.
+    if [[ -z "$compat_env" ]]; then
+        compat_env="/opt/3x-ui/compat.env"
+    fi
+
+    if [[ ! -f "$compat_env" ]]; then
+        echo "Error: 3x-UI compatibility state was not found:"
+        echo "$compat_env"
+        echo
+        echo "Install Sanaei 3x-UI through U-OPTI first."
+        return 1
+    fi
+
+    DOCKER_3XUI_NGINX_COMPAT_ENV="$compat_env"
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_NGINX_COMPAT_ENV"
+
+    domain="${DOMAIN:-}"
+    panel_port="${PANEL_PORT:-2053}"
+    sub_port="${SUBSCRIPTION_PORT:-}"
+    metrics_port="${METRICS_PORT:-}"
+    web_base_path="${WEB_BASE_PATH:-/}"
+
+    if ! docker_3xui_nginx_valid_domain "$domain"; then
+        echo "Error: Invalid or missing domain in compatibility state."
+        return 1
+    fi
+
+    if [[ ! "$panel_port" =~ ^[0-9]+$ ]] ||
+       (( panel_port < 1 || panel_port > 65535 )); then
+        echo "Error: Invalid panel port in compatibility state: $panel_port"
+        return 1
+    fi
+
+    if [[ -z "$sub_port" || ! "$sub_port" =~ ^[0-9]+$ ]] ||
+       (( sub_port < 1 || sub_port > 65535 )); then
+        echo "Error: Invalid subscription port in compatibility state: ${sub_port:-missing}"
+        return 1
+    fi
+
+    if [ "$web_base_path" != "/" ] &&
+       [[ ! "$web_base_path" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]]; then
+        echo "Error: Invalid Web Base Path in compatibility state: $web_base_path"
+        return 1
+    fi
+
+    DOCKER_3XUI_NGINX_DOMAIN="$domain"
+    DOCKER_3XUI_NGINX_PANEL_PORT="$panel_port"
+    DOCKER_3XUI_NGINX_SUB_PORT="$sub_port"
+    DOCKER_3XUI_NGINX_METRICS_PORT="$metrics_port"
+    DOCKER_3XUI_NGINX_WEB_BASE_PATH="$web_base_path"
+
+    return 0
+}
+
+
+
+docker_3xui_nginx_check_prerequisites() {
+    if [[ "$EUID" -ne 0 ]]; then
+        echo "Error: Root privileges are required."
+        return 1
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "Error: systemd/systemctl is required."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_install_packages() {
+    local need_install=0
+    local missing_packages=()
+
+    command -v nginx >/dev/null 2>&1 || missing_packages+=("nginx")
+    command -v certbot >/dev/null 2>&1 || missing_packages+=("certbot")
+    command -v curl >/dev/null 2>&1 || missing_packages+=("curl")
+    command -v openssl >/dev/null 2>&1 || missing_packages+=("openssl")
+
+    if [[ "${#missing_packages[@]}" -eq 0 ]]; then
+        DOCKER_3XUI_NGINX_CERTBOT_BIN="$(command -v certbot)"
+        return 0
+    fi
+
+    echo "Installing required packages..."
+    echo
+    echo "Missing: ${missing_packages[*]}"
+    echo
+
+    if ! apt update; then
+        echo "Error: Failed to update APT package lists."
+        return 1
+    fi
+
+    if ! apt install -y "${missing_packages[@]}"; then
+        echo "Error: Failed to install required packages."
+        return 1
+    fi
+
+    if ! docker_3xui_nginx_get_certbot; then
+        echo "Error: Certbot installation could not be verified."
+        return 1
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo "Error: Nginx is required but was not found."
+        return 1
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "Error: curl is required but was not found."
+        return 1
+    fi
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "Error: openssl is required but was not found."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_ensure_service() {
+    if ! systemctl enable --now nginx >/dev/null 2>&1; then
+        echo "Error: Failed to start/enable Nginx."
+        return 1
+    fi
+
+    if ! systemctl is-active --quiet nginx; then
+        echo "Error: Nginx is not running."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_acme_conf_path() {
+    echo "$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-3xui-acme-${DOCKER_3XUI_NGINX_DOMAIN}.conf"
+}
+
+
+docker_3xui_nginx_site_path() {
+    echo "$DOCKER_3XUI_NGINX_SITES_AVAILABLE/3xui-${DOCKER_3XUI_NGINX_DOMAIN}"
+}
+
+
+docker_3xui_nginx_enable_site() {
+    local site_path="$1"
+    local site_name
+
+    site_name="$(basename "$site_path")"
+
+    mkdir -p "$DOCKER_3XUI_NGINX_SITES_ENABLED" || return 1
+
+    ln -sfn \
+        "$site_path" \
+        "$DOCKER_3XUI_NGINX_SITES_ENABLED/$site_name" || return 1
+
+    return 0
+}
+
+
+docker_3xui_nginx_site_is_managed() {
+    local site_path="$1"
+
+    [[ -f "$site_path" ]] &&
+        grep -Fq "$DOCKER_3XUI_NGINX_MARKER" "$site_path"
+}
+
+
+docker_3xui_nginx_existing_domain_conflict() {
+    local domain="$DOCKER_3XUI_NGINX_DOMAIN"
+    local site_path
+    local output=""
+
+    site_path="$(docker_3xui_nginx_site_path)"
+
+    if [[ -f "$site_path" ]] &&
+       ! docker_3xui_nginx_site_is_managed "$site_path"; then
+
+        echo "Error: A non-U-OPTI Nginx site already exists:"
+        echo "$site_path"
+        echo
+        echo "U-OPTI will not overwrite an existing configuration."
+        return 1
+    fi
+
+    output="$(nginx -T 2>/dev/null || true)"
+
+    if grep -Eq \
+        "server_name[[:space:]]+[^;]*(^|[[:space:]])${domain}([[:space:]]|;)" \
+        <<< "$output"; then
+
+        if [[ ! -f "$site_path" ]] ||
+           ! docker_3xui_nginx_site_is_managed "$site_path"; then
+
+            echo "Error: The domain '$domain' is already configured in Nginx."
+            echo
+            echo "U-OPTI will not overwrite an existing non-U-OPTI site."
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_prepare_acme() {
+    local conf_path
+    local previous=""
+    local had_previous=0
+
+    conf_path="$(docker_3xui_nginx_acme_conf_path)"
+
+    mkdir -p \
+        "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge" ||
+        return 1
+
+    chmod 755 \
+        "$DOCKER_3XUI_NGINX_ACME_ROOT" \
+        "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known" \
+        "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge" ||
+        return 1
+
+    if [[ -f "$conf_path" ]]; then
+        had_previous=1
+        previous="$(cat "$conf_path")"
+    fi
+
+    cat > "$conf_path" <<EOF_CONF
+# U-OPTI - Let's Encrypt ACME Challenge
+# Domain: $DOCKER_3XUI_NGINX_DOMAIN
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $DOCKER_3XUI_NGINX_DOMAIN;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root $DOCKER_3XUI_NGINX_ACME_ROOT;
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF_CONF
+
+    if ! nginx -t >/dev/null 2>&1; then
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+
+        return 1
+    fi
+
+    if ! systemctl reload nginx; then
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+
+        nginx -t >/dev/null 2>&1 &&
+            systemctl reload nginx >/dev/null 2>&1 || true
+
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_test_acme() {
+    local test_file
+    local response=""
+    local curl_status=0
+    local attempt
+
+    test_file="$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test"
+
+    printf '%s\n' "u-opti-test" > "$test_file" || return 1
+
+    for attempt in {1..20}; do
+        response="$(
+            curl -fsS \
+                --max-time 10 \
+                -H "Host: $DOCKER_3XUI_NGINX_DOMAIN" \
+                "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+                2>/dev/null
+        )"
+        curl_status=$?
+
+        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-test" ]]; then
+            rm -f "$test_file"
+            return 0
+        fi
+
+        sleep 0.5
+    done
+
+    rm -f "$test_file"
+
+    echo "Error: ACME challenge path did not become reachable through Nginx."
+    echo "Last curl status: $curl_status"
+    echo "Last response: ${response:-<empty>}"
+
+    return 1
+}
+
+
+docker_3xui_nginx_issue_certificate() {
+    local cert_file
+
+    cert_file="/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/fullchain.pem"
+
+    if [[ -f "$cert_file" ]]; then
+        echo "Certificate already exists for:"
+        echo "$DOCKER_3XUI_NGINX_DOMAIN"
+        return 0
+    fi
+
+    echo "Testing ACME challenge path..."
+
+    if ! docker_3xui_nginx_test_acme; then
+        echo "Error: ACME challenge path is not reachable through Nginx."
+        return 1
+    fi
+
+    echo
+    echo "Requesting Let's Encrypt certificate..."
+    echo
+
+    if ! "$DOCKER_3XUI_NGINX_CERTBOT_BIN" certonly \
+        --webroot \
+        -w "$DOCKER_3XUI_NGINX_ACME_ROOT" \
+        --non-interactive \
+        --agree-tos \
+        --register-unsafely-without-email \
+        --cert-name "$DOCKER_3XUI_NGINX_DOMAIN" \
+        -d "$DOCKER_3XUI_NGINX_DOMAIN"; then
+
+        echo "Error: Let's Encrypt certificate issuance failed."
+        return 1
+    fi
+
+    if [[ ! -f "/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/fullchain.pem" ]]; then
+        echo "Error: Certificate was not found after issuance."
+        return 1
+    fi
+
+    if [[ ! -f "/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/privkey.pem" ]]; then
+        echo "Error: Private key was not found after issuance."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_write_site() {
+    local site_path
+    local temp_path
+
+    site_path="$(docker_3xui_nginx_site_path)"
+    temp_path="${site_path}.u-opti-new"
+
+    cat > "$temp_path" <<EOF_CONF
+$DOCKER_3XUI_NGINX_MARKER
+# U-OPTI - Sanaei 3x-UI Docker Public Access
+# Domain: $DOCKER_3XUI_NGINX_DOMAIN
+# Panel: $DOCKER_3XUI_NGINX_PANEL_PORT
+# Subscription: $DOCKER_3XUI_NGINX_SUB_PORT
+# Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH
+
+server {
+    server_tokens off;
+
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name $DOCKER_3XUI_NGINX_DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+EOF_CONF
+
+    if [ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]; then
+        echo "Error: Web Base Path '/' is incompatible with the central FakeSite."
+        echo "A dedicated Web Base Path is required."
+        rm -f "$temp_path"
+        return 1
+    fi
+
+    cat >> "$temp_path" <<EOF_PANEL_PATH
+
+    # U-OPTI Central FakeSite
+    root /var/www/u-opti-default;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    # Sanaei Panel
+    location = ${DOCKER_3XUI_NGINX_WEB_BASE_PATH%/} {
+        return 301 $DOCKER_3XUI_NGINX_WEB_BASE_PATH;
+    }
+
+    location ^~ $DOCKER_3XUI_NGINX_WEB_BASE_PATH {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_PANEL_PORT;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_buffering off;
+        proxy_redirect off;
+    }
+EOF_PANEL_PATH
+
+    cat >> "$temp_path" <<EOF_CONF
+
+    # Sanaei Subscription
+    location ^~ /sub/ {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_SUB_PORT/sub/;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        proxy_redirect off;
+    }
+
+    # Subscription path using the selected subscription port.
+    location ~ ^/$DOCKER_3XUI_NGINX_SUB_PORT/sub/(?<subpath>.*)$ {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_SUB_PORT/sub/\$subpath\$is_args\$args;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        proxy_redirect off;
+    }
+
+    # Xray WebSocket / XHTTP / HTTP forwarding paths.
+    #
+    # Path format:
+    #   /PORT/PATH
+    #
+    # gRPC traffic is forwarded directly with grpc_pass.
+    location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
+        client_max_body_size 0;
+
+        client_body_timeout 1d;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_http_version 1.1;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        proxy_socket_keepalive on;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_redirect off;
+
+        if (\$content_type ~* "^application/grpc") {
+            grpc_pass grpc://127.0.0.1:\$fwdport;
+            break;
+        }
+
+        proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
+    }
+}
+EOF_CONF
+
+    if ! nginx -t >/dev/null 2>&1; then
+        rm -f "$temp_path"
+
+        echo "Error: Generated Nginx configuration failed validation."
+        nginx -t 2>&1 || true
+
+        return 1
+    fi
+
+    mkdir -p "$DOCKER_3XUI_NGINX_SITES_AVAILABLE" || {
+        rm -f "$temp_path"
+        return 1
+    }
+
+    mv -f "$temp_path" "$site_path" || return 1
+
+    if ! docker_3xui_nginx_enable_site "$site_path"; then
+        echo "Error: Failed to enable Nginx site."
+        return 1
+    fi
+
+    if ! nginx -t >/dev/null 2>&1; then
+        echo "Error: Nginx configuration failed after enabling the site."
+        nginx -t 2>&1 || true
+        return 1
+    fi
+
+    if ! systemctl reload nginx; then
+        echo "Error: Failed to reload Nginx."
+        return 1
+    fi
+
+    return 0
+}
+
+
+docker_3xui_nginx_install_renewal_hook() {
+    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+    local hook_path
+
+    hook_path="$hook_dir/u-opti-3xui-nginx-${DOCKER_3XUI_NGINX_DOMAIN}.sh"
+
+    mkdir -p "$hook_dir" || return 1
+
+    cat > "$hook_path" <<EOF_HOOK
+#!/usr/bin/env bash
+set -u
+
+DOMAIN="$DOCKER_3XUI_NGINX_DOMAIN"
+
+if [[ ! -f "/etc/letsencrypt/live/\$DOMAIN/fullchain.pem" ||
+      ! -f "/etc/letsencrypt/live/\$DOMAIN/privkey.pem" ]]; then
+    exit 1
+fi
+
+if ! nginx -t >/dev/null 2>&1; then
+    exit 1
+fi
+
+systemctl reload nginx >/dev/null 2>&1
+EOF_HOOK
+
+    chmod 700 "$hook_path" || return 1
+
+    return 0
+}
+
+
+docker_3xui_nginx_show_result() {
+    echo
+    echo "======================================"
+    echo "     Sanaei Nginx / SSL Completed"
+    echo "======================================"
+    echo
+
+    echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
+    echo
+    if [[ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]]; then
+        echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN/"
+    else
+        echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN$DOCKER_3XUI_NGINX_WEB_BASE_PATH"
+    fi
+    echo "Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH"
+    echo "Subscription : https://$DOCKER_3XUI_NGINX_DOMAIN/sub/"
+    echo
+
+    echo "Panel Port   : $DOCKER_3XUI_NGINX_PANEL_PORT"
+    echo "Sub Port     : $DOCKER_3XUI_NGINX_SUB_PORT"
+
+    if [[ -n "${DOCKER_3XUI_NGINX_METRICS_PORT:-}" ]]; then
+        echo "Metrics      : 127.0.0.1:$DOCKER_3XUI_NGINX_METRICS_PORT"
+    fi
+
+    echo
+    echo "Nginx Site   : $(docker_3xui_nginx_site_path)"
+    echo "Certificate  : /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/"
+    echo "ACME Config  : $(docker_3xui_nginx_acme_conf_path)"
+    echo "Renew Hook   : /etc/letsencrypt/renewal-hooks/deploy/u-opti-3xui-nginx-${DOCKER_3XUI_NGINX_DOMAIN}.sh"
+    echo
+    echo "Xray paths   : /PORT/PATH"
+}
+
+
+docker_3xui_nginx_pause_if_needed() {
+    if [[ "${DOCKER_3XUI_NGINX_AUTO_MODE:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    docker_3xui_nginx_pause
+}
+
+
+docker_3xui_nginx_setup() {
+    local auto_mode="${1:-0}"
+
+    if [[ "$auto_mode" == "1" ]]; then
+        DOCKER_3XUI_NGINX_AUTO_MODE=1
+    else
+        DOCKER_3XUI_NGINX_AUTO_MODE=0
+    fi
+
+    clear
+
+    echo "======================================"
+    echo "   Sanaei Nginx / SSL Configuration"
+    echo "======================================"
+    echo
+
+    if ! docker_3xui_nginx_check_prerequisites; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    if ! docker_3xui_nginx_load_compat; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
+    echo "Panel        : 127.0.0.1:$DOCKER_3XUI_NGINX_PANEL_PORT"
+    echo "Subscription : 127.0.0.1:$DOCKER_3XUI_NGINX_SUB_PORT"
+
+    if [[ -n "${DOCKER_3XUI_NGINX_METRICS_PORT:-}" ]]; then
+        echo "Metrics      : 127.0.0.1:$DOCKER_3XUI_NGINX_METRICS_PORT"
+    fi
+
+    echo
+
+    if ! docker_3xui_nginx_install_packages; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    if ! docker_3xui_nginx_ensure_service; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    if ! docker_3xui_nginx_existing_domain_conflict; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    echo "Preparing Let's Encrypt challenge..."
+
+    if ! docker_3xui_nginx_prepare_acme; then
+        echo "Error: Failed to prepare Nginx ACME configuration."
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    if ! docker_3xui_nginx_issue_certificate; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    echo
+    echo "Writing HTTPS Nginx configuration..."
+
+    if ! docker_3xui_nginx_write_site; then
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    echo "Installing automatic certificate renewal hook..."
+
+    if ! docker_3xui_nginx_install_renewal_hook; then
+        echo "Error: Failed to install certificate renewal hook."
+        docker_3xui_nginx_pause_if_needed
+        return 1
+    fi
+
+    # Keep the ACME configuration permanently so Certbot renew can
+    # use the same webroot in the future.
+    if ! nginx -t >/dev/null 2>&1; then
+        echo "Warning: Nginx configuration test failed after setup."
+    else
+        systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+
+    docker_3xui_nginx_show_result
+    docker_3xui_nginx_pause_if_needed
+}
+
+
+docker_3xui_nginx_status() {
+    clear
+
+    echo "======================================"
+    echo "    Sanaei Nginx / SSL Status"
+    echo "======================================"
+    echo
+
+    if ! docker_3xui_nginx_load_compat; then
+        docker_3xui_nginx_pause
+        return 1
+    fi
+
+    local site_path
+    local cert_dir
+    local acme_conf
+    local cert_expiry=""
+
+    site_path="$(docker_3xui_nginx_site_path)"
+    cert_dir="/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN"
+    acme_conf="$(docker_3xui_nginx_acme_conf_path)"
+
+    echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
+    echo "Panel Port   : $DOCKER_3XUI_NGINX_PANEL_PORT"
+    echo "Sub Port     : $DOCKER_3XUI_NGINX_SUB_PORT"
+    echo "Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH"
+
+    if [[ -n "${DOCKER_3XUI_NGINX_METRICS_PORT:-}" ]]; then
+        echo "Metrics      : 127.0.0.1:$DOCKER_3XUI_NGINX_METRICS_PORT"
+    fi
+
+    echo
+
+    if systemctl is-active --quiet nginx; then
+        echo "Nginx        : Active"
+    else
+        echo "Nginx        : Inactive"
+    fi
+
+    if [[ -f "$site_path" ]] &&
+       docker_3xui_nginx_site_is_managed "$site_path"; then
+        echo "Nginx Site   : Configured"
+    else
+        echo "Nginx Site   : Not configured"
+    fi
+
+    if [[ -f "$acme_conf" ]]; then
+        echo "ACME         : Configured"
+    else
+        echo "ACME         : Not configured"
+    fi
+
+    if [[ -f "$cert_dir/cert.pem" ]]; then
+        cert_expiry="$(
+            openssl x509 \
+                -in "$cert_dir/cert.pem" \
+                -noout \
+                -enddate 2>/dev/null |
+            sed 's/^notAfter=//'
+        )"
+
+        echo "SSL          : Installed"
+        echo "Expires      : ${cert_expiry:-Unknown}"
+    else
+        echo "SSL          : Not installed"
+    fi
+
+    echo
+
+    docker_3xui_nginx_pause
+}
+
+# ---------------------------------------------------------------------------
+# U-OPTI Custom Domain / Nginx / SSL
+# ---------------------------------------------------------------------------
+
+docker_3xui_nginx_custom_domain_valid() {
+    docker_3xui_nginx_valid_domain "$1"
+}
+
+docker_3xui_nginx_custom_domain_site_path() {
+    echo "$DOCKER_3XUI_NGINX_SITES_AVAILABLE/u-opti-custom-${DOCKER_3XUI_CUSTOM_DOMAIN}"
+}
+
+docker_3xui_nginx_custom_domain_acme_path() {
+    echo "$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-custom-acme-${DOCKER_3XUI_CUSTOM_DOMAIN}.conf"
+}
+
+docker_3xui_nginx_custom_domain_conflict() {
+    local domain="$DOCKER_3XUI_CUSTOM_DOMAIN"
+    local site_path
+    local output=""
+
+    site_path="$(docker_3xui_nginx_custom_domain_site_path)"
+
+    if [[ -f "$site_path" ]] &&
+       ! grep -Fq "# U-OPTI-MANAGED-CUSTOM-NGINX" "$site_path"; then
+        echo "Error: A non-U-OPTI custom Nginx site already exists:"
+        echo "$site_path"
+        return 1
+    fi
+
+    output="$(nginx -T 2>/dev/null || true)"
+
+    if grep -Eq \
+        "server_name[[:space:]]+[^;]*(^|[[:space:]])${domain}([[:space:]]|;)" \
+        <<< "$output"; then
+
+        if [[ ! -f "$site_path" ]] ||
+           ! grep -Fq "# U-OPTI-MANAGED-CUSTOM-NGINX" "$site_path"; then
+            echo "Error: The domain '$domain' is already configured in Nginx."
+            echo
+            echo "U-OPTI will not overwrite an existing non-U-OPTI site."
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+docker_3xui_nginx_custom_domain_prepare_acme() {
+    local conf_path
+    local previous=""
+    local had_previous=0
+
+    conf_path="$(docker_3xui_nginx_custom_domain_acme_path)"
+
+    if [[ -f "$conf_path" ]]; then
+        had_previous=1
+        previous="$(cat "$conf_path")"
+    fi
+
+    mkdir -p "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge" || return 1
+
+    cat > "$conf_path" <<EOF_CONF
+# U-OPTI - Let's Encrypt ACME Challenge
+# Custom Domain: $DOCKER_3XUI_CUSTOM_DOMAIN
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $DOCKER_3XUI_CUSTOM_DOMAIN;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root $DOCKER_3XUI_NGINX_ACME_ROOT;
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF_CONF
+
+    if ! nginx -t >/dev/null 2>&1; then
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+        return 1
+    fi
+
+    systemctl reload nginx || {
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
+        nginx -t >/dev/null 2>&1 &&
+            systemctl reload nginx >/dev/null 2>&1 || true
+        return 1
+    }
+
+    return 0
+}
+
+docker_3xui_nginx_custom_domain_test_acme() {
+    local test_file
+    local response=""
+    local curl_status=0
+    local attempt
+
+    test_file="$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-custom-test"
+
+    printf '%s\n' "u-opti-custom-test" > "$test_file" || return 1
+
+    for attempt in {1..20}; do
+        response="$(
+            curl -fsS \
+                --max-time 10 \
+                -H "Host: $DOCKER_3XUI_CUSTOM_DOMAIN" \
+                "http://127.0.0.1/.well-known/acme/challenge/u-opti-custom-test" \
+                2>/dev/null
+        )"
+        curl_status=$?
+
+        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-custom-test" ]]; then
+            rm -f "$test_file"
+            return 0
+        fi
+
+        # Correct path for the ACME challenge.
+        response="$(
+            curl -fsS \
+                --max-time 10 \
+                -H "Host: $DOCKER_3XUI_CUSTOM_DOMAIN" \
+                "http://127.0.0.1/.well-known/acme-challenge/u-opti-custom-test" \
+                2>/dev/null
+        )"
+        curl_status=$?
+
+        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-custom-test" ]]; then
+            rm -f "$test_file"
+            return 0
+        fi
+
+        sleep 0.5
+    done
+
+    rm -f "$test_file"
+
+    echo "Error: Custom domain ACME challenge path is not reachable."
+    echo "Last curl status: $curl_status"
+    echo "Last response: ${response:-<empty>}"
+
+    return 1
+}
+
+docker_3xui_nginx_custom_domain_issue_certificate() {
+    local cert_file
+
+    cert_file="/etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/fullchain.pem"
+
+    if [[ -f "$cert_file" ]]; then
+        echo "Certificate already exists for:"
+        echo "$DOCKER_3XUI_CUSTOM_DOMAIN"
+        return 0
+    fi
+
+    echo "Testing ACME challenge path..."
+
+    if ! docker_3xui_nginx_custom_domain_test_acme; then
+        return 1
+    fi
+
+    echo
+    echo "Requesting Let's Encrypt certificate..."
+    echo
+
+    if ! "$DOCKER_3XUI_NGINX_CERTBOT_BIN" certonly \
+        --webroot \
+        -w "$DOCKER_3XUI_NGINX_ACME_ROOT" \
+        --non-interactive \
+        --agree-tos \
+        --register-unsafely-without-email \
+        --cert-name "$DOCKER_3XUI_CUSTOM_DOMAIN" \
+        -d "$DOCKER_3XUI_CUSTOM_DOMAIN"; then
+
+        echo "Error: Let's Encrypt certificate issuance failed."
+        return 1
+    fi
+
+    [[ -f "/etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/fullchain.pem" ]] &&
+    [[ -f "/etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/privkey.pem" ]]
+}
+
+docker_3xui_nginx_custom_domain_write_hook() {
+    local hook_path
+
+    hook_path="/etc/letsencrypt/renewal-hooks/deploy/u-opti-custom-nginx-${DOCKER_3XUI_CUSTOM_DOMAIN}.sh"
+
+    mkdir -p "/etc/letsencrypt/renewal-hooks/deploy" || return 1
+
+    cat > "$hook_path" <<EOF_HOOK
+#!/usr/bin/env bash
+set -u
+
+DOMAIN="$DOCKER_3XUI_CUSTOM_DOMAIN"
+
+if [[ ! -f "/etc/letsencrypt/live/\$DOMAIN/fullchain.pem" ||
+      ! -f "/etc/letsencrypt/live/\$DOMAIN/privkey.pem" ]]; then
+    exit 1
+fi
+
+if ! nginx -t >/dev/null 2>&1; then
+    exit 1
+fi
+
+systemctl reload nginx >/dev/null 2>&1
+EOF_HOOK
+
+    chmod 700 "$hook_path"
+}
+
+docker_3xui_nginx_custom_domain_write_site() {
+    local site_path
+    local temp_path
+
+    site_path="$(docker_3xui_nginx_custom_domain_site_path)"
+    temp_path="${site_path}.u-opti-new"
+
+    case "$DOCKER_3XUI_CUSTOM_MODE" in
+        proxy_instance)
+            cat > "$temp_path" <<EOF_CONF
+# U-OPTI-MANAGED-CUSTOM-NGINX
+# Custom Domain: $DOCKER_3XUI_CUSTOM_DOMAIN
+# Target Instance: $DOCKER_3XUI_INSTANCE_ID
+
+server {
+    server_tokens off;
+
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name $DOCKER_3XUI_CUSTOM_DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    root /var/www/u-opti-default;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    location = ${DOCKER_3XUI_CUSTOM_WEB_BASE_PATH%/} {
+        return 301 $DOCKER_3XUI_CUSTOM_WEB_BASE_PATH;
+    }
+
+    location ^~ $DOCKER_3XUI_CUSTOM_WEB_BASE_PATH {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_CUSTOM_TARGET_PORT;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+        proxy_buffering off;
+        proxy_redirect off;
+    }
+
+    location ^~ /sub/ {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_CUSTOM_SUB_PORT/sub/;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_redirect off;
+    }
+
+    location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
+        client_max_body_size 0;
+        client_body_timeout 1d;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_socket_keepalive on;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_redirect off;
+
+        if (\$content_type ~* "^application/grpc") {
+            grpc_pass grpc://127.0.0.1:\$fwdport;
+            break;
+        }
+
+        proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
+    }
+}
+EOF_CONF
+            ;;
+        custom_port)
+            cat > "$temp_path" <<EOF_CONF
+# U-OPTI-MANAGED-CUSTOM-NGINX
+# Custom Domain: $DOCKER_3XUI_CUSTOM_DOMAIN
+# Local Target: 127.0.0.1:$DOCKER_3XUI_CUSTOM_TARGET_PORT
+# Proxy Path: $DOCKER_3XUI_CUSTOM_PROXY_PATH
+
+server {
+    server_tokens off;
+
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name $DOCKER_3XUI_CUSTOM_DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    root /var/www/u-opti-default;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    location ^~ $DOCKER_3XUI_CUSTOM_PROXY_PATH {
+        proxy_pass http://127.0.0.1:$DOCKER_3XUI_CUSTOM_TARGET_PORT/;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+        proxy_buffering off;
+        proxy_redirect off;
+    }
+}
+EOF_CONF
+            ;;
+        *)
+            echo "Error: Unsupported custom domain mode."
+            return 1
+            ;;
+    esac
+
+    if ! nginx -t >/dev/null 2>&1; then
+        rm -f "$temp_path"
+        nginx -t 2>&1 || true
+        return 1
+    fi
+
+    mkdir -p "$DOCKER_3XUI_NGINX_SITES_AVAILABLE" || {
+        rm -f "$temp_path"
+        return 1
+    }
+
+    mv -f "$temp_path" "$site_path" || return 1
+
+    ln -sfn \
+        "$site_path" \
+        "$DOCKER_3XUI_NGINX_SITES_ENABLED/$(basename "$site_path")" || return 1
+
+    nginx -t || return 1
+    systemctl reload nginx || return 1
+
+    return 0
+}
+
+docker_3xui_nginx_custom_domain_show_result() {
+    echo
+    echo "======================================"
+    echo "   Custom Domain / SSL Completed"
+    echo "======================================"
+    echo
+    echo "Domain       : $DOCKER_3XUI_CUSTOM_DOMAIN"
+
+    case "$DOCKER_3XUI_CUSTOM_MODE" in
+        proxy_instance)
+            echo "Target       : 3x-UI Instance $DOCKER_3XUI_INSTANCE_ID"
+            echo "Panel Port   : $DOCKER_3XUI_CUSTOM_TARGET_PORT"
+            echo "Sub Port     : $DOCKER_3XUI_CUSTOM_SUB_PORT"
+            echo "Panel        : https://$DOCKER_3XUI_CUSTOM_DOMAIN$DOCKER_3XUI_CUSTOM_WEB_BASE_PATH"
+            echo "Subscription : https://$DOCKER_3XUI_CUSTOM_DOMAIN/sub/"
+            ;;
+        custom_port)
+            echo "Target       : 127.0.0.1:$DOCKER_3XUI_CUSTOM_TARGET_PORT"
+            echo "Proxy        : https://$DOCKER_3XUI_CUSTOM_DOMAIN$DOCKER_3XUI_CUSTOM_PROXY_PATH"
+            ;;
+        ssl_only)
+            echo "Mode         : SSL Certificate Only"
+            echo "Certificate  : /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/"
+            ;;
+    esac
+
+    echo
+    echo "Nginx Site   : $(docker_3xui_nginx_custom_domain_site_path)"
+    echo "Certificate  : /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/"
+    echo "Renew Hook   : /etc/letsencrypt/renewal-hooks/deploy/u-opti-custom-nginx-${DOCKER_3XUI_CUSTOM_DOMAIN}.sh"
+}
+
+docker_3xui_nginx_custom_domain_ssl_only() {
+    local default_root="/var/www/u-opti-default"
+    local site_path
+    local temp_path
+
+    site_path="$(docker_3xui_nginx_custom_domain_site_path)"
+    temp_path="${site_path}.u-opti-new"
+
+    echo
+    echo "Preparing default website root..."
+
+    mkdir -p "$default_root" || return 1
+
+    if [[ ! -f "$default_root/index.html" ]]; then
+        cat > "$default_root/index.html" <<'EOF_HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome</title>
+</head>
+<body>
+</body>
+</html>
+EOF_HTML
+    fi
+
+    docker_3xui_nginx_custom_domain_prepare_acme || return 1
+
+    docker_3xui_nginx_custom_domain_issue_certificate || return 1
+
+    echo
+    echo "Writing HTTPS Nginx configuration..."
+
+    cat > "$temp_path" <<EOF_CONF
+# U-OPTI-MANAGED-CUSTOM-NGINX
+# Custom Domain: $DOCKER_3XUI_CUSTOM_DOMAIN
+# Mode: SSL Certificate Only
+
+server {
+    server_tokens off;
+
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name $DOCKER_3XUI_CUSTOM_DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOCKER_3XUI_CUSTOM_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    root $default_root;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+EOF_CONF
+
+    if ! nginx -t >/dev/null 2>&1; then
+        rm -f "$temp_path"
+        echo "ERROR: Generated Nginx configuration failed validation."
+        nginx -t 2>&1 || true
+        return 1
+    fi
+
+    mkdir -p "$DOCKER_3XUI_NGINX_SITES_AVAILABLE" || {
+        rm -f "$temp_path"
+        return 1
+    }
+
+    mv -f "$temp_path" "$site_path" || return 1
+
+    ln -sfn \
+        "$site_path" \
+        "$DOCKER_3XUI_NGINX_SITES_ENABLED/$(basename "$site_path")" || return 1
+
+    if ! nginx -t; then
+        return 1
+    fi
+
+    if ! systemctl reload nginx; then
+        return 1
+    fi
+
+    docker_3xui_nginx_custom_domain_write_hook || return 1
+
+    echo
+    echo "SSL certificate and HTTPS site successfully configured."
+}
+
+docker_3xui_nginx_custom_domain_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "      Custom Domain / Nginx / SSL"
+        echo "======================================"
+        echo
+        echo "1) Attach Custom Domain to 3x-UI"
+        echo "2) Domain + Custom Local Port"
+        echo "3) SSL Certificate Only"
+        echo
+        echo "0) Back"
+        echo
+
+        read -r -p "Please enter your selection [0-3]: " choice
+
+        case "$choice" in
+            1)
+                if ! docker_3xui_load_nginx; then
+                    echo
+                    echo "ERROR: Sanaei Nginx / SSL module could not be loaded."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                if ! docker_3xui_select_instance; then
+                    continue
+                fi
+
+                local compat_env="/opt/3x-ui/instances/${DOCKER_3XUI_INSTANCE_ID}/compat.env"
+
+                if [[ ! -f "$compat_env" ]]; then
+                    echo
+                    echo "ERROR: Instance compatibility state not found:"
+                    echo "$compat_env"
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                local target_domain=""
+                local panel_port=""
+                local sub_port=""
+                local web_base_path="/"
+
+                target_domain="$(
+                    sed -n 's/^DOMAIN=//p' "$compat_env" | head -n1
+                )"
+
+                panel_port="$(
+                    sed -n 's/^PANEL_PORT=//p' "$compat_env" | head -n1
+                )"
+
+                sub_port="$(
+                    sed -n 's/^SUBSCRIPTION_PORT=//p' "$compat_env" | head -n1
+                )"
+
+                web_base_path="$(
+                    sed -n 's/^WEB_BASE_PATH=//p' "$compat_env" | head -n1
+                )"
+
+                [[ -n "$web_base_path" ]] || web_base_path="/"
+
+                if [[ "$web_base_path" == "/" ]]; then
+                    echo
+                    echo "ERROR: This 3x-UI instance uses Web Base Path '/'."
+                    echo "A dedicated Web Base Path is required when the root URL is reserved for FakeSite."
+                    echo "Change the instance Web Base Path first, then attach the custom domain."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "Selected Instance:"
+                echo "  Instance        : $DOCKER_3XUI_INSTANCE_ID"
+                echo "  Original Domain : ${target_domain:-Unknown}"
+                echo "  Panel Port      : ${panel_port:-Unknown}"
+                echo "  Subscription    : ${sub_port:-Unknown}"
+                echo "  Web Base Path   : $web_base_path"
+                echo
+
+                read -r -p "Enter custom domain: " DOCKER_3XUI_CUSTOM_DOMAIN
+
+                if ! docker_3xui_nginx_custom_domain_valid "$DOCKER_3XUI_CUSTOM_DOMAIN"; then
+                    echo
+                    echo "ERROR: Invalid domain."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                if [[ "$DOCKER_3XUI_CUSTOM_DOMAIN" == "$target_domain" ]]; then
+                    echo
+                    echo "ERROR: This is already the Instance's primary domain."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                DOCKER_3XUI_CUSTOM_MODE="proxy_instance"
+                DOCKER_3XUI_CUSTOM_TARGET_PORT="$panel_port"
+                DOCKER_3XUI_CUSTOM_SUB_PORT="$sub_port"
+                DOCKER_3XUI_CUSTOM_WEB_BASE_PATH="$web_base_path"
+
+                if ! docker_3xui_nginx_check_prerequisites ||
+                   ! docker_3xui_nginx_install_packages ||
+                   ! docker_3xui_nginx_ensure_service ||
+                   ! docker_3xui_nginx_custom_domain_conflict; then
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "Custom Domain : $DOCKER_3XUI_CUSTOM_DOMAIN"
+                echo "Target        : Instance $DOCKER_3XUI_INSTANCE_ID"
+                echo "Panel Port    : $DOCKER_3XUI_CUSTOM_TARGET_PORT"
+                echo "Sub Port      : $DOCKER_3XUI_CUSTOM_SUB_PORT"
+                echo "Web Base Path : $DOCKER_3XUI_CUSTOM_WEB_BASE_PATH"
+                echo
+
+                read -r -p "Continue? [y/N]: " confirm
+
+                case "$confirm" in
+                    y|Y|yes|YES)
+                        if docker_3xui_nginx_custom_domain_prepare_acme &&
+                           docker_3xui_nginx_custom_domain_issue_certificate &&
+                           docker_3xui_nginx_custom_domain_write_site &&
+                           docker_3xui_nginx_custom_domain_write_hook; then
+
+                            docker_3xui_nginx_custom_domain_show_result
+                        else
+                            echo
+                            echo "ERROR: Custom Domain / Nginx / SSL setup failed."
+                        fi
+
+                        read -r -p "Press Enter to return..."
+                        ;;
+
+                    *)
+                        echo
+                        echo "Custom Domain setup cancelled."
+                        sleep 1
+                        ;;
+                esac
+                ;;
+
+            2)
+                if ! docker_3xui_load_nginx; then
+                    echo
+                    echo "ERROR: Sanaei Nginx / SSL module could not be loaded."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "Custom Domain / Local Port"
+                echo
+
+                read -r -p "Enter custom domain: " DOCKER_3XUI_CUSTOM_DOMAIN
+
+                if ! docker_3xui_nginx_custom_domain_valid "$DOCKER_3XUI_CUSTOM_DOMAIN"; then
+                    echo
+                    echo "ERROR: Invalid domain."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                read -r -p "Enter local port [127.0.0.1]: " DOCKER_3XUI_CUSTOM_TARGET_PORT
+
+                if [[ ! "$DOCKER_3XUI_CUSTOM_TARGET_PORT" =~ ^[0-9]+$ ]] ||
+                   (( DOCKER_3XUI_CUSTOM_TARGET_PORT < 1 ||
+                      DOCKER_3XUI_CUSTOM_TARGET_PORT > 65535 )); then
+                    echo
+                    echo "ERROR: Invalid local port."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                read -r -p "Enter proxy path [/app/]: " DOCKER_3XUI_CUSTOM_PROXY_PATH
+                [[ -n "$DOCKER_3XUI_CUSTOM_PROXY_PATH" ]] || DOCKER_3XUI_CUSTOM_PROXY_PATH="/app/"
+
+                if [[ "$DOCKER_3XUI_CUSTOM_PROXY_PATH" != /* ]]; then
+                    DOCKER_3XUI_CUSTOM_PROXY_PATH="/$DOCKER_3XUI_CUSTOM_PROXY_PATH"
+                fi
+                [[ "$DOCKER_3XUI_CUSTOM_PROXY_PATH" == */ ]] ||
+                    DOCKER_3XUI_CUSTOM_PROXY_PATH="${DOCKER_3XUI_CUSTOM_PROXY_PATH}/"
+
+                case "$DOCKER_3XUI_CUSTOM_PROXY_PATH" in
+                    /|/sub/|/$DOCKER_3XUI_CUSTOM_TARGET_PORT/*)
+                        echo
+                        echo "ERROR: Reserved proxy path."
+                        read -r -p "Press Enter to return..."
+                        continue
+                        ;;
+                esac
+
+                DOCKER_3XUI_CUSTOM_MODE="custom_port"
+
+                if ! docker_3xui_nginx_check_prerequisites ||
+                   ! docker_3xui_nginx_install_packages ||
+                   ! docker_3xui_nginx_ensure_service ||
+                   ! docker_3xui_nginx_custom_domain_conflict; then
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "Custom Domain : $DOCKER_3XUI_CUSTOM_DOMAIN"
+                echo "Local Target  : 127.0.0.1:$DOCKER_3XUI_CUSTOM_TARGET_PORT"
+                echo "Proxy Path    : $DOCKER_3XUI_CUSTOM_PROXY_PATH"
+                echo
+
+                read -r -p "Continue? [y/N]: " confirm
+
+                case "$confirm" in
+                    y|Y|yes|YES)
+                        if docker_3xui_nginx_custom_domain_prepare_acme &&
+                           docker_3xui_nginx_custom_domain_issue_certificate &&
+                           docker_3xui_nginx_custom_domain_write_site &&
+                           docker_3xui_nginx_custom_domain_write_hook; then
+
+                            docker_3xui_nginx_custom_domain_show_result
+                        else
+                            echo
+                            echo "ERROR: Custom Domain / Nginx / SSL setup failed."
+                        fi
+
+                        read -r -p "Press Enter to return..."
+                        ;;
+
+                    *)
+                        echo
+                        echo "Custom Domain setup cancelled."
+                        sleep 1
+                        ;;
+                esac
+                ;;
+
+            3)
+                if ! docker_3xui_load_nginx; then
+                    echo
+                    echo "ERROR: Sanaei Nginx / SSL module could not be loaded."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "SSL Certificate Only"
+                echo
+
+                read -r -p "Enter domain for SSL certificate: " DOCKER_3XUI_CUSTOM_DOMAIN
+
+                if ! docker_3xui_nginx_custom_domain_valid "$DOCKER_3XUI_CUSTOM_DOMAIN"; then
+                    echo
+                    echo "ERROR: Invalid domain."
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                DOCKER_3XUI_CUSTOM_MODE="ssl_only"
+
+                if ! docker_3xui_nginx_check_prerequisites ||
+                   ! docker_3xui_nginx_install_packages ||
+                   ! docker_3xui_nginx_ensure_service; then
+                    read -r -p "Press Enter to return..."
+                    continue
+                fi
+
+                echo
+                echo "Domain : $DOCKER_3XUI_CUSTOM_DOMAIN"
+                echo "Mode   : SSL Certificate Only"
+                echo
+
+                read -r -p "Continue? [y/N]: " confirm
+
+                case "$confirm" in
+                    y|Y|yes|YES)
+                        if docker_3xui_nginx_custom_domain_ssl_only; then
+                            docker_3xui_nginx_custom_domain_show_result
+                        else
+                            echo
+                            echo "ERROR: SSL certificate and HTTPS site setup failed."
+                        fi
+
+                        read -r -p "Press Enter to return..."
+                        ;;
+
+                    *)
+                        echo
+                        echo "SSL setup cancelled."
+                        sleep 1
+                        ;;
+                esac
+                ;;
+
+            0)
+                return
+                ;;
+
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}

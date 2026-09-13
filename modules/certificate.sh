@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # U-OPTI - Certificate Management
-# v0.12.0
+# v0.13.0
 
 CERTBOT_BIN=""
 ACME_WEBROOT="/var/www/u-opti-acme"
@@ -72,7 +72,7 @@ validate_nginx() {
     fi
     if ! nginx -t >/dev/null 2>&1; then
         echo "Error: Existing Nginx configuration is invalid."
-        echo "Fix the Nginx configuration before continuing."
+        echo "Fix the Nginx configuration before issuing a certificate."
         return 1
     fi
 }
@@ -88,12 +88,15 @@ get_acme_conf_path() {
 
 prepare_acme_webroot() {
     local domain="$1" conf_path="$2" previous_content="" had_previous=0
+
     if [[ -f "$conf_path" ]]; then
         had_previous=1
         previous_content="$(cat "$conf_path")"
     fi
+
     mkdir -p "$ACME_WEBROOT/.well-known/acme-challenge" || return 1
     chmod 755 "$ACME_WEBROOT" "$ACME_WEBROOT/.well-known" "$ACME_WEBROOT/.well-known/acme-challenge"
+
     cat > "$conf_path" <<EOF
 # ==========================================
 # U-OPTI - Let's Encrypt ACME Challenge
@@ -116,22 +119,36 @@ server {
     }
 }
 EOF
+
     if ! nginx -t >/dev/null 2>&1; then
-        if [[ "$had_previous" -eq 1 ]]; then printf '%s\n' "$previous_content" > "$conf_path"; else rm -f "$conf_path"; fi
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous_content" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
         return 1
     fi
+
     systemctl reload nginx || {
-        if [[ "$had_previous" -eq 1 ]]; then printf '%s\n' "$previous_content" > "$conf_path"; else rm -f "$conf_path"; fi
+        if [[ "$had_previous" -eq 1 ]]; then
+            printf '%s\n' "$previous_content" > "$conf_path"
+        else
+            rm -f "$conf_path"
+        fi
         nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
         return 1
     }
 }
 
 test_acme_webroot() {
-    local domain="$1" test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test" response=""
+    local domain="$1"
+    local test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test"
+    local response=""
+
     printf '%s\n' "u-opti-test" > "$test_file" || return 1
     response="$(curl -fsS --max-time 10 -H "Host: $domain" "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" 2>/dev/null || true)"
     rm -f "$test_file"
+
     [[ "$response" == "u-opti-test" ]]
 }
 
@@ -141,39 +158,65 @@ certificate_status() {
     echo "       Certificate Status"
     echo "======================================"
     echo
-    if ! check_certbot; then pause_screen; return 1; fi
-    local live_dir="/etc/letsencrypt/live" found=0 cert_dir
+
+    if ! check_certbot; then
+        pause_screen
+        return 1
+    fi
+
+    local live_dir="/etc/letsencrypt/live"
+    local found=0
+    local cert_dir
+
     if [[ ! -d "$live_dir" ]]; then
         echo "No Let's Encrypt certificates found."
         pause_screen
         return
     fi
+
     for cert_dir in "$live_dir"/*; do
         [[ -d "$cert_dir" && -f "$cert_dir/cert.pem" ]] || continue
+
         found=1
+
         local domain expiry_raw expiry_date expiry_epoch now_epoch days_left status
+
         domain="$(basename "$cert_dir")"
         expiry_raw="$(openssl x509 -in "$cert_dir/cert.pem" -noout -enddate 2>/dev/null)"
         expiry_raw="${expiry_raw#notAfter=}"
+
         if [[ -z "$expiry_raw" ]]; then
-            status="Unknown"; expiry_date="Unknown"; days_left="Unknown"
+            status="Unknown"
+            expiry_date="Unknown"
+            days_left="Unknown"
         else
             expiry_date="$(date -d "$expiry_raw" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "Unknown")"
             expiry_epoch="$(date -d "$expiry_raw" '+%s' 2>/dev/null || echo "")"
             now_epoch="$(date '+%s')"
+
             if [[ -n "$expiry_epoch" && "$expiry_epoch" =~ ^[0-9]+$ ]]; then
                 days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
-                if (( days_left < 0 )); then status="Expired"
-                elif (( days_left <= 7 )); then status="Expiring Soon"
-                else status="Valid"; fi
-            else status="Unknown"; days_left="Unknown"; fi
+
+                if (( days_left < 0 )); then
+                    status="Expired"
+                elif (( days_left <= 7 )); then
+                    status="Expiring Soon"
+                else
+                    status="Valid"
+                fi
+            else
+                status="Unknown"
+                days_left="Unknown"
+            fi
         fi
+
         echo "Domain    : $domain"
         echo "Status    : $status"
         echo "Expires   : $expiry_date"
         echo "Days Left : $days_left"
         echo "--------------------------------------"
     done
+
     [[ "$found" -eq 1 ]] || echo "No Let's Encrypt certificates found."
     pause_screen
 }
@@ -184,20 +227,57 @@ issue_certificate() {
     echo "        Issue Certificate"
     echo "======================================"
     echo
-    if ! check_certbot; then pause_screen; return 1; fi
-    if ! validate_nginx; then pause_screen; return 1; fi
+
+    if ! check_certbot; then
+        pause_screen
+        return 1
+    fi
+
+    if ! validate_nginx; then
+        pause_screen
+        return 1
+    fi
+
     local domain conf_path
+
     read -r -p "Enter your domain (or 0 to go back): " domain
-    if [[ "$domain" == "0" ]]; then return; fi
-    [[ -n "$domain" ]] || { echo; echo "Error: Domain cannot be empty."; pause_screen; return 1; }
-    if ! validate_domain "$domain"; then echo; echo "Error: Invalid domain format."; pause_screen; return 1; fi
+    if [[ "$domain" == "0" ]]; then
+        return
+    fi
+
+    [[ -n "$domain" ]] || {
+        echo
+        echo "Error: Domain cannot be empty."
+        pause_screen
+        return 1
+    }
+
+    if ! validate_domain "$domain"; then
+        echo
+        echo "Error: Invalid domain format."
+        pause_screen
+        return 1
+    fi
+
     if [[ -f "/etc/letsencrypt/live/$domain/cert.pem" ]]; then
-        echo; echo "Error: A certificate for '$domain' already exists."; echo "Use Certificate Status or Renew Certificates."; pause_screen; return 1
+        echo
+        echo "Error: A certificate for '$domain' already exists."
+        echo "Use Certificate Status or Renew Certificates."
+        pause_screen
+        return 1
     fi
+
     if domain_exists_in_nginx "$domain"; then
-        echo; echo "Error: The domain '$domain' is already configured in Nginx."; echo; echo "U-OPTI will not modify an existing Nginx site configuration."; pause_screen; return 1
+        echo
+        echo "Error: The domain '$domain' is already configured in Nginx."
+        echo
+        echo "U-OPTI will not modify an existing Nginx site configuration."
+        pause_screen
+        return 1
     fi
+
     conf_path="$(get_acme_conf_path "$domain")"
+
     echo
     echo "Domain:"
     echo "$domain"
@@ -209,20 +289,47 @@ issue_certificate() {
     echo
     echo "U-OPTI will create a dedicated ACME server for this domain on port 80."
     echo
+
     read -r -p "Continue with certificate issuance? [y/N]: " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { echo; echo "Certificate issuance cancelled."; pause_screen; return; }
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo
+        echo "Certificate issuance cancelled."
+        pause_screen
+        return
+    }
 
     if ! prepare_acme_webroot "$domain" "$conf_path"; then
-        echo; echo "Error: Failed to prepare the ACME Nginx configuration."; pause_screen; return 1
+        echo
+        echo "Error: Failed to prepare the ACME Nginx configuration."
+        pause_screen
+        return 1
     fi
+
     echo
+
     if ! test_acme_webroot "$domain"; then
-        echo; echo "Error: ACME challenge path is not reachable from Nginx."; echo; echo "ACME configuration:"; echo "$conf_path"; pause_screen; return 1
+        echo
+        echo "Error: ACME challenge path is not reachable from Nginx."
+        echo
+        echo "ACME configuration:"
+        echo "$conf_path"
+        pause_screen
+        return 1
     fi
+
     echo
     echo "Requesting certificate from Let's Encrypt..."
     echo
-    if "$CERTBOT_BIN" certonly --webroot -w "$ACME_WEBROOT" --non-interactive --agree-tos --register-unsafely-without-email --cert-name "$domain" -d "$domain"; then
+
+    if "$CERTBOT_BIN" certonly \
+        --webroot \
+        -w "$ACME_WEBROOT" \
+        --non-interactive \
+        --agree-tos \
+        --register-unsafely-without-email \
+        --cert-name "$domain" \
+        -d "$domain"; then
+
         echo
         echo "Certificate issued successfully."
         echo
@@ -245,6 +352,7 @@ issue_certificate() {
         pause_screen
         return 1
     fi
+
     pause_screen
 }
 
@@ -254,9 +362,15 @@ renew_certificates() {
     echo "       Renew Certificates"
     echo "======================================"
     echo
-    if ! check_certbot; then pause_screen; return 1; fi
+
+    if ! check_certbot; then
+        pause_screen
+        return 1
+    fi
+
     echo "Checking and renewing certificates..."
     echo
+
     if "$CERTBOT_BIN" renew; then
         echo
         echo "Certificate renewal process completed."
@@ -267,6 +381,7 @@ renew_certificates() {
         pause_screen
         return 1
     fi
+
     pause_screen
 }
 
@@ -276,15 +391,40 @@ remove_certificate() {
     echo "        Remove Certificate"
     echo "======================================"
     echo
-    if ! check_certbot; then pause_screen; return 1; fi
-    local domain conf_path
-    read -r -p "Enter domain to remove (or 0 to go back): " domain
-    if [[ "$domain" == "0" ]]; then return; fi
-    [[ -n "$domain" ]] || { echo; echo "Error: Domain cannot be empty."; pause_screen; return 1; }
-    if ! validate_domain "$domain"; then echo; echo "Error: Invalid domain format."; pause_screen; return 1; fi
-    if [[ ! -f "/etc/letsencrypt/live/$domain/cert.pem" ]]; then
-        echo; echo "Error: No certificate found for '$domain'."; pause_screen; return 1
+
+    if ! check_certbot; then
+        pause_screen
+        return 1
     fi
+
+    local domain conf_path
+
+    read -r -p "Enter domain to remove (or 0 to go back): " domain
+    if [[ "$domain" == "0" ]]; then
+        return
+    fi
+
+    [[ -n "$domain" ]] || {
+        echo
+        echo "Error: Domain cannot be empty."
+        pause_screen
+        return 1
+    }
+
+    if ! validate_domain "$domain"; then
+        echo
+        echo "Error: Invalid domain format."
+        pause_screen
+        return 1
+    fi
+
+    if [[ ! -f "/etc/letsencrypt/live/$domain/cert.pem" ]]; then
+        echo
+        echo "Error: No certificate found for '$domain'."
+        pause_screen
+        return 1
+    fi
+
     echo
     echo "Certificate:"
     echo "$domain"
@@ -293,18 +433,34 @@ remove_certificate() {
     echo
     echo "Nginx site configuration will not be modified."
     echo
+
     read -r -p "Continue with removal? [y/N]: " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { echo; echo "Certificate removal cancelled."; pause_screen; return; }
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo
+        echo "Certificate removal cancelled."
+        pause_screen
+        return
+    }
+
     echo
+
     if "$CERTBOT_BIN" delete --cert-name "$domain" --non-interactive; then
         echo
         echo "Certificate removed successfully."
+
         conf_path="$(get_acme_conf_path "$domain")"
+
         if [[ -f "$conf_path" ]]; then
             rm -f "$conf_path"
-            if nginx -t >/dev/null 2>&1; then systemctl reload nginx >/dev/null 2>&1
-            else echo; echo "Warning: Nginx configuration test failed after removing the U-OPTI ACME configuration."; fi
+
+            if nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx >/dev/null 2>&1
+            else
+                echo
+                echo "Warning: Nginx configuration test failed after removing the U-OPTI ACME configuration."
+            fi
         fi
+
         echo "U-OPTI ACME configuration removed."
         echo "Nginx site configuration was not modified."
     else
@@ -313,6 +469,482 @@ remove_certificate() {
         pause_screen
         return 1
     fi
+
+    pause_screen
+}
+
+# ==========================================================
+# 3x-UI Docker Certificate Management
+# ==========================================================
+
+DOCKER_3XUI_CONTAINER="3xui"
+DOCKER_3XUI_CERT_ROOT="/opt/3x-ui/cert"
+DOCKER_3XUI_CERT_HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
+DOCKER_3XUI_CERT_HOOK_PREFIX="u-opti-3xui-"
+
+docker_3xui_certificate_check_environment() {
+    if ! check_certbot; then
+        return 1
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo "Install Docker first."
+        return 1
+    fi
+
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$DOCKER_3XUI_CONTAINER"; then
+        echo "Error: 3x-UI Docker container is not installed."
+        echo "Install 3x-UI first from Docker Management."
+        return 1
+    fi
+}
+
+docker_3xui_certificate_check_port_80() {
+    local listener
+
+    listener="$(ss -lntp 2>/dev/null | awk 'NR > 1 && $4 ~ /:80$/ {print}')"
+
+    if [[ -n "$listener" ]]; then
+        echo
+        echo "ERROR: Port 80/tcp is currently in use."
+        echo
+        echo "Certbot Standalone needs port 80 to be available."
+        echo
+        echo "Current listener:"
+        echo "$listener"
+        echo
+        return 1
+    fi
+
+    return 0
+}
+
+docker_3xui_certificate_copy() {
+    local domain="$1"
+    local source_cert="/etc/letsencrypt/live/$domain/fullchain.pem"
+    local source_key="/etc/letsencrypt/live/$domain/privkey.pem"
+    local target_dir="$DOCKER_3XUI_CERT_ROOT/$domain"
+
+    if [[ ! -f "$source_cert" || ! -f "$source_key" ]]; then
+        echo "Error: Let's Encrypt certificate files were not found."
+        echo "Expected:"
+        echo "$source_cert"
+        echo "$source_key"
+        return 1
+    fi
+
+    if [[ ! -d "$DOCKER_3XUI_CERT_ROOT" ]]; then
+        echo "Error: 3x-UI certificate directory does not exist:"
+        echo "$DOCKER_3XUI_CERT_ROOT"
+        echo "Make sure 3x-UI Docker is installed before copying the certificate."
+        return 1
+    fi
+
+    if ! mkdir -p "$target_dir"; then
+        echo "Error: Failed to create 3x-UI certificate directory:"
+        echo "$target_dir"
+        return 1
+    fi
+
+    chmod 700 "$target_dir" || return 1
+
+    if ! install -m 0644 "$source_cert" "$target_dir/fullchain.pem"; then
+        echo "Error: Failed to copy fullchain.pem."
+        return 1
+    fi
+
+    if ! install -m 0600 "$source_key" "$target_dir/privkey.pem"; then
+        echo "Error: Failed to copy privkey.pem."
+        return 1
+    fi
+
+    return 0
+}
+
+docker_3xui_certificate_restart_container() {
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$DOCKER_3XUI_CONTAINER"; then
+        return 0
+    fi
+
+    if ! docker inspect "$DOCKER_3XUI_CONTAINER" --format '{{.State.Running}}' 2>/dev/null | grep -Fxq "true"; then
+        return 0
+    fi
+
+    echo "Restarting 3x-UI so the renewed certificate is loaded..."
+
+    if ! docker restart "$DOCKER_3XUI_CONTAINER" >/dev/null; then
+        echo "Warning: 3x-UI container could not be restarted."
+        echo "The renewed certificate was copied successfully."
+        return 1
+    fi
+
+    return 0
+}
+
+docker_3xui_certificate_install_hook() {
+    local domain="$1"
+    local hook_path="${DOCKER_3XUI_CERT_HOOK_DIR}/${DOCKER_3XUI_CERT_HOOK_PREFIX}${domain}.sh"
+
+    if ! mkdir -p "$DOCKER_3XUI_CERT_HOOK_DIR"; then
+        echo "Error: Failed to create Certbot deploy-hook directory."
+        return 1
+    fi
+
+    cat > "$hook_path" <<EOF
+#!/usr/bin/env bash
+set -u
+
+DOMAIN="\$RENEWED_DOMAINS"
+SELECTED_DOMAIN="$domain"
+
+case " \$DOMAIN " in
+    *" \$SELECTED_DOMAIN "*)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+CERT_DIR="/etc/letsencrypt/live/\$SELECTED_DOMAIN"
+TARGET_DIR="/opt/3x-ui/cert/\$SELECTED_DOMAIN"
+
+if [[ ! -f "\$CERT_DIR/fullchain.pem" || ! -f "\$CERT_DIR/privkey.pem" ]]; then
+    exit 1
+fi
+
+if [[ ! -d "/opt/3x-ui/cert" ]]; then
+    exit 0
+fi
+
+mkdir -p "\$TARGET_DIR" || exit 1
+chmod 700 "\$TARGET_DIR" || exit 1
+install -m 0644 "\$CERT_DIR/fullchain.pem" "\$TARGET_DIR/fullchain.pem" || exit 1
+install -m 0600 "\$CERT_DIR/privkey.pem" "\$TARGET_DIR/privkey.pem" || exit 1
+
+if command -v docker >/dev/null 2>&1 &&
+   docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "3xui"; then
+    docker restart 3xui >/dev/null 2>&1 || true
+fi
+
+exit 0
+EOF
+
+    chmod 700 "$hook_path"
+
+    if [[ ! -x "$hook_path" ]]; then
+        echo "Error: Deploy hook was not created correctly."
+        return 1
+    fi
+
+    echo "$hook_path"
+    return 0
+}
+
+docker_3xui_certificate_show_paths() {
+    local domain="$1"
+
+    echo
+    echo "Certificate paths for Sanaei 3x-UI:"
+    echo
+    echo "Panel Certificate:"
+    echo "/root/cert/$domain/fullchain.pem"
+    echo
+    echo "Panel Private Key:"
+    echo "/root/cert/$domain/privkey.pem"
+    echo
+    echo "Host paths:"
+    echo "/opt/3x-ui/cert/$domain/fullchain.pem"
+    echo "/opt/3x-ui/cert/$domain/privkey.pem"
+}
+
+docker_3xui_certificate_status() {
+    clear
+    echo "======================================"
+    echo "     3x-UI Docker Certificate"
+    echo "              Status"
+    echo "======================================"
+    echo
+
+    if ! docker_3xui_certificate_check_environment; then
+        pause_screen
+        return 1
+    fi
+
+    if [[ ! -d "$DOCKER_3XUI_CERT_ROOT" ]]; then
+        echo "3x-UI certificate directory not found:"
+        echo "$DOCKER_3XUI_CERT_ROOT"
+        pause_screen
+        return
+    fi
+
+    local found=0
+    local cert_dir
+
+    for cert_dir in "$DOCKER_3XUI_CERT_ROOT"/*; do
+        [[ -d "$cert_dir" ]] || continue
+        [[ -f "$cert_dir/fullchain.pem" && -f "$cert_dir/privkey.pem" ]] || continue
+
+        found=1
+
+        local domain expiry_raw expiry_date expiry_epoch now_epoch days_left status
+        domain="$(basename "$cert_dir")"
+        expiry_raw="$(openssl x509 -in "$cert_dir/fullchain.pem" -noout -enddate 2>/dev/null)"
+        expiry_raw="${expiry_raw#notAfter=}"
+
+        if [[ -z "$expiry_raw" ]]; then
+            status="Unknown"
+            expiry_date="Unknown"
+            days_left="Unknown"
+        else
+            expiry_date="$(date -d "$expiry_raw" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "Unknown")"
+            expiry_epoch="$(date -d "$expiry_raw" '+%s' 2>/dev/null || echo "")"
+            now_epoch="$(date '+%s')"
+
+            if [[ -n "$expiry_epoch" && "$expiry_epoch" =~ ^[0-9]+$ ]]; then
+                days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+
+                if (( days_left < 0 )); then
+                    status="Expired"
+                elif (( days_left <= 7 )); then
+                    status="Expiring Soon"
+                else
+                    status="Valid"
+                fi
+            else
+                status="Unknown"
+                days_left="Unknown"
+            fi
+        fi
+
+        echo "Domain    : $domain"
+        echo "Status    : $status"
+        echo "Expires   : $expiry_date"
+        echo "Days Left : $days_left"
+        echo "--------------------------------------"
+    done
+
+    [[ "$found" -eq 1 ]] || echo "No Docker 3x-UI certificates found."
+    pause_screen
+}
+
+docker_3xui_certificate_issue() {
+    clear
+    echo "======================================"
+    echo "     3x-UI Docker Certificate"
+    echo "        Issue / Install"
+    echo "======================================"
+    echo
+
+    if ! docker_3xui_certificate_check_environment; then
+        pause_screen
+        return 1
+    fi
+
+    if ! docker_3xui_certificate_check_port_80; then
+        pause_screen
+        return 1
+    fi
+
+    local domain email confirm
+
+    read -r -p "Enter your domain (or 0 to go back): " domain
+    if [[ "$domain" == "0" ]]; then
+        return
+    fi
+
+    [[ -n "$domain" ]] || {
+        echo
+        echo "Error: Domain cannot be empty."
+        pause_screen
+        return 1
+    }
+
+    if ! validate_domain "$domain"; then
+        echo
+        echo "Error: Invalid domain format."
+        pause_screen
+        return 1
+    fi
+
+    echo
+    echo "Domain:"
+    echo "$domain"
+    echo
+    echo "Certificate method:"
+    echo "Certbot + HTTP-01 Standalone"
+    echo
+    echo "Port 80 must be reachable from the Internet."
+    echo "Nginx is not required."
+    echo
+
+    if [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" &&
+          -f "/etc/letsencrypt/live/$domain/privkey.pem" ]]; then
+        echo "An existing Let's Encrypt certificate was found for this domain."
+        echo "U-OPTI will reuse it and copy it to the 3x-UI certificate directory."
+        echo
+    else
+        read -r -p "Email address for Let's Encrypt notices: " email
+
+        [[ -n "$email" ]] || {
+            echo
+            echo "Error: Email address cannot be empty."
+            pause_screen
+            return 1
+        }
+    fi
+
+    echo
+    echo "U-OPTI will:"
+    echo "  1. Obtain or reuse the Let's Encrypt certificate."
+    echo "  2. Copy it to $DOCKER_3XUI_CERT_ROOT/$domain/"
+    echo "  3. Create a Certbot deploy hook for automatic renewal sync."
+    echo "  4. Restart 3x-UI after future successful renewals."
+    echo
+
+    read -r -p "Continue? [y/N]: " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo
+        echo "Certificate operation cancelled."
+        pause_screen
+        return
+    }
+
+    if [[ ! -f "/etc/letsencrypt/live/$domain/fullchain.pem" ||
+          ! -f "/etc/letsencrypt/live/$domain/privkey.pem" ]]; then
+
+        echo
+        echo "Requesting certificate from Let's Encrypt..."
+        echo
+
+        if ! "$CERTBOT_BIN" certonly \
+            --standalone \
+            --preferred-challenges http \
+            --non-interactive \
+            --agree-tos \
+            --email "$email" \
+            --cert-name "$domain" \
+            -d "$domain"; then
+
+            echo
+            echo "ERROR: Failed to issue the certificate."
+            pause_screen
+            return 1
+        fi
+    fi
+
+    echo
+    echo "Copying certificate to 3x-UI..."
+
+    if ! docker_3xui_certificate_copy "$domain"; then
+        echo
+        echo "ERROR: Certificate was issued, but copying to 3x-UI failed."
+        echo "The Let's Encrypt certificate remains available at:"
+        echo "/etc/letsencrypt/live/$domain/"
+        pause_screen
+        return 1
+    fi
+
+    echo
+    echo "Installing automatic renewal hook..."
+
+    if ! docker_3xui_certificate_install_hook "$domain" >/dev/null; then
+        echo
+        echo "WARNING: Certificate was copied, but automatic renewal synchronization hook"
+        echo "could not be installed."
+        echo
+        docker_3xui_certificate_show_paths "$domain"
+        pause_screen
+        return 1
+    fi
+
+    docker_3xui_certificate_show_paths "$domain"
+
+    echo
+    echo "3x-UI Docker certificate installed successfully."
+    echo "Future successful renewals will sync the certificate automatically."
+
+    if ! docker_3xui_certificate_restart_container; then
+        echo
+        echo "Warning: Certificate files are ready, but 3x-UI was not restarted."
+        pause_screen
+        return 1
+    fi
+
+    echo
+    echo "3x-UI restarted successfully."
+    pause_screen
+}
+
+docker_3xui_certificate_remove() {
+    clear
+    echo "======================================"
+    echo "      Remove 3x-UI Docker Cert"
+    echo "======================================"
+    echo
+
+    if ! check_certbot; then
+        pause_screen
+        return 1
+    fi
+
+    local domain confirm
+    local target_dir
+    local hook_path
+
+    read -r -p "Enter domain to remove from 3x-UI (or 0 to go back): " domain
+
+    if [[ "$domain" == "0" ]]; then
+        return
+    fi
+
+    [[ -n "$domain" ]] || {
+        echo
+        echo "Error: Domain cannot be empty."
+        pause_screen
+        return 1
+    }
+
+    if ! validate_domain "$domain"; then
+        echo
+        echo "Error: Invalid domain format."
+        pause_screen
+        return 1
+    fi
+
+    target_dir="$DOCKER_3XUI_CERT_ROOT/$domain"
+    hook_path="${DOCKER_3XUI_CERT_HOOK_DIR}/${DOCKER_3XUI_CERT_HOOK_PREFIX}${domain}.sh"
+
+    if [[ ! -d "$target_dir" && ! -f "$hook_path" ]]; then
+        echo "No Docker 3x-UI certificate mapping found for:"
+        echo "$domain"
+        pause_screen
+        return
+    fi
+
+    echo
+    echo "WARNING: This removes the certificate copy from 3x-UI"
+    echo "and removes the automatic renewal synchronization hook."
+    echo
+    echo "The Let's Encrypt certificate itself will NOT be deleted."
+    echo
+
+    read -r -p "Continue? [y/N]: " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo
+        echo "Removal cancelled."
+        pause_screen
+        return
+    }
+
+    rm -rf "$target_dir"
+    rm -f "$hook_path"
+
+    echo
+    echo "3x-UI certificate mapping removed."
+    echo "Let's Encrypt certificate retained:"
+    echo "/etc/letsencrypt/live/$domain/"
+
     pause_screen
 }
 
@@ -328,16 +960,19 @@ show_certificate_menu() {
         echo "3) Issue Certificate"
         echo "4) Renew Certificates"
         echo "5) Remove Certificate"
+        echo "6) 3x-UI Docker Certificate"
         echo
         echo "0) Back"
         echo
-        read -r -p "Please enter your selection [0-5]: " choice
+        read -r -p "Please enter your selection [0-6]: " choice
+
         case "$choice" in
             1) install_certbot ;;
             2) certificate_status ;;
             3) issue_certificate ;;
             4) renew_certificates ;;
             5) remove_certificate ;;
+            6) docker_3xui_certificate_issue ;;
             0) return 0 ;;
             *) echo; echo "Invalid selection."; sleep 1 ;;
         esac

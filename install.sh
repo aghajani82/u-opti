@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="main"
+BRANCH="v0.13-dev"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -30,6 +30,12 @@ MODULES=(
     "xui-pro.sh"
     "certificate.sh"
     "backup.sh"
+    "docker.sh"
+    "docker-3xui.sh"
+    "docker-3xui-instance.sh"
+    "docker-3xui-compat.sh"
+    "docker-3xui-nginx.sh"
+    "fakesite.sh"
 )
 
 echo "======================================"
@@ -74,6 +80,11 @@ for MODULE in "${MODULES[@]}"; do
         xui-pro.sh) LABEL="X-UI PRO Management" ;;
         certificate.sh) LABEL="Certificate Management" ;;
         backup.sh) LABEL="Backup & Restore" ;;
+        docker.sh) LABEL="Docker Management" ;;
+        docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
+        docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
+        docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
+        docker-3xui-nginx.sh) LABEL="3x-UI Nginx / SSL Integration" ;;
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
@@ -155,6 +166,22 @@ echo "$MODULES_PATH/certificate.sh"
 echo
 echo "Backup & Restore Module:"
 echo "$MODULES_PATH/backup.sh"
+echo
+
+echo "Docker Module:"
+echo "$MODULES_PATH/docker.sh"
+echo
+
+echo "3x-UI Docker Module:"
+echo "$MODULES_PATH/docker-3xui.sh"
+echo
+
+echo "3x-UI Nginx / SSL Module:"
+echo "$MODULES_PATH/docker-3xui-nginx.sh"
+echo
+
+echo "Default Website / FakeSite Module:"
+echo "$MODULES_PATH/fakesite.sh"
 echo
 
 "$INSTALL_PATH"

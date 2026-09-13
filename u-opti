@@ -6,6 +6,7 @@ if [ "$EUID" -ne 0 ]; then
         echo "Error: Root privileges are required, but sudo is not installed."
         exit 1
     fi
+
     exec sudo -E "$0" "$@"
 fi
 
@@ -14,8 +15,9 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
-BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+BRANCH="v0.13-dev"
+BASE_URL="https://api.github.com/repos/aghajani82/u-opti/contents"
+RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
 if [ -f "$VERSION_FILE" ]; then
     VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
@@ -38,6 +40,9 @@ source "$MODULES_PATH/fail2ban.sh"
 source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 source "$MODULES_PATH/backup.sh"
+source "$MODULES_PATH/docker.sh"
+source "$MODULES_PATH/docker-3xui-instance.sh"
+source "$MODULES_PATH/docker-3xui-nginx.sh"
 
 while true; do
     clear
@@ -54,13 +59,14 @@ while true; do
     echo "4) X-UI PRO Management"
     echo "5) Certificate Management"
     echo "6) Backup & Restore"
-    echo "7) Update U-OPTI"
-    echo "8) Uninstall U-OPTI"
+    echo "7) Docker Management"
+    echo "8) Update U-OPTI"
+    echo "9) Uninstall U-OPTI"
     echo
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-8]: " choice
+    read -rp "Please enter your selection [0-9]: " choice
 
     case "$choice" in
 
@@ -193,6 +199,10 @@ while true; do
             ;;
 
         7)
+            docker_management_menu
+            ;;
+
+        8)
             clear
 
             echo "======================================"
@@ -209,6 +219,13 @@ while true; do
 
             TEMP_DIR=$(mktemp -d)
 
+            download_repo_file() {
+                local REPO_PATH="$1"
+                local DESTINATION="$2"
+
+                curl -fsSL                     -H "Accept: application/vnd.github.raw+json"                     "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}"                     -o "$DESTINATION"
+            }
+
             cleanup_update_temp() {
                 rm -rf "$TEMP_DIR"
             }
@@ -220,6 +237,24 @@ while true; do
                 echo
                 echo "Update failed. Restoring the previous installation..."
 
+                if [ -f "$BACKUP_DIR/u-opti" ]; then
+                    if ! cp -f "$BACKUP_DIR/u-opti" "$INSTALL_PATH"; then
+                        RESTORE_OK=false
+                    fi
+                fi
+
+                if [ -f "$BACKUP_DIR/common.sh" ]; then
+                    if ! cp -f "$BACKUP_DIR/common.sh" "$LIB_PATH/common.sh"; then
+                        RESTORE_OK=false
+                    fi
+                fi
+
+                if [ -f "$BACKUP_DIR/VERSION" ]; then
+                    if ! cp -f "$BACKUP_DIR/VERSION" "$LIB_PATH/VERSION"; then
+                        RESTORE_OK=false
+                    fi
+                fi
+
                 for FILE in "${UPDATE_FILE_NAMES[@]}"; do
                     if [ -f "$BACKUP_DIR/$FILE" ]; then
                         if ! cp -f "$BACKUP_DIR/$FILE" "$UPDATE_DEST_DIR/$FILE"; then
@@ -227,12 +262,6 @@ while true; do
                         fi
                     fi
                 done
-
-                if [ -f "$BACKUP_DIR/u-opti" ]; then
-                    if ! cp -f "$BACKUP_DIR/u-opti" "$INSTALL_PATH"; then
-                        RESTORE_OK=false
-                    fi
-                fi
 
                 if [ "$RESTORE_OK" = "true" ]; then
                     echo "Previous installation restored successfully."
@@ -247,18 +276,24 @@ while true; do
             }
 
             UPDATE_FILE_NAMES=(
-                "common.sh"
                 "system.sh"
                 "time.sh"
                 "swap.sh"
                 "bbr.sh"
                 "storage.sh"
                 "ssh.sh"
+                "ssh-access.sh"
                 "firewall.sh"
                 "fail2ban.sh"
                 "xui-pro.sh"
                 "certificate.sh"
                 "backup.sh"
+                "docker.sh"
+                "docker-3xui-instance.sh"
+                "docker-3xui.sh"
+                "docker-3xui-compat.sh"
+                "docker-3xui-nginx.sh"
+                "fakesite.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
@@ -268,7 +303,7 @@ while true; do
 
             echo "Downloading VERSION..."
 
-            if ! curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION"; then
+            if ! download_repo_file "VERSION" "$TEMP_DIR/VERSION"; then
                 echo
                 echo "Failed to download VERSION."
                 cleanup_update_temp
@@ -303,16 +338,10 @@ while true; do
             echo "Remote Version  : $REMOTE_VERSION"
             echo
 
-            if [ "$REMOTE_VERSION" = "$VERSION" ]; then
-                echo "U-OPTI is already up to date."
-                echo "No files were changed."
-                cleanup_update_temp
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
+            SAME_VERSION_UPDATE=false
 
-            if [ "$(printf '%s\n' "$REMOTE_VERSION" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]; then
+            if [ "$(printf '%s\n' "$REMOTE_VERSION" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ] &&
+               [ "$REMOTE_VERSION" != "$VERSION" ]; then
                 echo "Remote version is not newer than the installed version."
                 echo "No files were changed."
                 cleanup_update_temp
@@ -321,9 +350,16 @@ while true; do
                 continue
             fi
 
-            echo "A newer version is available."
-            echo "Preparing to update from $VERSION to $REMOTE_VERSION."
-            echo
+            if [ "$REMOTE_VERSION" = "$VERSION" ]; then
+                SAME_VERSION_UPDATE=true
+                echo "Same version detected."
+                echo "Checking whether remote files have changed..."
+                echo
+            else
+                echo "A newer version is available."
+                echo "Preparing to update from $VERSION to $REMOTE_VERSION."
+                echo
+            fi
 
             declare -A UPDATE_URLS=(
                 ["u-opti"]="$BASE_URL/u-opti"
@@ -334,11 +370,18 @@ while true; do
                 ["bbr.sh"]="$BASE_URL/modules/bbr.sh"
                 ["storage.sh"]="$BASE_URL/modules/storage.sh"
                 ["ssh.sh"]="$BASE_URL/modules/ssh.sh"
+                ["ssh-access.sh"]="$BASE_URL/modules/ssh-access.sh"
                 ["firewall.sh"]="$BASE_URL/modules/firewall.sh"
                 ["fail2ban.sh"]="$BASE_URL/modules/fail2ban.sh"
                 ["xui-pro.sh"]="$BASE_URL/modules/xui-pro.sh"
                 ["certificate.sh"]="$BASE_URL/modules/certificate.sh"
                 ["backup.sh"]="$BASE_URL/modules/backup.sh"
+                ["docker.sh"]="$BASE_URL/modules/docker.sh"
+                ["docker-3xui-instance.sh"]="$BASE_URL/modules/docker-3xui-instance.sh"
+                ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
+                ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
+                ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
+                ["fakesite.sh"]="$BASE_URL/modules/fakesite.sh"
             )
 
             declare -A UPDATE_TARGETS=(
@@ -350,17 +393,53 @@ while true; do
                 ["bbr.sh"]="$TEMP_DIR/bbr.sh"
                 ["storage.sh"]="$TEMP_DIR/storage.sh"
                 ["ssh.sh"]="$TEMP_DIR/ssh.sh"
+                ["ssh-access.sh"]="$TEMP_DIR/ssh-access.sh"
                 ["firewall.sh"]="$TEMP_DIR/firewall.sh"
                 ["fail2ban.sh"]="$TEMP_DIR/fail2ban.sh"
                 ["xui-pro.sh"]="$TEMP_DIR/xui-pro.sh"
                 ["certificate.sh"]="$TEMP_DIR/certificate.sh"
                 ["backup.sh"]="$TEMP_DIR/backup.sh"
+                ["docker.sh"]="$TEMP_DIR/docker.sh"
+                ["docker-3xui-instance.sh"]="$TEMP_DIR/docker-3xui-instance.sh"
+                ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
+                ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
+                ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
+                ["fakesite.sh"]="$TEMP_DIR/fakesite.sh"
             )
 
-            for FILE in u-opti common.sh "${UPDATE_FILE_NAMES[@]}"; do
+            echo "Downloading u-opti..."
+            if ! download_repo_file "u-opti" "${UPDATE_TARGETS[u-opti]}"; then
+                echo
+                echo "Failed to download u-opti."
+                cleanup_update_temp
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Downloading common.sh..."
+            if ! download_repo_file "lib/common.sh" "${UPDATE_TARGETS[common.sh]}"; then
+                echo
+                echo "Failed to download common.sh."
+                cleanup_update_temp
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            for FILE in "${UPDATE_FILE_NAMES[@]}"; do
                 echo "Downloading $FILE..."
 
-                if ! curl -fsSL "${UPDATE_URLS[$FILE]}" -o "${UPDATE_TARGETS[$FILE]}"; then
+                case "$FILE" in
+                    "docker-3xui-compat.sh")
+                        REPO_PATH="modules/docker-3xui-compat.sh"
+                        ;;
+                    *)
+                        REPO_PATH="modules/$FILE"
+                        ;;
+                esac
+
+                if ! download_repo_file "$REPO_PATH" "${UPDATE_TARGETS[$FILE]}"; then
                     echo
                     echo "Failed to download $FILE."
                     cleanup_update_temp
@@ -377,18 +456,11 @@ while true; do
                 "$TEMP_DIR/VERSION"
                 "$TEMP_DIR/u-opti"
                 "$TEMP_DIR/common.sh"
-                "$TEMP_DIR/system.sh"
-                "$TEMP_DIR/time.sh"
-                "$TEMP_DIR/swap.sh"
-                "$TEMP_DIR/bbr.sh"
-                "$TEMP_DIR/storage.sh"
-                "$TEMP_DIR/ssh.sh"
-                "$TEMP_DIR/firewall.sh"
-                "$TEMP_DIR/fail2ban.sh"
-                "$TEMP_DIR/xui-pro.sh"
-                "$TEMP_DIR/certificate.sh"
-                "$TEMP_DIR/backup.sh"
             )
+
+            for FILE in "${UPDATE_FILE_NAMES[@]}"; do
+                REQUIRED_FILES+=("$TEMP_DIR/$FILE")
+            done
 
             UPDATE_FILES_OK=true
 
@@ -437,24 +509,70 @@ while true; do
 
             echo "Bash syntax check passed."
 
+            if [ "$SAME_VERSION_UPDATE" = "true" ]; then
+                echo
+                echo "Comparing remote files with the installed version..."
+
+                SAME_VERSION_CHANGED=false
+
+                if ! cmp -s "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                if ! cmp -s "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                if ! cmp -s "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
+                    if [ ! -f "$MODULES_PATH/$FILE" ] ||
+                       ! cmp -s "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
+                        SAME_VERSION_CHANGED=true
+                        break
+                    fi
+                done
+
+                if [ "$SAME_VERSION_CHANGED" = "false" ]; then
+                    echo "U-OPTI is already up to date."
+                    echo "No files were changed."
+                    cleanup_update_temp
+                    echo
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+
+                echo "Changes detected in the same version."
+                echo "Proceeding with the update."
+                echo
+            fi
+
             echo
             echo "Creating backup of current installation..."
 
             BACKUP_DIR=$(mktemp -d)
 
             BACKUP_FILES=(
-                "common.sh"
                 "system.sh"
                 "time.sh"
                 "swap.sh"
                 "bbr.sh"
                 "storage.sh"
                 "ssh.sh"
+                "ssh-access.sh"
                 "firewall.sh"
                 "fail2ban.sh"
                 "xui-pro.sh"
                 "certificate.sh"
                 "backup.sh"
+                "docker.sh"
+                "docker-3xui-instance.sh"
+                "docker-3xui.sh"
+                "docker-3xui-compat.sh"
+                "docker-3xui-nginx.sh"
+                "fakesite.sh"
             )
 
             BACKUP_OK=true
@@ -492,7 +610,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 15 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 21 ]; then
                 BACKUP_OK=false
             fi
 
@@ -593,9 +711,6 @@ while true; do
                 continue
             fi
 
-            rm -rf "$BACKUP_DIR"
-            cleanup_update_temp
-
             VERSION="$REMOTE_VERSION"
 
             if [ "$(tr -d '[:space:]' < "$LIB_PATH/VERSION")" != "$REMOTE_VERSION" ]; then
@@ -614,6 +729,9 @@ while true; do
                 continue
             fi
 
+            rm -rf "$BACKUP_DIR"
+            cleanup_update_temp
+
             echo
             echo "======================================"
             echo "          Update completed"
@@ -628,17 +746,19 @@ while true; do
             exec "$INSTALL_PATH"
             ;;
 
-        8)
+        9)
             clear
 
             echo "======================================"
             echo "          Uninstall U-OPTI"
             echo "======================================"
             echo
+
             echo "U-OPTI will remove only its own installation files:"
             echo "  - $INSTALL_PATH"
             echo "  - $LIB_PATH"
             echo
+
             echo "The following are NOT removed by U-OPTI:"
             echo "  - Nginx"
             echo "  - Certbot / Let's Encrypt certificates"
@@ -646,6 +766,7 @@ while true; do
             echo "  - Docker"
             echo "  - Your server data and other services"
             echo
+
             echo "U-OPTI backup data under /etc/u-opti is retained."
             echo
 
@@ -662,22 +783,29 @@ while true; do
             echo "Creating a final U-OPTI safety backup..."
 
             FINAL_BACKUP_DIR=""
+
             if [ -d "/etc/u-opti" ]; then
                 FINAL_BACKUP_DIR="/etc/u-opti/backups/$(date '+%Y%m%d-%H%M%S-%N')-pre-uninstall"
                 mkdir -p "$FINAL_BACKUP_DIR" || FINAL_BACKUP_DIR=""
 
                 if [ -n "$FINAL_BACKUP_DIR" ]; then
                     if ! tar -C / --exclude="etc/u-opti/backups" -czf "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" \
-                        "usr/local/bin/u-opti" "usr/local/lib/u-opti" "etc/u-opti" 2>/dev/null; then
+                        "usr/local/bin/u-opti" \
+                        "usr/local/lib/u-opti" \
+                        "etc/u-opti" 2>/dev/null; then
+
                         rm -rf "$FINAL_BACKUP_DIR"
                         FINAL_BACKUP_DIR=""
                     fi
                 fi
             fi
 
-            if [ -n "$FINAL_BACKUP_DIR" ] && [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
+            if [ -n "$FINAL_BACKUP_DIR" ] && \
+               [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
+
                 chmod 700 "$FINAL_BACKUP_DIR"
                 chmod 600 "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+
                 echo "Safety backup created:"
                 echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
             else
@@ -706,19 +834,23 @@ while true; do
             echo "       U-OPTI Uninstalled Safely"
             echo "======================================"
             echo
+
             echo "Removed:"
             echo "  - $INSTALL_PATH"
             echo "  - $LIB_PATH"
             echo
+
             echo "Retained:"
             echo "  - /etc/u-opti and its backups"
             echo "  - Nginx / Certbot"
             echo "  - 3x-UI / Xray"
             echo "  - Docker and other services"
             echo
+
             echo "Safety backup retained at:"
             echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
             echo
+
             exit 0
             ;;
 
