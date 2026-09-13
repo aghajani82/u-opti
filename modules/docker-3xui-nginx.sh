@@ -122,8 +122,13 @@ docker_3xui_nginx_load_compat() {
         return 1
     fi
 
-    if [ "$web_base_path" != "/" ] &&
-       [[ ! "$web_base_path" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]]; then
+    if [ "$web_base_path" = "/" ]; then
+        echo "Error: Web Base Path '/' is incompatible with the central FakeSite."
+        echo "A dedicated Web Base Path is required."
+        return 1
+    fi
+
+    if [[ ! "$web_base_path" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]]; then
         echo "Error: Invalid Web Base Path in compatibility state: $web_base_path"
         return 1
     fi
@@ -999,21 +1004,7 @@ docker_3xui_nginx_custom_domain_test_acme() {
     printf '%s\n' "u-opti-custom-test" > "$test_file" || return 1
 
     for attempt in {1..20}; do
-        response="$(
-            curl -fsS \
-                --max-time 10 \
-                -H "Host: $DOCKER_3XUI_CUSTOM_DOMAIN" \
-                "http://127.0.0.1/.well-known/acme/challenge/u-opti-custom-test" \
-                2>/dev/null
-        )"
-        curl_status=$?
-
-        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-custom-test" ]]; then
-            rm -f "$test_file"
-            return 0
-        fi
-
-        # Correct path for the ACME challenge.
+        # ACME challenge path.
         response="$(
             curl -fsS \
                 --max-time 10 \
