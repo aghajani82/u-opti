@@ -2831,6 +2831,87 @@ docker_3xui_sanaei_management() {
     docker exec -it "$DOCKER_3XUI_CONTAINER" x-ui
 }
 
+
+docker_3xui_nginx_ssl_management() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "      Nginx / SSL Configuration"
+        echo "======================================"
+        echo
+        echo "1) Docker 3x-UI Nginx / SSL"
+        echo "2) Custom Domain / Nginx / SSL"
+        echo
+        echo "0) Back"
+        echo
+
+        read -r -p "Please enter your selection [0-2]: " NGINX_MENU_CHOICE
+
+        case "$NGINX_MENU_CHOICE" in
+            1)
+                if ! docker_3xui_load_nginx; then
+                    echo
+                    echo "ERROR: Sanaei Nginx / SSL module could not be loaded."
+                    echo
+                    echo "Press Enter to return to the menu..."
+                    read -r
+                    continue
+                fi
+
+                if ! docker_3xui_select_instance; then
+                    continue
+                fi
+
+                DOCKER_3XUI_WEB_BASE_PATH="/"
+
+                if [ -f "/opt/3x-ui/instances/${DOCKER_3XUI_INSTANCE_ID}/compat.env" ]; then
+                    DOCKER_3XUI_WEB_BASE_PATH="$(
+                        sed -n 's/^WEB_BASE_PATH=//p'                         "/opt/3x-ui/instances/${DOCKER_3XUI_INSTANCE_ID}/compat.env"                         | head -n1
+                    )"
+
+                    [ -n "$DOCKER_3XUI_WEB_BASE_PATH" ] || DOCKER_3XUI_WEB_BASE_PATH="/"
+                fi
+
+                echo
+                echo "Selected Instance:"
+                echo "  Instance       : ${DOCKER_3XUI_INSTANCE_ID}"
+                echo "  Domain         : ${DOCKER_3XUI_DOMAIN:-Unknown}"
+                echo "  Container      : ${DOCKER_3XUI_CONTAINER}"
+                echo "  Panel Port     : ${DOCKER_3XUI_PANEL_PORT:-Unknown}"
+                echo "  Subscription   : ${DOCKER_3XUI_SUBSCRIPTION_PORT:-Unknown}"
+                echo "  Web Base Path  : ${DOCKER_3XUI_WEB_BASE_PATH:-/}"
+                echo
+
+                read -r -p "Continue with Nginx / SSL setup? [y/N]: " CONFIRM
+
+                case "$CONFIRM" in
+                    y|Y|yes|YES)
+                        docker_3xui_nginx_setup
+                        ;;
+                    *)
+                        echo
+                        echo "Nginx / SSL setup cancelled."
+                        sleep 1
+                        ;;
+                esac
+                ;;
+            2)
+                docker_3xui_nginx_custom_domain_menu
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -2867,14 +2948,7 @@ show_docker_3xui_menu() {
             8) docker_3xui_uninstall ;;
             9) docker_3xui_status ;;
             10) docker_3xui_sanaei_management ;;
-            11)
-                if docker_3xui_load_nginx; then
-                    docker_3xui_nginx_setup
-                else
-                    echo
-                    read -rp "Press Enter to return..."
-                fi
-                ;;
+            11) docker_3xui_nginx_ssl_management ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
