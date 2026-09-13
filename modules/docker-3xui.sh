@@ -221,12 +221,11 @@ docker_3xui_select_web_base_path() {
         echo "======================================"
         echo
         echo "1) Random (Recommended)"
-        echo "2) Root (/)"
-        echo "3) Custom"
+        echo "2) Custom"
         echo "0) Cancel installation"
         echo
 
-        echo "Select Web Base Path option [0-3]:"
+        echo "Select Web Base Path option [0-2]:"
         read -r CHOICE
 
         case "$CHOICE" in
@@ -240,13 +239,6 @@ docker_3xui_select_web_base_path() {
                 return 0
                 ;;
             2)
-                DOCKER_3XUI_WEB_BASE_PATH="/"
-                echo
-                echo "Selected Web Base Path:"
-                echo "/"
-                return 0
-                ;;
-            3)
                 echo
                 echo "Enter custom Web Base Path (example: /panel/):"
                 read -r CUSTOM_PATH
