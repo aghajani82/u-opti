@@ -483,31 +483,21 @@ server {
 EOF_CONF
 
     if [ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]; then
-        cat >> "$temp_path" <<EOF_PANEL_ROOT
+        echo "Error: Web Base Path '/' is incompatible with the central FakeSite."
+        echo "A dedicated Web Base Path is required."
+        rm -f "$temp_path"
+        return 1
+    fi
 
-    # Sanaei Panel
+    cat >> "$temp_path" <<EOF_PANEL_PATH
+
+    # U-OPTI Central FakeSite
+    root /var/www/u-opti-default;
+    index index.html;
+
     location / {
-        proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_PANEL_PORT;
-
-        proxy_http_version 1.1;
-
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        proxy_read_timeout 1d;
-        proxy_send_timeout 1d;
-
-        proxy_buffering off;
-        proxy_redirect off;
+        try_files \$uri \$uri/ =404;
     }
-EOF_PANEL_ROOT
-    else
-        cat >> "$temp_path" <<EOF_PANEL_PATH
 
     # Sanaei Panel
     location = ${DOCKER_3XUI_NGINX_WEB_BASE_PATH%/} {
@@ -533,13 +523,7 @@ EOF_PANEL_ROOT
         proxy_buffering off;
         proxy_redirect off;
     }
-
-    # Do not expose the Sanaei panel at the domain root when a base path is set.
-    location / {
-        return 404;
-    }
 EOF_PANEL_PATH
-    fi
 
     cat >> "$temp_path" <<EOF_CONF
 

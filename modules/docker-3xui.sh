@@ -13,6 +13,7 @@ DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
 DOCKER_3XUI_COMPAT_HELPER=""
 DOCKER_3XUI_NGINX_MODULE=""
 DOCKER_3XUI_INSTANCE_MODULE=""
+DOCKER_3XUI_FAKESITE_MODULE=""
 
 docker_3xui_load_instance() {
     local SCRIPT_DIR
@@ -111,6 +112,25 @@ docker_3xui_load_nginx() {
     # shellcheck disable=SC1090
     source "$DOCKER_3XUI_NGINX_MODULE"
 }
+
+docker_3xui_load_fakesite() {
+    local SCRIPT_DIR
+
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+
+    DOCKER_3XUI_FAKESITE_MODULE="$SCRIPT_DIR/fakesite.sh"
+
+    if [ ! -f "$DOCKER_3XUI_FAKESITE_MODULE" ]; then
+        echo
+        echo "ERROR: FakeSite module was not found:"
+        echo "$DOCKER_3XUI_FAKESITE_MODULE"
+        return 1
+    fi
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_3XUI_FAKESITE_MODULE"
+}
+
 
 docker_3xui_load_compat() {
     local SCRIPT_DIR
@@ -2832,6 +2852,19 @@ docker_3xui_sanaei_management() {
 }
 
 
+docker_3xui_fakesite_management() {
+    if ! docker_3xui_load_fakesite; then
+        echo
+        echo "ERROR: FakeSite module could not be loaded."
+        echo
+        read -r -p "Press Enter to return..."
+        return
+    fi
+
+    fakesite_menu
+}
+
+
 docker_3xui_nginx_ssl_management() {
     while true; do
         clear
@@ -2931,6 +2964,7 @@ show_docker_3xui_menu() {
         echo "9) Show Status"
         echo "10) Sanaei 3x-UI Management"
         echo "11) Nginx / SSL Configuration"
+        echo "12) Default Website / FakeSite"
         echo
         echo "0) Back"
         echo
@@ -2949,6 +2983,7 @@ show_docker_3xui_menu() {
             9) docker_3xui_status ;;
             10) docker_3xui_sanaei_management ;;
             11) docker_3xui_nginx_ssl_management ;;
+            12) docker_3xui_fakesite_management ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac

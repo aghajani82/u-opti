@@ -35,6 +35,7 @@ MODULES=(
     "docker-3xui-instance.sh"
     "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
+    "fakesite.sh"
 )
 
 echo "======================================"
@@ -177,6 +178,10 @@ echo
 
 echo "3x-UI Nginx / SSL Module:"
 echo "$MODULES_PATH/docker-3xui-nginx.sh"
+echo
+
+echo "Default Website / FakeSite Module:"
+echo "$MODULES_PATH/fakesite.sh"
 echo
 
 "$INSTALL_PATH"

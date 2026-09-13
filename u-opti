@@ -293,6 +293,7 @@ while true; do
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "fakesite.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
@@ -337,16 +338,10 @@ while true; do
             echo "Remote Version  : $REMOTE_VERSION"
             echo
 
-            if [ "$REMOTE_VERSION" = "$VERSION" ]; then
-                echo "U-OPTI is already up to date."
-                echo "No files were changed."
-                cleanup_update_temp
-                echo
-                read -rp "Press Enter to return..."
-                continue
-            fi
+            SAME_VERSION_UPDATE=false
 
-            if [ "$(printf '%s\n' "$REMOTE_VERSION" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]; then
+            if [ "$(printf '%s\n' "$REMOTE_VERSION" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ] &&
+               [ "$REMOTE_VERSION" != "$VERSION" ]; then
                 echo "Remote version is not newer than the installed version."
                 echo "No files were changed."
                 cleanup_update_temp
@@ -355,9 +350,16 @@ while true; do
                 continue
             fi
 
-            echo "A newer version is available."
-            echo "Preparing to update from $VERSION to $REMOTE_VERSION."
-            echo
+            if [ "$REMOTE_VERSION" = "$VERSION" ]; then
+                SAME_VERSION_UPDATE=true
+                echo "Same version detected."
+                echo "Checking whether remote files have changed..."
+                echo
+            else
+                echo "A newer version is available."
+                echo "Preparing to update from $VERSION to $REMOTE_VERSION."
+                echo
+            fi
 
             declare -A UPDATE_URLS=(
                 ["u-opti"]="$BASE_URL/u-opti"
@@ -379,6 +381,7 @@ while true; do
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
+                ["fakesite.sh"]="$BASE_URL/modules/fakesite.sh"
             )
 
             declare -A UPDATE_TARGETS=(
@@ -401,6 +404,7 @@ while true; do
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
+                ["fakesite.sh"]="$TEMP_DIR/fakesite.sh"
             )
 
             echo "Downloading u-opti..."
@@ -505,6 +509,46 @@ while true; do
 
             echo "Bash syntax check passed."
 
+            if [ "$SAME_VERSION_UPDATE" = "true" ]; then
+                echo
+                echo "Comparing remote files with the installed version..."
+
+                SAME_VERSION_CHANGED=false
+
+                if ! cmp -s "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                if ! cmp -s "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                if ! cmp -s "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
+                    SAME_VERSION_CHANGED=true
+                fi
+
+                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
+                    if [ ! -f "$MODULES_PATH/$FILE" ] ||
+                       ! cmp -s "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
+                        SAME_VERSION_CHANGED=true
+                        break
+                    fi
+                done
+
+                if [ "$SAME_VERSION_CHANGED" = "false" ]; then
+                    echo "U-OPTI is already up to date."
+                    echo "No files were changed."
+                    cleanup_update_temp
+                    echo
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+
+                echo "Changes detected in the same version."
+                echo "Proceeding with the update."
+                echo
+            fi
+
             echo
             echo "Creating backup of current installation..."
 
@@ -528,6 +572,7 @@ while true; do
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "fakesite.sh"
             )
 
             BACKUP_OK=true
@@ -565,7 +610,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 19 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 21 ]; then
                 BACKUP_OK=false
             fi
 
