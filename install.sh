@@ -49,6 +49,31 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
+echo "Checking required system packages..."
+
+REQUIRED_PACKAGES=(
+    "sqlite3"
+    "jq"
+)
+
+MISSING_PACKAGES=()
+
+for PACKAGE in "${REQUIRED_PACKAGES[@]}"; do
+    if ! dpkg -s "$PACKAGE" >/dev/null 2>&1; then
+        MISSING_PACKAGES+=("$PACKAGE")
+    fi
+done
+
+if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
+    echo "Missing required packages: ${MISSING_PACKAGES[*]}"
+    echo "Installing required system packages..."
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${MISSING_PACKAGES[@]}"
+fi
+
+echo "Required system packages are ready."
+echo
+
 TEMP_DIR=$(mktemp -d)
 cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
