@@ -15,8 +15,8 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
-BRANCH="v0.13-dev"
-BASE_URL="https://api.github.com/repos/aghajani82/u-opti/contents"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
 if [ -f "$VERSION_FILE" ]; then
