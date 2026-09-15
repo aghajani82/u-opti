@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - SSH Management Module
-# v0.12.0
+# v0.13.0
 
 SSH_CONFIG="/etc/ssh/sshd_config"
 SSH_SERVICE_UNIT="ssh.service"
