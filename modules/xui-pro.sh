@@ -1,7 +1,9 @@
 #!/bin/bash
 
-BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+# U-OPTI - X-UI PRO Management
+# v0.13.0
+
+XUI_PRO_URL="https://raw.githubusercontent.com/aghajani82/x-ui-pro/master/x-ui-pro.sh"
 
 xui_pro_install() {
     clear
