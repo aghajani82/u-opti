@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Backup & Restore Module
-# v0.12.0
+# v0.13.0
 
 BACKUP_ROOT="/etc/u-opti/backups"
 
