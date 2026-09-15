@@ -1,49 +1,9 @@
 #!/bin/bash
 
 # U-OPTI - Common Functions
-# v0.13.0
+# v0.12.0
 
 UOPTI_BACKUP_ROOT="/etc/u-opti/backups"
-
-# ---------------------------------------------------------------------------
-# Global TTY safety net
-# ---------------------------------------------------------------------------
-
-uopti_tty_reset() {
-    stty sane 2>/dev/null || true
-
-    if command -v tput >/dev/null 2>&1; then
-        tput sgr0  2>/dev/null || true
-        tput cnorm 2>/dev/null || true
-        tput rmcup 2>/dev/null || true
-        tput rmkx  2>/dev/null || true
-    fi
-
-    printf '\033[0m'                            2>/dev/null || true
-    printf '\033[?25h'                          2>/dev/null || true
-    printf '\033[?1049l'                        2>/dev/null || true
-    printf '\033[?47l'                          2>/dev/null || true
-    printf '\033[?1000l\033[?1002l\033[?1003l'  2>/dev/null || true
-    printf '\033[?1006l\033[?1015l'             2>/dev/null || true
-    printf '\033[?2004l'                        2>/dev/null || true
-    printf '\033[?1l\033>'                      2>/dev/null || true
-    printf '\033[r'                             2>/dev/null || true
-}
-
-clear() {
-    uopti_tty_reset
-    command clear
-}
-
-uopti_tty_hard_reset() {
-    uopti_tty_reset
-
-    case "${TERM:-}" in
-        xterm*|screen*|tmux*|rxvt*|vt100*|vt220*|linux|alacritty*|kitty*)
-            printf '\033c' 2>/dev/null || true
-            ;;
-    esac
-}
 
 pause_return() {
     echo
