@@ -804,29 +804,51 @@ while true; do
                 continue
             fi
 
-            echo
+                        echo
             echo "Creating a final U-OPTI safety backup..."
 
             FINAL_BACKUP_DIR=""
+            BACKUP_OK=false
+            BACKUP_SKIPPED=false
 
             if [ -d "/etc/u-opti" ]; then
                 FINAL_BACKUP_DIR="/etc/u-opti/backups/$(date '+%Y%m%d-%H%M%S-%N')-pre-uninstall"
-                mkdir -p "$FINAL_BACKUP_DIR" || FINAL_BACKUP_DIR=""
 
-                if [ -n "$FINAL_BACKUP_DIR" ]; then
-                    if ! tar -C / --exclude="etc/u-opti/backups" -czf "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" \
-                        "usr/local/bin/u-opti" \
-                        "usr/local/lib/u-opti" \
-                        "etc/u-opti" 2>/dev/null; then
+                if mkdir -p "$FINAL_BACKUP_DIR"; then
+                    # Only include paths that actually exist.
+                    BACKUP_SOURCES=()
+                    [ -e "/usr/local/bin/u-opti" ] && BACKUP_SOURCES+=("usr/local/bin/u-opti")
+                    [ -e "/usr/local/lib/u-opti" ] && BACKUP_SOURCES+=("usr/local/lib/u-opti")
+                    [ -e "/etc/u-opti" ]           && BACKUP_SOURCES+=("etc/u-opti")
 
-                        rm -rf "$FINAL_BACKUP_DIR"
-                        FINAL_BACKUP_DIR=""
+                    if [ "${#BACKUP_SOURCES[@]}" -gt 0 ]; then
+                        if tar -C / \
+                            --exclude="etc/u-opti/backups" \
+                            -czf "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" \
+                            "${BACKUP_SOURCES[@]}"; then
+                            BACKUP_OK=true
+                        fi
                     fi
                 fi
+
+                if [ "$BACKUP_OK" != "true" ]; then
+                    # Real failure when /etc/u-opti exists.
+                    [ -n "$FINAL_BACKUP_DIR" ] && rm -rf "$FINAL_BACKUP_DIR"
+                    FINAL_BACKUP_DIR=""
+                fi
+            else
+                # /etc/u-opti does not exist.
+                # There is nothing to preserve under /etc/u-opti, so a
+                # safety backup is not required. The uninstall can proceed.
+                BACKUP_SKIPPED=true
             fi
 
-            if [ -n "$FINAL_BACKUP_DIR" ] && \
-               [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
+            if [ "$BACKUP_SKIPPED" = "true" ]; then
+                echo "No U-OPTI configuration directory (/etc/u-opti) was found."
+                echo "No safety backup is required. Continuing with uninstall..."
+            elif [ "$BACKUP_OK" = "true" ] && \
+                 [ -n "$FINAL_BACKUP_DIR" ] && \
+                 [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
 
                 chmod 700 "$FINAL_BACKUP_DIR"
                 chmod 600 "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
