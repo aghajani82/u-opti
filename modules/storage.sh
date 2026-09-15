@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Storage Management Module
-# v0.12.0
+# v0.13.0
 
 show_storage_menu() {
     while true; do
