@@ -6,7 +6,7 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 
 ## Current Version
 
-**v0.12.0**
+**v0.13.0**
 
 ## Main Menu
 
@@ -195,6 +195,43 @@ After installation, run:
 ```bash
 u-opti
 ```
+
+## Troubleshooting
+
+### Reloading U-OPTI after a heavy operation
+
+Some operations (3x-UI panel install, certificate issuance, Docker
+operations) can leave the terminal in a state that makes subsequent
+menus render incorrectly. U-OPTI handles this automatically by
+re-launching itself inside a fresh pseudo-TTY after such operations.
+
+### Direct menu access
+
+For advanced users, U-OPTI can jump straight into a specific submenu
+without showing the main menu first:
+
+    u-opti --menu docker
+
+This opens the Docker Management menu directly. It is used internally
+by the 3x-UI installer to return the user to the Docker Management
+menu after a fresh install, in a clean terminal.
+
+Currently supported targets:
+
+  - `docker` — Docker Management
+
+### Uninstall notes
+
+The uninstall routine (`u-opti` → `9) Uninstall U-OPTI`) removes only
+U-OPTI itself. It does **not** touch Docker, Nginx, Certbot, 3x-UI,
+Xray, or any other service or data on the server.
+
+If `/etc/u-opti` does not exist (for example, on a fresh install that
+has never used the backup feature), no safety backup is created and
+the uninstall proceeds normally.
+
+
+
 
 ## Safety
 
