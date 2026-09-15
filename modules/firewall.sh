@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Firewall Management Module
-# v0.12.0
+# v0.13.0
 
 UOPTI_FIREWALL_DIR="/etc/u-opti/firewall"
 UOPTI_FIREWALL_BACKUP_DIR="$UOPTI_FIREWALL_DIR/backups"
