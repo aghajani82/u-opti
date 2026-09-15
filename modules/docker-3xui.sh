@@ -875,8 +875,17 @@ EOF
     echo "$DOCKER_3XUI_COMPAT_ENV"
     echo
     echo "Installation completed successfully."
-    echo "Press Enter to return to the Docker 3x-UI menu..."
+    echo "Press Enter to return to the Docker Management menu..."
     read -r
+
+    # Reset terminal state left behind by apt / docker compose / certbot.
+    stty sane 2>/dev/null || true
+    printf '\033[0m' 2>/dev/null || true
+
+    # Exit the 3x-UI Docker submenu entirely after a fresh install.
+    # Returning 2 tells show_docker_3xui_menu to break out and return
+    # to the parent Docker Management menu with a clean state.
+    return 2
 }
 
 docker_3xui_start() {
@@ -2963,8 +2972,13 @@ show_docker_3xui_menu() {
 
         read -rp "Please enter your selection [0-9]: " DOCKER_3XUI_CHOICE
 
-        case "$DOCKER_3XUI_CHOICE" in
-            1) docker_3xui_install ;;
+                case "$DOCKER_3XUI_CHOICE" in
+            1)
+                docker_3xui_install
+                if [ "$?" -eq 2 ]; then
+                    return
+                fi
+                ;;
             2) docker_3xui_start ;;
             3) docker_3xui_stop ;;
             4) docker_3xui_restart ;;
