@@ -252,6 +252,10 @@ If a passphrase is used for a private SSH key, keep the passphrase separate from
 Development work is performed on dedicated version or feature branches and tested on clean Ubuntu servers before release.
 
 The `main` branch contains the stable release.
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list of changes between
+versions.
 
 ## License
 
