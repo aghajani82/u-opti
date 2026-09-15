@@ -874,28 +874,9 @@ EOF
     echo "Compatibility state:"
     echo "$DOCKER_3XUI_COMPAT_ENV"
     echo
-        echo "Installation completed successfully."
-    echo
-    echo "Press Enter to reload U-OPTI in a fresh terminal..."
+    echo "Installation completed successfully."
+    echo "Press Enter to return to the Docker 3x-UI menu..."
     read -r
-
-    # -----------------------------------------------------------------------
-    # PTY-level relaunch.
-    #
-    # `script -qefc CMD /dev/null` starts CMD inside a brand-new pseudo-TTY.
-    # This completely resets the terminal state left behind by:
-    #   - apt / dpkg
-    #   - docker compose
-    #   - certbot
-    #   - the 3x-UI panel installer
-    #
-    # Combined with the --menu docker flag, the fresh U-OPTI process skips
-    # the main menu and lands directly on the Docker Management submenu.
-    #
-    # The outer exec replaces the current shell so that when the inner
-    # U-OPTI exits, control returns cleanly to the user's SSH session.
-    # -----------------------------------------------------------------------
-    exec script -qefc "/usr/local/bin/u-opti --menu docker" /dev/null
 }
 
 docker_3xui_start() {
