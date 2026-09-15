@@ -874,9 +874,43 @@ EOF
     echo "Compatibility state:"
     echo "$DOCKER_3XUI_COMPAT_ENV"
     echo
-    echo "Installation completed successfully."
-    echo "Press Enter to return to the Docker Management menu..."
+        echo "Installation completed successfully."
+    echo
+    echo "Reloading U-OPTI in a fresh shell and returning to"
+    echo "Docker Management..."
+    echo
+    echo "Press Enter to continue..."
     read -r
+
+    # -----------------------------------------------------------------------
+    # Full process replacement.
+    #
+    # Instead of returning to the previous (possibly corrupted) shell state,
+    # u-opti is re-executed as a brand new process. This is exactly
+    # equivalent to the user manually exiting and reopening u-opti,
+    # which is the only reliable way to recover the terminal after
+    # 3x-UI panel installation.
+    #
+    # The --menu docker flag tells the fresh u-opti instance to jump
+    # directly back to the Docker Management submenu.
+    # -----------------------------------------------------------------------
+    stty sane 2>/dev/null || true
+    printf '\033[0m\033[?25h' 2>/dev/null || true
+
+    local UOPTI_BIN="${INSTALL_PATH:-/usr/local/bin/u-opti}"
+
+    if [ -x "$UOPTI_BIN" ]; then
+        exec "$UOPTI_BIN" --menu docker
+    fi
+
+    # Fallback: if for some reason the binary cannot be re-executed, at
+    # least try to keep the user in a usable state.
+    echo
+    echo "WARNING: Could not reload U-OPTI automatically."
+    echo "Please exit and reopen the script manually."
+    echo
+    read -r -p "Press Enter to return..." _
+
 
     # Reset terminal state left behind by apt / docker compose / certbot.
     stty sane 2>/dev/null || true
