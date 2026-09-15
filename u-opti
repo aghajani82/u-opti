@@ -44,6 +44,29 @@ source "$MODULES_PATH/docker.sh"
 source "$MODULES_PATH/docker-3xui-instance.sh"
 source "$MODULES_PATH/docker-3xui-nginx.sh"
 
+# ---------------------------------------------------------------------------
+# Direct menu invocation
+# ---------------------------------------------------------------------------
+# When U-OPTI is re-launched internally (e.g. after a 3x-UI panel install),
+# the caller can request a specific submenu directly. This avoids showing
+# the main menu again and keeps the user in the same workflow.
+#
+# Usage:
+#   u-opti --menu docker
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--menu" ] && [ -n "${2:-}" ]; then
+    case "$2" in
+        docker)
+            docker_management_menu
+            exit 0
+            ;;
+        *)
+            echo "U-OPTI: Unknown menu target: $2" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 while true; do
     clear
 
