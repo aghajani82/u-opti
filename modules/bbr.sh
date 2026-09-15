@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - BBR Management Module
-# v0.12.0
+# v0.13.0
 
 BBR_BACKUP_DIR="/etc/u-opti"
 BBR_BACKUP_FILE="$BBR_BACKUP_DIR/bbr-backup.conf"
