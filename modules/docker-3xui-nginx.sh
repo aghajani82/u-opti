@@ -1828,3 +1828,411 @@ docker_3xui_nginx_custom_domain_menu() {
         esac
     done
 }
+# ---------------------------------------------------------------------------
+# Repair existing Nginx sites
+# ---------------------------------------------------------------------------
+# Scans U-OPTI-managed Nginx sites and ensures each one answers on the
+# correct www / non-www variants using the same rules as
+# docker_3xui_nginx_build_server_names.
+# ---------------------------------------------------------------------------
+
+docker_3xui_nginx_extract_site_domain() {
+    local site_path="$1"
+    local filename
+
+    filename="$(basename "$site_path")"
+
+    case "$filename" in
+        3xui-*)          printf '%s\n' "${filename#3xui-}" ;;
+        u-opti-custom-*) printf '%s\n' "${filename#u-opti-custom-}" ;;
+        *)               return 1 ;;
+    esac
+}
+
+
+docker_3xui_nginx_is_managed_site() {
+    local site_path="$1"
+
+    [[ -f "$site_path" ]] || return 1
+
+    grep -Fq "$DOCKER_3XUI_NGINX_MARKER" "$site_path" 2>/dev/null && return 0
+    grep -Fq "$DOCKER_3XUI_NGINX_CUSTOM_MARKER" "$site_path" 2>/dev/null && return 0
+
+    return 1
+}
+
+
+docker_3xui_nginx_cert_exists() {
+    local cert_name="$1"
+
+    [[ -f "/etc/letsencrypt/live/$cert_name/cert.pem" ]]
+}
+
+
+docker_3xui_nginx_cert_covers_name() {
+    local cert_name="$1"
+    local check_name="$2"
+    local cert_file
+
+    cert_file="/etc/letsencrypt/live/$cert_name/cert.pem"
+    [[ -f "$cert_file" ]] || return 1
+
+    openssl x509 -in "$cert_file" -noout -text 2>/dev/null |
+        grep -oE 'DNS:[^,[:space:]]+' |
+        sed 's/^DNS://' |
+        grep -Fxq "$check_name"
+}
+
+
+docker_3xui_nginx_repair_single_site() {
+    local site_path="$1"
+    local domain="$2"
+    local cert_name="$3"
+
+    local current_server_names
+    local expected_server_names
+    local -a expected_arr=()
+    local name
+    local needs_cert_expand=0
+    local backup
+
+    echo
+    echo "======================================"
+    echo "      Repairing Site"
+    echo "======================================"
+    echo
+    echo "Site   : $(basename "$site_path")"
+    echo "Domain : $domain"
+    echo
+
+    # 1. Current server_name line.
+    current_server_names="$(
+        sed -n 's/^[[:space:]]*server_name[[:space:]]\+\([^;]*\);.*/\1/p' \
+            "$site_path" | head -n1
+    )"
+
+    # 2. Expected server names.
+    expected_server_names="$(docker_3xui_nginx_build_server_names "$domain")"
+
+    echo "Current  server_name: ${current_server_names:-<none>}"
+    echo "Expected server_name: $expected_server_names"
+    echo
+
+    if [[ "$current_server_names" == "$expected_server_names" ]]; then
+        echo "server_name already matches. No change needed."
+
+        # Still verify certificate coverage.
+        read -ra expected_arr <<< "$expected_server_names"
+        for name in "${expected_arr[@]}"; do
+            if ! docker_3xui_nginx_cert_covers_name "$cert_name" "$name"; then
+                echo "WARNING: Certificate does not cover: $name"
+                echo "You may want to reissue the certificate manually."
+            fi
+        done
+
+        return 0
+    fi
+
+    read -ra expected_arr <<< "$expected_server_names"
+
+    # 3. Certificate coverage check.
+    for name in "${expected_arr[@]}"; do
+        if ! docker_3xui_nginx_cert_covers_name "$cert_name" "$name"; then
+            needs_cert_expand=1
+            echo "Certificate is missing: $name"
+        fi
+    done
+
+    # 4. Expand or issue certificate.
+    if [[ "$needs_cert_expand" -eq 1 ]]; then
+        local -a cert_domains=()
+        for name in "${expected_arr[@]}"; do
+            cert_domains+=("-d" "$name")
+        done
+
+        echo
+        echo "Updating certificate to cover all server names..."
+        echo "Domains: $expected_server_names"
+        echo
+
+        if docker_3xui_nginx_cert_exists "$cert_name"; then
+            if ! "$DOCKER_3XUI_NGINX_CERTBOT_BIN" certonly \
+                --webroot \
+                -w "$DOCKER_3XUI_NGINX_ACME_ROOT" \
+                --non-interactive \
+                --agree-tos \
+                --register-unsafely-without-email \
+                --cert-name "$cert_name" \
+                "${cert_domains[@]}" \
+                --expand; then
+
+                echo
+                echo "ERROR: Certificate expansion failed."
+                echo "The site configuration was NOT modified."
+                return 1
+            fi
+        else
+            if ! "$DOCKER_3XUI_NGINX_CERTBOT_BIN" certonly \
+                --webroot \
+                -w "$DOCKER_3XUI_NGINX_ACME_ROOT" \
+                --non-interactive \
+                --agree-tos \
+                --register-unsafely-without-email \
+                --cert-name "$cert_name" \
+                "${cert_domains[@]}"; then
+
+                echo
+                echo "ERROR: Certificate issuance failed."
+                echo "The site configuration was NOT modified."
+                return 1
+            fi
+        fi
+
+        echo "Certificate updated successfully."
+    else
+        echo "Certificate already covers all required names."
+    fi
+
+    # 5. Backup and update server_name.
+    backup="${site_path}.bak-$(date +%Y%m%d-%H%M%S)"
+    cp -f "$site_path" "$backup" || {
+        echo "ERROR: Failed to create site backup."
+        return 1
+    }
+
+    echo
+    echo "Updating server_name in site configuration..."
+    echo "Backup: $backup"
+
+    if ! sed -i \
+        "s|^\([[:space:]]*server_name[[:space:]]\+\)[^;]*;|\1${expected_server_names};|" \
+        "$site_path"; then
+
+        echo "ERROR: Failed to update server_name."
+        cp -f "$backup" "$site_path"
+        return 1
+    fi
+
+    # 6. Test and reload.
+    if ! nginx -t >/dev/null 2>&1; then
+        echo "ERROR: Nginx configuration test failed. Restoring backup."
+        nginx -t 2>&1 || true
+        cp -f "$backup" "$site_path"
+        return 1
+    fi
+
+    if ! systemctl reload nginx; then
+        echo "ERROR: Failed to reload Nginx. Restoring backup."
+        cp -f "$backup" "$site_path"
+        systemctl reload nginx >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    echo
+    echo "Site repaired successfully."
+    echo "New server_name: $expected_server_names"
+    echo "Backup: $backup"
+
+    return 0
+}
+
+
+docker_3xui_nginx_repair_all_sites() {
+    local repaired=0
+    local failed=0
+    local skipped=0
+    local site_path
+    local domain
+    local cert_name
+
+    echo
+    echo "Scanning U-OPTI-managed Nginx sites..."
+    echo
+
+    shopt -s nullglob
+    for site_path in \
+        "$DOCKER_3XUI_NGINX_SITES_ENABLED"/3xui-* \
+        "$DOCKER_3XUI_NGINX_SITES_ENABLED"/u-opti-custom-*; do
+
+        [[ -f "$site_path" ]] || continue
+
+        if ! docker_3xui_nginx_is_managed_site "$site_path"; then
+            echo "Skipping non-U-OPTI site: $(basename "$site_path")"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        if ! domain="$(docker_3xui_nginx_extract_site_domain "$site_path")"; then
+            echo "Skipping unparseable site: $(basename "$site_path")"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        # In U-OPTI, the certificate name is the primary domain used
+        # when the site was created. This is true for both 3xui-* and
+        # u-opti-custom-* sites.
+        cert_name="$domain"
+
+        if docker_3xui_nginx_repair_single_site "$site_path" "$domain" "$cert_name"; then
+            repaired=$((repaired + 1))
+        else
+            failed=$((failed + 1))
+        fi
+    done
+    shopt -u nullglob
+
+    echo
+    echo "======================================"
+    echo "         Repair Summary"
+    echo "======================================"
+    echo
+    echo "Repaired : $repaired"
+    echo "Failed   : $failed"
+    echo "Skipped  : $skipped"
+    echo
+}
+
+
+docker_3xui_nginx_repair_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "    Repair Existing Nginx Sites"
+        echo "======================================"
+        echo
+        echo "This will scan U-OPTI-managed Nginx sites and ensure each"
+        echo "domain works with and without the www prefix, using the"
+        echo "same rules as the latest Nginx / SSL module."
+        echo
+        echo "For each site, U-OPTI will:"
+        echo "  1. Read the current server_name line."
+        echo "  2. Compute the expected www / non-www aliases."
+        echo "  3. Expand or issue the Let's Encrypt certificate."
+        echo "  4. Update the site configuration."
+        echo "  5. Test and reload Nginx."
+        echo
+        echo "A timestamped backup is created before any site is changed."
+        echo
+        echo "1) Repair all U-OPTI-managed sites"
+        echo "2) Repair a specific site"
+        echo
+        echo "0) Back"
+        echo
+
+        read -r -p "Please enter your selection [0-2]: " repair_choice
+
+        case "$repair_choice" in
+            1)
+                if ! docker_3xui_nginx_check_prerequisites ||
+                   ! docker_3xui_nginx_install_packages ||
+                   ! docker_3xui_nginx_ensure_service; then
+                    echo
+                    read -r -p "Press Enter to return..." _
+                    continue
+                fi
+
+                docker_3xui_nginx_repair_all_sites
+                read -r -p "Press Enter to return..." _
+                ;;
+
+            2)
+                if ! docker_3xui_nginx_check_prerequisites ||
+                   ! docker_3xui_nginx_install_packages ||
+                   ! docker_3xui_nginx_ensure_service; then
+                    echo
+                    read -r -p "Press Enter to return..." _
+                    continue
+                fi
+
+                local -a sites=()
+                local site_path
+                local domain
+                local i=1
+                local pick
+
+                shopt -s nullglob
+                for site_path in \
+                    "$DOCKER_3XUI_NGINX_SITES_ENABLED"/3xui-* \
+                    "$DOCKER_3XUI_NGINX_SITES_ENABLED"/u-opti-custom-*; do
+
+                    [[ -f "$site_path" ]] || continue
+                    docker_3xui_nginx_is_managed_site "$site_path" || continue
+                    sites+=("$site_path")
+                done
+                shopt -u nullglob
+
+                if [[ "${#sites[@]}" -eq 0 ]]; then
+                    echo
+                    echo "No U-OPTI-managed Nginx sites were found."
+                    read -r -p "Press Enter to return..." _
+                    continue
+                fi
+
+                echo
+                echo "Available U-OPTI-managed sites:"
+                echo
+                for site_path in "${sites[@]}"; do
+                    echo "  $i) $(basename "$site_path")"
+                    i=$((i + 1))
+                done
+                echo "  0) Cancel"
+                echo
+
+                read -r -p "Select site [0-${#sites[@]}]: " pick
+
+                if [[ "$pick" == "0" ]]; then
+                    continue
+                fi
+
+                if ! [[ "$pick" =~ ^[0-9]+$ ]] ||
+                   (( pick < 1 || pick > ${#sites[@]} )); then
+                    echo
+                    echo "Invalid selection."
+                    sleep 1
+                    continue
+                fi
+
+                site_path="${sites[$((pick - 1))]}"
+                domain="$(docker_3xui_nginx_extract_site_domain "$site_path")"
+
+                echo
+                echo "Selected: $(basename "$site_path")"
+                echo "Domain  : $domain"
+                echo
+                read -r -p "Continue with repair? [y/N]: " confirm
+
+                case "$confirm" in
+                    y|Y|yes|YES)
+                        if docker_3xui_nginx_repair_single_site \
+                            "$site_path" "$domain" "$domain"; then
+                            echo
+                            echo "Repair completed."
+                        else
+                            echo
+                            echo "Repair failed."
+                        fi
+                        ;;
+
+                    *)
+                        echo
+                        echo "Repair cancelled."
+                        sleep 1
+                        ;;
+                esac
+
+                read -r -p "Press Enter to return..." _
+                ;;
+
+            0)
+                return 0
+                ;;
+
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
