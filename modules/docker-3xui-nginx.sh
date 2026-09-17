@@ -1885,16 +1885,33 @@ docker_3xui_nginx_cert_covers_name() {
 
 
 docker_3xui_nginx_repair_single_site() {
-    local site_path="$1"
+    local site_link="$1"
     local domain="$2"
     local cert_name="$3"
 
+    local site_path
+    local site_name
+    local available_path
     local current_server_names
     local expected_server_names
     local -a expected_arr=()
     local name
     local needs_cert_expand=0
     local backup
+
+    # Prefer the file under sites-available as the source of truth.
+    # This keeps symlinks intact and ensures backups are never placed
+    # inside sites-enabled, where Nginx would try to load them.
+    site_name="$(basename "$site_link")"
+    available_path="$DOCKER_3XUI_NGINX_SITES_AVAILABLE/$site_name"
+
+    if [[ -f "$available_path" ]]; then
+        site_path="$available_path"
+    elif [[ -L "$site_link" ]]; then
+        site_path="$(readlink -f "$site_link" 2>/dev/null || echo "$site_link")"
+    else
+        site_path="$site_link"
+    fi
 
     echo
     echo "======================================"
