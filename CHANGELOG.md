@@ -141,6 +141,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Key-only root access requires an active SSH session and at least
   one root public key before being enabled.
 - UFW changes are backed up and restored on failure.
+## [0.13.1] - 2026-09-17
+
+### Added
+- Automatic www / non-www alias for apex domains in the Nginx / SSL
+  module. Domains entered as `example.com` now also answer on
+  `www.example.com`, and vice versa.
+- Certificate requests now include both the apex and www names so
+  HTTPS works on both variants without manual intervention.
+- ACME challenge configuration serves all generated server names.
+
+### Changed
+- `docker-3xui-nginx.sh` now uses a shared `build_server_names`
+  helper for server_name generation, conflict detection, ACME
+  validation, and Certbot invocation.
+- Custom Domain and SSL-only modes follow the same alias rules.
+
+## [Unreleased]
+  
 
 ## [0.11.0] and earlier
 
