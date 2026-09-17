@@ -2886,11 +2886,12 @@ docker_3xui_nginx_ssl_management() {
         echo
         echo "1) Docker 3x-UI Nginx / SSL"
         echo "2) Custom Domain / Nginx / SSL"
+        echo "3) Repair Existing Domain (add missing www / non-www)"
         echo
         echo "0) Back"
         echo
 
-        read -r -p "Please enter your selection [0-2]: " NGINX_MENU_CHOICE
+        read -r -p "Please enter your selection [0-3]: " NGINX_MENU_CHOICE
 
         case "$NGINX_MENU_CHOICE" in
             1)
