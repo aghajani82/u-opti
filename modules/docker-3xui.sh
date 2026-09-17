@@ -2944,6 +2944,9 @@ docker_3xui_nginx_ssl_management() {
             2)
                 docker_3xui_nginx_custom_domain_menu
                 ;;
+            3)
+                docker_3xui_nginx_repair_menu
+                ;;
             0)
                 return
                 ;;
