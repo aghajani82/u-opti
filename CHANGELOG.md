@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Hostname Management under System Optimization:
+  - Display the current hostname
+  - Validate the new hostname before applying it
+  - Change the hostname with `hostnamectl set-hostname`
+  - Support `0) to return without making changes
+
+### Fixed
+
+- Installer and U-OPTI update downloads now use cache-busting query parameters
+  to avoid stale files being served from an intermediate cache.
+- Installer and U-OPTI update routines verify that required Hostname Management
+  code is present before installing or replacing the current files.
+- U-OPTI uninstall output no longer reports a nonexistent safety backup when
+  `/etc/u-opti` was not present.
+- Documentation version and main-menu numbering are synchronized with v0.13.0.
+
+
 ## [0.13.0] - 2026-09-15
 
 ### Added
