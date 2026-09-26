@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # U-OPTI - Common Functions
-# v0.12.0
+# v0.13.0
 
 UOPTI_BACKUP_ROOT="/etc/u-opti/backups"
 
