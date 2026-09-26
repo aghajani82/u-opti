@@ -78,18 +78,20 @@ TEMP_DIR=$(mktemp -d)
 cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
+CACHE_BUST="$(date +%s%N)"
+
 echo "Downloading VERSION..."
-curl -fsSL "$BASE_URL/VERSION" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
+curl -fsSL --retry 3 "$BASE_URL/VERSION?cb=$CACHE_BUST" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
 REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
 [ -n "$REMOTE_VERSION" ] || { echo "Error: Unable to determine U-OPTI version."; exit 1; }
 echo "Remote Version: $REMOTE_VERSION"
 echo
 
 echo "Downloading U-OPTI..."
-curl -fsSL "$BASE_URL/u-opti" -o "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
+curl -fsSL --retry 3 "$BASE_URL/u-opti?cb=$CACHE_BUST" -o "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
 
 echo "Downloading common library..."
-curl -fsSL "$BASE_URL/lib/common.sh" -o "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
+curl -fsSL --retry 3 "$BASE_URL/lib/common.sh?cb=$CACHE_BUST" -o "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
 
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
@@ -113,7 +115,7 @@ for MODULE in "${MODULES[@]}"; do
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
-    curl -fsSL "$BASE_URL/modules/$MODULE" -o "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
+    curl -fsSL --retry 3 "$BASE_URL/modules/$MODULE?cb=$CACHE_BUST" -o "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
 done
 
 echo
