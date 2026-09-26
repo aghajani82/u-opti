@@ -126,11 +126,12 @@ while true; do
                 echo "3) Swap Management"
                 echo "4) BBR Management"
                 echo "5) Storage Management"
+                echo "6) Hostname Management"
                 echo
                 echo "0) Back"
                 echo
 
-                read -rp "Please enter your selection [0-5]: " opt_choice
+                read -rp "Please enter your selection [0-6]: " opt_choice
 
                 case "$opt_choice" in
 
