@@ -914,14 +914,23 @@ while true; do
             echo
 
             echo "Retained:"
-            echo "  - /etc/u-opti and its backups"
+            if [ -d "/etc/u-opti" ]; then
+                echo "  - /etc/u-opti and its backups"
+            else
+                echo "  - Existing server data and other services"
+            fi
             echo "  - Nginx / Certbot"
             echo "  - 3x-UI / Xray"
             echo "  - Docker and other services"
             echo
 
-            echo "Safety backup retained at:"
-            echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+            if [ "$BACKUP_SKIPPED" = "true" ]; then
+                echo "No safety backup was created because /etc/u-opti did not exist."
+            elif [ "$BACKUP_OK" = "true" ] && [ -n "$FINAL_BACKUP_DIR" ] && \
+                 [ -f "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz" ]; then
+                echo "Safety backup retained at:"
+                echo "$FINAL_BACKUP_DIR/u-opti-installation.tar.gz"
+            fi
             echo
 
             exit 0
