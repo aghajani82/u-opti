@@ -268,12 +268,32 @@ test_acme_webroot() {
     local domain="$1"
     local test_file="$ACME_WEBROOT/.well-known/acme-challenge/u-opti-test"
     local response=""
+    local attempt
+    local max_attempts=6
 
     printf '%s\n' "u-opti-test" > "$test_file" || return 1
-    response="$(curl -fsS --max-time 10 -H "Host: $domain" "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" 2>/dev/null || true)"
-    rm -f "$test_file"
 
-    [[ "$response" == "u-opti-test" ]]
+    # Nginx reload is asynchronous: old workers may briefly remain active.
+    # Retry the local ACME request so a transient handover does not make the
+    # first certificate attempt fail while the second succeeds.
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        response="$(curl -fsS --connect-timeout 2 --max-time 3 \
+            -H "Host: $domain" \
+            "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+            2>/dev/null || true)"
+
+        if [[ "$response" == "u-opti-test" ]]; then
+            rm -f "$test_file"
+            return 0
+        fi
+
+        if (( attempt < max_attempts )); then
+            sleep 0.5
+        fi
+    done
+
+    rm -f "$test_file"
+    return 1
 }
 
 certificate_status() {
