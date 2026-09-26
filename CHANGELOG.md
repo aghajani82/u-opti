@@ -165,3 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial development of the U-OPTI framework, menu system, and
   core system management modules.
 - Early SSH, firewall, and system optimization utilities.
+
+### Added (Manually)
+- Repair Existing Domain (add missing www / non-www) - now part of v0.13.0
+  - Automatically creates both apex and www versions
+  - Issues single certificate for both
+  - Added as option 3 in Certificate Management
