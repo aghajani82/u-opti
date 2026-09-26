@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 
 # U-OPTI - 3x-UI Docker Nginx / SSL Integration
-# v0.13.1
+# v0.13.0
 #
 # This module configures public HTTPS access for a Sanaei 3x-UI Docker
 # instance managed by docker-3xui.sh.
 #
-# v0.13.1 changes:
+# v0.13.0 changes:
 #   - Automatic www / non-www alias for apex domains.
 #   - Certificate requests now include both apex and www names.
 #   - ACME challenge config serves all server names.
 #   - Custom Domain and SSL-only modes follow the same alias rules.
+#   - Repair reporting distinguishes repaired sites from skipped sites.
+#   - Repair can fix missing certificate coverage even when server_name is already correct.
+#   - Repair menu wording is scoped to U-OPTI-managed Nginx sites.
 
 DOCKER_3XUI_NGINX_CONTAINER="3xui"
 DOCKER_3XUI_NGINX_DIR="/opt/3x-ui"
@@ -33,6 +36,9 @@ DOCKER_3XUI_NGINX_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
 DOCKER_3XUI_NGINX_CUSTOM_MARKER="# U-OPTI-MANAGED-CUSTOM-NGINX"
 
 DOCKER_3XUI_NGINX_AUTO_MODE=0
+
+# Result of the most recent repair operation: repaired / skipped.
+DOCKER_3XUI_NGINX_REPAIR_STATUS="skipped"
 
 DOCKER_3XUI_CUSTOM_DOMAIN=""
 DOCKER_3XUI_CUSTOM_MODE=""
@@ -1935,30 +1941,29 @@ docker_3xui_nginx_repair_single_site() {
     echo "Expected server_name: $expected_server_names"
     echo
 
-    if [[ "$current_server_names" == "$expected_server_names" ]]; then
-        echo "server_name already matches. No change needed."
-
-        # Still verify certificate coverage.
-        read -ra expected_arr <<< "$expected_server_names"
-        for name in "${expected_arr[@]}"; do
-            if ! docker_3xui_nginx_cert_covers_name "$cert_name" "$name"; then
-                echo "WARNING: Certificate does not cover: $name"
-                echo "You may want to reissue the certificate manually."
-            fi
-        done
-
-        return 0
-    fi
+    DOCKER_3XUI_NGINX_REPAIR_STATUS="skipped"
 
     read -ra expected_arr <<< "$expected_server_names"
 
     # 3. Certificate coverage check.
+    # This runs even when server_name already matches so Repair can also
+    # fix a certificate that is missing one or more required names.
     for name in "${expected_arr[@]}"; do
         if ! docker_3xui_nginx_cert_covers_name "$cert_name" "$name"; then
             needs_cert_expand=1
             echo "Certificate is missing: $name"
         fi
     done
+
+    # If both the Nginx server_name and certificate are already correct,
+    # nothing needs to be changed.
+    if [[ "$current_server_names" == "$expected_server_names" &&
+          "$needs_cert_expand" -eq 0 ]]; then
+        echo "server_name already matches. No change needed."
+        echo "Certificate already covers all required names."
+        DOCKER_3XUI_NGINX_REPAIR_STATUS="skipped"
+        return 0
+    fi
 
     # 4. Expand or issue certificate.
     if [[ "$needs_cert_expand" -eq 1 ]]; then
@@ -2006,6 +2011,19 @@ docker_3xui_nginx_repair_single_site() {
         fi
 
         echo "Certificate updated successfully."
+
+        # If server_name was already correct, the certificate was the only
+        # repaired item. Reload Nginx so the updated certificate is active.
+        if [[ "$current_server_names" == "$expected_server_names" ]]; then
+            if ! systemctl reload nginx; then
+                echo "ERROR: Certificate was updated but Nginx reload failed."
+                return 1
+            fi
+
+            echo "Certificate repaired successfully."
+            DOCKER_3XUI_NGINX_REPAIR_STATUS="repaired"
+            return 0
+        fi
     else
         echo "Certificate already covers all required names."
     fi
@@ -2050,6 +2068,7 @@ docker_3xui_nginx_repair_single_site() {
     echo "New server_name: $expected_server_names"
     echo "Backup: $backup"
 
+    DOCKER_3XUI_NGINX_REPAIR_STATUS="repaired"
     return 0
 }
 
@@ -2091,7 +2110,17 @@ docker_3xui_nginx_repair_all_sites() {
         cert_name="$domain"
 
         if docker_3xui_nginx_repair_single_site "$site_path" "$domain" "$cert_name"; then
-            repaired=$((repaired + 1))
+            case "$DOCKER_3XUI_NGINX_REPAIR_STATUS" in
+                repaired)
+                    repaired=$((repaired + 1))
+                    ;;
+                skipped)
+                    skipped=$((skipped + 1))
+                    ;;
+                *)
+                    skipped=$((skipped + 1))
+                    ;;
+            esac
         else
             failed=$((failed + 1))
         fi
@@ -2115,24 +2144,24 @@ docker_3xui_nginx_repair_menu() {
         clear
 
         echo "======================================"
-        echo "    Repair Existing Nginx Sites"
+        echo "  Repair U-OPTI Nginx Domains"
         echo "======================================"
         echo
-        echo "This will scan U-OPTI-managed Nginx sites and ensure each"
-        echo "domain works with and without the www prefix, using the"
-        echo "same rules as the latest Nginx / SSL module."
+        echo "This scans U-OPTI-managed Nginx sites and repairs only"
+        echo "their Nginx server_name aliases and required SSL coverage"
+        echo "using the same rules as the Nginx / SSL module."
         echo
         echo "For each site, U-OPTI will:"
         echo "  1. Read the current server_name line."
         echo "  2. Compute the expected www / non-www aliases."
-        echo "  3. Expand or issue the Let's Encrypt certificate."
-        echo "  4. Update the site configuration."
-        echo "  5. Test and reload Nginx."
+        echo "  3. Expand or issue the Let's Encrypt certificate when needed."
+        echo "  4. Update the site configuration when needed."
+        echo "  5. Test and reload Nginx when a change is made."
         echo
         echo "A timestamped backup is created before any site is changed."
         echo
-        echo "1) Repair all U-OPTI-managed sites"
-        echo "2) Repair a specific site"
+        echo "1) Repair all U-OPTI-managed Nginx sites"
+        echo "2) Repair a specific U-OPTI Nginx site"
         echo
         echo "0) Back"
         echo
@@ -2224,7 +2253,17 @@ docker_3xui_nginx_repair_menu() {
                         if docker_3xui_nginx_repair_single_site \
                             "$site_path" "$domain" "$domain"; then
                             echo
-                            echo "Repair completed."
+                            case "$DOCKER_3XUI_NGINX_REPAIR_STATUS" in
+                                repaired)
+                                    echo "Repair completed: changes were applied."
+                                    ;;
+                                skipped)
+                                    echo "No repair needed: Nginx and SSL are already correct."
+                                    ;;
+                                *)
+                                    echo "Repair check completed."
+                                    ;;
+                            esac
                         else
                             echo
                             echo "Repair failed."
