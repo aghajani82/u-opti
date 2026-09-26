@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Display the current hostname
   - Validate the new hostname before applying it
   - Change the hostname with `hostnamectl set-hostname`
-  - Support `0) to return without making changes
+  - Support `0` to return without making changes
 
 ### Fixed
 
