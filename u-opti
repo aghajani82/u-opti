@@ -154,6 +154,10 @@ while true; do
                         show_storage_menu
                         ;;
 
+                    6)
+                        show_hostname_menu
+                        ;;
+
                     0)
                         break
                         ;;
