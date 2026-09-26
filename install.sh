@@ -134,6 +134,18 @@ for FILE in "${REQUIRED_FILES[@]}"; do
 done
 echo "All required files are present."
 
+if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
+   ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
+   ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh"; then
+    echo
+    echo "ERROR: Downloaded U-OPTI files failed feature verification."
+    echo "The downloaded files are inconsistent or stale."
+    echo "Installation cancelled."
+    exit 1
+fi
+
+echo "Feature verification passed."
+
 echo
 echo "Checking Bash syntax..."
 bash -n "$TEMP_DIR/u-opti"
