@@ -253,7 +253,13 @@ while true; do
                 local REPO_PATH="$1"
                 local DESTINATION="$2"
 
-                curl -fsSL                     -H "Accept: application/vnd.github.raw+json"                     "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}"                     -o "$DESTINATION"
+                local CACHE_BUST
+                CACHE_BUST="$(date +%s%N)"
+
+                curl -fsSL --retry 3 \
+                    -H "Accept: application/vnd.github.raw+json" \
+                    "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}&cb=${CACHE_BUST}" \
+                    -o "$DESTINATION"
             }
 
             cleanup_update_temp() {
@@ -514,6 +520,21 @@ while true; do
             fi
 
             echo "All required files are present."
+
+            if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
+               ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
+               ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh"; then
+                echo
+                echo "ERROR: Downloaded files failed feature verification."
+                echo "The downloaded U-OPTI files are inconsistent or stale."
+                echo "Update cancelled and no installed files were changed."
+                cleanup_update_temp
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
+            echo "Feature verification passed."
 
             echo
             echo "Checking Bash syntax..."
