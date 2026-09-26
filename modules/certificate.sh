@@ -221,6 +221,112 @@ certificate_status() {
     pause_screen
 }
 
+build_server_names() {
+    local domain="$1"
+    local server_names=("$domain")
+
+    if [[ "$domain" != www.* ]]; then
+        local www_domain="www.$domain"
+        server_names+=("$www_domain")
+    elif [[ "$domain" == www.* ]]; then
+        local apex="${domain#www.}"
+        server_names+=("$apex")
+    fi
+
+    echo "${server_names[@]}"
+}
+
+repair_existing_domain() {
+    clear
+    echo "======================================"
+    echo "    Repair Existing Domain (www / non-www)"
+    echo "======================================"
+    echo
+    echo "This will add missing www/non-www and issue certificate for both."
+
+    read -r -p "Enter domain (e.g. example.com or www.example.com): " domain
+    if [[ "$domain" == "0" ]]; then
+        return
+    fi
+
+    [[ -n "$domain" ]] || {
+        echo "Error: Domain cannot be empty."
+        pause_screen
+        return 1
+    }
+
+    if ! validate_domain "$domain"; then
+        echo "Error: Invalid domain format."
+        pause_screen
+        return 1
+    fi
+
+    local cert_dir="/etc/letsencrypt/live/$domain"
+    if [[ -f "$cert_dir/cert.pem" ]]; then
+        echo "Error: Certificate for '$domain' already exists."
+        echo "Use Certificate Status or Renew Certificates."
+        pause_screen
+        return 1
+    fi
+
+    if ! domain_exists_in_nginx "$domain"; then
+        echo "Error: Domain '$domain' is not configured in Nginx."
+        pause_screen
+        return 1
+    fi
+
+    local server_names=($(build_server_names "$domain"))
+    local conf_path
+    local www_domain="www.$domain"
+    if [[ "$domain" == www.* ]]; then
+        www_domain="${domain#www.}"
+    fi
+
+    echo
+    echo "Domains to support:"
+    for d in "${server_names[@]}"; do echo "  - $d"; done
+    echo
+
+    read -r -p "Continue with repair and certificate issuance? [y/N]: " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || {
+        echo "Cancelled."
+        pause_screen
+        return
+    }
+
+    # Prepare ACME for ALL domains
+    for d in "${server_names[@]}"; do
+        conf_path="$(get_acme_conf_path "$d")"
+        if ! prepare_acme_webroot "$d" "$conf_path"; then
+            echo "Error: Failed for $d"
+            return 1
+        fi
+    done
+
+    for d in "${server_names[@]}"; do
+        if ! test_acme_webroot "$d"; then
+            echo "Error: ACME test failed for $d"
+            return 1
+        fi
+    done
+
+    echo "Requesting certificate from Let's Encrypt for both domains..."
+    if "$CERTBOT_BIN" certonly \
+        --webroot -w "$ACME_WEBROOT" \
+        --non-interactive --agree-tos --register-unsafely-without-email \
+        --cert-name "${server_names[0]}" \
+        -d "${server_names[0]}" \
+        -d "${server_names[1]}"; then
+        echo "✅ Certificate issued successfully for both domains!"
+        echo "Live dir: /etc/letsencrypt/live/${server_names[0]}"
+    else
+        echo "❌ Failed. Try again or check logs."
+        return 1
+    fi
+
+    pause_screen
+}
+
 issue_certificate() {
     clear
     echo "======================================"
@@ -472,127 +578,6 @@ remove_certificate() {
 
     pause_screen
 }
-
-
-
-# ==========================================================
-# NEW: Repair Existing Domain (www / non-www) - v0.13.0
-# Added manually to stay on 0.13.0
-# ==========================================================
-
-build_server_names() {
-    local domain="$1"
-    local server_names=("$domain")
-
-    if [[ "$domain" != www.* ]]; then
-        local www_domain="www.$domain"
-        server_names+=("$www_domain")
-    elif [[ "$domain" == www.* ]]; then
-        local apex="${domain#www.}"
-        server_names+=("$apex")
-    fi
-
-    echo "${server_names[@]}"
-}
-
-repair_existing_domain() {
-    clear
-    echo "======================================"
-    echo "    Repair Existing Domain (www / non-www)"
-    echo "======================================"
-    echo
-    echo "This will add missing www/non-www and issue certificate for both."
-
-    read -r -p "Enter domain (e.g. example.com or www.example.com): " domain
-    if [[ "$domain" == "0" ]]; then
-        return
-    fi
-
-    [[ -n "$domain" ]] || {
-        echo "Error: Domain cannot be empty."
-        pause_screen
-        return 1
-    }
-
-    if ! validate_domain "$domain"; then
-        echo "Error: Invalid domain format."
-        pause_screen
-        return 1
-    }
-
-    local cert_dir="/etc/letsencrypt/live/$domain"
-    if [[ -f "$cert_dir/cert.pem" ]]; then
-        echo "Error: Certificate for '$domain' already exists."
-        echo "Use Certificate Status or Renew Certificates."
-        pause_screen
-        return 1
-    fi
-
-    if ! domain_exists_in_nginx "$domain"; then
-        echo "Error: Domain '$domain' is not configured in Nginx."
-        pause_screen
-        return 1
-    fi
-
-    local server_names=($(build_server_names "$domain"))
-    local conf_path
-    local www_domain="www.$domain"
-    if [[ "$domain" == www.* ]]; then
-        www_domain="${domain#www.}"
-    fi
-
-    echo
-    echo "Domains to support:"
-    for d in "${server_names[@]}"; do echo "  - $d"; done
-    echo
-
-    read -r -p "Continue with repair and certificate issuance? [y/N]: " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || {
-        echo "Cancelled."
-        pause_screen
-        return
-    }
-
-    # Prepare ACME for ALL domains
-    for d in "${server_names[@]}"; do
-        conf_path="$(get_acme_conf_path "$d")"
-        if ! prepare_acme_webroot "$d" "$conf_path"; then
-            echo "Error: Failed for $d"
-            return 1
-        fi
-    done
-
-    for d in "${server_names[@]}"; do
-        if ! test_acme_webroot "$d"; then
-            echo "Error: ACME test failed for $d"
-            return 1
-        fi
-    done
-
-    echo "Requesting certificate from Let's Encrypt for both domains..."
-    if "$CERTBOT_BIN" certonly \
-        --webroot -w "$ACME_WEBROOT" \
-        --non-interactive --agree-tos --register-unsafely-without-email \
-        --cert-name "${server_names[0]}" \
-        -d "${server_names[0]}" \
-        -d "${server_names[1]}"; then
-        echo "✅ Certificate issued successfully for both domains!"
-        echo "Live dir: /etc/letsencrypt/live/${server_names[0]}"
-    else
-        echo "❌ Failed. Try again or check logs."
-        return 1
-    fi
-
-    pause_screen
-}
-
-
-
-
-
-
-
-
 
 # ==========================================================
 # 3x-UI Docker Certificate Management
@@ -1034,7 +1019,7 @@ docker_3xui_certificate_remove() {
     fi
 
     target_dir="$DOCKER_3XUI_CERT_ROOT/$domain"
-    hook_path="${DOCKER_3XUI_CERT_HOOK_DIR}/${DOCKER_3XUI_CERT_HOOK_PREFIX}${domain}.sh"
+    hook_path="${DOCKER_3XUI_CERT_HOOK_DIR}/${DOCKER_3XUI_CERT_HOOK_PREFIX}${domain}.sh}"
 
     if [[ ! -d "$target_dir" && ! -f "$hook_path" ]]; then
         echo "No Docker 3x-UI certificate mapping found for:"
