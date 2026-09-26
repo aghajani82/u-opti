@@ -17,8 +17,9 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 4) X-UI PRO Management
 5) Certificate Management
 6) Backup & Restore
-7) Update U-OPTI
-8) Uninstall U-OPTI
+7) Docker Management
+8) Update U-OPTI
+9) Uninstall U-OPTI
 0) Exit
 ```
 
@@ -30,6 +31,7 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 - Display system information
 - Manage system time and timezone
 - Check and configure NTP synchronization
+- Change the system hostname with validation and safe menu navigation
 
 ### Swap Management
 
