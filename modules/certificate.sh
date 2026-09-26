@@ -7,6 +7,7 @@ CERTBOT_BIN=""
 ACME_WEBROOT="/var/www/u-opti-acme"
 ACME_CONF_DIR="/etc/nginx/conf.d"
 ACME_CONF_PREFIX="u-opti-acme"
+ACME_NGINX_HASH_CONF="u-opti-nginx-hash.conf"
 
 get_certbot_path() {
     if command -v certbot >/dev/null 2>&1; then
@@ -60,18 +61,26 @@ install_certbot() {
 }
 
 validate_nginx() {
+    local nginx_test_output=""
+
     if ! command -v nginx >/dev/null 2>&1; then
         echo "Error: Nginx is not installed."
         echo "Install Nginx first."
         return 1
     fi
+
     if ! systemctl is-active --quiet nginx; then
         echo "Error: Nginx is not running."
         echo "Start Nginx before issuing a certificate."
         return 1
     fi
-    if ! nginx -t >/dev/null 2>&1; then
+
+    if ! nginx_test_output="$(nginx -t 2>&1)"; then
+        echo
         echo "Error: Existing Nginx configuration is invalid."
+        echo
+        echo "$nginx_test_output"
+        echo
         echo "Fix the Nginx configuration before issuing a certificate."
         return 1
     fi
@@ -84,6 +93,90 @@ domain_exists_in_nginx() {
 
 get_acme_conf_path() {
     echo "$ACME_CONF_DIR/${ACME_CONF_PREFIX}-$1.conf"
+}
+
+find_existing_server_names_hash_conf() {
+    grep -RslE \
+        '^[[:space:]]*server_names_hash_bucket_size[[:space:]]+[0-9]+[[:space:]]*;' \
+        /etc/nginx \
+        --include='*.conf' 2>/dev/null | head -n 1
+}
+
+ensure_server_names_hash_bucket_size() {
+    local initial_test_output="$1"
+    local hash_conf_file=""
+    local hash_conf_created=0
+    local original_content=""
+    local size
+    local current_size=0
+    local min_size=128
+    local test_output=""
+
+    # Only handle the specific Nginx failure caused by a server_name hash
+    # that is too small. All unrelated Nginx errors are returned unchanged.
+    if ! grep -Fq "could not build server_names_hash" <<< "$initial_test_output"; then
+        return 1
+    fi
+
+    hash_conf_file="$(find_existing_server_names_hash_conf || true)"
+
+    if [[ -n "$hash_conf_file" ]]; then
+        original_content="$(cat "$hash_conf_file")"
+
+        current_size="$(awk '$1 == "server_names_hash_bucket_size" {gsub(/;/, "", $2); print $2; exit}' "$hash_conf_file")"
+        current_size="${current_size:-0}"
+    else
+        hash_conf_file="$ACME_CONF_DIR/$ACME_NGINX_HASH_CONF"
+        hash_conf_created=1
+    fi
+
+    for size in 128 256 512; do
+        if (( size < min_size || size < current_size )); then
+            continue
+        fi
+
+        if [[ "$hash_conf_created" -eq 1 && ! -f "$hash_conf_file" ]]; then
+            printf '%s\n' "server_names_hash_bucket_size $size;" > "$hash_conf_file" || {
+                echo "Error: Failed to create Nginx hash configuration."
+                return 1
+            }
+        elif [[ "$hash_conf_created" -eq 1 ]]; then
+            printf '%s\n' "server_names_hash_bucket_size $size;" > "$hash_conf_file" || {
+                rm -f "$hash_conf_file"
+                echo "Error: Failed to update Nginx hash configuration."
+                return 1
+            }
+        else
+            sed -Ei \
+                "s/^[[:space:]]*server_names_hash_bucket_size[[:space:]]+[0-9]+[[:space:]]*;[[:space:]]*$/    server_names_hash_bucket_size $size;/" \
+                "$hash_conf_file" || {
+                printf '%s\n' "$original_content" > "$hash_conf_file"
+                echo "Error: Failed to update Nginx hash configuration."
+                return 1
+            }
+        fi
+
+        test_output="$(nginx -t 2>&1)" && {
+            echo
+            echo "U-OPTI adjusted Nginx server name hash bucket size to $size."
+            echo "This prevents long domains from failing ACME configuration."
+            echo
+            return 0
+        }
+    done
+
+    if [[ "$hash_conf_created" -eq 1 ]]; then
+        rm -f "$hash_conf_file"
+    else
+        printf '%s\n' "$original_content" > "$hash_conf_file"
+    fi
+
+    echo
+    echo "Error: Nginx server_names_hash_bucket_size could not be adjusted automatically."
+    echo
+    echo "$test_output"
+    echo
+    return 1
 }
 
 prepare_acme_webroot() {
@@ -120,24 +213,55 @@ server {
 }
 EOF
 
-    if ! nginx -t >/dev/null 2>&1; then
+    local nginx_test_output=""
+
+    nginx_test_output="$(nginx -t 2>&1)" || {
+        if ! ensure_server_names_hash_bucket_size "$nginx_test_output"; then
+            if [[ "$had_previous" -eq 1 ]]; then
+                printf '%s\n' "$previous_content" > "$conf_path"
+            else
+                rm -f "$conf_path"
+            fi
+
+            echo
+            echo "$nginx_test_output"
+            echo
+            return 1
+        fi
+    }
+
+    if ! nginx_test_output="$(nginx -t 2>&1)"; then
         if [[ "$had_previous" -eq 1 ]]; then
             printf '%s\n' "$previous_content" > "$conf_path"
         else
             rm -f "$conf_path"
         fi
+
+        echo
+        echo "Error: Nginx configuration test failed after ACME preparation."
+        echo
+        echo "$nginx_test_output"
+        echo
         return 1
     fi
 
-    systemctl reload nginx || {
+    local reload_output=""
+    if ! reload_output="$(systemctl reload nginx 2>&1)"; then
         if [[ "$had_previous" -eq 1 ]]; then
             printf '%s\n' "$previous_content" > "$conf_path"
         else
             rm -f "$conf_path"
         fi
+
         nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+
+        echo
+        echo "Error: Failed to reload Nginx after ACME preparation."
+        echo
+        echo "$reload_output"
+        echo
         return 1
-    }
+    fi
 }
 
 test_acme_webroot() {
@@ -458,6 +582,8 @@ remove_certificate() {
             else
                 echo
                 echo "Warning: Nginx configuration test failed after removing the U-OPTI ACME configuration."
+                echo
+                nginx -t 2>&1 || true
             fi
         fi
 
