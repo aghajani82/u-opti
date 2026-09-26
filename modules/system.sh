@@ -3,6 +3,72 @@
 # U-OPTI - System Information Module
 # v0.13.0
 
+show_hostname_menu() {
+    while true; do
+        clear
+
+        echo "======================================"
+        echo "         Hostname Management"
+        echo "======================================"
+        echo
+        echo "Current Hostname: $(hostnamectl --static 2>/dev/null || hostname)"
+        echo
+        echo "Enter the new hostname."
+        echo "Allowed: letters, numbers, and hyphens."
+        echo "Maximum length: 63 characters."
+        echo
+        echo "0) Back"
+        echo
+
+        read -rp "New hostname: " NEW_HOSTNAME
+
+        if [ "$NEW_HOSTNAME" = "0" ]; then
+            return
+        fi
+
+        if [ -z "$NEW_HOSTNAME" ]; then
+            echo
+            echo "ERROR: Hostname cannot be empty."
+            sleep 2
+            continue
+        fi
+
+        if [[ ! "$NEW_HOSTNAME" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,62}$ ]]; then
+            echo
+            echo "ERROR: Invalid hostname."
+            echo "Use only letters, numbers, and hyphens."
+            echo "The hostname must start with a letter or number"
+            echo "and be no longer than 63 characters."
+            sleep 3
+            continue
+        fi
+
+        if [ "$(hostnamectl --static 2>/dev/null || hostname)" = "$NEW_HOSTNAME" ]; then
+            echo
+            echo "Hostname is already set to: $NEW_HOSTNAME"
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        echo
+        echo "Changing hostname to: $NEW_HOSTNAME"
+
+        if hostnamectl set-hostname "$NEW_HOSTNAME"; then
+            echo
+            echo "Hostname changed successfully."
+            echo "New Hostname: $(hostnamectl --static 2>/dev/null || hostname)"
+        else
+            echo
+            echo "ERROR: Failed to change hostname."
+        fi
+
+        echo
+        read -rp "Press Enter to return..."
+        return
+    done
+}
+
 show_system_information() {
     clear
 
