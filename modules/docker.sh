@@ -12,6 +12,7 @@ DOCKER_3XUI_MODULE="$DOCKER_MODULE_DIR/docker-3xui.sh"
 DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
 DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
 DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
+DOCKER_SMITE_FOREIGN_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-foreign-gateway.sh"
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -27,6 +28,10 @@ fi
 
 if [ -f "$DOCKER_SMITE_GATEWAY_MODULE" ]; then
     source "$DOCKER_SMITE_GATEWAY_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE" ]; then
+    source "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE"
 fi
 
 docker_is_installed() { command -v docker >/dev/null 2>&1; }
@@ -326,7 +331,15 @@ docker_smite_management_menu() {
                 fi
                 ;;
             2)
-                if declare -F show_smite_gateway_menu >/dev/null 2>&1; then
+                if declare -F smite_foreign_gateway_role >/dev/null 2>&1 && \
+                   [ "$(smite_foreign_gateway_role)" = "foreign" ]; then
+                    if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
+                        show_smite_foreign_gateway_menu
+                    else
+                        echo "Smite Foreign gateway module is not available."
+                        read -rp "Press Enter to return..."
+                    fi
+                elif declare -F show_smite_gateway_menu >/dev/null 2>&1; then
                     show_smite_gateway_menu
                 else
                     echo "Smite gateway module is not available."
