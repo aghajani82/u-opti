@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-BRANCH="main"
+BRANCH="${U_OPTI_BRANCH:-main}"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -31,6 +31,7 @@ MODULES=(
     "certificate.sh"
     "backup.sh"
     "docker.sh"
+    "smite.sh"
     "docker-3xui.sh"
     "docker-3xui-instance.sh"
     "docker-3xui-compat.sh"
@@ -108,6 +109,7 @@ for MODULE in "${MODULES[@]}"; do
         certificate.sh) LABEL="Certificate Management" ;;
         backup.sh) LABEL="Backup & Restore" ;;
         docker.sh) LABEL="Docker Management" ;;
+        smite.sh) LABEL="Smite Management" ;;
         docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
         docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
         docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
@@ -136,7 +138,10 @@ echo "All required files are present."
 
 if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
-   ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh"; then
+   ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh" || \
+   ! grep -q 'echo "5) Smite Management"' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'show_smite_menu' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh"; then
     echo
     echo "ERROR: Downloaded U-OPTI files failed feature verification."
     echo "The downloaded files are inconsistent or stale."
@@ -209,6 +214,10 @@ echo
 
 echo "Docker Module:"
 echo "$MODULES_PATH/docker.sh"
+echo
+
+echo "Smite Module:"
+echo "$MODULES_PATH/smite.sh"
 echo
 
 echo "3x-UI Docker Module:"

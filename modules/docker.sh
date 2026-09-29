@@ -6,12 +6,17 @@
 DOCKER_APT_SOURCE="/etc/apt/sources.list.d/docker.sources"
 DOCKER_GPG_KEY="/etc/apt/keyrings/docker.asc"
 
-# Load the dedicated 3x-UI Docker module when available.
+# Load dedicated Docker-related modules when available.
 DOCKER_MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_3XUI_MODULE="$DOCKER_MODULE_DIR/docker-3xui.sh"
+DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_MODULE" ]; then
+    source "$DOCKER_SMITE_MODULE"
 fi
 
 docker_is_installed() { command -v docker >/dev/null 2>&1; }
@@ -298,16 +303,17 @@ docker_management_menu() {
         echo "2) Docker Status"
         echo "3) Docker Compose"
         echo "4) 3x-UI Docker Management"
-        echo "5) Container Management"
-        echo "6) Image Management"
-        echo "7) Volume Management"
-        echo "8) Network Management"
-        echo "9) Docker Cleanup"
+        echo "5) Smite Management"
+        echo "6) Container Management"
+        echo "7) Image Management"
+        echo "8) Volume Management"
+        echo "9) Network Management"
+        echo "10) Docker Cleanup"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-9]: " DOCKER_CHOICE
+        read -rp "Please enter your selection [0-10]: " DOCKER_CHOICE
 
         case "$DOCKER_CHOICE" in
             1)
@@ -329,7 +335,17 @@ docker_management_menu() {
                     read -rp "Press Enter to return..."
                 fi
                 ;;
-            5|6|7|8|9)
+            5)
+                if declare -F show_smite_menu >/dev/null 2>&1; then
+                    show_smite_menu
+                else
+                    clear
+                    echo "Smite Management module is not available."
+                    echo
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            6|7|8|9|10)
                 clear
                 echo "This Docker management function is planned for v0.13.0."
                 echo

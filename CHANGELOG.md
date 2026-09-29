@@ -25,6 +25,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/etc/u-opti` was not present.
 - Documentation version and main-menu numbering are synchronized with v0.13.0.
 
+## [0.14.0] - 2026-09-29
+
+### Added
+
+- Smite Management under Docker Management.
+- Persistent Smite compatibility overlays under `/opt/u-opti-smite` for the
+  tested TCP/443 single-entry architecture.
+- Separate **Prepare** and **Activate** workflows so Smite compatibility files
+  and Docker Compose bind mounts can be validated before containers are
+  recreated.
+- Smite Panel compatibility for explicit per-node `control_address` values,
+  allowing panel-to-node control traffic to avoid publicly exposed node API
+  port 8888.
+- Smite Node compatibility for node-to-panel HTTPS registration through port
+  443.
+- GOST compatibility for forwarding a single local tunnel port to an explicit
+  remote port such as 443.
+- Persistent tunnel cleanup behavior that stops active processes during normal
+  node shutdown without deleting saved tunnel definitions.
+- Smite module integration with the U-OPTI installer and self-updater,
+  including download, Bash syntax validation, backup, installation,
+  verification, and rollback handling.
+- `U_OPTI_BRANCH` override for controlled feature-branch installer and updater
+  testing while preserving `main` as the default source.
+
+### Changed
+
+- Docker Management now includes a dedicated Smite Management submenu.
+- U-OPTI self-update now treats newly introduced modules as optional in the
+  pre-update backup, allowing safe upgrades from versions that did not contain
+  `smite.sh`.
+
+### Safety
+
+- Smite runtime patching is context-checked and refuses to modify unknown
+  upstream code when the expected source block is not present.
+- Compose files are backed up and validated with `docker compose config` before
+  compatibility activation.
+- Activation recreates only detected Smite services and waits for container
+  health before reporting success.
+
 
 ## [0.13.0] - 2026-09-15
 
