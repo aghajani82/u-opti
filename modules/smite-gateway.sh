@@ -211,6 +211,19 @@ smite_gateway_backup_file() {
     fi
 }
 
+smite_gateway_remove_unchanged_backup() {
+    local backup="$1"
+    local current="$2"
+
+    [ -n "$backup" ] || return 0
+    [ -f "$backup" ] || return 0
+    [ -f "$current" ] || return 0
+
+    if cmp -s "$backup" "$current"; then
+        rm -f "$backup"
+    fi
+}
+
 smite_gateway_write_backend() {
     local domain="$1"
 
@@ -550,6 +563,10 @@ smite_gateway_configure_panel() {
     fi
 
     smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
+
+    smite_gateway_remove_unchanged_backup "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
+    smite_gateway_remove_unchanged_backup "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"
+    smite_gateway_remove_unchanged_backup "$map_backup" "$SMITE_GATEWAY_MAP_FILE"
 
     echo
     echo "======================================"
