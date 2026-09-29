@@ -413,6 +413,12 @@ smite_install_panel_iran() {
         return
     fi
 
+    mkdir -p "$SMITE_NODE_DIR/certs" || {
+        echo "ERROR: Failed to create the Smite node certificate directory."
+        smite_install_pause
+        return
+    }
+
     echo "Downloading the Iran-node CA certificate from the local panel..."
     if ! curl -fsS --retry 5 \
         http://127.0.0.1:8000/api/panel/ca \
