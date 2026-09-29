@@ -34,6 +34,7 @@ MODULES=(
     "smite.sh"
     "smite-install.sh"
     "smite-gateway.sh"
+    "smite-foreign-gateway.sh"
     "docker-3xui.sh"
     "docker-3xui-instance.sh"
     "docker-3xui-compat.sh"
@@ -114,6 +115,7 @@ for MODULE in "${MODULES[@]}"; do
         smite.sh) LABEL="Smite Compatibility Management" ;;
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
+        smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
         docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
         docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
@@ -147,6 +149,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'docker_smite_management_menu' "$TEMP_DIR/docker.sh" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
+   ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh"; then
     echo
     echo "ERROR: Downloaded U-OPTI files failed feature verification."
@@ -232,6 +235,10 @@ echo
 
 echo "Smite Gateway Module:"
 echo "$MODULES_PATH/smite-gateway.sh"
+echo
+
+echo "Smite Foreign Gateway Module:"
+echo "$MODULES_PATH/smite-foreign-gateway.sh"
 echo
 
 echo "3x-UI Docker Module:"
