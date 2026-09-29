@@ -259,11 +259,51 @@ EOF
 
 smite_gateway_write_stream() {
     local domain="$1"
+    local map_tmp=""
 
-    cat > "$SMITE_GATEWAY_MAP_FILE" <<EOF
-# Managed by U-OPTI. Additional Foreign SNI routes are appended here.
-$domain    127.0.0.1:8443;
-EOF
+    map_tmp="$(mktemp)" || return 1
+
+    printf '%s\n' \
+        '# Managed by U-OPTI. Additional Foreign SNI routes are appended here.' \
+        > "$map_tmp" || {
+        rm -f "$map_tmp"
+        return 1
+    }
+
+    if [ -f "$SMITE_GATEWAY_MAP_FILE" ]; then
+        awk -v panel_domain="$domain" '
+            $0 == "# Managed by U-OPTI. Additional Foreign SNI routes are appended here." {
+                next
+            }
+
+            $1 == panel_domain {
+                next
+            }
+
+            $2 == "127.0.0.1:8443;" {
+                next
+            }
+
+            {
+                print
+            }
+        ' "$SMITE_GATEWAY_MAP_FILE" >> "$map_tmp" || {
+            rm -f "$map_tmp"
+            return 1
+        }
+    fi
+
+    printf '%s    127.0.0.1:8443;\n' "$domain" >> "$map_tmp" || {
+        rm -f "$map_tmp"
+        return 1
+    }
+
+    install -m 0644 "$map_tmp" "$SMITE_GATEWAY_MAP_FILE" || {
+        rm -f "$map_tmp"
+        return 1
+    }
+
+    rm -f "$map_tmp"
 
     cat > "$SMITE_GATEWAY_STREAM_CONF" <<EOF
 # Managed by U-OPTI - Smite TCP/443 SNI gateway
