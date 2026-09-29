@@ -10,6 +10,8 @@ DOCKER_GPG_KEY="/etc/apt/keyrings/docker.asc"
 DOCKER_MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_3XUI_MODULE="$DOCKER_MODULE_DIR/docker-3xui.sh"
 DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
+DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
+DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -17,6 +19,14 @@ fi
 
 if [ -f "$DOCKER_SMITE_MODULE" ]; then
     source "$DOCKER_SMITE_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_INSTALL_MODULE" ]; then
+    source "$DOCKER_SMITE_INSTALL_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_GATEWAY_MODULE" ]; then
+    source "$DOCKER_SMITE_GATEWAY_MODULE"
 fi
 
 docker_is_installed() { command -v docker >/dev/null 2>&1; }
@@ -291,6 +301,58 @@ docker_compose_menu() {
     read -rp "Press Enter to return..."
 }
 
+docker_smite_management_menu() {
+    while true; do
+        clear
+        echo "======================================"
+        echo "        Smite Management"
+        echo "======================================"
+        echo
+        echo "1) Install / Lifecycle"
+        echo "2) 443 Gateway"
+        echo "3) Compatibility Tools"
+        echo
+        echo "0) Back"
+        echo
+
+        read -rp "Please enter your selection [0-3]: " SMITE_MANAGEMENT_CHOICE
+        case "$SMITE_MANAGEMENT_CHOICE" in
+            1)
+                if declare -F show_smite_install_menu >/dev/null 2>&1; then
+                    show_smite_install_menu
+                else
+                    echo "Smite installer module is not available."
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            2)
+                if declare -F show_smite_gateway_menu >/dev/null 2>&1; then
+                    show_smite_gateway_menu
+                else
+                    echo "Smite gateway module is not available."
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            3)
+                if declare -F show_smite_menu >/dev/null 2>&1; then
+                    show_smite_menu
+                else
+                    echo "Smite compatibility module is not available."
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
 docker_management_menu() {
     while true; do
         clear
@@ -336,14 +398,7 @@ docker_management_menu() {
                 fi
                 ;;
             5)
-                if declare -F show_smite_menu >/dev/null 2>&1; then
-                    show_smite_menu
-                else
-                    clear
-                    echo "Smite Management module is not available."
-                    echo
-                    read -rp "Press Enter to return..."
-                fi
+                docker_smite_management_menu
                 ;;
             6|7|8|9|10)
                 clear
