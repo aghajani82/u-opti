@@ -332,6 +332,7 @@ while true; do
                 "smite.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
+                "smite-foreign-gateway.sh"
                 "docker-3xui-instance.sh"
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
@@ -423,6 +424,7 @@ while true; do
                 ["smite.sh"]="$BASE_URL/modules/smite.sh"
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
                 ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
+                ["smite-foreign-gateway.sh"]="$BASE_URL/modules/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$BASE_URL/modules/docker-3xui-instance.sh"
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
@@ -449,6 +451,7 @@ while true; do
                 ["smite.sh"]="$TEMP_DIR/smite.sh"
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
                 ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
+                ["smite-foreign-gateway.sh"]="$TEMP_DIR/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$TEMP_DIR/docker-3xui-instance.sh"
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
@@ -541,7 +544,8 @@ while true; do
                ! grep -q 'docker_smite_management_menu' "$TEMP_DIR/docker.sh" || \
                ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh" || \
                ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
-               ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh"; then
+               ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
+               ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh"; then
                 echo
                 echo "ERROR: Downloaded files failed feature verification."
                 echo "The downloaded U-OPTI files are inconsistent or stale."
@@ -640,6 +644,7 @@ while true; do
                 "smite.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
+                "smite-foreign-gateway.sh"
                 "docker-3xui-instance.sh"
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
@@ -673,7 +678,7 @@ while true; do
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
@@ -684,7 +689,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 24 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 25 ]; then
                 BACKUP_OK=false
             fi
 
