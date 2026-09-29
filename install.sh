@@ -138,7 +138,10 @@ echo "All required files are present."
 
 if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
-   ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh"; then
+   ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh" || \
+   ! grep -q 'echo "5) Smite Management"' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'show_smite_menu' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh"; then
     echo
     echo "ERROR: Downloaded U-OPTI files failed feature verification."
     echo "The downloaded files are inconsistent or stale."
