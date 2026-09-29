@@ -6,7 +6,7 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 
 ## Current Version
 
-**v0.13.0**
+**v0.14.0**
 
 ## Main Menu
 
@@ -162,6 +162,25 @@ U-OPTI backups are not intended to replace full-server snapshots. Provider snaps
 - Use dedicated ACME configuration per domain
 - Keep existing Nginx site configuration separate from certificate issuance
 
+### Smite Management
+
+Smite integration is available under Docker Management and provides a persistent compatibility layer for the tested single-entry TCP/443 architecture.
+
+- Detect Smite Panel and Smite Node containers independently
+- Show Smite 443 integration status
+- Prepare persistent compatibility overlays under `/opt/u-opti-smite`
+- Preserve required Smite Python compatibility changes across container recreation
+- Add bind mounts to the existing Smite Docker Compose files without replacing unrelated service configuration
+- Validate modified Compose files before activation
+- Recreate only detected Smite services when activation is explicitly confirmed
+- Preserve node-to-panel HTTPS/443 registration after container recreation
+- Preserve GOST forwarding to a separate remote port such as TCP/443
+- Preserve persisted node tunnel definitions during normal container shutdown and restart
+- Allow the panel to use an explicit per-node control address instead of requiring public node API port 8888
+- Refuse compatibility patching when expected upstream code blocks are not found, avoiding unsafe edits against unknown Smite versions
+
+The current Smite compatibility workflow is intentionally separated into **Prepare** and **Activate** steps so configuration can be reviewed before containers are recreated.
+
 ### U-OPTI Self-Update
 
 - Check the installed and remote U-OPTI version
@@ -174,12 +193,13 @@ U-OPTI backups are not intended to replace full-server snapshots. Provider snaps
 - Verify installed files after update
 - Automatically restore the previous installation if the update fails
 - Automatically restart U-OPTI using the newly installed version after a successful update
+- Include the Smite module in download, validation, backup, installation, verification, and rollback handling
 
 ### Safe Uninstall
 
 U-OPTI uninstall requires explicit confirmation and creates a final safety backup before removing the U-OPTI application files.
 
-The uninstall process removes only U-OPTI itself and keeps unrelated server services such as Nginx, Certbot, X-UI/Xray, and Docker untouched.
+The uninstall process removes only U-OPTI itself and keeps unrelated server services such as Nginx, Certbot, X-UI/Xray, Docker, and Smite untouched.
 
 ## Installation
 
@@ -226,14 +246,11 @@ Currently supported targets:
 
 The uninstall routine (`u-opti` → `9) Uninstall U-OPTI`) removes only
 U-OPTI itself. It does **not** touch Docker, Nginx, Certbot, 3x-UI,
-Xray, or any other service or data on the server.
+Xray, Smite, or any other service or data on the server.
 
 If `/etc/u-opti` does not exist (for example, on a fresh install that
 has never used the backup feature), no safety backup is created and
 the uninstall proceeds normally.
-
-
-
 
 ## Safety
 
@@ -254,6 +271,7 @@ If a passphrase is used for a private SSH key, keep the passphrase separate from
 Development work is performed on dedicated version or feature branches and tested on clean Ubuntu servers before release.
 
 The `main` branch contains the stable release.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list of changes between
