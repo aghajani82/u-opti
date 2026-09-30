@@ -125,6 +125,7 @@ smite_foreign_gateway_ensure_packages() {
 
 smite_foreign_gateway_prepare_acme() {
     local domain="$1" acme_conf="/etc/nginx/conf.d/u-opti-acme-${1}.conf"
+    local attempt=1
 
     mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
     chmod 0755 "$SMITE_FOREIGN_ACME_ROOT" "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
@@ -153,15 +154,20 @@ EOF
     printf '%s\n' 'u-opti-smite-foreign-acme-test' > \
         "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
 
-    if ! curl -fsS --connect-timeout 2 --max-time 5 -H "Host: $domain" \
-        http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-foreign-test \
-        | grep -qx 'u-opti-smite-foreign-acme-test'; then
-        rm -f "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test"
-        echo "ERROR: Local ACME webroot validation failed."
-        return 1
-    fi
+    while [ "$attempt" -le 10 ]; do
+        if curl -fsS --connect-timeout 2 --max-time 5 -H "Host: $domain" \
+            http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-foreign-test 2>/dev/null \
+            | grep -qx 'u-opti-smite-foreign-acme-test'; then
+            rm -f "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test"
+            return 0
+        fi
+        [ "$attempt" -lt 10 ] && sleep 1
+        attempt=$((attempt + 1))
+    done
 
     rm -f "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test"
+    echo "ERROR: Local ACME webroot validation failed."
+    return 1
 }
 
 smite_foreign_gateway_ensure_certificate() {
@@ -247,10 +253,13 @@ EOF
 
 smite_foreign_gateway_verify_local() {
     local domain="$1" control_path="$2"
-    local json=""
-    json="$(curl -fsS --max-time 10 --resolve "${domain}:443:127.0.0.1" \
-        "https://${domain}${control_path}/api/agent/status")" || return 1
-    python3 - "$json" <<'PY'
+    local json="" attempt=1
+
+    while [ "$attempt" -le 10 ]; do
+        json="$(curl -fsS --max-time 10 --resolve "${domain}:443:127.0.0.1" \
+            "https://${domain}${control_path}/api/agent/status" 2>/dev/null || true)"
+
+        if [ -n "$json" ] && python3 - "$json" <<'PY'
 import json, sys
 try:
     data = json.loads(sys.argv[1])
@@ -258,6 +267,15 @@ except Exception:
     raise SystemExit(1)
 raise SystemExit(0 if data.get('status') == 'ok' else 1)
 PY
+        then
+            return 0
+        fi
+
+        [ "$attempt" -lt 10 ] && sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    return 1
 }
 
 smite_foreign_gateway_patch_control_metadata() {
