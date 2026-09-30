@@ -108,6 +108,7 @@ smite_foreign_gateway_ensure_packages() {
     command -v certbot >/dev/null 2>&1 || packages+=(certbot)
     command -v curl >/dev/null 2>&1 || packages+=(curl)
     command -v python3 >/dev/null 2>&1 || packages+=(python3)
+    command -v openssl >/dev/null 2>&1 || packages+=(openssl)
 
     if [ "${#packages[@]}" -gt 0 ]; then
         echo "Installing Foreign gateway packages: ${packages[*]}"
@@ -215,7 +216,9 @@ smite_foreign_gateway_control_path() {
 
 smite_foreign_gateway_write_site() {
     local domain="$1" panel_ip="$2" control_path="$3" site="$4"
-    cat > "$site" <<EOF
+
+    if [ ! -f "$site" ]; then
+        cat > "$site" <<EOF
 # Managed by U-OPTI - Smite Foreign HTTPS/443 gateway
 server {
     listen 443 ssl;
@@ -229,6 +232,7 @@ server {
     root /var/www/html;
     index index.html index.htm index.nginx-debian.html;
 
+    # BEGIN U-OPTI SMITE FOREIGN CONTROL
     location ^~ ${control_path}/ {
         allow 127.0.0.1;
         allow ::1;
@@ -245,10 +249,115 @@ server {
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
     }
+    # END U-OPTI SMITE FOREIGN CONTROL
 
     location / { try_files \$uri \$uri/ =404; }
 }
 EOF
+        return 0
+    fi
+
+    python3 - "$site" "$domain" "$panel_ip" "$control_path" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+domain = sys.argv[2]
+panel_ip = sys.argv[3]
+control_path = sys.argv[4].rstrip('/')
+text = path.read_text()
+lines = text.splitlines(keepends=True)
+
+begin_marker = '# BEGIN U-OPTI SMITE FOREIGN CONTROL'
+end_marker = '# END U-OPTI SMITE FOREIGN CONTROL'
+
+block = f'''    {begin_marker}\n    location ^~ {control_path}/ {{\n        allow 127.0.0.1;\n        allow ::1;\n        allow {panel_ip};\n        deny all;\n\n        proxy_pass http://127.0.0.1:8888/;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_connect_timeout 10s;\n        proxy_read_timeout 60s;\n        proxy_send_timeout 60s;\n    }}\n    {end_marker}\n'''
+
+
+def brace_delta(line):
+    body = line.split('#', 1)[0]
+    return body.count('{') - body.count('}')
+
+
+def server_blocks(items):
+    result = []
+    i = 0
+    while i < len(items):
+        if re.match(r'^\s*server\s*\{', items[i]):
+            depth = 0
+            for j in range(i, len(items)):
+                depth += brace_delta(items[j])
+                if depth == 0:
+                    result.append((i, j))
+                    i = j
+                    break
+            else:
+                raise SystemExit('ERROR: Unterminated Nginx server block; refusing unsafe edit')
+        i += 1
+    return result
+
+
+def target_server(items):
+    matches = []
+    for start, end in server_blocks(items):
+        body = ''.join(items[start:end + 1])
+        names = []
+        for match in re.finditer(r'(?m)^\s*server_name\s+([^;]+);', body):
+            names.extend(match.group(1).split())
+        listens_443 = re.search(r'(?m)^\s*listen\s+[^;]*\b443\b[^;]*;', body) is not None
+        if domain in names and listens_443:
+            matches.append((start, end))
+    if len(matches) != 1:
+        raise SystemExit(
+            f'ERROR: Expected exactly one HTTPS server block for {domain}; found {len(matches)}. No change made.'
+        )
+    return matches[0]
+
+
+start, end = target_server(lines)
+
+marker_starts = [i for i in range(start, end + 1) if begin_marker in lines[i]]
+marker_ends = [i for i in range(start, end + 1) if end_marker in lines[i]]
+if marker_starts or marker_ends:
+    if len(marker_starts) != 1 or len(marker_ends) != 1 or marker_starts[0] >= marker_ends[0]:
+        raise SystemExit('ERROR: Invalid U-OPTI Foreign control markers; no change made')
+    a, b = marker_starts[0], marker_ends[0]
+    lines[a:b + 1] = [block]
+    path.write_text(''.join(lines))
+    print('Existing Nginx site preserved; managed Smite control block updated.')
+    raise SystemExit(0)
+
+location_re = re.compile(
+    r'^\s*location\s+\^~\s+' + re.escape(control_path + '/') + r'\s*\{'
+)
+legacy_start = None
+for i in range(start, end + 1):
+    if location_re.match(lines[i]):
+        legacy_start = i
+        break
+
+if legacy_start is not None:
+    depth = 0
+    legacy_end = None
+    for j in range(legacy_start, end + 1):
+        depth += brace_delta(lines[j])
+        if depth == 0:
+            legacy_end = j
+            break
+    if legacy_end is None:
+        raise SystemExit('ERROR: Unterminated legacy Smite control location; no change made')
+    lines[legacy_start:legacy_end + 1] = [block]
+    path.write_text(''.join(lines))
+    print('Existing Nginx site preserved; legacy Smite control location migrated.')
+    raise SystemExit(0)
+
+# Re-evaluate the target after no replacements; insert before its closing brace.
+start, end = target_server(lines)
+lines[end:end] = ['\n' + block]
+path.write_text(''.join(lines))
+print('Existing Nginx site preserved; Smite control location added.')
+PY
 }
 
 smite_foreign_gateway_verify_local() {
@@ -460,7 +569,7 @@ smite_foreign_gateway_status() {
 
 smite_foreign_gateway_configure() {
     local role domain panel_domain node_name site enabled control_path control_url
-    local detected_ip stored_ip panel_ip panel_ip_input confirm adopt
+    local detected_ip stored_ip panel_ip panel_ip_input confirm
     local site_backup="" env_backup=""
 
     clear
@@ -510,12 +619,11 @@ smite_foreign_gateway_configure() {
     panel_ip="${panel_ip_input:-$panel_ip}"
     smite_foreign_gateway_validate_ipv4 "$panel_ip" || { echo "ERROR: A valid Panel source IPv4 is required."; smite_foreign_gateway_pause; return; }
 
-    if [ -f "$site" ] && ! grep -q '^# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway$' "$site"; then
+    if [ -f "$site" ]; then
         echo
         echo "Existing Nginx site detected: $site"
-        echo "U-OPTI will create a timestamped backup before adopting this site."
-        read -rp "Adopt and replace this existing site? [y/N]: " adopt
-        case "$adopt" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; smite_foreign_gateway_pause; return ;; esac
+        echo "U-OPTI will preserve the existing server content and only add/repair its managed Smite control location."
+        echo "A timestamped backup is created before any edit."
     fi
 
     echo
@@ -541,7 +649,7 @@ smite_foreign_gateway_configure() {
         cp -a "$site" "$site_backup" || { echo "ERROR: Could not back up existing Foreign site."; smite_foreign_gateway_pause; return; }
     fi
 
-    smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to write Foreign Nginx site."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to update Foreign Nginx site without replacing existing content."; smite_foreign_gateway_pause; return; }
     ln -sfn "$site" "$enabled" || { echo "ERROR: Failed to enable Foreign Nginx site."; smite_foreign_gateway_pause; return; }
 
     if ! nginx -t || ! systemctl reload nginx; then
