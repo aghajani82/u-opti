@@ -6,8 +6,12 @@
 SMITE_UPSTREAM_VERSION="${SMITE_UPSTREAM_VERSION:-0.1.7}"
 SMITE_UPSTREAM_REF="${SMITE_UPSTREAM_REF:-v${SMITE_UPSTREAM_VERSION}}"
 SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/zZedix/Smite/${SMITE_UPSTREAM_REF}"
-SMITE_PANEL_IMAGE="ghcr.io/zzedix/smite-panel:${SMITE_UPSTREAM_VERSION}"
-SMITE_NODE_IMAGE="ghcr.io/zzedix/smite-node:${SMITE_UPSTREAM_VERSION}"
+SMITE_PANEL_REPO="ghcr.io/zzedix/smite-panel"
+SMITE_NODE_REPO="ghcr.io/zzedix/smite-node"
+SMITE_PANEL_DIGEST="sha256:67f98cba1f49658e651779ab6142290f7eb0906b54b386939fcdb867d18cb44f"
+SMITE_NODE_DIGEST="sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+SMITE_PANEL_IMAGE="${SMITE_PANEL_REPO}@${SMITE_PANEL_DIGEST}"
+SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
 
@@ -88,6 +92,34 @@ smite_download_upstream() {
     curl -fsSL --retry 3 \
         "${SMITE_UPSTREAM_RAW}/${path}?cb=${cache_bust}" \
         -o "$destination"
+}
+
+smite_install_pin_compose_image() {
+    local compose_file="$1"
+    local expected_repo="$2"
+    local pinned_image="$3"
+
+    python3 - "$compose_file" "$expected_repo" "$pinned_image" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+expected_repo = sys.argv[2]
+pinned_image = sys.argv[3]
+
+text = path.read_text()
+needle = f"    image: {expected_repo}:${{SMITE_VERSION:-latest}}"
+replacement = f"    image: {pinned_image}"
+
+count = text.count(needle)
+if count != 1:
+    raise SystemExit(
+        f"ERROR: Expected exactly one Compose image line for {expected_repo}; found {count}. Refusing unsafe pin."
+    )
+
+path.write_text(text.replace(needle, replacement, 1))
+print(f"Pinned Compose image: {pinned_image}")
+PY
 }
 
 smite_install_cli_tools() {
@@ -179,6 +211,11 @@ smite_install_panel_files() {
         return 1
     fi
 
+    if ! smite_install_pin_compose_image "$SMITE_PANEL_COMPOSE" "$SMITE_PANEL_REPO" "$SMITE_PANEL_IMAGE"; then
+        echo "ERROR: Failed to pin the validated Smite panel image digest."
+        return 1
+    fi
+
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
 PANEL_PORT=8000
 PANEL_HOST=127.0.0.1
@@ -215,6 +252,11 @@ smite_install_node_files() {
 
     if ! smite_download_upstream "node/docker-compose.yml" "$SMITE_NODE_COMPOSE"; then
         echo "ERROR: Failed to download the validated Smite node Compose file."
+        return 1
+    fi
+
+    if ! smite_install_pin_compose_image "$SMITE_NODE_COMPOSE" "$SMITE_NODE_REPO" "$SMITE_NODE_IMAGE"; then
+        echo "ERROR: Failed to pin the validated Smite node image digest."
         return 1
     fi
 
