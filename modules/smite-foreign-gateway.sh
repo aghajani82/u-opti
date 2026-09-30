@@ -457,6 +457,38 @@ smite_foreign_gateway_set_node_control_address() {
 }
 
 smite_foreign_gateway_recreate_node() {
+    local env_file="$SMITE_NODE_DIR/.env"
+    local overlay="$SMITE_OVERLAY_DIR/node/panel_client.py"
+    local desired="" running="" mounted_source=""
+    local started_iso="" started_epoch=0 overlay_mtime=0
+
+    desired="$(awk -F= '$1 == "SMITE_CONTROL_ADDRESS" {print substr($0,index($0,"=")+1); exit}' "$env_file" 2>/dev/null)"
+
+    running="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null \
+        | awk -F= '$1 == "SMITE_CONTROL_ADDRESS" {print substr($0,index($0,"=")+1); exit}')"
+
+    mounted_source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/app/panel_client.py"}}{{.Source}}{{end}}{{end}}' smite-node 2>/dev/null || true)"
+
+    started_iso="$(docker inspect -f '{{.State.StartedAt}}' smite-node 2>/dev/null || true)"
+    started_epoch="$(date -d "$started_iso" +%s 2>/dev/null || printf '0')"
+
+    if [ -f "$overlay" ]; then
+        overlay_mtime="$(stat -c %Y "$overlay" 2>/dev/null || printf '0')"
+    fi
+
+    if [ -n "$desired" ] &&
+       [ "$running" = "$desired" ] &&
+       [ "$mounted_source" = "$overlay" ] &&
+       [ -f "$overlay" ] &&
+       grep -Fq 'SMITE_CONTROL_ADDRESS' "$overlay" &&
+       [ "$started_epoch" -gt 0 ] &&
+       [ "$overlay_mtime" -le "$started_epoch" ]; then
+
+        echo "Foreign Smite Node configuration unchanged; recreation skipped."
+        return 0
+    fi
+
+    echo "Recreating Foreign Smite Node because effective configuration changed..."
     docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
     smite_foreign_gateway_wait_healthy 90
 }
@@ -669,7 +701,7 @@ smite_foreign_gateway_configure() {
     env_backup="${SMITE_NODE_DIR}/.env.u-opti-before-foreign-gateway-$(date +%Y%m%d-%H%M%S).bak"
     smite_foreign_gateway_set_node_control_address "$control_url" "$env_backup" || { echo "ERROR: Could not update node control address."; smite_foreign_gateway_pause; return; }
 
-    echo "Recreating Foreign Smite Node with persistent control_address metadata..."
+    echo "Applying Foreign Smite Node control metadata..."
     if ! smite_foreign_gateway_recreate_node; then
         echo "ERROR: Foreign node recreation failed; restoring previous node environment."
         cp -a "$env_backup" "$SMITE_NODE_DIR/.env"
