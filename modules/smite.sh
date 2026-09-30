@@ -309,6 +309,48 @@ replace_once(
 PY
 }
 
+smite_patch_existing_node_overlay_metadata() {
+    local overlay="$SMITE_OVERLAY_DIR/node/panel_client.py"
+
+    [ -f "$overlay" ] || return 0
+
+    python3 - "$overlay" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+s = path.read_text()
+marker = 'SMITE_CONTROL_ADDRESS'
+if marker in s:
+    print('Node overlay control_address metadata: already patched')
+    raise SystemExit(0)
+
+old = '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+        
+        try:
+'''
+new = '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+
+        control_address = __import__("os").environ.get("SMITE_CONTROL_ADDRESS", "").strip()
+        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+        
+        try:
+'''
+if old not in s:
+    raise SystemExit('ERROR: Node overlay registration metadata block was not found; refusing unsafe patch')
+
+path.write_text(s.replace(old, new, 1))
+print('Node overlay control_address metadata: patched')
+PY
+
+    python3 -m py_compile "$overlay" || return 1
+}
+
 smite_prepare_overlays() {
     smite_require_docker || return 1
 
@@ -324,6 +366,7 @@ smite_prepare_overlays() {
     fi
 
     if smite_container_exists smite-node; then
+        smite_patch_existing_node_overlay_metadata || return 1
         smite_patch_node_runtime || return 1
         docker cp smite-node:/app/app/panel_client.py "$SMITE_OVERLAY_DIR/node/panel_client.py" || return 1
         docker cp smite-node:/app/app/core_adapters.py "$SMITE_OVERLAY_DIR/node/core_adapters.py" || return 1
