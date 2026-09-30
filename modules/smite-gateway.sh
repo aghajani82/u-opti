@@ -132,6 +132,9 @@ smite_gateway_ensure_packages() {
 smite_gateway_prepare_acme() {
     local domain="$1"
     local acme_conf="/etc/nginx/conf.d/u-opti-acme-${domain}.conf"
+    local acme_test_file="$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-test"
+    local attempt
+    local validated=false
 
     mkdir -p "$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge" || return 1
     chmod 0755 "$SMITE_GATEWAY_ACME_ROOT" \
@@ -160,19 +163,28 @@ EOF
     nginx -t || return 1
     systemctl reload nginx || return 1
 
-    printf '%s\n' 'u-opti-smite-acme-test' > \
-        "$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-test" || return 1
+    printf '%s\n' 'u-opti-smite-acme-test' > "$acme_test_file" || return 1
 
-    if ! curl -fsS --connect-timeout 2 --max-time 5 \
-        -H "Host: $domain" \
-        http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-test \
-        | grep -qx 'u-opti-smite-acme-test'; then
-        rm -f "$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-test"
-        echo "ERROR: Local ACME webroot validation failed."
+    # A fresh Nginx install/reload may briefly keep serving the old worker
+    # configuration. Retry the local ACME probe instead of treating that
+    # short reload window as a permanent webroot failure.
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if curl -fsS --connect-timeout 2 --max-time 5 \
+            -H "Host: $domain" \
+            http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-test \
+            2>/dev/null | grep -qx 'u-opti-smite-acme-test'; then
+            validated=true
+            break
+        fi
+        sleep 1
+    done
+
+    rm -f "$acme_test_file"
+
+    if [ "$validated" != "true" ]; then
+        echo "ERROR: Local ACME webroot validation failed after retries."
         return 1
     fi
-
-    rm -f "$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-test"
 }
 
 smite_gateway_ensure_certificate() {
