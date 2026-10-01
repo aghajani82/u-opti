@@ -693,6 +693,60 @@ smite_install_foreign_node() {
     smite_install_pause
 }
 
+smite_install_sanaei_foreign() {
+    local current_role=""
+
+    clear
+    echo "======================================"
+    echo "    Sanaei 3x-UI for Smite Foreign"
+    echo "======================================"
+    echo
+
+    if [ ! -f "$SMITE_STATE_FILE" ]; then
+        echo "ERROR: Smite managed state was not found."
+        echo
+        echo "Install the Smite Foreign Node first."
+        smite_install_pause
+        return
+    fi
+
+    # shellcheck disable=SC1090
+    source "$SMITE_STATE_FILE"
+    current_role="${SMITE_ROLE:-}"
+
+    if [ "$current_role" != "foreign" ]; then
+        echo "ERROR: This option is available only on a Smite Foreign Node."
+        echo
+        echo "Detected role: ${current_role:-Unknown}"
+        smite_install_pause
+        return
+    fi
+
+    if ! declare -F docker_3xui_install >/dev/null 2>&1; then
+        echo "ERROR: U-OPTI 3x-UI Docker installer is not available."
+        echo
+        echo "The existing Docker 3x-UI module must be loaded."
+        smite_install_pause
+        return
+    fi
+
+    echo "Smite Foreign Node detected."
+    echo
+    echo "Launching the existing U-OPTI 3x-UI Multi-Instance installer..."
+    echo
+    echo "The normal U-OPTI rules remain active:"
+    echo "  - Multi-instance allocation"
+    echo "  - Nginx / SSL"
+    echo "  - Hidden Web Base Path"
+    echo "  - Panel Listen IP: 127.0.0.1"
+    echo "  - Subscription / API / Metrics compatibility"
+    echo
+    sleep 2
+
+    docker_3xui_install
+}
+
+
 show_smite_install_menu() {
     while true; do
         clear
@@ -703,15 +757,17 @@ show_smite_install_menu() {
         echo "1) Install Panel + Iran Node"
         echo "2) Install Foreign Node"
         echo "3) Installation State"
+        echo "4) Install Sanaei 3x-UI on Foreign Node"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-3]: " smite_install_choice
+        read -rp "Please enter your selection [0-4]: " smite_install_choice
         case "$smite_install_choice" in
             1) smite_install_panel_iran ;;
             2) smite_install_foreign_node ;;
             3) smite_show_installation_state ;;
+            4) smite_install_sanaei_foreign ;;
             0) break ;;
             *)
                 echo
