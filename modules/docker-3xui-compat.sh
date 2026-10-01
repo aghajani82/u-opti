@@ -15,7 +15,7 @@
 #   Subscription : prefer 2096, then 2095, then 2097-2099
 #   Metrics      : prefer 11111, then 11112, then 11113-11115
 #
-# Subscription is kept on localhost and published through Nginx :443.
+# Panel and Subscription are kept on localhost and published through Nginx :443.
 # Xray metrics are kept on localhost.
 #
 # These are library functions only. Nothing runs automatically when sourced.
@@ -795,12 +795,13 @@ docker_3xui_compat_configure_panel() {
 
     if ! sqlite3 "$DB_FILE" <<SQL
 BEGIN;
-DELETE FROM settings WHERE key='webPort';
+DELETE FROM settings WHERE key IN ('webListen','webPort');
+INSERT INTO settings(key,value) VALUES ('webListen','127.0.0.1');
 INSERT INTO settings(key,value) VALUES ('webPort','$PORT');
 COMMIT;
 SQL
     then
-        echo "ERROR: Failed to configure panel webPort."
+        echo "ERROR: Failed to configure panel webListen/webPort."
         return 1
     fi
 
@@ -811,6 +812,7 @@ SQL
 docker_3xui_compat_verify_panel() {
     local DB_FILE="$1"
     local EXPECTED_PORT="$2"
+    local ACTUAL_LISTEN
     local ACTUAL_PORT
 
     if [ -z "$DB_FILE" ] || [ -z "$EXPECTED_PORT" ]; then
@@ -819,11 +821,24 @@ docker_3xui_compat_verify_panel() {
         return 1
     fi
 
+    ACTUAL_LISTEN="$(
+        sqlite3 "$DB_FILE" \
+            "SELECT value FROM settings WHERE key='webListen' LIMIT 1;" \
+            2>/dev/null || true
+    )"
+
     ACTUAL_PORT="$(
         sqlite3 "$DB_FILE" \
             "SELECT value FROM settings WHERE key='webPort' LIMIT 1;" \
             2>/dev/null || true
     )"
+
+    if [ "$ACTUAL_LISTEN" != "127.0.0.1" ]; then
+        echo "ERROR: Panel listen IP configuration verification failed."
+        echo "Expected: 127.0.0.1"
+        echo "Detected : ${ACTUAL_LISTEN:-Not detected}"
+        return 1
+    fi
 
     if [ "$ACTUAL_PORT" != "$EXPECTED_PORT" ]; then
         echo "ERROR: Panel port configuration verification failed."
@@ -965,21 +980,21 @@ docker_3xui_compat_configure() {
     echo "  Listen        : 127.0.0.1:$DOCKER_3XUI_COMPAT_PANEL_PORT"
     echo
 
-    if ! docker_3xui_compat_configure_panel         "$DB_FILE"         "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
-
-        echo "ERROR: Panel webPort configuration failed."
-        return 1
-    fi
-
-    echo "Web Base Path:"
-    echo "  Path          : $WEB_BASE_PATH"
+    echo "Stopping 3x-UI temporarily to apply instance-specific ports..."
     echo
 
-    if ! docker_3xui_compat_configure_web_base_path \
-        "$CONTAINER" \
-        "$WEB_BASE_PATH"; then
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" = "true" ]; then
+        if ! docker stop "$CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop 3x-UI container before compatibility configuration."
+            return 1
+        fi
+    fi
 
-        echo "ERROR: Web Base Path configuration failed."
+    if ! docker_3xui_compat_configure_panel \
+        "$DB_FILE" \
+        "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
+
+        echo "ERROR: Panel webListen/webPort configuration failed."
         return 1
     fi
 
@@ -1021,6 +1036,36 @@ docker_3xui_compat_configure() {
         "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
 
         echo "ERROR: Metrics configuration failed."
+        return 1
+    fi
+
+    echo
+    echo "Starting 3x-UI with instance-specific ports..."
+    echo
+
+    if ! docker start "$CONTAINER" >/dev/null; then
+        echo "ERROR: Failed to start 3x-UI after compatibility configuration."
+        return 1
+    fi
+
+    sleep 3
+
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" != "true" ]; then
+        echo "ERROR: 3x-UI stopped after applying instance-specific ports."
+        echo
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
+        return 1
+    fi
+
+    echo "Web Base Path:"
+    echo "  Path          : $WEB_BASE_PATH"
+    echo
+
+    if ! docker_3xui_compat_configure_web_base_path \
+        "$CONTAINER" \
+        "$WEB_BASE_PATH"; then
+
+        echo "ERROR: Web Base Path configuration failed."
         return 1
     fi
 

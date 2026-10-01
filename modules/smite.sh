@@ -145,6 +145,28 @@ replace_once(
     "node FRP-status HTTPS/443",
 )
 
+replace_once(
+    panel_client,
+    '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+        
+        try:
+''',
+    '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+
+        control_address = __import__("os").environ.get("SMITE_CONTROL_ADDRESS", "").strip()
+        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+        
+        try:
+''',
+    'SMITE_CONTROL_ADDRESS',
+    "node control_address metadata",
+)
+
 core = "/app/app/core_adapters.py"
 replace_once(
     core,
@@ -268,7 +290,65 @@ replace_once(
     'node.node_metadata.get("control_address")',
     "panel control_address",
 )
+
+replace_once(
+    "/app/app/routers/nodes.py",
+    '''        existing.node_metadata.update(metadata)
+        existing.node_metadata["role"] = existing_role
+        await db.commit()
+''',
+    '''        existing.node_metadata.update(metadata)
+        existing.node_metadata["role"] = existing_role
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(existing, "node_metadata")
+        await db.commit()
+''',
+    'flag_modified(existing, "node_metadata")',
+    "panel node metadata persistence",
+)
 PY
+}
+
+smite_patch_existing_node_overlay_metadata() {
+    local overlay="$SMITE_OVERLAY_DIR/node/panel_client.py"
+
+    [ -f "$overlay" ] || return 0
+
+    python3 - "$overlay" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+s = path.read_text()
+marker = 'SMITE_CONTROL_ADDRESS'
+if marker in s:
+    print('Node overlay control_address metadata: already patched')
+    raise SystemExit(0)
+
+old = '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+        
+        try:
+'''
+new = '''                "role": settings.node_role  # "iran" or "foreign"
+            }
+        }
+
+        control_address = __import__("os").environ.get("SMITE_CONTROL_ADDRESS", "").strip()
+        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+        
+        try:
+'''
+if old not in s:
+    raise SystemExit('ERROR: Node overlay registration metadata block was not found; refusing unsafe patch')
+
+path.write_text(s.replace(old, new, 1))
+print('Node overlay control_address metadata: patched')
+PY
+
+    python3 -m py_compile "$overlay" || return 1
 }
 
 smite_prepare_overlays() {
@@ -281,10 +361,12 @@ smite_prepare_overlays() {
         smite_patch_panel_runtime || return 1
         docker cp smite-panel:/app/app/node_client.py "$SMITE_OVERLAY_DIR/panel/node_client.py" || return 1
         docker cp smite-panel:/app/app/routers/tunnels.py "$SMITE_OVERLAY_DIR/panel/tunnels.py" || return 1
-        chmod 0644 "$SMITE_OVERLAY_DIR/panel/node_client.py" "$SMITE_OVERLAY_DIR/panel/tunnels.py"
+        docker cp smite-panel:/app/app/routers/nodes.py "$SMITE_OVERLAY_DIR/panel/nodes.py" || return 1
+        chmod 0644 "$SMITE_OVERLAY_DIR/panel/node_client.py" "$SMITE_OVERLAY_DIR/panel/tunnels.py" "$SMITE_OVERLAY_DIR/panel/nodes.py"
     fi
 
     if smite_container_exists smite-node; then
+        smite_patch_existing_node_overlay_metadata || return 1
         smite_patch_node_runtime || return 1
         docker cp smite-node:/app/app/panel_client.py "$SMITE_OVERLAY_DIR/node/panel_client.py" || return 1
         docker cp smite-node:/app/app/core_adapters.py "$SMITE_OVERLAY_DIR/node/core_adapters.py" || return 1
@@ -307,17 +389,17 @@ import sys
 path = Path(sys.argv[1])
 overlay = sys.argv[2]
 s = path.read_text()
-mount = f"      - {overlay}/panel/node_client.py:/app/app/node_client.py:ro\n"
-if mount not in s:
-    marker = "      - ./docker-compose.yml:/app/config/docker-compose.yml:ro\n"
+marker = "      - ./docker-compose.yml:/app/config/docker-compose.yml:ro\n"
+mounts = [
+    f"      - {overlay}/panel/node_client.py:/app/app/node_client.py:ro\n",
+    f"      - {overlay}/panel/tunnels.py:/app/app/routers/tunnels.py:ro\n",
+    f"      - {overlay}/panel/nodes.py:/app/app/routers/nodes.py:ro\n",
+]
+missing = [mount for mount in mounts if mount not in s]
+if missing:
     if marker not in s:
         raise SystemExit("ERROR: panel compose volume marker not found; refusing unsafe edit")
-    extra = (
-        marker
-        + f"      - {overlay}/panel/node_client.py:/app/app/node_client.py:ro\n"
-        + f"      - {overlay}/panel/tunnels.py:/app/app/routers/tunnels.py:ro\n"
-    )
-    s = s.replace(marker, extra, 1)
+    s = s.replace(marker, marker + "".join(missing), 1)
     path.write_text(s)
 print("Panel compose mounts: OK")
 PY
@@ -332,17 +414,16 @@ import sys
 path = Path(sys.argv[1])
 overlay = sys.argv[2]
 s = path.read_text()
-mount = f"      - {overlay}/node/panel_client.py:/app/app/panel_client.py:ro\n"
-if mount not in s:
-    marker = "      - node-data:/var/lib/smite-node\n"
+marker = "      - node-data:/var/lib/smite-node\n"
+mounts = [
+    f"      - {overlay}/node/panel_client.py:/app/app/panel_client.py:ro\n",
+    f"      - {overlay}/node/core_adapters.py:/app/app/core_adapters.py:ro\n",
+]
+missing = [mount for mount in mounts if mount not in s]
+if missing:
     if marker not in s:
         raise SystemExit("ERROR: node compose volume marker not found; refusing unsafe edit")
-    extra = (
-        marker
-        + f"      - {overlay}/node/panel_client.py:/app/app/panel_client.py:ro\n"
-        + f"      - {overlay}/node/core_adapters.py:/app/app/core_adapters.py:ro\n"
-    )
-    s = s.replace(marker, extra, 1)
+    s = s.replace(marker, marker + "".join(missing), 1)
     path.write_text(s)
 print("Node compose mounts: OK")
 PY
