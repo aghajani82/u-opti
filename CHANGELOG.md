@@ -1,233 +1,171 @@
 # Changelog
 
-All notable changes to U-OPTI will be documented in this file.
+All notable changes to U-OPTI are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+No unreleased changes are currently documented.
 
-- Hostname Management under System Optimization:
-  - Display the current hostname
-  - Validate the new hostname before applying it
-  - Change the hostname with `hostnamectl set-hostname`
-  - Support `0` to return without making changes
-
-### Fixed
-
-- Installer and U-OPTI update downloads now use cache-busting query parameters
-  to avoid stale files being served from an intermediate cache.
-- Installer and U-OPTI update routines verify that required Hostname Management
-  code is present before installing or replacing the current files.
-- U-OPTI uninstall output no longer reports a nonexistent safety backup when
-  `/etc/u-opti` was not present.
-- Documentation version and main-menu numbering are synchronized with v0.13.0.
-
-## [0.14.0] - 2026-09-29
+## [0.14.0] - 2026-10-01
 
 ### Added
 
 - Smite Management under Docker Management.
-- Persistent Smite compatibility overlays under `/opt/u-opti-smite` for the
-  tested TCP/443 single-entry architecture.
-- Separate **Prepare** and **Activate** workflows so Smite compatibility files
-  and Docker Compose bind mounts can be validated before containers are
-  recreated.
-- Smite Panel compatibility for explicit per-node `control_address` values,
-  allowing panel-to-node control traffic to avoid publicly exposed node API
-  port 8888.
-- Smite Node compatibility for node-to-panel HTTPS registration through port
-  443.
-- GOST compatibility for forwarding a single local tunnel port to an explicit
-  remote port such as 443.
-- Persistent tunnel cleanup behavior that stops active processes during normal
-  node shutdown without deleting saved tunnel definitions.
-- Smite module integration with the U-OPTI installer and self-updater,
-  including download, Bash syntax validation, backup, installation,
-  verification, and rollback handling.
-- `U_OPTI_BRANCH` override for controlled feature-branch installer and updater
-  testing while preserving `main` as the default source.
+- Controlled Smite Panel + Iran Node installation and lifecycle workflow.
+- Controlled Smite Foreign Node installation and lifecycle workflow.
+- Managed Smite installation state under `/etc/u-opti/smite/state.env` without storing control secrets.
+- Smite Panel TCP/443 gateway integration.
+- Smite Foreign TCP/443 gateway integration.
+- Persistent Smite compatibility overlays under `/opt/u-opti-smite` for the tested single-entry TCP/443 architecture.
+- Separate compatibility preparation/activation logic with validation before container recreation.
+- Smite Panel compatibility for explicit per-node `control_address` values so node API port 8888 does not need to be public.
+- Smite Node compatibility for node-to-panel HTTPS registration through port 443.
+- GOST/tunnel compatibility for forwarding to an explicit remote port such as TCP/443.
+- Persistent tunnel cleanup behavior that stops active processes during normal node shutdown without deleting saved tunnel definitions.
+- Controlled Smite image-digest migration helper with backup and rollback validation.
+- Smite module integration with the U-OPTI installer and self-updater, including download, Bash syntax validation, backup, installation, verification, and rollback handling.
+- `U_OPTI_BRANCH` override for controlled feature-branch installer/updater testing while preserving `main` as the default source.
+- Smite Foreign lifecycle entry for installing Sanaei 3x-UI through the existing U-OPTI 3x-UI Multi-Instance installer.
 
 ### Changed
 
 - Docker Management now includes a dedicated Smite Management submenu.
-- U-OPTI self-update now treats newly introduced modules as optional in the
-  pre-update backup, allowing safe upgrades from versions that did not contain
-  `smite.sh`.
+- Smite and Sanaei 3x-UI remain independent subsystems: the Smite lifecycle entry reuses `docker_3xui_install` instead of duplicating the installer.
+- Docker 3x-UI panel settings now explicitly bind `webListen` to `127.0.0.1` together with the allocated `webPort`.
+- Fresh 3x-UI compatibility configuration now temporarily stops the instance after database creation, writes instance-specific Panel/API/Subscription/Metrics settings, restarts the container, and only then applies Web Base Path through the official Sanaei CLI.
+- U-OPTI self-update treats newly introduced modules as optional in pre-update backups so upgrades from older versions remain safe.
+
+### Fixed
+
+- Fixed a multi-instance 3x-UI startup collision where a fresh additional instance could start with Sanaei's default subscription port before U-OPTI wrote its allocated port.
+- Prevented additional 3x-UI instances from colliding with an existing instance already listening on subscription port `2096`.
+- Fixed the mismatch where U-OPTI displayed the Docker 3x-UI panel as loopback-only but had not written `webListen=127.0.0.1` into Sanaei settings.
+- Improved failure diagnostics when a 3x-UI instance exits during compatibility configuration.
 
 ### Safety
 
-- Smite runtime patching is context-checked and refuses to modify unknown
-  upstream code when the expected source block is not present.
-- Compose files are backed up and validated with `docker compose config` before
-  compatibility activation.
-- Activation recreates only detected Smite services and waits for container
-  health before reporting success.
+- Smite runtime patching is context-checked and refuses to modify unknown upstream code when the expected source block is not present.
+- Compose files are backed up and validated with `docker compose config` before compatibility activation.
+- Smite image-digest migration validates the running image identity before rewriting Compose references and does not recreate a running service unnecessarily.
+- 3x-UI public HTTPS continues to use the existing U-OPTI Nginx/SSL implementation with hidden Web Base Path and generic `/PORT/PATH` forwarding.
+- X-UI PRO and existing Docker 3x-UI lifecycle behavior are not redesigned around Smite.
 
+### Validated
+
+- Clean-room Smite Panel + Iran installation.
+- Clean-room Smite Foreign installation.
+- Panel/Foreign Smite control through the tested TCP/443 gateway design.
+- Smite compatibility overlays across container recreation.
+- Smite → Sanaei Foreign lifecycle handoff to the existing U-OPTI 3x-UI installer.
+- Multiple Sanaei 3x-UI instances on one Foreign server with independent ports.
+- 3x-UI instance 04 installed directly from the GitHub branch with:
+  - Panel `2056`
+  - Xray API `62792`
+  - Subscription `2098`
+  - Metrics `11114`
+  - Random hidden Web Base Path
+  - Automatic Nginx + Let's Encrypt setup
+- Final listener verification after compatibility configuration and restart.
+- Previous default-subscription collision on `2096` no longer reproduced.
+
+## [0.13.1] - 2026-09-17
+
+### Added
+
+- Automatic www/non-www alias handling for apex domains in the Nginx/SSL module.
+- Certificate requests include both apex and www names where applicable.
+- ACME challenge configuration serves all generated server names.
+- Repair Existing Domain workflow for adding missing www/non-www coverage to existing U-OPTI-managed domains.
+
+### Changed
+
+- `docker-3xui-nginx.sh` uses a shared server-name helper for server name generation, conflict detection, ACME validation, and Certbot invocation.
+- Custom Domain and SSL-only modes use the same alias rules.
 
 ## [0.13.0] - 2026-09-15
 
 ### Added
 
-- Docker Management module with a full submenu, including:
+- Docker Management module with:
   - Install Docker
   - Docker Status
   - Docker Compose
   - 3x-UI Docker Management
-  - Container / Image / Volume / Network management placeholders
-  - Docker cleanup placeholder
-- Multi-instance 3x-UI Docker registry with per-instance `state.env`
-  and `compat.env` files under `/opt/3x-ui/instances/<ID>/`.
-- Per-instance port allocation for panel, Xray API, subscription, and
-  metrics, with automatic conflict detection against:
-  - Listening ports
-  - Reserved ports from other instances
-  - Legacy `/opt/3x-ui/compat.env`
-  - Existing X-UI PRO installation (`webPort`, `subPort`, and live Xray
-    `config.json`)
-- `docker-3xui-compat.sh` compatibility helpers for Sanaei 3x-UI,
-  including panel port, Web Base Path, Xray API port, subscription,
-  and metrics configuration with JSON-safe database updates via
-  `sqlite3` and `jq`.
-- `docker-3xui-nginx.sh` module for public HTTPS access:
-  - Let's Encrypt certificate issuance via ACME Webroot
-  - Nginx HTTPS site generation with panel, subscription, and Xray
-    path forwarding (`/PORT/PATH` including gRPC pass-through)
-  - Automatic certificate renewal hook installation
-  - Custom Domain support with three modes:
-    - Attach to a 3x-UI instance
-    - Domain + custom local port
-    - SSL certificate only
-- `--menu <target>` option for direct submenu access. Currently
-  supports `docker` to jump straight into Docker Management. Used
-  internally by the 3x-UI installer.
-- FakeSite module with daily random template scheduling via systemd
-  timer and an interactive template selector.
-- Full uninstall routine for U-OPTI itself that leaves Docker, Nginx,
-  Certbot, 3x-UI, and other services untouched.
-- Safety backups before destructive operations, including 3x-UI
-  uninstall, restore, and U-OPTI self-uninstall.
-- Troubleshooting section in README documenting PTY relaunch,
-  `--menu docker`, and uninstall behavior.
+  - Container/Image/Volume/Network management
+  - Docker cleanup
+- Multi-instance 3x-UI Docker registry with per-instance `state.env` and `compat.env` files under `/opt/3x-ui/instances/<ID>/`.
+- Per-instance port allocation for panel, Xray API, subscription, and metrics with conflict detection against listeners, registered instances, legacy Docker state, and X-UI PRO.
+- `docker-3xui-compat.sh` helpers for panel, Web Base Path, Xray API, subscription, and metrics configuration.
+- `docker-3xui-nginx.sh` for public HTTPS access, Let's Encrypt issuance, hidden panel paths, subscription forwarding, and generic Xray `/PORT/PATH` forwarding.
+- Custom Domain support with instance, custom-local-port, and SSL-only modes.
+- `--menu <target>` direct submenu access, including `docker`.
+- FakeSite module with daily random template scheduling and interactive template selection.
+- Full U-OPTI uninstall routine that leaves Docker, Nginx, Certbot, 3x-UI, and other services untouched.
+- Safety backups before destructive operations such as 3x-UI uninstall, restore, and U-OPTI self-uninstall.
+- Hostname Management under System Optimization using validated `hostnamectl set-hostname` workflow.
 
 ### Fixed
 
-- **TTY / menu rendering after 3x-UI Docker install.** Installing the
-  3x-UI panel inside Docker (and other heavy operations such as
-  Certbot and Docker Compose) left the terminal in a corrupted state,
-  causing subsequent menus to render with invisible text or missing
-  prompts. U-OPTI now relaunches itself inside a fresh pseudo-TTY
-  using `script -qefc "<bin> --menu docker" /dev/null` after the
-  install completes, restoring the terminal state exactly as if the
-  user had exited and reopened U-OPTI manually.
-- **Return to Docker Management after install.** After the PTY
-  relaunch, U-OPTI now lands directly on the Docker Management
-  submenu instead of the main menu, preserving the user's workflow.
-- **`0) Back` from Docker Management no longer exits U-OPTI.**
-  Pressing `0` in the Docker Management menu now returns to the main
-  menu as expected, instead of terminating the entire script.
-- **Uninstall no longer blocked when `/etc/u-opti` is missing.**
-  Previously, if U-OPTI had never used the backup feature, the
-  uninstall routine failed at the safety-backup step and refused to
-  remove the installation. U-OPTI now detects that `/etc/u-opti` does
-  not exist, skips the safety backup, and proceeds with uninstall as
-  expected.
+- Heavy Docker/Certbot operations no longer leave subsequent menus with a corrupted terminal state; U-OPTI can relaunch itself inside a fresh pseudo-TTY.
+- After a 3x-UI install, U-OPTI can return directly to Docker Management instead of requiring a manual exit/reopen.
+- `0) Back` from Docker Management returns to the main menu instead of exiting the script.
+- U-OPTI uninstall no longer fails when `/etc/u-opti` does not yet exist.
+- Installer and self-update downloads use cache-busting query parameters to reduce stale-file problems from intermediate caches.
 
 ### Changed
 
-- `common.sh` now overrides the shell `clear` command with a
-  self-healing wrapper (`uopti_tty_reset`) that restores termios
-  settings, cursor visibility, alternate screen buffer, mouse tracking
-  modes, bracketed paste, application cursor keys, and scroll region
-  before clearing. This acts as a global safety net for every menu
-  in U-OPTI.
-- Port allocation for 3x-UI Docker instances now respects existing
-  X-UI PRO configuration and running Xray config, avoiding conflicts
-  with `webPort`, `subPort`, and API / metrics listeners.
-- Nginx / SSL setup for 3x-UI now validates Web Base Path, rejects
-  `/`, and requires a dedicated path compatible with the central
-  FakeSite.
+- `common.sh` includes a self-healing terminal reset wrapper used by menu clears.
+- 3x-UI Docker allocation respects existing X-UI PRO configuration and running Xray listeners.
+- 3x-UI Nginx/SSL setup validates hidden Web Base Path and keeps FakeSite behavior separate.
 
 ### Security
 
-- Uninstall requires explicit `UNINSTALL` confirmation and creates a
-  final safety backup before removing U-OPTI application files.
-- Nginx site writes refuse to overwrite non-U-OPTI configurations
-  unless the file carries the U-OPTI management marker.
-- ACME challenge paths are validated through the local Nginx before
-  requesting certificates.
+- U-OPTI uninstall requires explicit confirmation and creates a final safety backup when U-OPTI state exists.
+- Nginx site writes refuse to overwrite non-U-OPTI configurations unless the file carries the U-OPTI management marker.
+- ACME challenge paths are validated through local Nginx before certificate issuance.
 
 ## [0.12.0] - 2026-09-08
 
 ### Added
 
-- Server update via APT (`apt update && apt upgrade`).
-- System Optimization menu with:
-  - System Information
-  - Time & Date and NTP configuration
-  - Swap management (view, create, resize, disable)
-  - BBR management (status, compatibility, enable, disable, TCP qdisc)
-  - Storage management (disk info, large files / directories, APT cache)
-- Server Security menu with:
-  - SSH management (safe port change, validation, rollback, UFW
-    integration, systemd socket activation support)
-  - SSH access management (Ed25519 key pairs, `authorized_keys`,
-    key-only root access, safety backups and rollback)
-  - Firewall management via UFW (initial setup, port rules,
-    protected SSH port, IPv4 / IPv6 support)
-  - Fail2Ban management for SSH
-- X-UI PRO Management (install / uninstall via remote installer).
-- Certificate Management (Certbot installation, ACME Webroot
-  issuance, renewal, removal).
-- Backup & Restore for U-OPTI-managed configuration under
-  `/etc/u-opti`, `/etc/ssh/sshd_config`, `/etc/ufw`, and Fail2Ban.
-- U-OPTI self-update:
-  - Version check against the remote `VERSION` file
-  - Download all required files before installation
-  - Bash syntax validation on every downloaded file
-  - Automatic backup of the current installation
-  - File-by-file verification after install
-  - Automatic rollback on any failure
-  - Automatic relaunch of the newly installed U-OPTI
-- Safe uninstall that preserves Nginx, Certbot, 3x-UI / Xray, Docker,
-  and other server services.
+- Server update through APT.
+- System Optimization menu with system info, time/NTP, swap, BBR, storage, and hostname management foundations.
+- Server Security menu with SSH management, SSH access management, UFW firewall management, and Fail2Ban.
+- X-UI PRO Management.
+- Certificate Management with Certbot and ACME Webroot.
+- Backup & Restore for U-OPTI-managed server/security configuration.
+- U-OPTI self-update with version validation, staged downloads, Bash syntax validation, backups, verification, rollback, and automatic relaunch.
+- Safe U-OPTI uninstall that preserves unrelated server services.
 
 ### Security
 
-- SSH port changes validate the new configuration, verify the new
-  listener, and roll back automatically on failure.
-- Key-only root access requires an active SSH session and at least
-  one root public key before being enabled.
-- UFW changes are backed up and restored on failure.
-## [0.13.1] - 2026-09-17
+- SSH port changes validate the new configuration, verify the listener, and roll back automatically on failure.
+- Key-only root access requires an active SSH session and at least one installed root public key.
+- UFW changes are backed up and restored on protected-operation failure.
 
-### Added
-- Automatic www / non-www alias for apex domains in the Nginx / SSL
-  module. Domains entered as `example.com` now also answer on
-  `www.example.com`, and vice versa.
-- Certificate requests now include both the apex and www names so
-  HTTPS works on both variants without manual intervention.
-- ACME challenge configuration serves all generated server names.
+## [0.11.1] - 2026-09-07
 
 ### Changed
-- `docker-3xui-nginx.sh` now uses a shared `build_server_names`
-  helper for server_name generation, conflict detection, ACME
-  validation, and Certbot invocation.
-- Custom Domain and SSL-only modes follow the same alias rules.
 
-## [Unreleased]
-  
+- Improved time/date synchronization workflow.
+- Added Back handling to BBR, Fail2Ban, and Certificate Management prompts.
+- Added X-UI PRO uninstall support.
+- Improved U-OPTI self-update completion and automatic restart behavior.
 
-## [0.11.0] and earlier
+### Safety
 
-- Initial development of the U-OPTI framework, menu system, and
-  core system management modules.
-- Early SSH, firewall, and system optimization utilities.
+- Added downloaded-module validation, Bash syntax checks, update backups, and rollback support.
 
-### Added (Manually)
-- Repair Existing Domain (add missing www / non-www) - now part of v0.13.0
-  - Automatically creates both apex and www versions
-  - Issues single certificate for both
-  - Added as option 3 in Certificate Management
+## [0.11.0] - 2026-09-06
+
+### Added
+
+- SSH Access Management focused on Ed25519 key generation, `authorized_keys`, SSH access backup/restore, password management, and key-only root authentication.
+- Safe SSH configuration validation and rollback.
+
+## [0.10.0] and earlier
+
+- Initial U-OPTI framework and interactive menu system.
+- Early system optimization, SSH, firewall, X-UI PRO, and certificate-management utilities.
