@@ -15,7 +15,7 @@
 #   Subscription : prefer 2096, then 2095, then 2097-2099
 #   Metrics      : prefer 11111, then 11112, then 11113-11115
 #
-# Subscription is kept on localhost and published through Nginx :443.
+# Panel and Subscription are kept on localhost and published through Nginx :443.
 # Xray metrics are kept on localhost.
 #
 # These are library functions only. Nothing runs automatically when sourced.
@@ -795,12 +795,13 @@ docker_3xui_compat_configure_panel() {
 
     if ! sqlite3 "$DB_FILE" <<SQL
 BEGIN;
-DELETE FROM settings WHERE key='webPort';
+DELETE FROM settings WHERE key IN ('webListen','webPort');
+INSERT INTO settings(key,value) VALUES ('webListen','127.0.0.1');
 INSERT INTO settings(key,value) VALUES ('webPort','$PORT');
 COMMIT;
 SQL
     then
-        echo "ERROR: Failed to configure panel webPort."
+        echo "ERROR: Failed to configure panel webListen/webPort."
         return 1
     fi
 
@@ -811,6 +812,7 @@ SQL
 docker_3xui_compat_verify_panel() {
     local DB_FILE="$1"
     local EXPECTED_PORT="$2"
+    local ACTUAL_LISTEN
     local ACTUAL_PORT
 
     if [ -z "$DB_FILE" ] || [ -z "$EXPECTED_PORT" ]; then
@@ -819,11 +821,24 @@ docker_3xui_compat_verify_panel() {
         return 1
     fi
 
+    ACTUAL_LISTEN="$(
+        sqlite3 "$DB_FILE" \
+            "SELECT value FROM settings WHERE key='webListen' LIMIT 1;" \
+            2>/dev/null || true
+    )"
+
     ACTUAL_PORT="$(
         sqlite3 "$DB_FILE" \
             "SELECT value FROM settings WHERE key='webPort' LIMIT 1;" \
             2>/dev/null || true
     )"
+
+    if [ "$ACTUAL_LISTEN" != "127.0.0.1" ]; then
+        echo "ERROR: Panel listen IP configuration verification failed."
+        echo "Expected: 127.0.0.1"
+        echo "Detected : ${ACTUAL_LISTEN:-Not detected}"
+        return 1
+    fi
 
     if [ "$ACTUAL_PORT" != "$EXPECTED_PORT" ]; then
         echo "ERROR: Panel port configuration verification failed."
@@ -967,7 +982,7 @@ docker_3xui_compat_configure() {
 
     if ! docker_3xui_compat_configure_panel         "$DB_FILE"         "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
 
-        echo "ERROR: Panel webPort configuration failed."
+        echo "ERROR: Panel webListen/webPort configuration failed."
         return 1
     fi
 
