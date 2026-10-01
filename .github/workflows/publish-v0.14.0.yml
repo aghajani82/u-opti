@@ -1,0 +1,97 @@
+name: Publish U-OPTI v0.14.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.14.0.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.14.0 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view v0.14.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v0.14.0 already exists; nothing to do."
+            exit 0
+          fi
+
+          cat > /tmp/u-opti-v0.14.0-notes.md <<'EOF'
+          # U-OPTI v0.14.0
+
+          This release completes the Smite lifecycle/gateway integration and hardens Sanaei 3x-UI multi-instance startup behavior while preserving the existing U-OPTI architecture.
+
+          ## Highlights
+
+          - Added controlled Smite Panel + Iran Node installation and lifecycle management.
+          - Added controlled Smite Foreign Node installation and lifecycle management.
+          - Added Smite Panel and Foreign TCP/443 gateway integration.
+          - Added persistent Smite compatibility overlays and validated image-digest migration support.
+          - Added a Smite Foreign lifecycle entry that launches the existing U-OPTI Sanaei 3x-UI Multi-Instance installer.
+          - Kept Smite, X-UI PRO, and Docker 3x-UI independently manageable.
+          - Added explicit `webListen=127.0.0.1` handling for Docker 3x-UI panels.
+          - Fixed fresh multi-instance startup ordering so per-instance Panel/API/Subscription/Metrics settings are written before restart.
+          - Fixed the default Sanaei subscription-port collision that could occur when additional instances started while `2096` was already in use.
+          - Preserved automatic Nginx + Let's Encrypt setup, hidden Web Base Path, subscription publishing, and generic `/PORT/PATH` forwarding.
+
+          ## Smite Architecture
+
+          U-OPTI adds Smite as an independent compatibility/lifecycle layer instead of redesigning existing subsystems around it.
+
+          The Smite Foreign lifecycle can launch the existing Sanaei installer, so normal U-OPTI behavior remains shared in one implementation:
+
+          - Multi-instance allocation
+          - Nginx / SSL
+          - Hidden Web Base Path
+          - Panel loopback binding
+          - Subscription / API / Metrics allocation
+          - Backup / Restore / Update / Uninstall behavior
+
+          ## Validation
+
+          Validated on clean-room Ubuntu servers:
+
+          - Smite Panel + Iran installation
+          - Smite Foreign installation
+          - TCP/443 gateway workflow
+          - Smite compatibility overlays across container recreation
+          - Smite -> Sanaei installer handoff on a Foreign node
+          - Multiple Sanaei instances on the same Foreign server
+          - Independent panel/API/subscription/metrics ports
+          - Instance 04 with Panel `2056`, API `62792`, Subscription `2098`, Metrics `11114`
+          - Random hidden Web Base Path
+          - Automatic Nginx + Let's Encrypt
+          - Final listener verification
+          - Previous default-subscription collision on `2096` no longer reproduced
+
+          ## Installation
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/main/install.sh -o /tmp/u-opti-install.sh
+          bash /tmp/u-opti-install.sh
+          ```
+
+          Then run:
+
+          ```bash
+          u-opti
+          ```
+
+          See `README.md`, `CATALOG.md`, and `CHANGELOG.md` for full documentation.
+          EOF
+
+          gh release create v0.14.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 5d1d9c9315ec4380b69486e292c311f2f5f4231f \
+            --title "U-OPTI v0.14.0" \
+            --notes-file /tmp/u-opti-v0.14.0-notes.md
