@@ -980,21 +980,21 @@ docker_3xui_compat_configure() {
     echo "  Listen        : 127.0.0.1:$DOCKER_3XUI_COMPAT_PANEL_PORT"
     echo
 
-    if ! docker_3xui_compat_configure_panel         "$DB_FILE"         "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
-
-        echo "ERROR: Panel webListen/webPort configuration failed."
-        return 1
-    fi
-
-    echo "Web Base Path:"
-    echo "  Path          : $WEB_BASE_PATH"
+    echo "Stopping 3x-UI temporarily to apply instance-specific ports..."
     echo
 
-    if ! docker_3xui_compat_configure_web_base_path \
-        "$CONTAINER" \
-        "$WEB_BASE_PATH"; then
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" = "true" ]; then
+        if ! docker stop "$CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop 3x-UI container before compatibility configuration."
+            return 1
+        fi
+    fi
 
-        echo "ERROR: Web Base Path configuration failed."
+    if ! docker_3xui_compat_configure_panel \
+        "$DB_FILE" \
+        "$DOCKER_3XUI_COMPAT_PANEL_PORT"; then
+
+        echo "ERROR: Panel webListen/webPort configuration failed."
         return 1
     fi
 
@@ -1036,6 +1036,36 @@ docker_3xui_compat_configure() {
         "$DOCKER_3XUI_COMPAT_METRICS_PORT"; then
 
         echo "ERROR: Metrics configuration failed."
+        return 1
+    fi
+
+    echo
+    echo "Starting 3x-UI with instance-specific ports..."
+    echo
+
+    if ! docker start "$CONTAINER" >/dev/null; then
+        echo "ERROR: Failed to start 3x-UI after compatibility configuration."
+        return 1
+    fi
+
+    sleep 3
+
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" != "true" ]; then
+        echo "ERROR: 3x-UI stopped after applying instance-specific ports."
+        echo
+        docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
+        return 1
+    fi
+
+    echo "Web Base Path:"
+    echo "  Path          : $WEB_BASE_PATH"
+    echo
+
+    if ! docker_3xui_compat_configure_web_base_path \
+        "$CONTAINER" \
+        "$WEB_BASE_PATH"; then
+
+        echo "ERROR: Web Base Path configuration failed."
         return 1
     fi
 
