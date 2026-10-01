@@ -2,7 +2,7 @@
 
 Ubuntu Server Optimization and Management Tool
 
-U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and maintaining Ubuntu servers through an interactive menu.
+U-OPTI is a lightweight Bash-based toolkit for managing, optimizing, securing, and maintaining Ubuntu servers through an interactive menu.
 
 ## Current Version
 
@@ -22,6 +22,23 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Highlights in v0.14.0
+
+- Smite Panel + Iran Node installation and lifecycle management
+- Smite Foreign Node installation and lifecycle management
+- TCP/443 gateway integration for Smite Panel and Foreign nodes
+- Smite compatibility helpers with persistent overlays
+- Sanaei 3x-UI installation directly from the Smite Foreign lifecycle menu
+- Multi-instance 3x-UI Docker management with independent panel, API, subscription, and metrics ports
+- 3x-UI panel binding to `127.0.0.1`
+- Safe startup ordering for additional 3x-UI instances to prevent default subscription-port collisions
+- Automatic Nginx + Let's Encrypt integration for 3x-UI instances
+- Generic Xray forwarding through `/PORT/PATH`
+- Controlled Smite image-digest migration helper
+
+For a module-by-module overview, see [CATALOG.md](CATALOG.md).
+For version history, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 
@@ -83,7 +100,6 @@ U-OPTI is a lightweight Bash-based tool for managing, optimizing, securing, and 
 - Add public keys to `authorized_keys`
 - Validate public keys before installation
 - List installed public keys
-- Display key fingerprints
 - Remove selected public keys
 - Automatically back up `authorized_keys` before changes
 - Create full SSH access backups
@@ -108,8 +124,8 @@ U-OPTI uses UFW for firewall management.
 - View configured firewall rules
 - Configure the initial firewall
 - Automatically detect the current SSH port
-- Automatically allow HTTP (80/tcp)
-- Automatically allow HTTPS (443/tcp)
+- Automatically allow HTTP (`80/tcp`)
+- Automatically allow HTTPS (`443/tcp`)
 - Add multiple TCP ports at once
 - Remove multiple TCP ports at once
 - Protect the current SSH port from accidental removal
@@ -151,7 +167,77 @@ U-OPTI backups are not intended to replace full-server snapshots. Provider snaps
 - Install X-UI PRO
 - Uninstall X-UI PRO
 - Use the managed X-UI PRO installation workflow
+- Keep X-UI PRO independent from Docker 3x-UI and Smite
 - Preserve unrelated Nginx and server services during U-OPTI uninstall
+
+### Docker Management
+
+The Docker menu provides the entry point for Docker Engine, Docker Compose, Sanaei 3x-UI, Smite, and container/image/volume/network operations.
+
+### Sanaei 3x-UI Docker Multi-Instance
+
+U-OPTI manages independent Sanaei 3x-UI Docker instances under:
+
+```text
+/opt/3x-ui/instances/<ID>/
+```
+
+Each instance receives its own managed ports and state:
+
+- Panel port
+- Xray API port
+- Subscription port
+- Metrics port
+- Hidden Web Base Path
+- Domain
+- Nginx site
+- Let's Encrypt certificate
+- Compatibility state
+
+The compatibility layer keeps panel, subscription, API, and metrics services on loopback where appropriate and exposes public access through Nginx/HTTPS.
+
+For additional instances, U-OPTI writes the instance-specific settings before restarting the container. This prevents a fresh Sanaei container from trying to reuse another instance's default subscription port.
+
+Public Xray HTTP-style transports are forwarded through the existing generic Nginx route:
+
+```text
+/PORT/PATH
+```
+
+This is designed for transport paths such as XHTTP, WebSocket, and HTTPUpgrade without requiring U-OPTI to scan or rewrite inbound definitions.
+
+### Smite Management
+
+Smite is integrated into U-OPTI as an independent compatibility and lifecycle layer. Existing U-OPTI X-UI PRO and Docker 3x-UI systems remain independently manageable.
+
+Available workflows include:
+
+- Install Smite Panel + Iran Node
+- Install Smite Foreign Node
+- Show managed Smite installation state
+- Configure Panel-side TCP/443 gateway behavior
+- Configure Foreign-side TCP/443 gateway behavior
+- Prepare and activate persistent Smite compatibility overlays
+- Preserve node-to-panel HTTPS/443 registration across container recreation
+- Keep public Smite control/API ports off the public Internet where the gateway architecture is used
+- Preserve GOST/tunnel compatibility needed by the tested architecture
+- Migrate validated Smite image references to approved digest pins without unnecessary container recreation
+
+On a managed Smite Foreign Node, U-OPTI also provides:
+
+```text
+Smite Management
+→ Install / Lifecycle
+→ Install Sanaei 3x-UI on Foreign Node
+```
+
+This entry does **not** implement a second 3x-UI installer. It calls the existing U-OPTI 3x-UI Multi-Instance installer, so the normal allocation, Nginx/SSL, hidden Web Base Path, subscription, API, metrics, backup, restore, update, and uninstall behavior remains in one place.
+
+Design principle:
+
+> Smite is added to U-OPTI; U-OPTI is not redesigned around Smite.
+
+Removing Smite does not remove Sanaei 3x-UI, and removing a Sanaei instance does not remove Smite.
 
 ### Certificate Management
 
@@ -161,25 +247,6 @@ U-OPTI backups are not intended to replace full-server snapshots. Provider snaps
 - Remove certificates
 - Use dedicated ACME configuration per domain
 - Keep existing Nginx site configuration separate from certificate issuance
-
-### Smite Management
-
-Smite integration is available under Docker Management and provides a persistent compatibility layer for the tested single-entry TCP/443 architecture.
-
-- Detect Smite Panel and Smite Node containers independently
-- Show Smite 443 integration status
-- Prepare persistent compatibility overlays under `/opt/u-opti-smite`
-- Preserve required Smite Python compatibility changes across container recreation
-- Add bind mounts to the existing Smite Docker Compose files without replacing unrelated service configuration
-- Validate modified Compose files before activation
-- Recreate only detected Smite services when activation is explicitly confirmed
-- Preserve node-to-panel HTTPS/443 registration after container recreation
-- Preserve GOST forwarding to a separate remote port such as TCP/443
-- Preserve persisted node tunnel definitions during normal container shutdown and restart
-- Allow the panel to use an explicit per-node control address instead of requiring public node API port 8888
-- Refuse compatibility patching when expected upstream code blocks are not found, avoiding unsafe edits against unknown Smite versions
-
-The current Smite compatibility workflow is intentionally separated into **Prepare** and **Activate** steps so configuration can be reviewed before containers are recreated.
 
 ### U-OPTI Self-Update
 
@@ -193,13 +260,13 @@ The current Smite compatibility workflow is intentionally separated into **Prepa
 - Verify installed files after update
 - Automatically restore the previous installation if the update fails
 - Automatically restart U-OPTI using the newly installed version after a successful update
-- Include the Smite module in download, validation, backup, installation, verification, and rollback handling
+- Include Smite lifecycle, gateway, compatibility, and digest-migration modules in managed update handling
 
 ### Safe Uninstall
 
 U-OPTI uninstall requires explicit confirmation and creates a final safety backup before removing the U-OPTI application files.
 
-The uninstall process removes only U-OPTI itself and keeps unrelated server services such as Nginx, Certbot, X-UI/Xray, Docker, and Smite untouched.
+The uninstall process removes only U-OPTI itself and keeps unrelated server services and data such as Nginx, Certbot, X-UI/Xray, Docker, 3x-UI, and Smite untouched.
 
 ## Installation
 
@@ -222,35 +289,25 @@ u-opti
 
 ### Reloading U-OPTI after a heavy operation
 
-Some operations (3x-UI panel install, certificate issuance, Docker
-operations) can leave the terminal in a state that makes subsequent
-menus render incorrectly. U-OPTI handles this automatically by
-re-launching itself inside a fresh pseudo-TTY after such operations.
+Some operations such as 3x-UI installation, certificate issuance, and Docker operations can leave the terminal in a state that makes subsequent menus render incorrectly. U-OPTI handles this by re-launching itself inside a fresh pseudo-TTY after supported heavy operations.
 
 ### Direct menu access
 
-For advanced users, U-OPTI can jump straight into a specific submenu
-without showing the main menu first:
+For advanced users, U-OPTI can jump directly into a supported submenu:
 
-    u-opti --menu docker
+```bash
+u-opti --menu docker
+```
 
-This opens the Docker Management menu directly. It is used internally
-by the 3x-UI installer to return the user to the Docker Management
-menu after a fresh install, in a clean terminal.
+Currently supported target:
 
-Currently supported targets:
-
-  - `docker` — Docker Management
+- `docker` — Docker Management
 
 ### Uninstall notes
 
-The uninstall routine (`u-opti` → `9) Uninstall U-OPTI`) removes only
-U-OPTI itself. It does **not** touch Docker, Nginx, Certbot, 3x-UI,
-Xray, Smite, or any other service or data on the server.
+The uninstall routine (`u-opti` → `9) Uninstall U-OPTI`) removes only U-OPTI itself. It does **not** remove Docker, Nginx, Certbot, 3x-UI, Xray, Smite, or their service data.
 
-If `/etc/u-opti` does not exist (for example, on a fresh install that
-has never used the backup feature), no safety backup is created and
-the uninstall proceeds normally.
+If `/etc/u-opti` does not exist, no safety backup is created and the uninstall proceeds normally.
 
 ## Safety
 
@@ -272,10 +329,11 @@ Development work is performed on dedicated version or feature branches and teste
 
 The `main` branch contains the stable release.
 
-## Changelog
+## Documentation
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list of changes between
-versions.
+- [Feature Catalog](CATALOG.md)
+- [Changelog](CHANGELOG.md)
+- [Releases](https://github.com/aghajani82/u-opti/releases)
 
 ## License
 
