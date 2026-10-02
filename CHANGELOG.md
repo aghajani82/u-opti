@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.14.2] - 2026-10-02
+
+### Added
+
+- Added optional `SMITE_BACKHAUL_ADDRESS` node metadata so Backhaul control traffic can use a dedicated private/internal address while the node keeps its normal public `ip_address` identity.
+- Added persistent panel overlays for `tunnel_reapply_manager.py` and `core_health.py` so private Backhaul routing survives panel recreation, reapply, health repair, and host reboot paths.
+
+### Changed
+
+- Backhaul client address generation now prefers `backhaul_address` and falls back to the existing `ip_address` when no private override is configured.
+- The private Backhaul address preference is applied consistently across tunnel creation, tunnel update, panel startup restore, tunnel reapply, and core-health repair paths.
+- Existing read-only compatibility overlays are patched on the host before runtime patching, allowing safe upgrades from earlier U-OPTI Smite overlay versions.
+
+### Safety
+
+- Private Backhaul patching is limited to Backhaul branches and validates the expected replacement count for each pinned Smite `0.1.7` source file before writing.
+- Patched Python source is compiled before it is persisted.
+- Existing behavior remains unchanged when `SMITE_BACKHAUL_ADDRESS` is not set.
+
+### Validated
+
+- Smite Panel communication from the Foreign server remained working over Hetzner Private Network `10.77.10.10:8000` after removing the public `8000` firewall rule.
+- Panel-to-Foreign node control remained working over `10.77.10.20:8888` after removing the public `8888` firewall rule.
+- Backhaul client control moved from the Iran public IP to `10.77.10.10:3080`; the Foreign server showed established Backhaul connections to the private address.
+- End-to-end VLESS connectivity remained working after removing the public `3080` firewall rule, while the public client entry remained on Iran TCP/443.
+
 ## [0.14.1] - 2026-10-02
 
 ### Fixed
