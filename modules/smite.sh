@@ -306,6 +306,27 @@ replace_once(
     'flag_modified(existing, "node_metadata")',
     "panel node metadata persistence",
 )
+
+replace_once(
+    "/app/main.py",
+    '''                        if target_port:
+                            target_addr = f"{target_host}:{target_port}"
+                            server_spec["ports"] = [f"{public_port}={target_addr}"]
+                        else:
+                            server_spec["ports"] = [str(public_port)]
+''',
+    '''                        existing_ports = server_spec.get("ports", [])
+                        if existing_ports:
+                            server_spec["ports"] = existing_ports
+                        elif target_port:
+                            target_addr = f"{target_host}:{target_port}"
+                            server_spec["ports"] = [f"{public_port}={target_addr}"]
+                        else:
+                            server_spec["ports"] = [str(public_port)]
+''',
+    'existing_ports = server_spec.get("ports", [])',
+    "panel Backhaul startup custom-port persistence",
+)
 PY
 }
 
@@ -359,10 +380,11 @@ smite_prepare_overlays() {
 
     if smite_container_exists smite-panel; then
         smite_patch_panel_runtime || return 1
+        docker cp smite-panel:/app/main.py "$SMITE_OVERLAY_DIR/panel/main.py" || return 1
         docker cp smite-panel:/app/app/node_client.py "$SMITE_OVERLAY_DIR/panel/node_client.py" || return 1
         docker cp smite-panel:/app/app/routers/tunnels.py "$SMITE_OVERLAY_DIR/panel/tunnels.py" || return 1
         docker cp smite-panel:/app/app/routers/nodes.py "$SMITE_OVERLAY_DIR/panel/nodes.py" || return 1
-        chmod 0644 "$SMITE_OVERLAY_DIR/panel/node_client.py" "$SMITE_OVERLAY_DIR/panel/tunnels.py" "$SMITE_OVERLAY_DIR/panel/nodes.py"
+        chmod 0644 "$SMITE_OVERLAY_DIR/panel/main.py" "$SMITE_OVERLAY_DIR/panel/node_client.py" "$SMITE_OVERLAY_DIR/panel/tunnels.py" "$SMITE_OVERLAY_DIR/panel/nodes.py"
     fi
 
     if smite_container_exists smite-node; then
@@ -391,6 +413,7 @@ overlay = sys.argv[2]
 s = path.read_text()
 marker = "      - ./docker-compose.yml:/app/config/docker-compose.yml:ro\n"
 mounts = [
+    f"      - {overlay}/panel/main.py:/app/main.py:ro\n",
     f"      - {overlay}/panel/node_client.py:/app/app/node_client.py:ro\n",
     f"      - {overlay}/panel/tunnels.py:/app/app/routers/tunnels.py:ro\n",
     f"      - {overlay}/panel/nodes.py:/app/app/routers/nodes.py:ro\n",
