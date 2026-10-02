@@ -104,7 +104,9 @@ def replace_once(path, old, new, marker, label):
         return
     if old not in s:
         raise SystemExit(f"ERROR: {label}: expected upstream block not found; refusing unsafe patch")
-    p.write_text(s.replace(old, new, 1))
+    updated = s.replace(old, new, 1)
+    compile(updated, path, "exec")
+    p.write_text(updated)
     print(f"{label}: patched")
 
 panel_client = "/app/app/panel_client.py"
@@ -167,6 +169,22 @@ replace_once(
     "node control_address metadata",
 )
 
+replace_once(
+    panel_client,
+    '''        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+''',
+    '''        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+
+        backhaul_address = __import__("os").environ.get("SMITE_BACKHAUL_ADDRESS", "").strip()
+        if backhaul_address:
+            registration_data["metadata"]["backhaul_address"] = backhaul_address
+''',
+    'SMITE_BACKHAUL_ADDRESS',
+    "node backhaul_address metadata",
+)
+
 core = "/app/app/core_adapters.py"
 replace_once(
     core,
@@ -220,6 +238,7 @@ smite_patch_panel_runtime() {
 
     docker exec -i smite-panel python - <<'PY'
 from pathlib import Path
+import re
 
 
 def replace_once(path, old, new, marker, label):
@@ -230,8 +249,91 @@ def replace_once(path, old, new, marker, label):
         return
     if old not in s:
         raise SystemExit(f"ERROR: {label}: expected upstream block not found; refusing unsafe patch")
-    p.write_text(s.replace(old, new, 1))
+    updated = s.replace(old, new, 1)
+    compile(updated, path, "exec")
+    p.write_text(updated)
     print(f"{label}: patched")
+
+
+def plan_backhaul_address_patch(path, expected, label):
+    p = Path(path)
+    s = p.read_text()
+    marker = 'iran_node.node_metadata.get("backhaul_address")'
+    existing = s.count(marker)
+
+    if existing:
+        if existing != expected:
+            raise SystemExit(
+                f"ERROR: {label}: expected {expected} existing private-Backhaul marker(s), found {existing}; refusing unsafe patch"
+            )
+        print(f"{label}: already patched")
+        return None
+
+    target = 'iran_node_ip = iran_node.node_metadata.get("ip_address")'
+    branch_re = re.compile(
+        r'^(\s*)(?:if|elif)\s+'
+        r'(?:db_tunnel\.core|tunnel\.core|core)\s*==\s*'
+        r'["\']backhaul["\']\s*:'
+    )
+
+    lines = s.splitlines(keepends=True)
+    output = []
+    in_backhaul = False
+    branch_indent = None
+    changed = 0
+
+    for line in lines:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        match = branch_re.match(line)
+
+        if match:
+            in_backhaul = True
+            branch_indent = len(match.group(1))
+            output.append(line)
+            continue
+
+        if in_backhaul and stripped and indent <= branch_indent:
+            in_backhaul = False
+            branch_indent = None
+
+        if in_backhaul and stripped == target:
+            prefix = line[:len(line) - len(line.lstrip())]
+            newline = "\n" if line.endswith("\n") else ""
+            output.append(
+                prefix + "iran_node_ip = (" + newline
+                + prefix + '    iran_node.node_metadata.get("backhaul_address")' + newline
+                + prefix + '    or iran_node.node_metadata.get("ip_address")' + newline
+                + prefix + ")" + newline
+            )
+            changed += 1
+        else:
+            output.append(line)
+
+    if changed != expected:
+        raise SystemExit(
+            f"ERROR: {label}: expected {expected} Backhaul replacement(s), found {changed}; refusing unsafe patch"
+        )
+
+    updated = "".join(output)
+    compile(updated, path, "exec")
+    return p, updated, label, changed
+
+
+backhaul_plans = []
+for path, expected, label in [
+    ("/app/main.py", 1, "panel startup private Backhaul address"),
+    ("/app/app/routers/tunnels.py", 2, "panel tunnel private Backhaul address"),
+    ("/app/app/tunnel_reapply_manager.py", 1, "panel reapply private Backhaul address"),
+    ("/app/app/routers/core_health.py", 1, "panel health private Backhaul address"),
+]:
+    plan = plan_backhaul_address_patch(path, expected, label)
+    if plan:
+        backhaul_plans.append(plan)
+
+for path, updated, label, changed in backhaul_plans:
+    path.write_text(updated)
+    print(f"{label}: patched ({changed})")
 
 replace_once(
     "/app/app/routers/tunnels.py",
@@ -341,18 +443,15 @@ import sys
 
 path = Path(sys.argv[1])
 s = path.read_text()
-marker = 'SMITE_CONTROL_ADDRESS'
-if marker in s:
-    print('Node overlay control_address metadata: already patched')
-    raise SystemExit(0)
 
-old = '''                "role": settings.node_role  # "iran" or "foreign"
+if 'SMITE_CONTROL_ADDRESS' not in s:
+    old = '''                "role": settings.node_role  # "iran" or "foreign"
             }
         }
         
         try:
 '''
-new = '''                "role": settings.node_role  # "iran" or "foreign"
+    new = '''                "role": settings.node_role  # "iran" or "foreign"
             }
         }
 
@@ -362,14 +461,124 @@ new = '''                "role": settings.node_role  # "iran" or "foreign"
         
         try:
 '''
-if old not in s:
-    raise SystemExit('ERROR: Node overlay registration metadata block was not found; refusing unsafe patch')
+    if old not in s:
+        raise SystemExit('ERROR: Node overlay registration metadata block was not found; refusing unsafe patch')
+    s = s.replace(old, new, 1)
+    print('Node overlay control_address metadata: patched')
+else:
+    print('Node overlay control_address metadata: already patched')
 
-path.write_text(s.replace(old, new, 1))
-print('Node overlay control_address metadata: patched')
+if 'SMITE_BACKHAUL_ADDRESS' not in s:
+    old = '''        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+'''
+    new = '''        if control_address:
+            registration_data["metadata"]["control_address"] = control_address.rstrip("/")
+
+        backhaul_address = __import__("os").environ.get("SMITE_BACKHAUL_ADDRESS", "").strip()
+        if backhaul_address:
+            registration_data["metadata"]["backhaul_address"] = backhaul_address
+'''
+    if old not in s:
+        raise SystemExit('ERROR: Node overlay control_address block was not found; refusing unsafe Backhaul metadata patch')
+    s = s.replace(old, new, 1)
+    print('Node overlay backhaul_address metadata: patched')
+else:
+    print('Node overlay backhaul_address metadata: already patched')
+
+compile(s, str(path), "exec")
+path.write_text(s)
 PY
+}
 
-    python3 -m py_compile "$overlay" || return 1
+smite_patch_existing_panel_overlay_private_backhaul() {
+    local panel_overlay_dir="$SMITE_OVERLAY_DIR/panel"
+
+    [ -d "$panel_overlay_dir" ] || return 0
+
+    python3 - "$panel_overlay_dir" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+files = [
+    (root / "main.py", 1, "panel startup private Backhaul address"),
+    (root / "tunnels.py", 2, "panel tunnel private Backhaul address"),
+    (root / "tunnel_reapply_manager.py", 1, "panel reapply private Backhaul address"),
+    (root / "core_health.py", 1, "panel health private Backhaul address"),
+]
+target = 'iran_node_ip = iran_node.node_metadata.get("ip_address")'
+marker = 'iran_node.node_metadata.get("backhaul_address")'
+branch_re = re.compile(
+    r'^(\s*)(?:if|elif)\s+'
+    r'(?:db_tunnel\.core|tunnel\.core|core)\s*==\s*'
+    r'["\']backhaul["\']\s*:'
+)
+
+plans = []
+
+for path, expected, label in files:
+    if not path.exists():
+        continue
+
+    s = path.read_text()
+    existing = s.count(marker)
+    if existing:
+        if existing != expected:
+            raise SystemExit(
+                f"ERROR: {label}: expected {expected} existing private-Backhaul marker(s), found {existing}; refusing unsafe patch"
+            )
+        print(f"{label}: already patched")
+        continue
+
+    lines = s.splitlines(keepends=True)
+    output = []
+    in_backhaul = False
+    branch_indent = None
+    changed = 0
+
+    for line in lines:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        match = branch_re.match(line)
+
+        if match:
+            in_backhaul = True
+            branch_indent = len(match.group(1))
+            output.append(line)
+            continue
+
+        if in_backhaul and stripped and indent <= branch_indent:
+            in_backhaul = False
+            branch_indent = None
+
+        if in_backhaul and stripped == target:
+            prefix = line[:len(line) - len(line.lstrip())]
+            newline = "\n" if line.endswith("\n") else ""
+            output.append(
+                prefix + "iran_node_ip = (" + newline
+                + prefix + '    iran_node.node_metadata.get("backhaul_address")' + newline
+                + prefix + '    or iran_node.node_metadata.get("ip_address")' + newline
+                + prefix + ")" + newline
+            )
+            changed += 1
+        else:
+            output.append(line)
+
+    if changed != expected:
+        raise SystemExit(
+            f"ERROR: {label}: expected {expected} Backhaul replacement(s), found {changed}; refusing unsafe patch"
+        )
+
+    updated = "".join(output)
+    compile(updated, str(path), "exec")
+    plans.append((path, updated, label, changed))
+
+for path, updated, label, changed in plans:
+    path.write_text(updated)
+    print(f"{label}: patched ({changed})")
+PY
 }
 
 smite_prepare_overlays() {
@@ -379,12 +588,21 @@ smite_prepare_overlays() {
     chmod 0755 "$SMITE_OVERLAY_DIR" "$SMITE_OVERLAY_DIR/panel" "$SMITE_OVERLAY_DIR/node"
 
     if smite_container_exists smite-panel; then
+        smite_patch_existing_panel_overlay_private_backhaul || return 1
         smite_patch_panel_runtime || return 1
         docker cp smite-panel:/app/main.py "$SMITE_OVERLAY_DIR/panel/main.py" || return 1
         docker cp smite-panel:/app/app/node_client.py "$SMITE_OVERLAY_DIR/panel/node_client.py" || return 1
         docker cp smite-panel:/app/app/routers/tunnels.py "$SMITE_OVERLAY_DIR/panel/tunnels.py" || return 1
         docker cp smite-panel:/app/app/routers/nodes.py "$SMITE_OVERLAY_DIR/panel/nodes.py" || return 1
-        chmod 0644 "$SMITE_OVERLAY_DIR/panel/main.py" "$SMITE_OVERLAY_DIR/panel/node_client.py" "$SMITE_OVERLAY_DIR/panel/tunnels.py" "$SMITE_OVERLAY_DIR/panel/nodes.py"
+        docker cp smite-panel:/app/app/tunnel_reapply_manager.py "$SMITE_OVERLAY_DIR/panel/tunnel_reapply_manager.py" || return 1
+        docker cp smite-panel:/app/app/routers/core_health.py "$SMITE_OVERLAY_DIR/panel/core_health.py" || return 1
+        chmod 0644 \
+            "$SMITE_OVERLAY_DIR/panel/main.py" \
+            "$SMITE_OVERLAY_DIR/panel/node_client.py" \
+            "$SMITE_OVERLAY_DIR/panel/tunnels.py" \
+            "$SMITE_OVERLAY_DIR/panel/nodes.py" \
+            "$SMITE_OVERLAY_DIR/panel/tunnel_reapply_manager.py" \
+            "$SMITE_OVERLAY_DIR/panel/core_health.py"
     fi
 
     if smite_container_exists smite-node; then
@@ -417,6 +635,8 @@ mounts = [
     f"      - {overlay}/panel/node_client.py:/app/app/node_client.py:ro\n",
     f"      - {overlay}/panel/tunnels.py:/app/app/routers/tunnels.py:ro\n",
     f"      - {overlay}/panel/nodes.py:/app/app/routers/nodes.py:ro\n",
+    f"      - {overlay}/panel/tunnel_reapply_manager.py:/app/app/tunnel_reapply_manager.py:ro\n",
+    f"      - {overlay}/panel/core_health.py:/app/app/routers/core_health.py:ro\n",
 ]
 missing = [mount for mount in mounts if mount not in s]
 if missing:
