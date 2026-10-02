@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.14.1] - 2026-10-02
+
+### Fixed
+
+- Smite Backhaul startup restore now preserves an existing custom `ports` mapping instead of rebuilding it from `public_port` / `target_port`.
+- Added a persistent `/app/main.py` compatibility overlay so the reboot fix survives panel container recreation and host reboot.
+
+### Validated
+
+- Custom Backhaul mapping `443=127.0.0.1:10000` remained intact after recreating `smite-panel`.
+- End-to-end VLESS connectivity remained working after rebooting the Iran Smite server without manual reapply or restart.
+
 ## [0.14.0] - 2026-10-01
 
 ### Added
