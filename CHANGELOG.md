@@ -8,6 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.14.4] - 2026-10-03
+
+### Added
+
+- Added a first-class Smite Private Network installation mode for both Panel + Iran Node and Foreign Node workflows.
+- Added validated IPv4 input handling for private addresses and local-interface verification before applying a server's private address.
+- Added managed Smite installation state fields for connection mode, Panel private IP, and Foreign private IP.
+- Added optional `SMITE_CONTROL_ADDRESS` and `SMITE_BACKHAUL_ADDRESS` generation to the node environment when Private Network mode requires them.
+
+### Changed
+
+- Panel + Iran installation now lets the operator choose Standard / Local or Private Network mode.
+- Private Network Panel installation binds the Panel API on `0.0.0.0:8000` so it remains reachable over the server's private interface, while the local Iran node continues to bootstrap through `127.0.0.1:8000`.
+- Foreign installation now lets the operator choose Standard / HTTPS or Private Network transport.
+- In Private Network mode, Foreign nodes register to the Panel over the private Panel address on port `8000`, fetch the Panel CA over private HTTP, and publish their own private node-control address on port `8888`.
+- Standard installation behavior remains compatible with the previous flow: the Panel stays loopback-bound and Foreign nodes use the Panel domain on HTTPS/443.
+- Interactive installer variables are function-local to avoid state leaking between menu workflows.
+
+### Safety
+
+- Private IPv4 input must contain four numeric octets in the `0-255` range.
+- The Iran private address and Foreign private address are checked against addresses actually configured on the corresponding local server before installation proceeds.
+- Existing four-argument `smite_write_state` callers remain compatible because the new connection mode defaults to `standard` and private-address fields default to empty.
+- Public ports `8000` and `8888` are still expected to remain blocked by the provider/firewall when Private Network mode is used.
+
+### Validated
+
+- Clean-room Panel + Iran installation completed successfully in Private Network mode with local Panel bootstrap, private Backhaul metadata, persistent compatibility overlays, and healthy Smite containers.
+- Clean-room Foreign Node installation completed successfully in Private Network mode with Panel communication over the private network, private node-control metadata, CA retrieval, registration, and compatibility overlays.
+- Installation state correctly persisted `private` mode and the expected private addresses on both servers.
+- The resulting Private Network installation was subsequently validated with the shared TCP/443 gateway, private Backhaul control, Sanaei 3x-UI, end-to-end VLESS traffic, and reboot persistence.
+
 ## [0.14.3] - 2026-10-03
 
 ### Added
