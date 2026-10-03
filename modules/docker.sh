@@ -12,7 +12,9 @@ DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
 DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
 DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
 DOCKER_SMITE_FOREIGN_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-foreign-gateway.sh"
+DOCKER_SMITE_PRIVATE_NETWORK_MODULE="$DOCKER_MODULE_DIR/smite-private-network.sh"
 DOCKER_SMITE_DIGEST_MODULE="$DOCKER_MODULE_DIR/smite-digest-migrate.sh"
+DOCKER_SMITE_PRIVATE_NETWORK_ERROR=""
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -32,6 +34,15 @@ fi
 
 if [ -f "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE" ]; then
     source "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" ]; then
+    if bash -n "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" >/dev/null 2>&1; then
+        # shellcheck disable=SC1090
+        source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+    else
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite Private Network module failed syntax validation."
+    fi
 fi
 
 if [ -f "$DOCKER_SMITE_DIGEST_MODULE" ] && bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1; then
@@ -462,13 +473,14 @@ docker_smite_management_menu() {
         echo "======================================"
         echo
         echo "1) Install / Lifecycle"
-        echo "2) 443 Gateway"
-        echo "3) Compatibility Tools"
+        echo "2) Private Network"
+        echo "3) 443 Gateway"
+        echo "4) Compatibility Tools"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-3]: " SMITE_MANAGEMENT_CHOICE
+        read -rp "Please enter your selection [0-4]: " SMITE_MANAGEMENT_CHOICE
         case "$SMITE_MANAGEMENT_CHOICE" in
             1)
                 if declare -F show_smite_install_menu >/dev/null 2>&1; then
@@ -479,6 +491,19 @@ docker_smite_management_menu() {
                 fi
                 ;;
             2)
+                if declare -F show_smite_private_network_menu >/dev/null 2>&1; then
+                    show_smite_private_network_menu
+                else
+                    clear
+                    echo "Smite Private Network module is not available."
+                    if [ -n "$DOCKER_SMITE_PRIVATE_NETWORK_ERROR" ]; then
+                        echo "$DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+                    fi
+                    echo
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            3)
                 if declare -F smite_foreign_gateway_role >/dev/null 2>&1 && \
                    [ "$(smite_foreign_gateway_role)" = "foreign" ]; then
                     if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
@@ -494,7 +519,7 @@ docker_smite_management_menu() {
                     read -rp "Press Enter to return..."
                 fi
                 ;;
-            3)
+            4)
                 docker_smite_compatibility_menu
                 ;;
             0)
