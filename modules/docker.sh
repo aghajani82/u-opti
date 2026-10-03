@@ -13,8 +13,10 @@ DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
 DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
 DOCKER_SMITE_FOREIGN_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-foreign-gateway.sh"
 DOCKER_SMITE_PRIVATE_NETWORK_MODULE="$DOCKER_MODULE_DIR/smite-private-network.sh"
+DOCKER_SMITE_PRIVATE_PEER_MODULE="$DOCKER_MODULE_DIR/smite-private-peer.sh"
 DOCKER_SMITE_DIGEST_MODULE="$DOCKER_MODULE_DIR/smite-digest-migrate.sh"
 DOCKER_SMITE_PRIVATE_NETWORK_ERROR=""
+DOCKER_SMITE_PRIVATE_PEER_ERROR=""
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -42,6 +44,17 @@ if [ -f "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" ]; then
         source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
     else
         DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite Private Network module failed syntax validation."
+    fi
+fi
+
+if [ -f "$DOCKER_SMITE_PRIVATE_PEER_MODULE" ]; then
+    if ! declare -F smite_private_state_value >/dev/null 2>&1; then
+        DOCKER_SMITE_PRIVATE_PEER_ERROR="Smite Private Network base module is not available."
+    elif bash -n "$DOCKER_SMITE_PRIVATE_PEER_MODULE" >/dev/null 2>&1; then
+        # shellcheck disable=SC1090
+        source "$DOCKER_SMITE_PRIVATE_PEER_MODULE"
+    else
+        DOCKER_SMITE_PRIVATE_PEER_ERROR="Smite Private Network peer helper failed syntax validation."
     fi
 fi
 
