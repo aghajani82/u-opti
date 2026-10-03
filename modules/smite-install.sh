@@ -30,6 +30,24 @@ smite_install_validate_name() {
     [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]
 }
 
+smite_install_validate_ipv4() {
+    local ip="$1"
+    local IFS=.
+    local -a octets
+    local octet
+
+    read -r -a octets <<< "$ip"
+
+    [ "${#octets[@]}" -eq 4 ] || return 1
+
+    for octet in "${octets[@]}"; do
+        [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+        (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
+    done
+
+    return 0
+}
+
 smite_install_require_tools() {
     local missing=()
     local cmd
@@ -54,6 +72,8 @@ smite_install_require_tools() {
 }
 
 smite_install_ensure_docker() {
+    local confirm=""
+
     if command -v docker >/dev/null 2>&1 && \
        systemctl is-active --quiet docker 2>/dev/null && \
        docker compose version >/dev/null 2>&1; then
@@ -144,6 +164,9 @@ smite_write_state() {
     local panel_domain="$2"
     local node_name="$3"
     local foreign_domain="${4:-}"
+    local connection_mode="${5:-standard}"
+    local panel_private_ip="${6:-}"
+    local foreign_private_ip="${7:-}"
 
     mkdir -p "$SMITE_STATE_DIR" || return 1
     chmod 0700 "$SMITE_STATE_DIR" || return 1
@@ -151,9 +174,12 @@ smite_write_state() {
     cat > "$SMITE_STATE_FILE" <<EOF_STATE
 # Managed by U-OPTI. No secrets are stored here.
 SMITE_ROLE=$role
+SMITE_CONNECTION_MODE=$connection_mode
 SMITE_PANEL_DOMAIN=$panel_domain
+SMITE_PANEL_PRIVATE_IP=$panel_private_ip
 SMITE_NODE_NAME=$node_name
 SMITE_FOREIGN_DOMAIN=$foreign_domain
+SMITE_FOREIGN_PRIVATE_IP=$foreign_private_ip
 SMITE_MANAGED_VERSION=$SMITE_UPSTREAM_VERSION
 SMITE_UPSTREAM_REF=$SMITE_UPSTREAM_REF
 EOF_STATE
@@ -174,10 +200,17 @@ smite_show_installation_state() {
     if [ -f "$SMITE_STATE_FILE" ]; then
         source "$SMITE_STATE_FILE"
         echo "Managed role            : ${SMITE_ROLE:-Unknown}"
+        echo "Connection mode         : ${SMITE_CONNECTION_MODE:-standard}"
         echo "Panel domain            : ${SMITE_PANEL_DOMAIN:-Not set}"
+        if [ -n "${SMITE_PANEL_PRIVATE_IP:-}" ]; then
+            echo "Panel private IP        : $SMITE_PANEL_PRIVATE_IP"
+        fi
         echo "Node name               : ${SMITE_NODE_NAME:-Not set}"
         if [ -n "${SMITE_FOREIGN_DOMAIN:-}" ]; then
             echo "Foreign domain          : $SMITE_FOREIGN_DOMAIN"
+        fi
+        if [ -n "${SMITE_FOREIGN_PRIVATE_IP:-}" ]; then
+            echo "Foreign private IP      : $SMITE_FOREIGN_PRIVATE_IP"
         fi
         echo "Managed Smite version   : ${SMITE_MANAGED_VERSION:-Unknown}"
     else
@@ -201,6 +234,7 @@ smite_show_installation_state() {
 
 smite_install_panel_files() {
     local panel_domain="$1"
+    local panel_host="${2:-127.0.0.1}"
     local secret_key
     secret_key="$(openssl rand -hex 32)" || return 1
 
@@ -218,7 +252,7 @@ smite_install_panel_files() {
 
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
 PANEL_PORT=8000
-PANEL_HOST=127.0.0.1
+PANEL_HOST=$panel_host
 HTTPS_ENABLED=false
 PANEL_DOMAIN=$panel_domain
 SMITE_HTTP_PORT=80
@@ -247,6 +281,8 @@ smite_install_node_files() {
     local node_role="$2"
     local panel_address="$3"
     local ca_source="$4"
+    local control_address="${5:-}"
+    local backhaul_address="${6:-}"
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || return 1
 
@@ -275,6 +311,15 @@ PANEL_CA_PATH=/etc/smite-node/certs/ca.crt
 PANEL_ADDRESS=$panel_address
 PANEL_API_PORT=8000
 EOF_ENV
+
+    if [ -n "$control_address" ]; then
+        printf 'SMITE_CONTROL_ADDRESS=%s\n' "$control_address" >> "$SMITE_NODE_DIR/.env"
+    fi
+
+    if [ -n "$backhaul_address" ]; then
+        printf 'SMITE_BACKHAUL_ADDRESS=%s\n' "$backhaul_address" >> "$SMITE_NODE_DIR/.env"
+    fi
+
     chmod 0600 "$SMITE_NODE_DIR/.env" || return 1
 
     docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null || {
@@ -375,8 +420,8 @@ smite_install_panel_iran() {
     echo "======================================"
     echo
     echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
-    echo "Panel API will initially bind only to 127.0.0.1:8000."
-    echo "The Iran node will bootstrap against that local panel endpoint."
+    echo "Panel API bind address depends on the selected connection mode."
+    echo "The Iran node always bootstraps against the local panel endpoint."
     echo "TCP/443 gateway configuration is handled as a separate step."
     echo
 
@@ -392,6 +437,11 @@ smite_install_panel_iran() {
     fi
 
     local panel_domain node_name
+    local connection_choice="" confirm="" create_admin=""
+    local connection_mode="standard"
+    local panel_private_ip=""
+    local panel_host="127.0.0.1"
+
     read -rp "Panel domain (example: ir.example.com): " panel_domain
     panel_domain="${panel_domain,,}"
     if ! smite_install_validate_domain "$panel_domain"; then
@@ -409,8 +459,52 @@ smite_install_panel_iran() {
     fi
 
     echo
+    echo "Connection mode:"
+    echo "1) Standard / Local"
+    echo "2) Private Network"
+    echo
+    read -rp "Please enter your selection [1-2]: " connection_choice
+
+    case "$connection_choice" in
+        1)
+            connection_mode="standard"
+            panel_host="127.0.0.1"
+            ;;
+        2)
+            connection_mode="private"
+
+            read -rp "Iran Private IPv4 address: " panel_private_ip
+            panel_private_ip="${panel_private_ip//[[:space:]]/}"
+
+            if ! smite_install_validate_ipv4 "$panel_private_ip"; then
+                echo "ERROR: Invalid Private IPv4 address."
+                smite_install_pause
+                return
+            fi
+
+            if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$panel_private_ip"; then
+                echo "ERROR: Private IPv4 address is not configured on this server:"
+                echo "       $panel_private_ip"
+                smite_install_pause
+                return
+            fi
+
+            panel_host="0.0.0.0"
+            ;;
+        *)
+            echo "ERROR: Invalid connection mode."
+            smite_install_pause
+            return
+            ;;
+    esac
+
+    echo
     echo "Panel domain : $panel_domain"
     echo "Iran node    : $node_name"
+    echo "Connection   : $connection_mode"
+    if [ "$connection_mode" = "private" ]; then
+        echo "Private IP   : $panel_private_ip"
+    fi
     echo "Smite version: $SMITE_UPSTREAM_VERSION"
     echo
     read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
@@ -425,7 +519,7 @@ smite_install_panel_iran() {
         return
     }
 
-    if ! smite_install_panel_files "$panel_domain"; then
+    if ! smite_install_panel_files "$panel_domain" "$panel_host"; then
         smite_install_pause
         return
     fi
@@ -442,7 +536,7 @@ smite_install_panel_iran() {
     fi
 
     echo
-    echo "Starting Smite Panel on 127.0.0.1:8000..."
+    echo "Starting Smite Panel on ${panel_host}:8000..."
     if ! docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
         echo "ERROR: Failed to start Smite Panel."
         smite_install_pause
@@ -476,7 +570,13 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_install_node_files "$node_name" "iran" "127.0.0.1:8000" "$SMITE_NODE_DIR/certs/ca.crt"; then
+    if ! smite_install_node_files \
+        "$node_name" \
+        "iran" \
+        "127.0.0.1:8000" \
+        "$SMITE_NODE_DIR/certs/ca.crt" \
+        "" \
+        "$panel_private_ip"; then
         smite_install_pause
         return
     fi
@@ -520,7 +620,14 @@ smite_install_panel_iran() {
         echo "WARNING: Could not set the local panel control address automatically."
     fi
 
-    smite_write_state "panel-iran" "$panel_domain" "$node_name" || {
+    smite_write_state \
+        "panel-iran" \
+        "$panel_domain" \
+        "$node_name" \
+        "" \
+        "$connection_mode" \
+        "$panel_private_ip" \
+        "" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
     }
 
@@ -529,13 +636,25 @@ smite_install_panel_iran() {
     echo "      Smite Core Install Complete"
     echo "======================================"
     echo
-    echo "Panel       : running on 127.0.0.1:8000"
+    if [ "$connection_mode" = "private" ]; then
+        echo "Panel       : running on 0.0.0.0:8000"
+        echo "Private API : http://${panel_private_ip}:8000"
+        echo "Backhaul IP : $panel_private_ip"
+    else
+        echo "Panel       : running on 127.0.0.1:8000"
+    fi
     echo "Iran Node   : running on port 8888"
     echo "Panel Domain: $panel_domain"
+    echo "Connection  : $connection_mode"
     echo "Compatibility overlays: active"
     echo
     echo "IMPORTANT: TCP/443 gateway is not configured by this installer step yet."
-    echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
+    if [ "$connection_mode" = "private" ]; then
+        echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
+        echo "Port 8000 is intended for the private network only."
+    else
+        echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
+    fi
     echo
     read -rp "Create a Smite admin account now? [y/N]: " create_admin
     case "$create_admin" in
@@ -554,7 +673,7 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
-    echo "The Panel must already be reachable over HTTPS/443."
+    echo "Choose Standard HTTPS or Private Network transport."
     echo
 
     smite_install_require_tools || { smite_install_pause; return; }
@@ -568,6 +687,14 @@ smite_install_foreign_node() {
     fi
 
     local panel_domain foreign_domain node_name temp_ca
+    local connection_choice="" confirm=""
+    local connection_mode="standard"
+    local panel_private_ip=""
+    local foreign_private_ip=""
+    local panel_address=""
+    local control_address=""
+    local ca_url=""
+
     read -rp "Panel domain (example: ir.example.com): " panel_domain
     panel_domain="${panel_domain,,}"
     if ! smite_install_validate_domain "$panel_domain"; then
@@ -593,9 +720,74 @@ smite_install_foreign_node() {
     fi
 
     echo
-    echo "Panel domain  : $panel_domain"
-    echo "Foreign domain: $foreign_domain"
-    echo "Node name     : $node_name"
+    echo "Connection mode:"
+    echo "1) Standard / HTTPS"
+    echo "2) Private Network"
+    echo
+    read -rp "Please enter your selection [1-2]: " connection_choice
+
+    case "$connection_choice" in
+        1)
+            connection_mode="standard"
+            panel_address="${panel_domain}:443"
+            ca_url="https://${panel_domain}/api/panel/ca/server"
+            ;;
+
+        2)
+            connection_mode="private"
+
+            read -rp "Iran Panel Private IPv4 address: " panel_private_ip
+            panel_private_ip="${panel_private_ip//[[:space:]]/}"
+
+            if ! smite_install_validate_ipv4 "$panel_private_ip"; then
+                echo "ERROR: Invalid Iran Panel Private IPv4 address."
+                smite_install_pause
+                return
+            fi
+
+            read -rp "This Foreign server Private IPv4 address: " foreign_private_ip
+            foreign_private_ip="${foreign_private_ip//[[:space:]]/}"
+
+            if ! smite_install_validate_ipv4 "$foreign_private_ip"; then
+                echo "ERROR: Invalid Foreign Private IPv4 address."
+                smite_install_pause
+                return
+            fi
+
+            if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$foreign_private_ip"; then
+                echo "ERROR: Foreign Private IPv4 address is not configured on this server:"
+                echo "       $foreign_private_ip"
+                smite_install_pause
+                return
+            fi
+
+            panel_address="${panel_private_ip}:8000"
+            control_address="http://${foreign_private_ip}:8888"
+            ca_url="http://${panel_address}/api/panel/ca/server"
+            ;;
+
+        *)
+            echo "ERROR: Invalid connection mode."
+            smite_install_pause
+            return
+            ;;
+    esac
+
+    echo
+    echo "Panel domain   : $panel_domain"
+    echo "Foreign domain : $foreign_domain"
+    echo "Node name      : $node_name"
+    echo "Connection     : $connection_mode"
+
+    if [ "$connection_mode" = "private" ]; then
+        echo "Panel private  : $panel_private_ip"
+        echo "Foreign private : $foreign_private_ip"
+        echo "Panel transport: http://$panel_address"
+        echo "Node control   : $control_address"
+    else
+        echo "Panel transport: https://$panel_address"
+    fi
+
     echo
     read -rp "Install the Foreign Smite Node? [y/N]: " confirm
     case "$confirm" in
@@ -610,13 +802,25 @@ smite_install_foreign_node() {
     }
 
     temp_ca="$(mktemp)"
-    echo "Downloading the Foreign-node CA certificate from https://$panel_domain ..."
+
+    echo "Downloading the Foreign-node CA certificate from $ca_url ..."
     if ! curl -fsS --retry 5 \
-        "https://${panel_domain}/api/panel/ca/server" \
+        "$ca_url" \
         -o "$temp_ca"; then
+
         rm -f "$temp_ca"
-        echo "ERROR: Could not reach the panel CA endpoint over HTTPS/443."
-        echo "Configure the IR panel 443 gateway before installing a Foreign node."
+
+        if [ "$connection_mode" = "private" ]; then
+            echo "ERROR: Could not reach the Panel over the Private Network."
+            echo "Check:"
+            echo "  - Private Network connectivity"
+            echo "  - Panel Private IP"
+            echo "  - Panel TCP/8000 availability"
+        else
+            echo "ERROR: Could not reach the Panel CA endpoint over HTTPS/443."
+            echo "Configure the IR Panel 443 gateway before installing a Foreign node."
+        fi
+
         smite_install_pause
         return
     fi
@@ -628,11 +832,19 @@ smite_install_foreign_node() {
         return
     fi
 
-    if ! smite_install_node_files "$node_name" "foreign" "${panel_domain}:443" "$temp_ca"; then
+    if ! smite_install_node_files \
+        "$node_name" \
+        "foreign" \
+        "$panel_address" \
+        "$temp_ca" \
+        "$control_address" \
+        ""; then
+
         rm -f "$temp_ca"
         smite_install_pause
         return
     fi
+
     rm -f "$temp_ca"
 
     if ! smite_install_cli_tools; then
@@ -673,7 +885,14 @@ smite_install_foreign_node() {
         echo "Foreign node registration: OK"
     fi
 
-    smite_write_state "foreign" "$panel_domain" "$node_name" "$foreign_domain" || {
+    smite_write_state \
+        "foreign" \
+        "$panel_domain" \
+        "$node_name" \
+        "$foreign_domain" \
+        "$connection_mode" \
+        "$panel_private_ip" \
+        "$foreign_private_ip" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
     }
 
@@ -683,12 +902,30 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     echo "Node          : $node_name"
-    echo "Panel         : https://$panel_domain:443"
+    echo "Panel domain  : $panel_domain"
     echo "Foreign domain: $foreign_domain"
+    echo "Connection    : $connection_mode"
+
+    if [ "$connection_mode" = "private" ]; then
+        echo "Panel private : $panel_private_ip"
+        echo "Foreign private : $foreign_private_ip"
+        echo "Panel transport: http://$panel_address"
+        echo "Node control  : $control_address"
+    else
+        echo "Panel         : https://$panel_domain:443"
+    fi
+
     echo "Compatibility overlays: active"
     echo
-    echo "IMPORTANT: Panel -> Foreign Node control over 443 is configured in the gateway step."
-    echo "Keep public port 8888 blocked at the firewall/provider level."
+
+    if [ "$connection_mode" = "private" ]; then
+        echo "Private Network mode is active."
+        echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
+        echo "Machine-to-machine control traffic uses the private network."
+    else
+        echo "IMPORTANT: Panel -> Foreign Node control over 443 is configured in the gateway step."
+        echo "Keep public port 8888 blocked at the firewall/provider level."
+    fi
 
     smite_install_pause
 }
