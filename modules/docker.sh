@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # U-OPTI - Docker Management
-# v0.13.0
 
 DOCKER_APT_SOURCE="/etc/apt/sources.list.d/docker.sources"
 DOCKER_GPG_KEY="/etc/apt/keyrings/docker.asc"
@@ -13,6 +12,7 @@ DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
 DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
 DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
 DOCKER_SMITE_FOREIGN_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-foreign-gateway.sh"
+DOCKER_SMITE_DIGEST_MODULE="$DOCKER_MODULE_DIR/smite-digest-migrate.sh"
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -34,9 +34,78 @@ if [ -f "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE" ]; then
     source "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE"
 fi
 
+if [ -f "$DOCKER_SMITE_DIGEST_MODULE" ] && bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1; then
+    # shellcheck disable=SC1090
+    source "$DOCKER_SMITE_DIGEST_MODULE"
+fi
+
 docker_is_installed() { command -v docker >/dev/null 2>&1; }
 docker_service_is_active() { systemctl is-active --quiet docker 2>/dev/null; }
 docker_compose_is_installed() { docker compose version >/dev/null 2>&1; }
+
+docker_smite_ensure_digest_module() {
+    local branch="${U_OPTI_BRANCH:-main}"
+    local base_url="https://raw.githubusercontent.com/aghajani82/u-opti/$branch"
+    local temp_file=""
+
+    if declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ -f "$DOCKER_SMITE_DIGEST_MODULE" ] &&
+       bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1; then
+        # shellcheck disable=SC1090
+        source "$DOCKER_SMITE_DIGEST_MODULE"
+        if declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "ERROR: curl is required to prepare the Smite digest migration helper."
+        return 1
+    fi
+
+    echo "Smite digest migration helper is missing."
+    echo "Preparing the helper from the active U-OPTI branch..."
+
+    temp_file="$(mktemp)" || return 1
+
+    if ! curl -fsSL --retry 3 \
+        "${base_url}/modules/smite-digest-migrate.sh?cb=$(date +%s%N)" \
+        -o "$temp_file"; then
+        echo "ERROR: Failed to download smite-digest-migrate.sh."
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    if [ ! -s "$temp_file" ] ||
+       ! bash -n "$temp_file" ||
+       ! grep -q '^smite_digest_migrate_existing()' "$temp_file"; then
+        echo "ERROR: Downloaded Smite digest migration helper failed validation."
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    if ! install -m 0755 "$temp_file" "$DOCKER_SMITE_DIGEST_MODULE"; then
+        echo "ERROR: Failed to install the Smite digest migration helper."
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    rm -f "$temp_file"
+
+    # shellcheck disable=SC1090
+    source "$DOCKER_SMITE_DIGEST_MODULE"
+
+    if ! declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
+        echo "ERROR: Smite digest migration helper did not load correctly."
+        return 1
+    fi
+
+    echo "Smite digest migration helper is ready."
+    return 0
+}
 
 docker_show_status() {
     clear
@@ -214,14 +283,14 @@ docker_install() {
         return
     }
 
-    cat > "$DOCKER_APT_SOURCE" <<EOF
+    cat > "$DOCKER_APT_SOURCE" <<EOF_DOCKER_SOURCE
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: $UBUNTU_CODENAME
 Components: stable
 Architectures: $ARCH
 Signed-By: $DOCKER_GPG_KEY
-EOF
+EOF_DOCKER_SOURCE
 
     apt update || {
         echo "Error: Docker repository could not be used."
@@ -306,6 +375,50 @@ docker_compose_menu() {
     read -rp "Press Enter to return..."
 }
 
+docker_smite_compatibility_menu() {
+    while true; do
+        clear
+        echo "======================================"
+        echo "     Smite Compatibility Tools"
+        echo "======================================"
+        echo
+        echo "1) Persistent 443 Compatibility"
+        echo "2) Image Digest Migration"
+        echo
+        echo "0) Back"
+        echo
+
+        read -rp "Please enter your selection [0-2]: " SMITE_COMPAT_CHOICE
+
+        case "$SMITE_COMPAT_CHOICE" in
+            1)
+                if declare -F show_smite_menu >/dev/null 2>&1; then
+                    show_smite_menu
+                else
+                    echo "Smite compatibility module is not available."
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            2)
+                clear
+                if docker_smite_ensure_digest_module; then
+                    smite_digest_migrate_existing
+                fi
+                echo
+                read -rp "Press Enter to return..."
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+
 docker_smite_management_menu() {
     while true; do
         clear
@@ -347,12 +460,7 @@ docker_smite_management_menu() {
                 fi
                 ;;
             3)
-                if declare -F show_smite_menu >/dev/null 2>&1; then
-                    show_smite_menu
-                else
-                    echo "Smite compatibility module is not available."
-                    read -rp "Press Enter to return..."
-                fi
+                docker_smite_compatibility_menu
                 ;;
             0)
                 break
@@ -405,7 +513,7 @@ docker_management_menu() {
                     show_docker_3xui_menu
                 else
                     clear
-                    echo "3x-UI Docker Management is not implemented yet."
+                    echo "3x-UI Docker Management is not available."
                     echo
                     read -rp "Press Enter to return..."
                 fi
@@ -415,7 +523,7 @@ docker_management_menu() {
                 ;;
             6|7|8|9|10)
                 clear
-                echo "This Docker management function is planned for v0.13.0."
+                echo "This Docker management function is not implemented yet."
                 echo
                 read -rp "Press Enter to return..."
                 ;;
