@@ -26,6 +26,10 @@ No unreleased changes are currently documented.
 - Standard installation behavior remains compatible with the previous flow: the Panel stays loopback-bound and Foreign nodes use the Panel domain on HTTPS/443.
 - Interactive installer variables are function-local to avoid state leaking between menu workflows.
 
+### Fixed
+
+- Corrected the Sanaei 3x-UI Docker menu prompt so the displayed selection range now matches all available options (`0-12`).
+
 ### Safety
 
 - Private IPv4 input must contain four numeric octets in the `0-255` range.
