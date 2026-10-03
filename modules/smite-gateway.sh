@@ -15,6 +15,12 @@ SMITE_GATEWAY_STREAM_CONF="/etc/nginx/modules-enabled/99-u-opti-smite-stream.con
 SMITE_GATEWAY_MAP_FILE="/etc/nginx/u-opti-smite-stream-map.conf"
 SMITE_GATEWAY_ACME_ROOT="/var/www/u-opti-acme"
 SMITE_GATEWAY_RENEW_HOOK="/etc/letsencrypt/renewal-hooks/deploy/u-opti-nginx-reload"
+SMITE_GATEWAY_DB="${SMITE_GATEWAY_DB:-$SMITE_PANEL_DIR/panel/data/smite.db}"
+SMITE_GATEWAY_PRIVATE_DATA_PORT="${SMITE_GATEWAY_PRIVATE_DATA_PORT:-9443}"
+
+# Runtime transaction state. These are intentionally not persisted.
+SMITE_GATEWAY_PRIVATE_DB_BACKUP=""
+SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED=0
 
 smite_gateway_pause() {
     echo
@@ -36,6 +42,17 @@ smite_gateway_panel_domain() {
         value="$(awk -F= '$1 == "PANEL_DOMAIN" {print substr($0, index($0,"=")+1); exit}' "$SMITE_PANEL_DIR/.env")"
     fi
 
+    printf '%s' "$value"
+}
+
+smite_gateway_connection_mode() {
+    local value="standard"
+
+    if [ -f "$SMITE_STATE_FILE" ]; then
+        value="$(awk -F= '$1 == "SMITE_CONNECTION_MODE" {print substr($0, index($0,"=")+1); exit}' "$SMITE_STATE_FILE")"
+    fi
+
+    [ -n "$value" ] || value="standard"
     printf '%s' "$value"
 }
 
@@ -141,7 +158,7 @@ smite_gateway_prepare_acme() {
         "$SMITE_GATEWAY_ACME_ROOT/.well-known" \
         "$SMITE_GATEWAY_ACME_ROOT/.well-known/acme-challenge" || return 1
 
-    cat > "$acme_conf" <<EOF
+    cat > "$acme_conf" <<EOF_ACME
 # U-OPTI Smite ACME webroot
 server {
     listen 80;
@@ -158,7 +175,7 @@ server {
         return 404;
     }
 }
-EOF
+EOF_ACME
 
     nginx -t || return 1
     systemctl reload nginx || return 1
@@ -236,10 +253,355 @@ smite_gateway_remove_unchanged_backup() {
     fi
 }
 
+smite_gateway_private_backhaul_listener_ready() {
+    ss -lntp 2>/dev/null \
+        | grep -Eq "127\.0\.0\.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}[[:space:]].*backhaul"
+}
+
+smite_gateway_prepare_private_backhaul() {
+    local inspection=""
+    local action=""
+    local tunnel_id=""
+    local tunnel_name=""
+    local port_index=""
+    local old_mapping=""
+    local backup=""
+    local attempt=""
+
+    SMITE_GATEWAY_PRIVATE_DB_BACKUP=""
+    SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED=0
+
+    [ "$(smite_gateway_connection_mode)" = "private" ] || return 0
+
+    [ -f "$SMITE_GATEWAY_DB" ] || {
+        echo "ERROR: Smite database was not found:"
+        echo "$SMITE_GATEWAY_DB"
+        return 1
+    }
+
+    inspection="$(python3 - "$SMITE_GATEWAY_DB" "$SMITE_GATEWAY_PRIVATE_DATA_PORT" <<'PYDB'
+import json
+import sqlite3
+import sys
+
+db = sys.argv[1]
+data_port = str(sys.argv[2])
+
+con = sqlite3.connect(db)
+cur = con.cursor()
+
+rows = cur.execute(
+    """
+    SELECT id, name, spec
+    FROM tunnels
+    WHERE core='backhaul'
+      AND status='active'
+    """
+).fetchall()
+
+matches = []
+
+for tunnel_id, name, raw_spec in rows:
+    try:
+        spec = json.loads(raw_spec)
+    except Exception:
+        continue
+
+    ports = spec.get("ports")
+    if not isinstance(ports, list):
+        continue
+
+    for index, item in enumerate(ports):
+        entry = str(item)
+        if "=" not in entry:
+            continue
+
+        left, _right = entry.split("=", 1)
+
+        if left == f"127.0.0.1:{data_port}":
+            kind = "prepared"
+        else:
+            listen_port = left.rsplit(":", 1)[-1] if ":" in left else left
+            if listen_port != "443":
+                continue
+            kind = "public443"
+
+        matches.append((tunnel_id, name, spec, index, entry, kind))
+
+if len(matches) != 1:
+    print(
+        "ERROR: Expected exactly one active Backhaul mapping for public 443 "
+        f"or private 127.0.0.1:{data_port}; found {len(matches)}.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+tunnel_id, name, spec, index, entry, kind = matches[0]
+
+if kind == "prepared":
+    public_port = str(spec.get("public_port", ""))
+    listen_port = str(spec.get("listen_port", ""))
+    action = "already" if public_port == data_port and listen_port == data_port else "repair"
+else:
+    action = "migrate"
+
+print("\t".join([action, str(tunnel_id), str(name), str(index), entry]))
+con.close()
+PYDB
+)" || return 1
+
+    IFS=$'\t' read -r action tunnel_id tunnel_name port_index old_mapping <<< "$inspection"
+
+    case "$action" in
+        already)
+            if smite_gateway_private_backhaul_listener_ready; then
+                echo "Private Mode Backhaul: already prepared on 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}"
+                return 0
+            fi
+
+            echo "Private Mode Backhaul mapping is already prepared, but the listener is missing."
+            echo "Restarting Smite Panel to reapply the tunnel..."
+            ;;
+
+        migrate)
+            # During the normal first conversion Backhaul itself must own :443.
+            if ! ss -lntp 2>/dev/null \
+                | grep -E ':443[[:space:]]' \
+                | grep -q 'backhaul'; then
+                echo "ERROR: Backhaul does not currently own public TCP/443."
+                echo "Refusing to migrate an ambiguous gateway state."
+                return 1
+            fi
+
+            echo "Private Mode: moving Backhaul data listener from public :443"
+            echo "              to 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}"
+            ;;
+
+        repair)
+            echo "Private Mode: repairing Backhaul gateway metadata for 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}"
+            ;;
+
+        *)
+            echo "ERROR: Unexpected Backhaul inspection result: $action"
+            return 1
+            ;;
+    esac
+
+    backup="${SMITE_GATEWAY_DB}.u-opti-before-private-gateway-$(date +%Y%m%d-%H%M%S).bak"
+
+    cp -a "$SMITE_GATEWAY_DB" "$backup" || {
+        echo "ERROR: Could not back up the Smite database."
+        return 1
+    }
+
+    if ! python3 - \
+        "$SMITE_GATEWAY_DB" \
+        "$SMITE_GATEWAY_PRIVATE_DATA_PORT" \
+        "$tunnel_id" \
+        "$port_index" \
+        "$action" <<'PYDB'
+import json
+import sqlite3
+import sys
+
+db = sys.argv[1]
+data_port = int(sys.argv[2])
+tunnel_id = sys.argv[3]
+port_index = int(sys.argv[4])
+action = sys.argv[5]
+
+con = sqlite3.connect(db)
+cur = con.cursor()
+
+row = cur.execute(
+    """
+    SELECT spec
+    FROM tunnels
+    WHERE id=?
+      AND core='backhaul'
+      AND status='active'
+    """,
+    (tunnel_id,),
+).fetchone()
+
+if not row:
+    print("ERROR: Backhaul tunnel disappeared during migration.", file=sys.stderr)
+    sys.exit(2)
+
+spec = json.loads(row[0])
+ports = spec.get("ports")
+
+if not isinstance(ports, list) or port_index >= len(ports):
+    print("ERROR: Backhaul ports changed during migration.", file=sys.stderr)
+    sys.exit(3)
+
+entry = str(ports[port_index])
+if "=" not in entry:
+    print("ERROR: Invalid Backhaul port mapping.", file=sys.stderr)
+    sys.exit(4)
+
+left, right = entry.split("=", 1)
+
+if action == "migrate":
+    listen_port = left.rsplit(":", 1)[-1] if ":" in left else left
+    if listen_port != "443":
+        print(f"ERROR: Expected Backhaul public port 443, found {left}.", file=sys.stderr)
+        sys.exit(5)
+    ports[port_index] = f"127.0.0.1:{data_port}={right}"
+
+elif action in ("repair", "already"):
+    expected = f"127.0.0.1:{data_port}"
+    if left != expected:
+        print(f"ERROR: Expected prepared Backhaul listener {expected}, found {left}.", file=sys.stderr)
+        sys.exit(6)
+
+else:
+    print(f"ERROR: Unsupported migration action: {action}", file=sys.stderr)
+    sys.exit(7)
+
+# Keep listen_ip untouched. It is also used by Backhaul's control listener
+# and must remain reachable through the private network.
+spec["ports"] = ports
+spec["public_port"] = data_port
+spec["listen_port"] = data_port
+
+cur.execute(
+    "UPDATE tunnels SET spec=? WHERE id=?",
+    (json.dumps(spec), tunnel_id),
+)
+
+con.commit()
+con.close()
+PYDB
+    then
+        rm -f "$backup"
+        echo "ERROR: Failed to update the Backhaul tunnel."
+        return 1
+    fi
+
+    echo "Reapplying Backhaul tunnel..."
+
+    if ! docker restart smite-panel >/dev/null; then
+        echo "ERROR: Could not restart smite-panel."
+        cp -a "$backup" "$SMITE_GATEWAY_DB"
+        docker restart smite-panel >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    if ! smite_gateway_wait_healthy smite-panel 90; then
+        echo "ERROR: smite-panel did not become healthy after Backhaul migration."
+        cp -a "$backup" "$SMITE_GATEWAY_DB"
+        docker restart smite-panel >/dev/null 2>&1 || true
+        smite_gateway_wait_healthy smite-panel 90 >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    for attempt in $(seq 1 30); do
+        if smite_gateway_private_backhaul_listener_ready; then
+            SMITE_GATEWAY_PRIVATE_DB_BACKUP="$backup"
+            SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED=1
+
+            echo "Private Mode Backhaul listener: 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT} OK"
+            echo "Smite database backup: $backup"
+            return 0
+        fi
+
+        sleep 1
+    done
+
+    echo "ERROR: Backhaul did not start on 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}."
+    echo "Restoring the previous Smite database..."
+
+    cp -a "$backup" "$SMITE_GATEWAY_DB"
+    docker restart smite-panel >/dev/null 2>&1 || true
+    smite_gateway_wait_healthy smite-panel 90 >/dev/null 2>&1 || true
+
+    return 1
+}
+
+smite_gateway_restore_nginx_files() {
+    local backend_backup="$1"
+    local stream_backup="$2"
+    local map_backup="$3"
+
+    if [ -n "$backend_backup" ]; then
+        cp -a "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
+    else
+        rm -f "$SMITE_GATEWAY_BACKEND_CONF"
+    fi
+
+    if [ -n "$stream_backup" ]; then
+        cp -a "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"
+    else
+        rm -f "$SMITE_GATEWAY_STREAM_CONF"
+    fi
+
+    if [ -n "$map_backup" ]; then
+        cp -a "$map_backup" "$SMITE_GATEWAY_MAP_FILE"
+    else
+        rm -f "$SMITE_GATEWAY_MAP_FILE"
+    fi
+
+    if nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx >/dev/null 2>&1 || \
+            echo "WARNING: Nginx rollback configuration is valid, but reload failed."
+    else
+        echo "WARNING: Previous Nginx gateway files were restored, but nginx -t failed."
+    fi
+}
+
+smite_gateway_rollback_private_backhaul() {
+    local backup="$1"
+    local changed="$2"
+
+    [ "$changed" = "1" ] || return 0
+    [ -n "$backup" ] || return 0
+    [ -f "$backup" ] || {
+        echo "WARNING: Private Backhaul rollback backup was not found:"
+        echo "$backup"
+        return 1
+    }
+
+    echo "Restoring previous Backhaul tunnel configuration..."
+
+    cp -a "$backup" "$SMITE_GATEWAY_DB" || return 1
+
+    docker restart smite-panel >/dev/null 2>&1 || {
+        echo "WARNING: Database was restored, but smite-panel restart failed."
+        return 1
+    }
+
+    if ! smite_gateway_wait_healthy smite-panel 90; then
+        echo "WARNING: Database was restored, but smite-panel did not become healthy."
+        return 1
+    fi
+
+    echo "Backhaul database rollback: OK"
+}
+
+smite_gateway_rollback_transaction() {
+    local backend_backup="$1"
+    local stream_backup="$2"
+    local map_backup="$3"
+    local private_db_backup="$4"
+    local private_backhaul_changed="$5"
+
+    # Free public :443 first by restoring the previous Nginx state.
+    smite_gateway_restore_nginx_files \
+        "$backend_backup" \
+        "$stream_backup" \
+        "$map_backup"
+
+    # Only then restore Backhaul :443.
+    smite_gateway_rollback_private_backhaul \
+        "$private_db_backup" \
+        "$private_backhaul_changed"
+}
+
 smite_gateway_write_backend() {
     local domain="$1"
 
-    cat > "$SMITE_GATEWAY_BACKEND_CONF" <<EOF
+    cat > "$SMITE_GATEWAY_BACKEND_CONF" <<EOF_BACKEND
 # Managed by U-OPTI - Smite Panel TLS backend
 server {
     listen 127.0.0.1:8443 ssl;
@@ -266,12 +628,28 @@ server {
         proxy_send_timeout 3600s;
     }
 }
-EOF
+EOF_BACKEND
 }
 
 smite_gateway_write_stream() {
     local domain="$1"
     local map_tmp=""
+    local connection_mode=""
+    local default_backend="127.0.0.1:8443"
+
+    connection_mode="$(smite_gateway_connection_mode)"
+
+    if [ "$connection_mode" = "private" ]; then
+        default_backend="127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}"
+
+        if ! smite_gateway_private_backhaul_listener_ready; then
+            echo "ERROR: Private Mode Backhaul listener is not available at $default_backend."
+            echo "Refusing to place Nginx on public TCP/443."
+            return 1
+        fi
+
+        echo "Private Mode default TCP/443 backend: $default_backend"
+    fi
 
     map_tmp="$(mktemp)" || return 1
 
@@ -317,12 +695,12 @@ smite_gateway_write_stream() {
 
     rm -f "$map_tmp"
 
-    cat > "$SMITE_GATEWAY_STREAM_CONF" <<EOF
+    cat > "$SMITE_GATEWAY_STREAM_CONF" <<EOF_STREAM
 # Managed by U-OPTI - Smite TCP/443 SNI gateway
 stream {
     map \$ssl_preread_server_name \$uopti_smite_backend {
         include $SMITE_GATEWAY_MAP_FILE;
-        default 127.0.0.1:8443;
+        default $default_backend;
     }
 
     server {
@@ -336,18 +714,18 @@ stream {
         proxy_timeout 1h;
     }
 }
-EOF
+EOF_STREAM
 }
 
 smite_gateway_write_renew_hook() {
     mkdir -p "$(dirname "$SMITE_GATEWAY_RENEW_HOOK")" || return 1
 
-    cat > "$SMITE_GATEWAY_RENEW_HOOK" <<'EOF'
+    cat > "$SMITE_GATEWAY_RENEW_HOOK" <<'EOF_HOOK'
 #!/bin/sh
 if nginx -t >/dev/null 2>&1; then
     systemctl reload nginx
 fi
-EOF
+EOF_HOOK
     chmod 0755 "$SMITE_GATEWAY_RENEW_HOOK"
 }
 
@@ -364,6 +742,16 @@ smite_gateway_switch_local_node_to_443() {
     local env_file="$SMITE_NODE_DIR/.env"
     local compose_file="$SMITE_NODE_COMPOSE"
     local backup=""
+    local current_panel_address=""
+
+    if [ "$(smite_gateway_connection_mode)" = "private" ]; then
+        if [ -f "$env_file" ]; then
+            current_panel_address="$(awk -F= '$1 == "PANEL_ADDRESS" {print substr($0, index($0,"=")+1); exit}' "$env_file")"
+        fi
+
+        echo "Private Mode: keeping Iran node PANEL_ADDRESS=${current_panel_address:-unchanged}"
+        return 0
+    fi
 
     [ -f "$env_file" ] || {
         echo "WARNING: Local Smite node configuration was not found; skipping PANEL_ADDRESS switch."
@@ -419,13 +807,13 @@ smite_gateway_write_state() {
     mkdir -p "$SMITE_STATE_DIR" || return 1
     chmod 0700 "$SMITE_STATE_DIR" || return 1
 
-    cat > "$SMITE_GATEWAY_STATE_FILE" <<EOF
+    cat > "$SMITE_GATEWAY_STATE_FILE" <<EOF_STATE
 # Managed by U-OPTI. No secrets are stored here.
 SMITE_GATEWAY_DOMAIN=$domain
 SMITE_GATEWAY_BACKEND=127.0.0.1:8443
 SMITE_GATEWAY_PUBLIC_PORT=443
 SMITE_GATEWAY_MODE=stream-sni
-EOF
+EOF_STATE
     chmod 0600 "$SMITE_GATEWAY_STATE_FILE"
 }
 
@@ -439,6 +827,7 @@ smite_gateway_status() {
     echo "======================================"
     echo
     echo "Panel domain : ${domain:-Not detected}"
+    echo "Mode         : $(smite_gateway_connection_mode)"
     echo
 
     if command -v nginx >/dev/null 2>&1; then
@@ -469,6 +858,14 @@ smite_gateway_status() {
         echo "Port 8443    : Not listening"
     fi
 
+    if [ "$(smite_gateway_connection_mode)" = "private" ]; then
+        if smite_gateway_private_backhaul_listener_ready; then
+            echo "RAW backend  : 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT} (Backhaul)"
+        else
+            echo "RAW backend  : Not listening"
+        fi
+    fi
+
     if ss -lnt 2>/dev/null | grep -Eq '[[:space:]][^[:space:]]*:443[[:space:]]'; then
         echo "Port 443     : Listening"
     else
@@ -491,6 +888,7 @@ smite_gateway_status() {
 smite_gateway_configure_panel() {
     local domain confirm
     local backend_backup="" stream_backup="" map_backup=""
+    local private_db_backup="" private_backhaul_changed=0
 
     clear
     echo "======================================"
@@ -560,42 +958,57 @@ smite_gateway_configure_panel() {
         return
     }
 
+    if ! smite_gateway_prepare_private_backhaul; then
+        echo "ERROR: Private Mode Backhaul preparation failed."
+        smite_gateway_pause
+        return
+    fi
+
+    private_db_backup="$SMITE_GATEWAY_PRIVATE_DB_BACKUP"
+    private_backhaul_changed="$SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED"
+
     smite_gateway_write_backend "$domain" || {
         echo "ERROR: Failed to write the Smite TLS backend configuration."
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     }
+
     smite_gateway_write_stream "$domain" || {
         echo "ERROR: Failed to write the Smite stream configuration."
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     }
 
     if ! nginx -t; then
         echo "ERROR: Nginx validation failed. Restoring previous gateway configuration..."
-        if [ -n "$backend_backup" ]; then cp -a "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"; else rm -f "$SMITE_GATEWAY_BACKEND_CONF"; fi
-        if [ -n "$stream_backup" ]; then cp -a "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"; else rm -f "$SMITE_GATEWAY_STREAM_CONF"; fi
-        if [ -n "$map_backup" ]; then cp -a "$map_backup" "$SMITE_GATEWAY_MAP_FILE"; else rm -f "$SMITE_GATEWAY_MAP_FILE"; fi
-        nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     fi
 
     if ! systemctl reload nginx; then
         echo "ERROR: Nginx reload failed. Restoring previous gateway configuration..."
-        if [ -n "$backend_backup" ]; then cp -a "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"; else rm -f "$SMITE_GATEWAY_BACKEND_CONF"; fi
-        if [ -n "$stream_backup" ]; then cp -a "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"; else rm -f "$SMITE_GATEWAY_STREAM_CONF"; fi
-        if [ -n "$map_backup" ]; then cp -a "$map_backup" "$SMITE_GATEWAY_MAP_FILE"; else rm -f "$SMITE_GATEWAY_MAP_FILE"; fi
-        nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     fi
 
-    smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
-
     if ! smite_gateway_verify_443 "$domain"; then
         echo "ERROR: Panel HTTPS/443 verification failed."
         echo "Nginx configuration is valid, but the panel path did not answer successfully."
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     fi
@@ -604,16 +1017,23 @@ smite_gateway_configure_panel() {
 
     if ! smite_gateway_switch_local_node_to_443 "$domain"; then
         echo "ERROR: Gateway is online, but the Iran node could not be switched to HTTPS/443."
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     fi
 
     if ! smite_gateway_verify_443 "$domain"; then
         echo "ERROR: Final Panel HTTPS/443 verification failed after node recreation."
+        smite_gateway_rollback_transaction \
+            "$backend_backup" "$stream_backup" "$map_backup" \
+            "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
         return
     fi
 
+    smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
     smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
 
     smite_gateway_remove_unchanged_backup "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
@@ -629,7 +1049,12 @@ smite_gateway_configure_panel() {
     echo "Public TCP   : 443"
     echo "Panel API    : 127.0.0.1:8000"
     echo "TLS backend  : 127.0.0.1:8443"
-    echo "Iran Node    : ${domain}:443"
+    if [ "$(smite_gateway_connection_mode)" = "private" ]; then
+        echo "Iran Node    : 127.0.0.1:8000 (Private Mode)"
+        echo "RAW backend  : 127.0.0.1:${SMITE_GATEWAY_PRIVATE_DATA_PORT}"
+    else
+        echo "Iran Node    : ${domain}:443"
+    fi
     echo "Renewal hook : installed"
     echo
     echo "Keep public ports 8000 and 8888 blocked."
