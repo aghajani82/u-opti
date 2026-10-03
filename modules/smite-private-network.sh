@@ -16,6 +16,7 @@ SMITE_PRIVATE_WG_DIR="${SMITE_PRIVATE_WG_DIR:-/etc/wireguard}"
 SMITE_PRIVATE_WG_CONFIG="${SMITE_PRIVATE_WG_CONFIG:-$SMITE_PRIVATE_WG_DIR/${SMITE_PRIVATE_INTERFACE}.conf}"
 SMITE_PRIVATE_DEFAULT_CIDR="${SMITE_PRIVATE_DEFAULT_CIDR:-10.88.10.0/24}"
 SMITE_PRIVATE_DEFAULT_PANEL_IP="${SMITE_PRIVATE_DEFAULT_PANEL_IP:-10.88.10.10}"
+SMITE_PRIVATE_DEFAULT_FOREIGN_IP="${SMITE_PRIVATE_DEFAULT_FOREIGN_IP:-10.88.10.20}"
 SMITE_PRIVATE_DEFAULT_PORT="${SMITE_PRIVATE_DEFAULT_PORT:-51820}"
 
 smite_private_pause() {
@@ -140,13 +141,13 @@ smite_private_format_handshake() {
 }
 
 smite_private_ipv4_owner() {
-    local ip="$1"
+    local target_ip="$1"
 
     ip -4 -o addr show 2>/dev/null \
-        | awk -v ip="$ip" '
+        | awk -v target_ip="$target_ip" '
             {
                 split($4, address, "/")
-                if (address[1] == ip) {
+                if (address[1] == target_ip) {
                     print $2
                     exit
                 }
@@ -210,9 +211,13 @@ EOF_STATE
     chmod 0600 "$SMITE_PRIVATE_STATE_FILE"
 }
 
-smite_private_initialize_panel() {
+smite_private_initialize_role() {
+    local role="$1"
+    local role_label="$2"
+    local local_ip="$3"
+    local panel_ip="$4"
+    local next_step="$5"
     local cidr="$SMITE_PRIVATE_DEFAULT_CIDR"
-    local panel_ip="$SMITE_PRIVATE_DEFAULT_PANEL_IP"
     local listen_port="$SMITE_PRIVATE_DEFAULT_PORT"
     local prefix=""
     local ip_owner=""
@@ -226,7 +231,7 @@ smite_private_initialize_panel() {
 
     clear
     echo "======================================"
-    echo "   Initialize Smite Panel / Iran"
+    printf '   Initialize Smite %s\n' "$role_label"
     echo "======================================"
     echo
 
@@ -236,7 +241,9 @@ smite_private_initialize_panel() {
         return
     fi
 
-    if ! smite_private_validate_cidr "$cidr" || ! smite_private_validate_ipv4 "$panel_ip"; then
+    if ! smite_private_validate_cidr "$cidr" || \
+       ! smite_private_validate_ipv4 "$local_ip" || \
+       ! smite_private_validate_ipv4 "$panel_ip"; then
         echo "ERROR: Default Private Network addressing is invalid."
         smite_private_pause
         return
@@ -267,9 +274,9 @@ smite_private_initialize_panel() {
         return
     fi
 
-    ip_owner="$(smite_private_ipv4_owner "$panel_ip")"
+    ip_owner="$(smite_private_ipv4_owner "$local_ip")"
     if [ -n "$ip_owner" ] && [ "$ip_owner" != "$SMITE_PRIVATE_INTERFACE" ]; then
-        echo "ERROR: $panel_ip is already assigned to interface $ip_owner."
+        echo "ERROR: $local_ip is already assigned to interface $ip_owner."
         echo "Nothing was changed."
         smite_private_pause
         return
@@ -289,10 +296,11 @@ smite_private_initialize_panel() {
 
     echo "This will create an independent WireGuard network on this server."
     echo
-    echo "Role          : Panel / Iran"
+    echo "Role          : $role_label"
     echo "Interface     : $SMITE_PRIVATE_INTERFACE"
     echo "Private CIDR  : $cidr"
-    echo "Local IP      : $panel_ip/$prefix"
+    echo "Local IP      : $local_ip/$prefix"
+    echo "Panel IP      : $panel_ip"
     echo "Listen port   : UDP $listen_port"
     echo
     echo "Important:"
@@ -342,7 +350,7 @@ smite_private_initialize_panel() {
 
     if ! cat > "$SMITE_PRIVATE_WG_CONFIG" <<EOF_WG
 [Interface]
-Address = $panel_ip/$prefix
+Address = $local_ip/$prefix
 ListenPort = $listen_port
 PrivateKey = $private_key
 EOF_WG
@@ -374,7 +382,7 @@ EOF_WG
     fi
     started_interface=true
 
-    if [ "$(smite_private_local_ipv4)" != "$panel_ip" ]; then
+    if [ "$(smite_private_local_ipv4)" != "$local_ip" ]; then
         echo "ERROR: Interface started but the expected IP was not assigned."
         wg-quick down "$SMITE_PRIVATE_INTERFACE" >/dev/null 2>&1 || true
         systemctl disable "wg-quick@${SMITE_PRIVATE_INTERFACE}.service" >/dev/null 2>&1 || true
@@ -384,9 +392,9 @@ EOF_WG
     fi
 
     if ! smite_private_write_state \
-        "panel" \
+        "$role" \
         "$cidr" \
-        "$panel_ip" \
+        "$local_ip" \
         "$panel_ip" \
         "$listen_port" \
         "$public_key"; then
@@ -409,9 +417,10 @@ EOF_WG
     echo "  Smite Private Network Initialized"
     echo "======================================"
     echo
-    echo "Role          : Panel / Iran"
+    echo "Role          : $role_label"
     echo "Interface     : $SMITE_PRIVATE_INTERFACE"
-    echo "Private IP    : $panel_ip/$prefix"
+    echo "Private IP    : $local_ip/$prefix"
+    echo "Panel IP      : $panel_ip"
     echo "Listen port   : UDP $listen_port"
     echo "Public key    : $public_key"
     echo
@@ -420,8 +429,26 @@ EOF_WG
     echo "Firewall                  : Unchanged"
     echo
     echo "The interface has no peer yet, so Handshake will remain Never."
-    echo "Next step: initialize the Foreign node and pair the two servers."
+    echo "$next_step"
     smite_private_pause
+}
+
+smite_private_initialize_panel() {
+    smite_private_initialize_role \
+        "panel" \
+        "Panel / Iran" \
+        "$SMITE_PRIVATE_DEFAULT_PANEL_IP" \
+        "$SMITE_PRIVATE_DEFAULT_PANEL_IP" \
+        "Next step: initialize the Foreign node and pair the two servers."
+}
+
+smite_private_initialize_foreign() {
+    smite_private_initialize_role \
+        "foreign" \
+        "Foreign Node" \
+        "$SMITE_PRIVATE_DEFAULT_FOREIGN_IP" \
+        "$SMITE_PRIVATE_DEFAULT_PANEL_IP" \
+        "Next step: pair this Foreign node with the Panel / Iran server."
 }
 
 smite_private_show_status() {
@@ -547,7 +574,7 @@ show_smite_private_network_menu() {
                 smite_private_initialize_panel
                 ;;
             3)
-                smite_private_foundation_pending "Initialize Foreign Node"
+                smite_private_initialize_foreign
                 ;;
             4)
                 smite_private_foundation_pending "Peer Management"
