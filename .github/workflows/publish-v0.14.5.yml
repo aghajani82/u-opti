@@ -1,0 +1,109 @@
+name: Publish U-OPTI v0.14.5
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.14.5.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release target
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="f4351abb16760b5e3e638c51cc7a98439f3910cc"
+          test "$(git rev-parse "${TARGET}^{commit}")" = "$TARGET"
+          test "$(git show "$TARGET:VERSION" | tr -d '[:space:]')" = "0.14.5"
+
+      - name: Build release notes
+        shell: bash
+        run: |
+          cat > /tmp/v0145-notes.md <<'EOF'
+          U-OPTI v0.14.5 is a packaging, upgrade-safety, and Smite compatibility maintenance release built on the tested v0.14.4 Private Network architecture.
+
+          ## Highlights
+
+          - Added first-class Image Digest Migration under Smite Compatibility Tools.
+          - Added `smite-digest-migrate.sh` to clean U-OPTI installations.
+          - Added upgrade-safe digest-helper bootstrap for systems upgrading through older fixed-file U-OPTI updaters.
+          - Added validation of downloaded digest helpers before installation or sourcing.
+          - Preserved the existing validated Smite Private Network and shared TCP/443 architecture.
+          - Removed stale Docker v0.13.0 version wording.
+
+          ## Upgrade Validation
+
+          Live upgrades from U-OPTI `0.14.2` to `0.14.5` were validated on both Iran and Foreign servers.
+
+          The legacy updater completed successfully on both systems. Because the older updater did not yet know about the new digest helper, the v0.14.5 compatibility layer safely bootstrapped the missing helper after validating its Bash syntax and expected function entry point.
+
+          ## Digest Migration Validation
+
+          - Iran Smite Panel: already pinned, no changes required.
+          - Iran Smite Node: already pinned, no changes required.
+          - Foreign Smite Node: already pinned, no changes required.
+          - Docker Compose validation passed.
+          - Container IDs, start times, and image IDs remained unchanged.
+          - No Smite container was restarted or recreated.
+
+          ## Runtime Validation
+
+          - Iran Nginx and shared TCP/443 gateway remained healthy.
+          - Backhaul data remained on loopback and private Backhaul control remained established.
+          - Iran Panel HTTPS and existing VLESS connectivity remained working.
+          - Foreign Nginx, Sanaei 3x-UI, and loopback Xray remained healthy.
+          - Private Network Smite settings remained intact.
+
+          ## Installation
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/main/install.sh -o /tmp/u-opti-install.sh
+          bash /tmp/u-opti-install.sh
+          ```
+
+          Then run:
+
+          ```bash
+          u-opti
+          ```
+
+          See `README.md`, `CATALOG.md`, and `CHANGELOG.md` for complete documentation.
+          EOF
+
+          awk '
+            /^## \[0\.14\.4\]/ {capture=1}
+            /^## \[0\.14\.3\]/ {capture=0}
+            capture {print}
+          ' CHANGELOG.md > /tmp/v0144-notes.md
+
+      - name: Publish v0.14.5 and repair v0.14.4 notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="f4351abb16760b5e3e638c51cc7a98439f3910cc"
+
+          if gh release view v0.14.5 >/dev/null 2>&1; then
+            gh release edit v0.14.5 --title "U-OPTI v0.14.5" --notes-file /tmp/v0145-notes.md --latest
+          else
+            gh release create v0.14.5 --target "$TARGET" --title "U-OPTI v0.14.5" --notes-file /tmp/v0145-notes.md --latest
+          fi
+
+          if gh release view v0.14.4 >/dev/null 2>&1; then
+            gh release edit v0.14.4 --title "U-OPTI v0.14.4" --notes-file /tmp/v0144-notes.md
+          fi
+
+          gh release view v0.14.5 --json tagName,name,isDraft,isPrerelease,url
