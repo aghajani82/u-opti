@@ -203,15 +203,15 @@ smite_private_peer_add() {
         return 1
     fi
 
-    if [ -n "$endpoint" ]; then
-        if [[ "$endpoint" != *:* ]]; then
-            echo "ERROR: Invalid peer Endpoint: $endpoint"
-            return 1
-        fi
+    if [ -n "$endpoint" ] && [[ "$endpoint" != *:* ]]; then
+        echo "ERROR: Invalid peer Endpoint: $endpoint"
+        return 1
     fi
 
     umask 077
-    temp_config="$(mktemp "$SMITE_PRIVATE_WG_DIR/.${SMITE_PRIVATE_INTERFACE}.peer.XXXXXX.conf")" || {
+    # Keep the temporary basename <=15 chars so wg-quick accepts it as a
+    # configuration filename during validation.
+    temp_config="$(mktemp "$SMITE_PRIVATE_WG_DIR/sptXXXXXX.conf")" || {
         echo "ERROR: Could not create a temporary WireGuard config."
         return 1
     }
@@ -348,6 +348,8 @@ smite_private_peer_pair_panel_with_foreign() {
     local endpoint_port="$SMITE_PRIVATE_DEFAULT_PORT"
     local endpoint=""
     local confirm=""
+    local input_foreign_ip=""
+    local input_endpoint_port=""
 
     clear
     echo "======================================"
