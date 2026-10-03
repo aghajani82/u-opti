@@ -2984,7 +2984,7 @@ show_docker_3xui_menu() {
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-9]: " DOCKER_3XUI_CHOICE
+        read -rp "Please enter your selection [0-12]: " DOCKER_3XUI_CHOICE
 
         case "$DOCKER_3XUI_CHOICE" in
             1) docker_3xui_install ;;
