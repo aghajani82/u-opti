@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.14.4**
+Current stable version: **v0.14.5**
 
 ## Core System Management
 
@@ -32,18 +32,11 @@ Current stable version: **v0.14.4**
 - Renewal and removal.
 - Apex + www alias handling where applicable.
 - Repair of U-OPTI-managed domain coverage.
-- Dedicated ACME/Nginx configuration.
 - Nginx validation before reload.
 
 ## X-UI PRO
 
-X-UI PRO remains an independent U-OPTI subsystem.
-
-- Install X-UI PRO.
-- Uninstall X-UI PRO.
-- Preserve unrelated Nginx, Docker, Smite, and Sanaei services.
-
-Smite integration does not replace or redesign X-UI PRO.
+X-UI PRO remains an independent U-OPTI subsystem. Smite integration does not replace or redesign it.
 
 ## Docker Management
 
@@ -53,8 +46,9 @@ Docker Management is the common entry point for:
 - Docker Compose.
 - Sanaei 3x-UI Docker Multi-Instance.
 - Smite Management.
-- Container/Image/Volume/Network operations.
-- Docker cleanup.
+- Reserved Container/Image/Volume/Network/Cleanup entries.
+
+Reserved Docker entries that are not implemented are explicitly labeled as such at runtime.
 
 ## Sanaei 3x-UI Docker Multi-Instance
 
@@ -64,21 +58,7 @@ Instances are stored under:
 /opt/3x-ui/instances/<ID>/
 ```
 
-Each instance receives its own:
-
-- Instance ID.
-- Domain.
-- Container.
-- Panel port.
-- Xray API port.
-- Subscription port.
-- Metrics port.
-- Hidden Web Base Path.
-- Data directory.
-- Certificate directory.
-- Docker Compose file.
-- Compatibility state.
-- Nginx/SSL configuration.
+Each instance receives its own ID, domain, container, Panel/API/Subscription/Metrics ports, hidden Web Base Path, data/certificate directories, Docker Compose file, compatibility state, and Nginx/SSL configuration.
 
 ### Management Menu
 
@@ -98,36 +78,19 @@ Each instance receives its own:
 0) Back
 ```
 
+The prompt range is `[0-12]`.
+
 ### Compatibility Behavior
 
-U-OPTI configures the managed Sanaei services so that:
-
-- Panel listens on `127.0.0.1:<allocated-port>`.
-- Subscription is kept on loopback where appropriate.
-- Xray API uses the allocated per-instance port.
-- Metrics uses the allocated per-instance port.
-- Public access is handled by Nginx/HTTPS.
-- Hidden Web Base Path is configured through the official Sanaei `x-ui` CLI.
-
-### Fresh Instance Startup Safety
-
-For a fresh additional instance, U-OPTI waits for the database, applies instance-specific Panel/API/Subscription/Metrics settings, restarts the container, then applies and verifies Web Base Path.
-
-This avoids leaving a new instance on conflicting default Sanaei ports.
-
-### Xray Public Paths
-
-U-OPTI uses the generic Nginx forwarding form:
-
-```text
-/PORT/PATH
-```
-
-This supports public path forwarding for HTTP-style Xray transports such as XHTTP, WebSocket, and HTTPUpgrade without scanning or rewriting user inbound definitions.
+- Panel and related management services are kept on loopback where appropriate.
+- Public management access is handled through Nginx/HTTPS.
+- Hidden Web Base Path is configured through the Sanaei CLI.
+- Instance-specific settings are applied in a controlled startup order to avoid default-port collisions.
+- HTTP-style Xray transports use the generic public form `/PORT/PATH`.
 
 ## Smite Management
 
-Smite is integrated as its own lifecycle/compatibility layer.
+Smite is an independent U-OPTI lifecycle/compatibility layer.
 
 ### Install / Lifecycle
 
@@ -135,28 +98,13 @@ Smite is integrated as its own lifecycle/compatibility layer.
 - Install Smite Foreign Node.
 - Choose Standard or Private Network transport.
 - Show managed installation state.
-- Install Sanaei 3x-UI on a managed Smite Foreign Node.
+- Install Sanaei 3x-UI on a managed Foreign node by delegating to the existing 3x-UI installer.
 
-The Sanaei entry delegates to the existing U-OPTI 3x-UI installer rather than implementing a duplicate installer.
+### Managed State
 
-### Managed Smite State
-
-The managed state can record:
-
-- Role.
-- Connection mode.
-- Panel domain.
-- Panel private IP.
-- Node name.
-- Foreign domain.
-- Foreign private IP.
-- Managed Smite version/ref.
-
-Connection mode defaults to `standard` for backward compatibility with older state callers.
+The state can record role, connection mode, Panel domain/private IP, node name, Foreign domain/private IP, and managed Smite version/ref. Connection mode defaults to `standard` for backward compatibility.
 
 ### Standard Mode
-
-Standard mode keeps the previous HTTPS-oriented behavior:
 
 - Panel remains loopback-bound on the Iran server.
 - Iran node uses the local Panel endpoint.
@@ -164,23 +112,18 @@ Standard mode keeps the previous HTTPS-oriented behavior:
 
 ### Private Network Mode
 
-Private Network mode uses provider/internal networking for machine-to-machine traffic.
+- Iran Panel API is reachable on the provider/private interface at port `8000`.
+- Iran local node continues to use `127.0.0.1:8000`.
+- Foreign node reaches the Panel over the Iran private address on `8000`.
+- Foreign node publishes its private control address on `8888`.
+- `SMITE_BACKHAUL_ADDRESS` can direct Backhaul control to the Iran private address.
+- Private IPv4 input and local interface presence are validated.
 
-- Iran Panel API can listen on `0.0.0.0:8000` so the private interface can reach it.
-- Iran local node continues to bootstrap through `127.0.0.1:8000`.
-- Foreign node reaches the Panel through the Iran private address on port `8000`.
-- Foreign node publishes its own private control address on port `8888`.
-- `SMITE_BACKHAUL_ADDRESS` can point Backhaul control to the Iran private address.
-- Private IPv4 input is validated before installation.
-- The server's own private address must exist on a local interface before installation proceeds.
-
-Public ports `8000` and `8888` are expected to remain blocked from the public Internet in this mode.
+Public `8000`, `8888`, and Backhaul control should remain blocked from the public Internet in Private Network mode.
 
 ## Smite TCP/443 Gateway
 
-### Private Mode Architecture
-
-The tested single-entry architecture is:
+Tested Private Mode layout:
 
 ```text
 Internet :443
@@ -193,112 +136,71 @@ Nginx stream
     +-- default/no-SNI -> 127.0.0.1:9443 -> Backhaul data
 ```
 
-Backhaul control remains available through its control port over the private network.
+Backhaul control remains on its control port over the private network.
 
-### Automatic Private Gateway Preparation
+U-OPTI can detect Private Mode, back up the Smite database, move Backhaul data from public `:443` to `127.0.0.1:9443`, preserve the control listener, configure Nginx stream/SNI, verify the final state, and roll back protected changes on failure. Re-running an already-prepared gateway is idempotent and avoids unnecessary tunnel-spec rewrites or service restarts.
 
-U-OPTI can:
+## Smite Compatibility Tools
 
-- Detect Private Mode from managed state.
-- Verify the expected Smite database/tunnel state.
-- Back up the Smite database before migration.
-- Move the Backhaul data listener from public `:443` to loopback `127.0.0.1:9443`.
-- Keep `listen_ip` unchanged so the Backhaul control listener remains reachable over the private network.
-- Reapply the tunnel and verify the loopback Backhaul listener.
-- Configure Nginx stream/SNI on public TCP/443.
-- Verify Panel HTTPS through the shared public entry.
-- Roll back Nginx and the Smite database/runtime if a protected gateway step fails.
+```text
+Docker Management
+-> Smite Management
+-> Compatibility Tools
 
-### Idempotency
+1) Persistent 443 Compatibility
+2) Image Digest Migration
+0) Back
+```
 
-If Private Mode is already prepared correctly, re-running Configure / Repair:
+### Persistent 443 Compatibility
 
-- Does not rewrite the tunnel specification unnecessarily.
-- Does not restart Smite Panel/Backhaul unnecessarily.
-- Revalidates the gateway state and HTTPS path.
-
-## Smite Compatibility Layer
-
-- Persistent compatibility overlays.
+- Persistent Smite overlays.
 - Compose validation before activation.
-- Panel startup/restore compatibility.
-- Tunnel reapply compatibility.
-- Core-health repair compatibility.
-- Private Backhaul address preference with fallback to the normal node IP.
-- Context-checked source patching.
-- Python compilation before persisting patched source.
-- Image-digest migration helper with validation and rollback.
+- Node-to-panel HTTPS/443 compatibility.
+- Explicit per-node control-address compatibility.
+- Private Backhaul address preference with normal IP fallback.
+- Startup, reapply, and core-health persistence paths.
+- Context-checked Python patching and compile-before-persist behavior.
 
-## Design Boundary
+### Image Digest Migration
 
-**Smite is added to U-OPTI; U-OPTI is not redesigned around Smite.**
+The managed helper is `modules/smite-digest-migrate.sh`.
 
-Therefore:
+Safety properties:
 
-- X-UI PRO remains independent.
-- Docker 3x-UI Multi-Instance remains independent.
-- Removing Smite does not remove Sanaei 3x-UI.
-- Removing a Sanaei instance does not remove Smite.
-- Existing U-OPTI Nginx/SSL, backup/restore, update, uninstall, and port-allocation logic is reused instead of duplicated.
+- Running image identity must match the validated image.
+- Compose file is backed up before a reference change.
+- `docker compose config` is checked after the edit.
+- Automatic Compose rollback is attempted on validation failure.
+- Container ID, `StartedAt`, and ImageID are checked to remain unchanged.
+- Smite containers are not restarted or recreated by the migration helper.
+- X-UI PRO and Sanaei 3x-UI resources are not modified.
+
+### v0.14.5 Packaging / Upgrade Behavior
+
+- Clean installer includes the digest helper.
+- Docker/Smite loads the helper when present and syntax-valid.
+- If an older installation reaches v0.14.5 through a legacy fixed-file updater and the helper is still missing, Compatibility Tools can bootstrap it safely.
+- Helper downloads must be non-empty, pass `bash -n`, and contain the expected migration entry function before installation.
+- The helper loader prefers the exact installed release tag and falls back to `U_OPTI_BRANCH`/`main` for controlled branch workflows.
+- If refresh fails but an existing local helper validates, U-OPTI keeps using the validated local copy instead of replacing it with an unverified download.
 
 ## Backup & Restore
 
-Targeted U-OPTI backups can include:
-
-- `/etc/u-opti`.
-- SSH configuration.
-- UFW configuration.
-- U-OPTI-managed Fail2Ban configuration.
-
-Backup/restore operations include validation and safety backups before destructive restoration.
-
-Provider snapshots are still recommended for full-server recovery.
+Targeted backups can include `/etc/u-opti`, SSH configuration, UFW configuration, and U-OPTI-managed Fail2Ban configuration. Provider snapshots are still recommended for full-server recovery.
 
 ## Self-Update
 
-U-OPTI self-update provides:
+U-OPTI self-update provides version comparison, staged/cache-busted downloads, required-file validation, Bash syntax checks, pre-update backup, installation verification, rollback, and automatic relaunch.
 
-- Installed/remote version comparison.
-- Staged downloads.
-- Required-file validation.
-- Bash syntax checks.
-- Pre-update backup.
-- Installation verification.
-- Automatic rollback on failure.
-- Automatic relaunch after successful update.
-
-Smite lifecycle, gateway, compatibility, and digest-migration modules are included in managed update handling.
+The v0.14.5 digest-helper bootstrap closes the first-upgrade gap for machines whose older updater did not yet know about the helper file.
 
 ## Safe Uninstall
 
-U-OPTI uninstall removes U-OPTI application files only.
+U-OPTI removes its own application files only and leaves Nginx, Certbot, Docker, X-UI PRO, Sanaei 3x-UI, Xray, and Smite service data untouched.
 
-It does not remove service/data installations such as:
+## Validation Boundary
 
-- Nginx.
-- Certbot.
-- Docker.
-- X-UI PRO.
-- Sanaei 3x-UI.
-- Xray.
-- Smite.
-
-## v0.14.4 Validation Snapshot
-
-The v0.14.4 architecture was validated with:
-
-- Clean Smite Panel + Iran installation in Private Network mode.
-- Clean Smite Foreign installation in Private Network mode.
-- Private Panel communication.
-- Private Foreign node control.
-- Private Backhaul control.
-- Automatic Backhaul data migration from public `:443` to `127.0.0.1:9443`.
-- Nginx owning public TCP/443.
-- Panel HTTPS and RAW client traffic sharing the public TCP/443 entry.
-- Sanaei 3x-UI with Xray loopback binding.
-- End-to-end VLESS connectivity through Iran TCP/443.
-- Idempotent gateway reconfiguration.
-- Reboot persistence for the tested Nginx/Smite/Backhaul/3x-UI/VLESS path.
+The Smite Private Network / shared-443 architecture was runtime-validated across v0.14.1-v0.14.4. v0.14.5 is a packaging and menu-integration patch around the already-existing digest migration helper and does not alter that tested tunnel data path.
 
 For detailed version history, see [CHANGELOG.md](CHANGELOG.md).
-For installation and operational overview, see [README.md](README.md).

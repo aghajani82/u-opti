@@ -32,6 +32,7 @@ MODULES=(
     "backup.sh"
     "docker.sh"
     "smite.sh"
+    "smite-digest-migrate.sh"
     "smite-install.sh"
     "smite-gateway.sh"
     "smite-foreign-gateway.sh"
@@ -113,6 +114,7 @@ for MODULE in "${MODULES[@]}"; do
         backup.sh) LABEL="Backup & Restore" ;;
         docker.sh) LABEL="Docker Management" ;;
         smite.sh) LABEL="Smite Compatibility Management" ;;
+        smite-digest-migrate.sh) LABEL="Smite Digest Migration" ;;
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
@@ -120,6 +122,7 @@ for MODULE in "${MODULES[@]}"; do
         docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
         docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
         docker-3xui-nginx.sh) LABEL="3x-UI Nginx / SSL Integration" ;;
+        fakesite.sh) LABEL="Default Website / FakeSite" ;;
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
@@ -147,6 +150,9 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh" || \
    ! grep -q 'echo "5) Smite Management"' "$TEMP_DIR/docker.sh" || \
    ! grep -q 'docker_smite_management_menu' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'docker_smite_compatibility_menu' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'docker_smite_ensure_digest_module' "$TEMP_DIR/docker.sh" || \
+   ! grep -q 'smite_digest_migrate_existing()' "$TEMP_DIR/smite-digest-migrate.sh" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
@@ -227,6 +233,10 @@ echo
 
 echo "Smite Compatibility Module:"
 echo "$MODULES_PATH/smite.sh"
+echo
+
+echo "Smite Digest Migration Module:"
+echo "$MODULES_PATH/smite-digest-migrate.sh"
 echo
 
 echo "Smite Installer Module:"

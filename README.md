@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.14.4**
+**v0.14.5**
 
 ## Main Menu
 
@@ -23,18 +23,17 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 0) Exit
 ```
 
-## Highlights in v0.14.4
+## Highlights in v0.14.5
 
 - First-class Smite **Standard** and **Private Network** installation modes.
-- Private Panel/Node control paths for Smite while keeping the public client entry on TCP/443.
-- Private Backhaul address support with persistent compatibility overlays.
-- Automatic Private Mode migration of the Backhaul data listener from public `:443` to loopback `127.0.0.1:9443` before Nginx takes ownership of public TCP/443.
-- Shared TCP/443 gateway behavior: Smite Panel HTTPS by SNI and RAW/no-SNI traffic to the Backhaul data listener.
-- Idempotent gateway repair: re-running the gateway setup does not unnecessarily rewrite the tunnel specification or restart Smite services.
-- Transactional backup/rollback around the Private Mode gateway migration.
+- Private Panel, node-control, and Backhaul paths while keeping the public client entry on TCP/443.
+- Shared TCP/443 gateway: Panel HTTPS by SNI and RAW/no-SNI traffic to the Backhaul data listener.
+- Automatic Private Mode Backhaul data migration from public `:443` to `127.0.0.1:9443` with backup, verification, idempotency, and rollback.
+- Persistent Smite compatibility overlays across container recreation and reboot.
+- Smite **Image Digest Migration** is now exposed from Compatibility Tools and is included in clean installs.
+- Upgrade-safe digest-helper bootstrap: older U-OPTI installations can obtain the validated helper even when their legacy updater did not know about that file.
 - Multi-instance Sanaei 3x-UI Docker management with independent Panel/API/Subscription/Metrics allocation.
 - Automatic Nginx + Let's Encrypt integration, hidden Web Base Path, and generic `/PORT/PATH` forwarding for supported HTTP-style Xray transports.
-- Persistent Smite compatibility overlays across container recreation and reboot.
 - Safe U-OPTI self-update with staged downloads, syntax validation, backup, verification, and rollback.
 
 For a module-by-module view, see [CATALOG.md](CATALOG.md). For version history, see [CHANGELOG.md](CHANGELOG.md).
@@ -69,9 +68,7 @@ Standard mode keeps the original HTTPS-oriented behavior:
 
 ### Private Network Mode
 
-Private Network mode is intended for provider/internal networking between the Iran and Foreign servers.
-
-The installer validates private IPv4 input and verifies that each server's own private address is actually configured before continuing.
+Private Network mode is intended for provider/internal networking between the Iran and Foreign servers. The installer validates private IPv4 input and verifies that each server's own private address is actually configured before continuing.
 
 Typical behavior:
 
@@ -103,28 +100,51 @@ Internet TCP/443
         +-- default / no SNI   -> 127.0.0.1:9443 -> Backhaul data
 ```
 
-Backhaul control remains on its control port over the private network. The migration changes the Backhaul data listener only; it intentionally does not force the Backhaul control listener onto loopback.
+Backhaul control remains on its control port over the private network. The migration changes the Backhaul data listener only; it intentionally leaves `listen_ip` unchanged so the control listener remains reachable through the private network.
 
-The gateway workflow includes:
+The gateway workflow includes certificate reuse/issuance, Nginx stream configuration, database backup, Backhaul migration, listener verification, HTTPS verification, idempotent repair, and rollback of protected changes when a gateway step fails.
 
-- Existing Let's Encrypt certificate reuse when available.
-- Nginx stream/SNI configuration.
-- Automatic Backhaul data-listener migration for Private Mode.
-- Database backup before tunnel-spec changes.
-- Rollback if the migrated listener or gateway validation fails.
-- Final HTTPS verification before declaring the gateway ready.
-- Idempotent repair behavior for an already-prepared gateway.
+## Smite Compatibility Tools
+
+Path:
+
+```text
+Docker Management
+-> Smite Management
+-> Compatibility Tools
+```
+
+Available groups:
+
+```text
+1) Persistent 443 Compatibility
+2) Image Digest Migration
+0) Back
+```
+
+### Persistent 443 Compatibility
+
+This workflow prepares and activates the compatibility overlays used by the tested Smite 0.1.7 architecture, including node-to-panel communication, explicit node control addresses, private Backhaul address preference, tunnel restore behavior, and GOST/Backhaul compatibility.
+
+### Image Digest Migration
+
+The digest migration helper safely changes existing Smite Compose image references to the exact image digests validated by U-OPTI. It:
+
+- verifies the running container already uses the validated image,
+- creates a timestamped Compose backup before editing,
+- validates `docker compose config` after the edit,
+- rolls the Compose file back if validation fails,
+- verifies container ID, start time, and ImageID remain unchanged,
+- does **not** restart or recreate Smite containers,
+- does **not** modify X-UI PRO or Sanaei 3x-UI resources.
+
+Clean installs include `smite-digest-migrate.sh`. For upgrades from older U-OPTI builds whose updater did not know about this helper, the Docker/Smite compatibility workflow can safely bootstrap or refresh the helper after validating its Bash syntax and required function marker. It prefers the exact installed release tag when available and falls back to the active U-OPTI branch for controlled pre-release/testing workflows.
 
 ## Docker Management
 
-Docker Management provides the entry point for:
+Docker Management provides Docker Engine installation/status, Docker Compose, Sanaei 3x-UI Multi-Instance, Smite Management, and reserved Container/Image/Volume/Network/Cleanup menu entries.
 
-- Docker Engine installation and status.
-- Docker Compose.
-- Sanaei 3x-UI Docker Multi-Instance.
-- Smite Management.
-- Container/Image/Volume/Network operations.
-- Docker cleanup.
+The reserved Docker entries remain explicitly marked as not implemented; they are not presented as completed functionality.
 
 ## Sanaei 3x-UI Docker Multi-Instance
 
@@ -134,143 +154,51 @@ Managed instances are stored under:
 /opt/3x-ui/instances/<ID>/
 ```
 
-Each instance receives managed state for:
+Each instance receives managed state for its ID, domain, container, Panel port, Xray API port, Subscription port, Metrics port, hidden Web Base Path, data/certificate directories, Compose configuration, and Nginx/SSL configuration.
 
-- Instance ID and domain.
-- Container name.
-- Panel port.
-- Xray API port.
-- Subscription port.
-- Metrics port.
-- Hidden Web Base Path.
-- Data/certificate directories.
-- Docker Compose configuration.
-- Nginx/SSL configuration.
+The management menu includes options 1 through 12 plus `0) Back`; the displayed selection range is `[0-12]`.
 
-The compatibility layer configures Panel and related management services on loopback where appropriate, while Nginx provides public HTTPS access.
-
-A fresh additional instance is configured in a controlled order so it does not start permanently on conflicting default Sanaei ports.
-
-The 3x-UI management menu includes:
+Public Xray HTTP-style transports are forwarded through the generic Nginx form:
 
 ```text
-1) Install 3x-UI in Docker
-2) Start 3x-UI
-3) Stop 3x-UI
-4) Restart 3x-UI
-5) Update 3x-UI
-6) Backup 3x-UI
-7) Restore 3x-UI
-8) Uninstall 3x-UI
-9) Show Status
-10) Sanaei 3x-UI Management
-11) Nginx / SSL Configuration
-12) Default Website / FakeSite
-0) Back
+/PORT/PATH
 ```
 
-## System Management
+## System and Security Management
 
 U-OPTI includes:
 
 - APT update/upgrade workflow.
-- System information.
-- Timezone and NTP management.
-- Swap management.
-- BBR and qdisc management.
-- Storage inspection and cleanup.
-- Validated hostname changes.
+- System information, time/NTP, swap, BBR/qdisc, storage, and hostname management.
+- SSH port management with validation, listener verification, backup, and rollback.
+- SSH access management with Ed25519 keys and key-only root workflows.
+- UFW management with protected SSH handling and rollback.
+- Fail2Ban management.
+- X-UI PRO management.
+- Certbot/ACME Webroot certificate management.
+- Targeted U-OPTI backup and restore.
 
-## Server Security
-
-### SSH
-
-- Effective SSH port detection.
-- Safe SSH port changes with configuration validation.
-- Listener verification after changes.
-- systemd SSH socket support.
-- Automatic backup and rollback on failed changes.
-- UFW-aware SSH port changes.
-
-### SSH Access
-
-- Ed25519 key generation.
-- Optional private-key passphrase protection.
-- `authorized_keys` management.
-- SSH access backup/restore.
-- Root key-only authentication workflow.
-- Effective authentication verification before and after changes.
-
-### UFW
-
-- Initial firewall configuration.
-- Add/remove TCP rules.
-- Protection for the active SSH port.
-- IPv4/IPv6 support.
-- Backup/rollback around protected operations.
-
-### Fail2Ban
-
-- Managed SSH protection and configuration.
-
-## Certificate Management
-
-- Certbot installation.
-- Let's Encrypt certificates through ACME Webroot.
-- Renewal and removal.
-- U-OPTI-managed domain repair.
-- Apex/www alias handling where applicable.
-- Nginx validation before certificate-related reloads.
-
-## Backup & Restore
-
-U-OPTI provides targeted backups for its managed configuration and important server-security files. These backups are intended for configuration recovery and do not replace full provider snapshots.
-
-Provider snapshots are recommended before major test or migration work.
+Provider snapshots are still recommended before major test or migration work.
 
 ## U-OPTI Self-Update
 
-The updater provides:
+The updater provides installed/remote version comparison, cache-busted staged downloads, required-file validation, Bash syntax checks, pre-update backup, installed-file verification, automatic rollback on failure, and automatic relaunch into the updated U-OPTI version.
 
-- Installed/remote version comparison.
-- Cache-busted staged downloads.
-- Required-file validation.
-- Bash syntax checks before installation.
-- Pre-update backup.
-- Installed-file verification.
-- Automatic rollback on failure.
-- Automatic relaunch into the updated U-OPTI version.
+The v0.14.5 digest-helper compatibility path is deliberately upgrade-safe for installations coming from an older updater: the newly updated Docker module can validate and obtain the helper on demand even if the first legacy update did not directly download that newly introduced managed file.
 
 ## Safe Uninstall
 
-U-OPTI uninstall removes U-OPTI application files only. It does **not** remove unrelated service/data installations such as:
+U-OPTI uninstall removes U-OPTI application files only. It does **not** remove unrelated service/data installations such as Nginx, Certbot, Docker, X-UI PRO, Sanaei 3x-UI, Xray, or Smite.
 
-- Nginx
-- Certbot
-- Docker
-- X-UI PRO
-- Sanaei 3x-UI
-- Xray
-- Smite
+## Validation
 
-## Validation Snapshot for v0.14.4
+The core Private Network / gateway architecture was runtime-validated during the v0.14.1-v0.14.4 work, including clean Iran/Foreign installation, private Panel/node control, private Backhaul control, automatic Backhaul data migration, shared public TCP/443, Sanaei 3x-UI, end-to-end VLESS, idempotent gateway repair, and reboot persistence.
 
-The v0.14.4 work was validated on the tested Iran/Foreign server architecture with:
-
-- Clean Smite Panel + Iran installation in Private Network mode.
-- Clean Smite Foreign Node installation in Private Network mode.
-- Private Panel communication and Foreign node control.
-- Private Backhaul control path.
-- Automatic Backhaul data-listener migration to `127.0.0.1:9443`.
-- Nginx owning public TCP/443 with Panel HTTPS and RAW client traffic sharing the entry point.
-- Sanaei 3x-UI with Xray on loopback.
-- End-to-end VLESS connectivity through Iran TCP/443.
-- Re-running gateway configuration without unnecessary Smite restarts or tunnel-spec changes.
-- Reboot persistence for the tested Smite/Backhaul/Nginx/3x-UI/VLESS path.
+The v0.14.5 packaging cleanup is designed to preserve that runtime architecture; it adds managed access to the existing digest migration helper and upgrade-safe helper bootstrap without changing the tested Smite tunnel data path.
 
 ## Development
 
-The `main` branch is the stable source used by the installer and self-updater. Changes are tested before being promoted to `main`.
+The `main` branch is the stable source used by the installer and self-updater. Release changes are prepared and checked before promotion to `main`.
 
 ## Documentation
 
