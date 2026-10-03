@@ -8,6 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.14.3] - 2026-10-03
+
+### Added
+
+- Added Private Mode awareness to the Smite TCP/443 gateway.
+- Added automatic Backhaul data-listener migration from public TCP/443 to loopback `127.0.0.1:9443` before Nginx takes ownership of public TCP/443.
+- Added Private Mode runtime detection through `SMITE_CONNECTION_MODE` and a dedicated `SMITE_GATEWAY_PRIVATE_DATA_PORT` setting, defaulting to `9443`.
+- Added transactional Smite database backup and rollback helpers for Private Mode gateway migration.
+
+### Changed
+
+- In Private Mode, Nginx stream now routes the Smite Panel SNI to `127.0.0.1:8443` while no-SNI / RAW TCP traffic falls back to the loopback Backhaul listener on `127.0.0.1:9443`.
+- Private Mode keeps the Iran node `PANEL_ADDRESS` unchanged instead of switching it to the public domain on TCP/443.
+- Backhaul `listen_ip` is intentionally left unchanged during the data-listener migration so the Backhaul control listener on port `3080` remains reachable through the private network.
+- Gateway status now reports the detected connection mode and Private Mode RAW backend state.
+- Certificate renewal hook installation is deferred until the final gateway verification succeeds.
+
+### Safety
+
+- Private Backhaul migration requires exactly one active matching Backhaul mapping and refuses ambiguous states.
+- Before changing the Smite tunnel specification, U-OPTI backs up the Smite database, reapplies the panel, waits for health, and verifies the loopback Backhaul listener.
+- Gateway failures restore Nginx files first to free public TCP/443, then restore the previous Smite database and Backhaul runtime.
+- Re-running Configure / Repair on an already prepared Private Mode gateway is idempotent and does not rewrite the tunnel specification or restart Smite Panel / Backhaul unnecessarily.
+
+### Validated
+
+- Fresh automatic migration from Backhaul `*:443` to `127.0.0.1:9443` completed successfully through U-OPTI without manual SQLite changes.
+- After migration, Nginx owned public TCP/443, the Panel TLS backend remained on `127.0.0.1:8443`, Backhaul data remained on `127.0.0.1:9443`, and Backhaul control remained on port `3080`.
+- The Iran node kept `PANEL_ADDRESS=127.0.0.1:8000` in Private Mode.
+- The Foreign node maintained established Backhaul control connections to the Iran private address on port `3080`, while Xray remained loopback-bound on port `10000`.
+- Both the Smite Panel domain and the existing VLESS client configuration remained working through the shared public TCP/443 entry.
+- Reboot persistence was verified for Nginx, Smite Panel, Smite nodes, Backhaul private control/data paths, Sanaei 3x-UI, and end-to-end VLESS connectivity.
+
 ## [0.14.2] - 2026-10-02
 
 ### Added
