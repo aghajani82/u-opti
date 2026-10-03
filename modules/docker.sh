@@ -45,52 +45,88 @@ docker_compose_is_installed() { docker compose version >/dev/null 2>&1; }
 
 docker_smite_ensure_digest_module() {
     local branch="${U_OPTI_BRANCH:-main}"
-    local base_url="https://raw.githubusercontent.com/aghajani82/u-opti/$branch"
+    local branch_url="https://raw.githubusercontent.com/aghajani82/u-opti/$branch/modules/smite-digest-migrate.sh"
+    local installed_version="${VERSION:-}"
+    local version_url=""
     local temp_file=""
+    local local_helper_ok=false
+    local downloaded=false
 
-    if declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
-        return 0
+    if [ -z "$installed_version" ] && [ -f "/usr/local/lib/u-opti/VERSION" ]; then
+        installed_version="$(tr -d '[:space:]' < /usr/local/lib/u-opti/VERSION)"
     fi
 
     if [ -f "$DOCKER_SMITE_DIGEST_MODULE" ] &&
-       bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1; then
-        # shellcheck disable=SC1090
-        source "$DOCKER_SMITE_DIGEST_MODULE"
-        if declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
-            return 0
-        fi
+       bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1 &&
+       grep -q '^smite_digest_migrate_existing()' "$DOCKER_SMITE_DIGEST_MODULE"; then
+        local_helper_ok=true
     fi
 
     if ! command -v curl >/dev/null 2>&1; then
+        if [ "$local_helper_ok" = "true" ]; then
+            # shellcheck disable=SC1090
+            source "$DOCKER_SMITE_DIGEST_MODULE"
+            return 0
+        fi
         echo "ERROR: curl is required to prepare the Smite digest migration helper."
         return 1
     fi
 
-    echo "Smite digest migration helper is missing."
-    echo "Preparing the helper from the active U-OPTI branch..."
-
     temp_file="$(mktemp)" || return 1
 
-    if ! curl -fsSL --retry 3 \
-        "${base_url}/modules/smite-digest-migrate.sh?cb=$(date +%s%N)" \
-        -o "$temp_file"; then
-        echo "ERROR: Failed to download smite-digest-migrate.sh."
-        rm -f "$temp_file"
-        return 1
+    if [[ "$installed_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        version_url="https://raw.githubusercontent.com/aghajani82/u-opti/v${installed_version}/modules/smite-digest-migrate.sh"
+        if curl -fsSL --retry 2 \
+            "${version_url}?cb=$(date +%s%N)" \
+            -o "$temp_file"; then
+            downloaded=true
+        fi
     fi
 
-    if [ ! -s "$temp_file" ] ||
-       ! bash -n "$temp_file" ||
-       ! grep -q '^smite_digest_migrate_existing()' "$temp_file"; then
-        echo "ERROR: Downloaded Smite digest migration helper failed validation."
-        rm -f "$temp_file"
-        return 1
+    if [ "$downloaded" != "true" ]; then
+        if curl -fsSL --retry 3 \
+            "${branch_url}?cb=$(date +%s%N)" \
+            -o "$temp_file"; then
+            downloaded=true
+        fi
     fi
 
-    if ! install -m 0755 "$temp_file" "$DOCKER_SMITE_DIGEST_MODULE"; then
-        echo "ERROR: Failed to install the Smite digest migration helper."
+    if [ "$downloaded" = "true" ]; then
+        if [ ! -s "$temp_file" ] ||
+           ! bash -n "$temp_file" ||
+           ! grep -q '^smite_digest_migrate_existing()' "$temp_file"; then
+            echo "ERROR: Downloaded Smite digest migration helper failed validation."
+            rm -f "$temp_file"
+            if [ "$local_helper_ok" = "true" ]; then
+                echo "Using the existing validated local helper instead."
+                # shellcheck disable=SC1090
+                source "$DOCKER_SMITE_DIGEST_MODULE"
+                return 0
+            fi
+            return 1
+        fi
+
+        if [ "$local_helper_ok" != "true" ] || ! cmp -s "$temp_file" "$DOCKER_SMITE_DIGEST_MODULE"; then
+            echo "Synchronizing Smite digest migration helper..."
+            if ! install -m 0755 "$temp_file" "$DOCKER_SMITE_DIGEST_MODULE"; then
+                echo "ERROR: Failed to install the Smite digest migration helper."
+                rm -f "$temp_file"
+                if [ "$local_helper_ok" = "true" ]; then
+                    echo "Using the existing validated local helper instead."
+                    # shellcheck disable=SC1090
+                    source "$DOCKER_SMITE_DIGEST_MODULE"
+                    return 0
+                fi
+                return 1
+            fi
+        fi
+    elif [ "$local_helper_ok" != "true" ]; then
+        echo "ERROR: Smite digest migration helper is missing and could not be downloaded."
         rm -f "$temp_file"
         return 1
+    else
+        echo "WARNING: Could not refresh the Smite digest migration helper."
+        echo "Using the existing validated local helper."
     fi
 
     rm -f "$temp_file"
@@ -103,7 +139,6 @@ docker_smite_ensure_digest_module() {
         return 1
     fi
 
-    echo "Smite digest migration helper is ready."
     return 0
 }
 
