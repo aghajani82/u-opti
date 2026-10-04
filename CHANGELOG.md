@@ -272,3 +272,26 @@ No unreleased changes are currently documented.
 ### Security
 
 - SSH port changes validate configuration/listeners and roll back failures.
+- Root key-only access requires an active session and at least one installed root public key.
+- UFW protected operations use backup/restore safety.
+
+## [0.11.1] - 2026-09-07
+
+### Changed
+
+- Improved time/date synchronization, menu Back handling, X-UI PRO uninstall, and self-update completion/restart behavior.
+
+### Safety
+
+- Added downloaded-module validation, Bash syntax checks, update backups, and rollback support.
+
+## [0.11.0] - 2026-09-06
+
+### Added
+
+- SSH Access Management focused on Ed25519 keys, `authorized_keys`, SSH access backup/restore, password management, key-only root authentication, validation, and rollback.
+
+## [0.10.0] and earlier
+
+- Initial U-OPTI framework and interactive menu system.
+- Early system optimization, SSH, firewall, X-UI PRO, and certificate-management utilities.
