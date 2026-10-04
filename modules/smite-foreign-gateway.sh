@@ -2,6 +2,7 @@
 
 # U-OPTI - Smite Foreign Node 443 Gateway
 # Panel -> Foreign Node control over HTTPS/TCP 443.
+# This gateway is for Standard/HTTPS mode only. Private Network mode uses EasyTier.
 
 SMITE_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 SMITE_NODE_COMPOSE="${SMITE_NODE_COMPOSE:-$SMITE_NODE_DIR/docker-compose.yml}"
@@ -42,6 +43,44 @@ PY
 
 smite_foreign_gateway_role() {
     smite_foreign_gateway_state_value SMITE_ROLE "$SMITE_STATE_FILE"
+}
+
+smite_foreign_gateway_connection_mode() {
+    local value="standard"
+    value="$(smite_foreign_gateway_state_value SMITE_CONNECTION_MODE "$SMITE_STATE_FILE")"
+    [ -n "$value" ] || value="standard"
+    printf '%s' "$value"
+}
+
+smite_foreign_gateway_private_ip() {
+    smite_foreign_gateway_state_value SMITE_FOREIGN_PRIVATE_IP "$SMITE_STATE_FILE"
+}
+
+smite_foreign_gateway_private_notice() {
+    local private_ip=""
+    private_ip="$(smite_foreign_gateway_private_ip)"
+
+    clear
+    echo "======================================"
+    echo "   Foreign Gateway Not Required"
+    echo "======================================"
+    echo
+    echo "Private Network mode is active on this Foreign node."
+    echo "The Foreign HTTPS/443 gateway must NOT be configured in this mode."
+    echo
+    if [ -n "$private_ip" ]; then
+        echo "Panel -> Foreign control : http://${private_ip}:8888"
+    else
+        echo "Panel -> Foreign control : EasyTier private network -> TCP/8888"
+    fi
+    echo "Foreign public 443       : existing 3x-UI / EasyTier Nginx entry"
+    echo
+    echo "Next gateway step belongs on the Iran/Panel server:"
+    echo "Docker Management -> Smite Management -> 443 Gateway"
+    echo "-> Configure / Repair Panel Gateway"
+    echo
+    echo "No Nginx, certificate, or Smite node settings were changed."
+    smite_foreign_gateway_pause
 }
 
 smite_foreign_gateway_panel_domain() {
@@ -594,6 +633,12 @@ EOF
 
 smite_foreign_gateway_status() {
     local domain panel_domain node_name site control_path control_url panel_ip
+
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
+        return
+    fi
+
     domain="$(smite_foreign_gateway_domain)"
     panel_domain="$(smite_foreign_gateway_panel_domain)"
     node_name="$(smite_foreign_gateway_node_name)"
@@ -663,6 +708,11 @@ smite_foreign_gateway_configure() {
         echo "ERROR: This server is not registered in U-OPTI state as a Foreign Smite node."
         echo "Detected role: ${role:-Not set}"
         smite_foreign_gateway_pause
+        return
+    fi
+
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
         return
     fi
 
@@ -788,10 +838,15 @@ smite_foreign_gateway_configure() {
 }
 
 show_smite_foreign_gateway_menu() {
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
+        return
+    fi
+
     while true; do
         clear
         echo "======================================"
-        echo "      Smite Foreign 443 Gateway"
+        echo "  Smite Foreign 443 Gateway (Standard)"
         echo "======================================"
         echo
         echo "1) Configure / Repair Foreign Gateway"
