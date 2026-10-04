@@ -11,6 +11,8 @@ SMITE_STATE_FILE="${SMITE_STATE_FILE:-$SMITE_STATE_DIR/state.env}"
 SMITE_FOREIGN_GATEWAY_STATE_FILE="$SMITE_STATE_DIR/foreign-gateway.env"
 SMITE_FOREIGN_ACME_ROOT="${SMITE_FOREIGN_ACME_ROOT:-/var/www/u-opti-acme}"
 SMITE_FOREIGN_RENEW_HOOK="/etc/letsencrypt/renewal-hooks/deploy/u-opti-nginx-reload"
+SMITE_FOREIGN_3XUI_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
+SMITE_FOREIGN_STANDALONE_MARKER="# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway"
 
 smite_foreign_gateway_pause() {
     echo
@@ -68,11 +70,55 @@ smite_foreign_gateway_node_name() {
 }
 
 smite_foreign_gateway_site_path() {
-    printf '/etc/nginx/sites-available/%s' "$1"
+    local domain="$1"
+    local shared_site="/etc/nginx/sites-available/3xui-${domain}"
+
+    if [ -f "$shared_site" ] && grep -Fq "$SMITE_FOREIGN_3XUI_MARKER" "$shared_site"; then
+        printf '%s' "$shared_site"
+        return 0
+    fi
+
+    printf '/etc/nginx/sites-available/%s' "$domain"
 }
 
 smite_foreign_gateway_enabled_path() {
-    printf '/etc/nginx/sites-enabled/%s' "$1"
+    local site=""
+    site="$(smite_foreign_gateway_site_path "$1")"
+    printf '/etc/nginx/sites-enabled/%s' "$(basename "$site")"
+}
+
+smite_foreign_gateway_cleanup_stale_standalone() {
+    local domain="$1" selected_site="$2"
+    local stale_site="/etc/nginx/sites-available/${domain}"
+    local stale_enabled="/etc/nginx/sites-enabled/${domain}"
+    local backup=""
+
+    [ "$selected_site" != "$stale_site" ] || return 0
+
+    if [ ! -e "$stale_site" ] && [ ! -L "$stale_enabled" ]; then
+        return 0
+    fi
+
+    if [ ! -e "$stale_site" ]; then
+        echo "Removing stale Foreign gateway symlink: $stale_enabled"
+        rm -f "$stale_enabled"
+        return $?
+    fi
+
+    if ! grep -Fq "$SMITE_FOREIGN_STANDALONE_MARKER" "$stale_site"; then
+        echo "ERROR: A conflicting non-U-OPTI standalone Nginx site exists:"
+        echo "$stale_site"
+        echo "Refusing to remove or overwrite it automatically."
+        return 1
+    fi
+
+    backup="${stale_site}.u-opti-stale-$(date +%Y%m%d-%H%M%S).bak"
+    cp -a "$stale_site" "$backup" || return 1
+    rm -f "$stale_enabled" "$stale_site" || return 1
+
+    echo "Removed stale standalone Smite Foreign vhost after backup:"
+    echo "$backup"
+    return 0
 }
 
 smite_foreign_gateway_container_healthy() {
@@ -675,6 +721,8 @@ smite_foreign_gateway_configure() {
     smite_foreign_gateway_ensure_certificate "$domain" || { echo "ERROR: Certificate preparation failed."; smite_foreign_gateway_pause; return; }
 
     mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return; }
+
+    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return; }
 
     if [ -f "$site" ]; then
         site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
