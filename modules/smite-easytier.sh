@@ -59,8 +59,8 @@ smite_et_install_binary() {
         return 0
     fi
 
-    apt-get update || return 1
-    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl unzip || return 1
+    apt-get -o DPkg::Lock::Timeout=300 update || return 1
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl unzip || return 1
     tmp="$(mktemp -d)" || return 1
     archive="$tmp/$SMITE_ET_ASSET"
     curl -fL --retry 3 "$SMITE_ET_URL" -o "$archive" || { rm -rf "$tmp"; return 1; }
