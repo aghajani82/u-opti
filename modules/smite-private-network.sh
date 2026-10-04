@@ -2,10 +2,9 @@
 
 # U-OPTI - Smite Provider-Independent Private Network entry point
 #
-# The original experimental WireGuard implementation has been retired from
-# this branch. The supported provider-independent transport is EasyTier over
-# WSS/TCP 443. Keep this compatibility entry point so Docker -> Smite ->
-# Private Network remains stable for users and older menu integrations.
+# The supported provider-independent transport is EasyTier over WSS/TCP 443.
+# Keep this compatibility entry point so Docker -> Smite -> Private Network
+# remains stable for clean installs and upgrades from older U-OPTI releases.
 
 SMITE_PRIVATE_MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_PRIVATE_EASYTIER_MODULE="$SMITE_PRIVATE_MODULE_DIR/smite-easytier.sh"
