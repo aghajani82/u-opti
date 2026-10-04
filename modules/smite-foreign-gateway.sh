@@ -2,6 +2,7 @@
 
 # U-OPTI - Smite Foreign Node 443 Gateway
 # Panel -> Foreign Node control over HTTPS/TCP 443.
+# This gateway is for Standard/HTTPS mode only. Private Network mode uses EasyTier.
 
 SMITE_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 SMITE_NODE_COMPOSE="${SMITE_NODE_COMPOSE:-$SMITE_NODE_DIR/docker-compose.yml}"
@@ -11,6 +12,8 @@ SMITE_STATE_FILE="${SMITE_STATE_FILE:-$SMITE_STATE_DIR/state.env}"
 SMITE_FOREIGN_GATEWAY_STATE_FILE="$SMITE_STATE_DIR/foreign-gateway.env"
 SMITE_FOREIGN_ACME_ROOT="${SMITE_FOREIGN_ACME_ROOT:-/var/www/u-opti-acme}"
 SMITE_FOREIGN_RENEW_HOOK="/etc/letsencrypt/renewal-hooks/deploy/u-opti-nginx-reload"
+SMITE_FOREIGN_3XUI_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
+SMITE_FOREIGN_STANDALONE_MARKER="# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway"
 
 smite_foreign_gateway_pause() {
     echo
@@ -42,6 +45,44 @@ smite_foreign_gateway_role() {
     smite_foreign_gateway_state_value SMITE_ROLE "$SMITE_STATE_FILE"
 }
 
+smite_foreign_gateway_connection_mode() {
+    local value="standard"
+    value="$(smite_foreign_gateway_state_value SMITE_CONNECTION_MODE "$SMITE_STATE_FILE")"
+    [ -n "$value" ] || value="standard"
+    printf '%s' "$value"
+}
+
+smite_foreign_gateway_private_ip() {
+    smite_foreign_gateway_state_value SMITE_FOREIGN_PRIVATE_IP "$SMITE_STATE_FILE"
+}
+
+smite_foreign_gateway_private_notice() {
+    local private_ip=""
+    private_ip="$(smite_foreign_gateway_private_ip)"
+
+    clear
+    echo "======================================"
+    echo "   Foreign Gateway Not Required"
+    echo "======================================"
+    echo
+    echo "Private Network mode is active on this Foreign node."
+    echo "The Foreign HTTPS/443 gateway must NOT be configured in this mode."
+    echo
+    if [ -n "$private_ip" ]; then
+        echo "Panel -> Foreign control : http://${private_ip}:8888"
+    else
+        echo "Panel -> Foreign control : EasyTier private network -> TCP/8888"
+    fi
+    echo "Foreign public 443       : existing 3x-UI / EasyTier Nginx entry"
+    echo
+    echo "Next gateway step belongs on the Iran/Panel server:"
+    echo "Docker Management -> Smite Management -> 443 Gateway"
+    echo "-> Configure / Repair Panel Gateway"
+    echo
+    echo "No Nginx, certificate, or Smite node settings were changed."
+    smite_foreign_gateway_pause
+}
+
 smite_foreign_gateway_panel_domain() {
     local value=""
     value="$(smite_foreign_gateway_state_value SMITE_PANEL_DOMAIN "$SMITE_STATE_FILE")"
@@ -68,11 +109,55 @@ smite_foreign_gateway_node_name() {
 }
 
 smite_foreign_gateway_site_path() {
-    printf '/etc/nginx/sites-available/%s' "$1"
+    local domain="$1"
+    local shared_site="/etc/nginx/sites-available/3xui-${domain}"
+
+    if [ -f "$shared_site" ] && grep -Fq "$SMITE_FOREIGN_3XUI_MARKER" "$shared_site"; then
+        printf '%s' "$shared_site"
+        return 0
+    fi
+
+    printf '/etc/nginx/sites-available/%s' "$domain"
 }
 
 smite_foreign_gateway_enabled_path() {
-    printf '/etc/nginx/sites-enabled/%s' "$1"
+    local site=""
+    site="$(smite_foreign_gateway_site_path "$1")"
+    printf '/etc/nginx/sites-enabled/%s' "$(basename "$site")"
+}
+
+smite_foreign_gateway_cleanup_stale_standalone() {
+    local domain="$1" selected_site="$2"
+    local stale_site="/etc/nginx/sites-available/${domain}"
+    local stale_enabled="/etc/nginx/sites-enabled/${domain}"
+    local backup=""
+
+    [ "$selected_site" != "$stale_site" ] || return 0
+
+    if [ ! -e "$stale_site" ] && [ ! -L "$stale_enabled" ]; then
+        return 0
+    fi
+
+    if [ ! -e "$stale_site" ]; then
+        echo "Removing stale Foreign gateway symlink: $stale_enabled"
+        rm -f "$stale_enabled"
+        return $?
+    fi
+
+    if ! grep -Fq "$SMITE_FOREIGN_STANDALONE_MARKER" "$stale_site"; then
+        echo "ERROR: A conflicting non-U-OPTI standalone Nginx site exists:"
+        echo "$stale_site"
+        echo "Refusing to remove or overwrite it automatically."
+        return 1
+    fi
+
+    backup="${stale_site}.u-opti-stale-$(date +%Y%m%d-%H%M%S).bak"
+    cp -a "$stale_site" "$backup" || return 1
+    rm -f "$stale_enabled" "$stale_site" || return 1
+
+    echo "Removed stale standalone Smite Foreign vhost after backup:"
+    echo "$backup"
+    return 0
 }
 
 smite_foreign_gateway_container_healthy() {
@@ -548,6 +633,12 @@ EOF
 
 smite_foreign_gateway_status() {
     local domain panel_domain node_name site control_path control_url panel_ip
+
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
+        return
+    fi
+
     domain="$(smite_foreign_gateway_domain)"
     panel_domain="$(smite_foreign_gateway_panel_domain)"
     node_name="$(smite_foreign_gateway_node_name)"
@@ -620,6 +711,11 @@ smite_foreign_gateway_configure() {
         return
     fi
 
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
+        return
+    fi
+
     smite_foreign_gateway_require_node || { smite_foreign_gateway_pause; return; }
 
     domain="$(smite_foreign_gateway_domain)"
@@ -675,6 +771,8 @@ smite_foreign_gateway_configure() {
     smite_foreign_gateway_ensure_certificate "$domain" || { echo "ERROR: Certificate preparation failed."; smite_foreign_gateway_pause; return; }
 
     mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return; }
+
+    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return; }
 
     if [ -f "$site" ]; then
         site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
@@ -740,10 +838,15 @@ smite_foreign_gateway_configure() {
 }
 
 show_smite_foreign_gateway_menu() {
+    if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        smite_foreign_gateway_private_notice
+        return
+    fi
+
     while true; do
         clear
         echo "======================================"
-        echo "      Smite Foreign 443 Gateway"
+        echo "  Smite Foreign 443 Gateway (Standard)"
         echo "======================================"
         echo
         echo "1) Configure / Repair Foreign Gateway"

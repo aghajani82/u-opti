@@ -611,22 +611,85 @@ docker_smite_compatibility_menu() {
     done
 }
 
+docker_smite_state_value() {
+    local key="$1"
+    local state_file="${SMITE_STATE_FILE:-/etc/u-opti/smite/state.env}"
+    [ -f "$state_file" ] || return 0
+    awk -F= -v key="$key" '$1 == key {print substr($0, index($0,"=")+1); exit}' "$state_file"
+}
+
+docker_smite_clean_setup_guide() {
+    local role mode
+    role="$(docker_smite_state_value SMITE_ROLE)"
+    mode="$(docker_smite_state_value SMITE_CONNECTION_MODE)"
+
+    clear
+    echo "======================================"
+    echo "   Smite Private Clean Setup Guide"
+    echo "======================================"
+    echo
+    echo "Recommended two-server order:"
+    echo
+    echo "1) BOTH: Main Menu -> Docker Management -> Install Docker"
+    echo "2) KH  : Docker Management -> 3x-UI Docker Management -> Install 3x-UI in Docker"
+    echo "3) KH  : Docker Management -> Smite Management -> EasyTier Private Network"
+    echo "          -> Initialize Foreign / KH -> Show Pairing Details"
+    echo "4) IR  : Docker Management -> Smite Management -> EasyTier Private Network"
+    echo "          -> Initialize Panel / Iran"
+    echo "5) IR  : Docker Management -> Smite Management -> Install Smite Components"
+    echo "          -> Install Panel + Iran Node -> Private Network"
+    echo "6) KH  : Docker Management -> Smite Management -> Install Smite Components"
+    echo "          -> Install Foreign Node -> Private Network"
+    echo "7) IR  : Docker Management -> Smite Management -> 443 Gateway"
+    echo "          -> Configure / Repair Panel Gateway"
+    echo "8) KH  : Create Xray/VLESS target on loopback in 3x-UI"
+    echo "9) PANEL: Create Backhaul tunnel with logical port 443 and custom target"
+    echo
+    echo "IMPORTANT: Do NOT configure a Foreign HTTPS/443 Gateway on KH in Private Network mode."
+    echo "Panel -> Foreign control uses EasyTier and the Foreign private IP on TCP/8888."
+    echo
+    if [ -n "$role" ] || [ -n "$mode" ]; then
+        echo "Detected on this server:"
+        echo "  Role : ${role:-Not set}"
+        echo "  Mode : ${mode:-Not set}"
+        echo
+    fi
+    read -rp "Press Enter to return..."
+}
+
 docker_smite_management_menu() {
     while true; do
+        local role="" mode="" gateway_label="443 Gateway (auto-detect role)"
+        role="$(docker_smite_state_value SMITE_ROLE)"
+        mode="$(docker_smite_state_value SMITE_CONNECTION_MODE)"
+
+        if [ "$role" = "panel-iran" ]; then
+            gateway_label="Panel 443 Gateway (Iran)"
+        elif [ "$role" = "foreign" ] && [ "$mode" = "private" ]; then
+            gateway_label="Foreign 443 Gateway (not used in Private mode)"
+        elif [ "$role" = "foreign" ]; then
+            gateway_label="Foreign 443 Gateway (Standard mode)"
+        fi
+
         clear
         echo "======================================"
         echo "        Smite Management"
         echo "======================================"
         echo
-        echo "1) Install / Lifecycle"
-        echo "2) Private Network"
-        echo "3) 443 Gateway"
-        echo "4) Compatibility Tools"
+        echo "1) Install Smite Components"
+        echo "2) EasyTier Private Network"
+        echo "3) $gateway_label"
+        echo "4) Compatibility / Repair Tools"
+        echo "5) Private Clean Setup Guide"
         echo
+        if [ -n "$role" ] || [ -n "$mode" ]; then
+            echo "Detected: role=${role:-not-set} mode=${mode:-not-set}"
+            echo
+        fi
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-4]: " SMITE_MANAGEMENT_CHOICE
+        read -rp "Please enter your selection [0-5]: " SMITE_MANAGEMENT_CHOICE
         case "$SMITE_MANAGEMENT_CHOICE" in
             1)
                 if declare -F show_smite_install_menu >/dev/null 2>&1; then
@@ -651,8 +714,18 @@ docker_smite_management_menu() {
                 fi
                 ;;
             3)
-                if declare -F smite_foreign_gateway_role >/dev/null 2>&1 && \
-                   [ "$(smite_foreign_gateway_role)" = "foreign" ]; then
+                if [ "$role" = "foreign" ] && [ "$mode" = "private" ]; then
+                    if declare -F smite_foreign_gateway_private_notice >/dev/null 2>&1; then
+                        smite_foreign_gateway_private_notice
+                    else
+                        clear
+                        echo "Private Network mode is active on this Foreign node."
+                        echo "Foreign HTTPS/443 Gateway is not required."
+                        echo "Use the Iran/Panel server for the Panel 443 Gateway step."
+                        echo
+                        read -rp "Press Enter to return..."
+                    fi
+                elif [ "$role" = "foreign" ]; then
                     if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
                         show_smite_foreign_gateway_menu
                     else
@@ -662,12 +735,15 @@ docker_smite_management_menu() {
                 elif declare -F show_smite_gateway_menu >/dev/null 2>&1; then
                     show_smite_gateway_menu
                 else
-                    echo "Smite gateway module is not available."
+                    echo "Smite Panel gateway module is not available."
                     read -rp "Press Enter to return..."
                 fi
                 ;;
             4)
                 docker_smite_compatibility_menu
+                ;;
+            5)
+                docker_smite_clean_setup_guide
                 ;;
             0)
                 break
