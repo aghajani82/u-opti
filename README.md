@@ -57,6 +57,274 @@ Then run:
 u-opti
 ```
 
+## Recommended Smite Clean Installation Order
+
+For a fresh two-server Smite Private Network deployment, use this order. It matches the validated **gateway-first** workflow and keeps the public edge limited to TCP `80` and `443`.
+
+Example roles/domains used below:
+
+```text
+Iran / Panel server   : ir.example.com
+Foreign / KH server   : kh.example.com
+EasyTier Iran IP      : 10.89.10.10
+EasyTier Foreign IP   : 10.89.10.20
+```
+
+### 1. Prepare both servers
+
+Rebuild both servers with a supported Ubuntu release, update the OS, reboot if required, install U-OPTI from `main`, and install Docker on both hosts:
+
+```text
+U-OPTI
+-> Docker Management
+-> Install Docker
+```
+
+At the provider/firewall edge, keep only the required public service ports exposed:
+
+```text
+80/TCP   public
+443/TCP  public
+```
+
+Internal Smite, Backhaul, EasyTier, and Xray service ports such as `8000`, `8888`, `3080`, `8443`, `9443`, `10000`, `15888`, and `19020` must not be opened to the public Internet.
+
+### 2. Foreign server: install Sanaei 3x-UI first
+
+On the Foreign/KH server:
+
+```text
+U-OPTI
+-> Docker Management
+-> 3x-UI Docker Management
+-> Install 3x-UI in Docker
+```
+
+Configure the Foreign domain, for example `kh.example.com`, and let U-OPTI complete the managed Nginx + Let's Encrypt setup. This step is intentionally performed before EasyTier because the Foreign EasyTier WSS endpoint is inserted into the existing U-OPTI-managed TLS/443 vhost.
+
+Do **not** use the Smite lifecycle option `Install Sanaei 3x-UI on Foreign Node` for this clean installation path; install 3x-UI directly from Docker Management as shown above.
+
+### 3. Foreign server: initialize EasyTier Foreign / KH
+
+```text
+U-OPTI
+-> Docker Management
+-> Smite Management
+-> Private Network
+-> Initialize Foreign / KH
+```
+
+Enter the Foreign TLS domain, for example:
+
+```text
+kh.example.com
+```
+
+Then use:
+
+```text
+Show Pairing Details (Foreign)
+```
+
+and explicitly confirm with `SHOW` when requested. Keep the generated hidden path and network secret private.
+
+Expected Foreign overlay address:
+
+```text
+10.89.10.20/24
+```
+
+### 4. Iran server: initialize EasyTier Panel / Iran
+
+On the Iran server:
+
+```text
+U-OPTI
+-> Docker Management
+-> Smite Management
+-> Private Network
+-> Initialize Panel / Iran
+```
+
+Use the Foreign pairing values generated in the previous step:
+
+```text
+Foreign TLS domain : kh.example.com
+Hidden path        : <generated Foreign hidden path>
+Network secret     : <generated Foreign network secret>
+```
+
+Expected Iran overlay address:
+
+```text
+10.89.10.10/24
+```
+
+Before continuing, verify EasyTier connectivity between the two hosts. A startup ping may lose the first packet while the WSS session is still coming up; repeat the connectivity test and continue only when the overlay is stable.
+
+### 5. Iran server: install Smite Panel + Iran Node
+
+```text
+U-OPTI
+-> Docker Management
+-> Smite Management
+-> Install / Lifecycle
+-> Install Panel + Iran Node
+```
+
+Recommended Private Network values:
+
+```text
+Panel domain    : ir.example.com
+Node name       : node-ir
+Connection mode : Private Network
+Private IPv4    : 10.89.10.10
+```
+
+### 6. Foreign server: install Smite Foreign Node
+
+```text
+U-OPTI
+-> Docker Management
+-> Smite Management
+-> Install / Lifecycle
+-> Install Foreign Node
+```
+
+Recommended Private Network values:
+
+```text
+Panel domain         : ir.example.com
+Foreign domain       : kh.example.com
+Node name            : node-kh
+Connection mode      : Private Network
+Iran private IPv4    : 10.89.10.10
+Foreign private IPv4 : 10.89.10.20
+```
+
+### 7. Iran server: configure the TCP/443 Gateway before creating Backhaul
+
+This is the preferred gateway-first flow:
+
+```text
+U-OPTI
+-> Docker Management
+-> Smite Management
+-> 443 Gateway
+-> Configure / Repair Panel Gateway
+```
+
+The Panel should now be reachable directly through its normal HTTPS domain, for example:
+
+```text
+https://ir.example.com
+```
+
+No temporary public `8000` exposure and no SSH port-forward are required.
+
+The intended layout is:
+
+```text
+Internet TCP/443
+        |
+        v
+   Nginx stream
+        |
+        +-- Panel SNI -> 127.0.0.1:8443 -> Smite Panel
+        |
+        +-- default   -> 127.0.0.1:9443 -> future Backhaul data
+```
+
+If no Backhaul tunnel exists yet, `127.0.0.1:9443` is simply reserved until the first Backhaul tunnel is created.
+
+### 8. Foreign server: create the Xray/VLESS target
+
+Create the desired inbound in Sanaei 3x-UI. A simple validated example is:
+
+```text
+Protocol   : VLESS
+Listen IP  : 127.0.0.1
+Port       : 10000
+Transport  : TCP
+Security   : None
+Sniffing   : Off
+```
+
+Port `10000` is only a recommended example, not a requirement. Any suitable free loopback port may be used; the Backhaul custom mapping must point to the same port.
+
+### 9. Smite Panel: create the Backhaul tunnel
+
+Open the Smite Panel and create a tunnel with:
+
+```text
+Iran Node      : node-ir
+Foreign Server : node-kh
+Core           : Backhaul
+Type           : TCP
+Control Port   : 3080
+Ports          : 443
+Allow UDP      : Off
+```
+
+For the example Xray target on port `10000`, set:
+
+```text
+Advanced Settings
+-> Custom Ports
+443=127.0.0.1:10000
+```
+
+The Smite UI continues to use logical/public port `443`. When the U-OPTI Private Mode gateway is active, the Iran-node runtime keeps Nginx as the only public owner of TCP/443 and maps Backhaul data internally to loopback `127.0.0.1:9443`.
+
+### 10. Final validation
+
+Verify all of the following:
+
+```text
+- EasyTier: 10.89.10.10 <-> 10.89.10.20
+- Smite Panel opens through https://ir.example.com
+- Foreign Smite Node is registered and healthy
+- Xray target listens only on Foreign loopback
+- Backhaul tunnel is Active
+- Client configuration connects end-to-end
+- Public service exposure remains limited to 80/TCP and 443/TCP
+```
+
+Then reboot the Foreign server, validate again, reboot the Iran server, and repeat the final checks to confirm service and tunnel persistence.
+
+Quick order reference:
+
+```text
+IR + Foreign: U-OPTI + Docker
+        |
+        v
+Foreign: 3x-UI + Nginx/SSL
+        |
+        v
+Foreign: EasyTier Foreign
+        |
+        v
+Iran: EasyTier Panel
+        |
+        v
+Iran: Smite Panel + Iran Node
+        |
+        v
+Foreign: Smite Foreign Node
+        |
+        v
+Iran: 443 Gateway
+        |
+        v
+Foreign: Xray/VLESS loopback target
+        |
+        v
+Smite Panel: Backhaul tunnel
+        |
+        v
+Panel + client + reboot validation
+```
+
 ## Smite Architecture
 
 Smite is integrated as an independent U-OPTI subsystem. X-UI PRO and Docker 3x-UI remain independently manageable.
@@ -129,9 +397,9 @@ Internet TCP/443
         +-- default / no SNI   -> 127.0.0.1:9443 -> Backhaul data
 ```
 
-Backhaul control remains on its control port over the EasyTier overlay. The migration changes the Backhaul data listener only; it intentionally leaves `listen_ip` unchanged so the control listener remains reachable through the private network.
+Backhaul control remains on its control port over the EasyTier overlay. The gateway can be configured before the first Backhaul tunnel exists; in that flow `127.0.0.1:9443` is reserved until Backhaul is created, while Smite continues to use logical/public port `443`. Existing installations that already have an active Backhaul tunnel still retain the validated migration path from public `:443` to loopback `127.0.0.1:9443`.
 
-The gateway workflow includes certificate reuse/issuance, Nginx stream configuration, database backup, Backhaul migration, listener verification, HTTPS verification, idempotent repair, and rollback of protected changes when a gateway step fails.
+The gateway workflow includes certificate reuse/issuance, Nginx stream configuration, listener verification, HTTPS verification, idempotent repair, and rollback of protected changes when a gateway step fails. Legacy active-tunnel migrations also retain database backup and rollback protection.
 
 ## Smite Compatibility Tools
 
