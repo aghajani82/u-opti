@@ -36,6 +36,8 @@ MODULES=(
     "smite-install.sh"
     "smite-gateway.sh"
     "smite-foreign-gateway.sh"
+    "smite-private-network.sh"
+    "smite-easytier.sh"
     "docker-3xui.sh"
     "docker-3xui-instance.sh"
     "docker-3xui-compat.sh"
@@ -72,8 +74,8 @@ done
 if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
     echo "Missing required packages: ${MISSING_PACKAGES[*]}"
     echo "Installing required system packages..."
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${MISSING_PACKAGES[@]}"
+    apt-get -o DPkg::Lock::Timeout=300 update
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
 fi
 
 echo "Required system packages are ready."
@@ -118,6 +120,8 @@ for MODULE in "${MODULES[@]}"; do
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
+        smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
+        smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
         docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
         docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
         docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
@@ -156,6 +160,8 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
+   ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
+   ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
    ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh"; then
     echo
     echo "ERROR: Downloaded U-OPTI files failed feature verification."
@@ -249,6 +255,14 @@ echo
 
 echo "Smite Foreign Gateway Module:"
 echo "$MODULES_PATH/smite-foreign-gateway.sh"
+echo
+
+echo "Smite Private Network Module:"
+echo "$MODULES_PATH/smite-private-network.sh"
+echo
+
+echo "Smite EasyTier Module:"
+echo "$MODULES_PATH/smite-easytier.sh"
 echo
 
 echo "3x-UI Docker Module:"
