@@ -19,8 +19,12 @@ else
 fi
 
 show_smite_private_network_menu() {
+    local previous_umask
+    previous_umask="$(umask)"
+
     if declare -F show_smite_easytier_menu >/dev/null 2>&1; then
         show_smite_easytier_menu
+        umask "$previous_umask"
         return
     fi
 
@@ -35,4 +39,5 @@ show_smite_private_network_menu() {
     fi
     echo
     read -rp "Press Enter to return..."
+    umask "$previous_umask"
 }
