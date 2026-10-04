@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  bash-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          bash -n u-opti
+          bash -n lib/common.sh
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            bash -n "$file"
+          done < <(find modules -type f -name '*.sh' -print0 | sort -z)
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fq "**v${version}**" README.md
+          grep -Fq "Current stable version: **v${version}**" CATALOG.md
+          grep -Fq "## [${version}]" CHANGELOG.md
+
+      - name: Validate Smite EasyTier packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '"smite-private-network.sh"' install.sh
+          grep -Fq '"smite-easytier.sh"' install.sh
+          grep -Fq 'show_smite_private_network_menu()' modules/smite-private-network.sh
+          grep -Fq 'show_smite_easytier_menu()' modules/smite-easytier.sh
+          grep -Fq 'docker_smite_ensure_private_network_modules()' modules/docker.sh

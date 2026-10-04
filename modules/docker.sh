@@ -12,7 +12,10 @@ DOCKER_SMITE_MODULE="$DOCKER_MODULE_DIR/smite.sh"
 DOCKER_SMITE_INSTALL_MODULE="$DOCKER_MODULE_DIR/smite-install.sh"
 DOCKER_SMITE_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-gateway.sh"
 DOCKER_SMITE_FOREIGN_GATEWAY_MODULE="$DOCKER_MODULE_DIR/smite-foreign-gateway.sh"
+DOCKER_SMITE_PRIVATE_NETWORK_MODULE="$DOCKER_MODULE_DIR/smite-private-network.sh"
+DOCKER_SMITE_EASYTIER_MODULE="$DOCKER_MODULE_DIR/smite-easytier.sh"
 DOCKER_SMITE_DIGEST_MODULE="$DOCKER_MODULE_DIR/smite-digest-migrate.sh"
+DOCKER_SMITE_PRIVATE_NETWORK_ERROR=""
 
 if [ -f "$DOCKER_3XUI_MODULE" ]; then
     source "$DOCKER_3XUI_MODULE"
@@ -32,6 +35,18 @@ fi
 
 if [ -f "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE" ]; then
     source "$DOCKER_SMITE_FOREIGN_GATEWAY_MODULE"
+fi
+
+if [ -f "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" ] && [ -f "$DOCKER_SMITE_EASYTIER_MODULE" ]; then
+    if bash -n "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" >/dev/null 2>&1 && \
+       bash -n "$DOCKER_SMITE_EASYTIER_MODULE" >/dev/null 2>&1; then
+        # shellcheck disable=SC1090
+        source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+    else
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite EasyTier Private Network modules failed syntax validation."
+    fi
+elif [ -f "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" ] || [ -f "$DOCKER_SMITE_EASYTIER_MODULE" ]; then
+    DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite EasyTier Private Network module pair is incomplete."
 fi
 
 if [ -f "$DOCKER_SMITE_DIGEST_MODULE" ] && bash -n "$DOCKER_SMITE_DIGEST_MODULE" >/dev/null 2>&1; then
@@ -136,6 +151,148 @@ docker_smite_ensure_digest_module() {
 
     if ! declare -F smite_digest_migrate_existing >/dev/null 2>&1; then
         echo "ERROR: Smite digest migration helper did not load correctly."
+        return 1
+    fi
+
+    return 0
+}
+
+docker_smite_private_network_modules_valid() {
+    local wrapper="${1:-$DOCKER_SMITE_PRIVATE_NETWORK_MODULE}"
+    local easytier="${2:-$DOCKER_SMITE_EASYTIER_MODULE}"
+
+    [ -s "$wrapper" ] &&
+    [ -s "$easytier" ] &&
+    bash -n "$wrapper" >/dev/null 2>&1 &&
+    bash -n "$easytier" >/dev/null 2>&1 &&
+    grep -q '^show_smite_private_network_menu()' "$wrapper" &&
+    grep -q '^show_smite_easytier_menu()' "$easytier"
+}
+
+docker_smite_ensure_private_network_modules() {
+    local branch="${U_OPTI_BRANCH:-main}"
+    local installed_version="${VERSION:-}"
+    local release_base=""
+    local branch_base="https://raw.githubusercontent.com/aghajani82/u-opti/$branch"
+    local temp_dir=""
+    local temp_wrapper=""
+    local temp_easytier=""
+    local local_pair_ok=false
+    local downloaded=false
+    local cache_bust=""
+
+    if [ -z "$installed_version" ] && [ -f "/usr/local/lib/u-opti/VERSION" ]; then
+        installed_version="$(tr -d '[:space:]' < /usr/local/lib/u-opti/VERSION)"
+    fi
+
+    if docker_smite_private_network_modules_valid; then
+        local_pair_ok=true
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        if [ "$local_pair_ok" = "true" ]; then
+            # shellcheck disable=SC1090
+            source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+            return 0
+        fi
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="curl is required to prepare the Smite EasyTier Private Network modules."
+        echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+        return 1
+    fi
+
+    temp_dir="$(mktemp -d)" || return 1
+    temp_wrapper="$temp_dir/smite-private-network.sh"
+    temp_easytier="$temp_dir/smite-easytier.sh"
+
+    docker_smite_download_private_pair() {
+        local base="$1"
+        cache_bust="$(date +%s%N)"
+        rm -f "$temp_wrapper" "$temp_easytier"
+        curl -fsSL --retry 2 \
+            "$base/modules/smite-private-network.sh?cb=$cache_bust" \
+            -o "$temp_wrapper" || return 1
+        curl -fsSL --retry 2 \
+            "$base/modules/smite-easytier.sh?cb=$cache_bust" \
+            -o "$temp_easytier" || return 1
+        docker_smite_private_network_modules_valid "$temp_wrapper" "$temp_easytier"
+    }
+
+    if [[ "$installed_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        release_base="https://raw.githubusercontent.com/aghajani82/u-opti/v${installed_version}"
+        if docker_smite_download_private_pair "$release_base"; then
+            downloaded=true
+        fi
+    fi
+
+    if [ "$downloaded" != "true" ]; then
+        if docker_smite_download_private_pair "$branch_base"; then
+            downloaded=true
+        fi
+    fi
+
+    if [ "$downloaded" != "true" ]; then
+        rm -rf "$temp_dir"
+        unset -f docker_smite_download_private_pair
+        if [ "$local_pair_ok" = "true" ]; then
+            echo "WARNING: Could not refresh the Smite EasyTier Private Network modules."
+            echo "Using the existing validated local module pair."
+            # shellcheck disable=SC1090
+            source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+            return 0
+        fi
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite EasyTier Private Network modules are missing and could not be downloaded."
+        echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+        return 1
+    fi
+
+    if [ "$local_pair_ok" != "true" ] || \
+       ! cmp -s "$temp_wrapper" "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE" || \
+       ! cmp -s "$temp_easytier" "$DOCKER_SMITE_EASYTIER_MODULE"; then
+        echo "Synchronizing Smite EasyTier Private Network modules..."
+
+        if ! install -m 0755 "$temp_wrapper" "${DOCKER_SMITE_PRIVATE_NETWORK_MODULE}.new" || \
+           ! install -m 0755 "$temp_easytier" "${DOCKER_SMITE_EASYTIER_MODULE}.new"; then
+            rm -f "${DOCKER_SMITE_PRIVATE_NETWORK_MODULE}.new" "${DOCKER_SMITE_EASYTIER_MODULE}.new"
+            rm -rf "$temp_dir"
+            unset -f docker_smite_download_private_pair
+            if [ "$local_pair_ok" = "true" ]; then
+                echo "WARNING: Module staging failed; using the existing validated local pair."
+                # shellcheck disable=SC1090
+                source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+                return 0
+            fi
+            DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Failed to stage the Smite EasyTier Private Network modules."
+            echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+            return 1
+        fi
+
+        if ! mv -f "${DOCKER_SMITE_EASYTIER_MODULE}.new" "$DOCKER_SMITE_EASYTIER_MODULE" || \
+           ! mv -f "${DOCKER_SMITE_PRIVATE_NETWORK_MODULE}.new" "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"; then
+            rm -f "${DOCKER_SMITE_PRIVATE_NETWORK_MODULE}.new" "${DOCKER_SMITE_EASYTIER_MODULE}.new"
+            rm -rf "$temp_dir"
+            unset -f docker_smite_download_private_pair
+            DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Failed to activate the Smite EasyTier Private Network modules."
+            echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+            return 1
+        fi
+    fi
+
+    rm -rf "$temp_dir"
+    unset -f docker_smite_download_private_pair
+
+    if ! docker_smite_private_network_modules_valid; then
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Installed Smite EasyTier Private Network modules failed validation."
+        echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+        return 1
+    fi
+
+    DOCKER_SMITE_PRIVATE_NETWORK_ERROR=""
+    # shellcheck disable=SC1090
+    source "$DOCKER_SMITE_PRIVATE_NETWORK_MODULE"
+
+    if ! declare -F show_smite_private_network_menu >/dev/null 2>&1; then
+        DOCKER_SMITE_PRIVATE_NETWORK_ERROR="Smite EasyTier Private Network entry point did not load correctly."
+        echo "ERROR: $DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
         return 1
     fi
 
@@ -462,13 +619,14 @@ docker_smite_management_menu() {
         echo "======================================"
         echo
         echo "1) Install / Lifecycle"
-        echo "2) 443 Gateway"
-        echo "3) Compatibility Tools"
+        echo "2) Private Network"
+        echo "3) 443 Gateway"
+        echo "4) Compatibility Tools"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-3]: " SMITE_MANAGEMENT_CHOICE
+        read -rp "Please enter your selection [0-4]: " SMITE_MANAGEMENT_CHOICE
         case "$SMITE_MANAGEMENT_CHOICE" in
             1)
                 if declare -F show_smite_install_menu >/dev/null 2>&1; then
@@ -479,6 +637,20 @@ docker_smite_management_menu() {
                 fi
                 ;;
             2)
+                if docker_smite_ensure_private_network_modules && \
+                   declare -F show_smite_private_network_menu >/dev/null 2>&1; then
+                    show_smite_private_network_menu
+                else
+                    clear
+                    echo "Smite Private Network module is not available."
+                    if [ -n "$DOCKER_SMITE_PRIVATE_NETWORK_ERROR" ]; then
+                        echo "$DOCKER_SMITE_PRIVATE_NETWORK_ERROR"
+                    fi
+                    echo
+                    read -rp "Press Enter to return..."
+                fi
+                ;;
+            3)
                 if declare -F smite_foreign_gateway_role >/dev/null 2>&1 && \
                    [ "$(smite_foreign_gateway_role)" = "foreign" ]; then
                     if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
@@ -494,7 +666,7 @@ docker_smite_management_menu() {
                     read -rp "Press Enter to return..."
                 fi
                 ;;
-            3)
+            4)
                 docker_smite_compatibility_menu
                 ;;
             0)

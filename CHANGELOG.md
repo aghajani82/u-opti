@@ -8,6 +8,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.15.0] - 2026-10-04
+
+### Added
+
+- Added a provider-independent Smite Private Network implementation based on EasyTier v2.6.4 over WSS/TCP 443.
+- Added managed overlay addresses `10.89.10.10/24` for Iran and `10.89.10.20/24` for Foreign.
+- Added Foreign EasyTier initialization behind an existing U-OPTI-managed Nginx TLS/443 vhost with a generated hidden WebSocket path.
+- Added checksum-verified EasyTier binary installation for x86_64 and arm64 release assets.
+- Added explicit Pairing Details workflow with `SHOW` confirmation before revealing the network secret.
+- Added EasyTier status, start/restart, connectivity test, migration, active-tunnel reapply, and repair workflows under Smite Private Network.
+- Added an upgrade-safe EasyTier module-pair bootstrap for systems upgrading from fixed-file U-OPTI updaters that did not yet know about `smite-private-network.sh` and `smite-easytier.sh`.
+- Added repository CI for Bash syntax, release metadata consistency, and EasyTier packaging checks.
+- Added automatic GitHub release publication from the matching changelog section whenever a new VERSION reaches `main`.
+
+### Changed
+
+- Smite `Private Network` now uses EasyTier WSS/TCP443 as the supported provider-independent transport.
+- The Foreign EasyTier role listens on loopback WebSocket backend `127.0.0.1:19020`; Iran connects through the Foreign TLS domain and hidden path on public TCP/443.
+- The validated EasyTier profile disables UDP/STUN/UPnP/hole-punching/P2P behavior and keeps the real overlay transport on TCP/443.
+- Docker/Smite loading treats `smite-private-network.sh` and `smite-easytier.sh` as one validated module pair and synchronizes them from the exact installed release tag when possible.
+- The active `U_OPTI_BRANCH`/`main` source is used as the controlled fallback when the matching release tag is unavailable.
+- The Private Network compatibility wrapper restores the caller's previous umask after leaving the EasyTier submenu.
+- Documentation now describes the full EasyTier overlay, shared TCP/443 data path, upgrade behavior, and completed clean-room validation.
+
+### Removed
+
+- Removed the remaining Docker/Smite loader dependency on the retired experimental `smite-private-peer.sh` / WireGuard peer helper.
+- Removed the branch-only/experimental framing from the Private Network entry point now that EasyTier is the supported v0.15.0 implementation.
+
+### Security
+
+- EasyTier release archives are SHA-256 verified before binaries are installed.
+- Network secret, pairing data, and EasyTier configuration are stored under `/etc/u-opti/smite/easytier/` with restricted permissions.
+- Pairing secret is not printed automatically.
+- Nginx EasyTier integration backs up the selected vhost, inserts only at the expected U-OPTI marker, validates with `nginx -t`, and restores the backup if validation or reload fails.
+- Bootstrap downloads must be non-empty, pass `bash -n`, and contain the expected `show_smite_private_network_menu()` / `show_smite_easytier_menu()` entry points before activation.
+- Internal Smite ports `8000`, `8888`, and Backhaul control remain intended for private/internal reachability only; the validated provider firewall exposed public TCP `80` and `443` only.
+
+### Validation
+
+- Clean Ubuntu 24.04.5 rebuilds were completed for both Iran and Foreign servers.
+- Docker installation passed on both hosts.
+- Foreign Sanaei 3x-UI, Nginx, Let's Encrypt, and the required Xray loopback target passed clean installation and verification.
+- EasyTier established the real transport from Iran to the Foreign public address on TCP/443 with no EasyTier UDP sockets.
+- Overlay connectivity passed between `10.89.10.10` and `10.89.10.20`.
+- Smite Panel + Iran and Foreign Node were installed directly in Private Network mode without a post-install network migration.
+- Foreign registration used `10.89.10.10:8000`; Foreign control metadata used `10.89.10.20:8888`; Backhaul control used `10.89.10.10:3080`.
+- A Backhaul tunnel with target `127.0.0.1:10000` passed before gateway activation and end-to-end VLESS connected successfully.
+- U-OPTI gateway migration moved Backhaul data to `127.0.0.1:9443`, placed Nginx on public TCP/443, and kept Panel TLS on `127.0.0.1:8443`.
+- Public Smite Panel HTTPS returned HTTP 200 and the existing VLESS client continued to work after gateway activation.
+- Foreign reboot restored EasyTier, Smite node, persisted Backhaul client state, 3x-UI/Xray, and connectivity.
+- Iran reboot restored EasyTier, Smite Panel/Iran node, Nginx shared 443 gateway, Backhaul control/data listeners, public Panel HTTPS, and end-to-end VLESS.
+- Final hosts booted kernel `6.8.0-146-generic` successfully during persistence validation.
+
 ## [0.14.5] - 2026-10-03
 
 ### Added

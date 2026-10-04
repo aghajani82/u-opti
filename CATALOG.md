@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.14.5**
+Current stable version: **v0.15.0**
 
 ## Core System Management
 
@@ -110,16 +110,55 @@ The state can record role, connection mode, Panel domain/private IP, node name, 
 - Iran node uses the local Panel endpoint.
 - Foreign node reaches the Panel through the Panel domain on HTTPS/443.
 
-### Private Network Mode
+### Private Network Mode — EasyTier
 
-- Iran Panel API is reachable on the provider/private interface at port `8000`.
-- Iran local node continues to use `127.0.0.1:8000`.
-- Foreign node reaches the Panel over the Iran private address on `8000`.
-- Foreign node publishes its private control address on `8888`.
-- `SMITE_BACKHAUL_ADDRESS` can direct Backhaul control to the Iran private address.
-- Private IPv4 input and local interface presence are validated.
+The supported provider-independent private transport is EasyTier v2.6.4 over WSS/TCP 443.
 
-Public `8000`, `8888`, and Backhaul control should remain blocked from the public Internet in Private Network mode.
+Validated overlay:
+
+```text
+Iran      10.89.10.10/24
+Foreign   10.89.10.20/24
+Foreign WS backend 127.0.0.1:19020
+EasyTier RPC       127.0.0.1:15888
+```
+
+Behavior:
+
+- Foreign EasyTier is exposed only through a generated hidden WSS path in the existing U-OPTI-managed TLS/443 Nginx vhost.
+- Iran EasyTier connects to the Foreign domain on TCP/443 using that hidden path.
+- EasyTier UDP/STUN/UPnP/hole-punching/P2P are disabled in the validated profile.
+- Iran Panel API is reachable on `10.89.10.10:8000`.
+- Iran local node continues to bootstrap through `127.0.0.1:8000`.
+- Foreign node reaches the Panel through `10.89.10.10:8000`.
+- Foreign node publishes its control address as `http://10.89.10.20:8888`.
+- `SMITE_BACKHAUL_ADDRESS=10.89.10.10` directs Backhaul control across the overlay.
+- EasyTier service and interface state persist across reboot.
+
+Public `8000`, `8888`, and Backhaul control ports must remain blocked from the public Internet. The validated provider edge exposed only TCP `80` and `443` on both servers.
+
+### Private Network Menu
+
+```text
+1) Status
+2) Initialize Foreign / KH
+3) Show Pairing Details (Foreign)
+4) Initialize Panel / Iran
+5) Start / Restart EasyTier
+6) Connectivity Test
+7) Migrate Existing Smite Role
+8) Reapply Active Tunnels (Panel)
+9) Repair EasyTier / Nginx
+0) Back
+```
+
+Security and safety behavior:
+
+- EasyTier release assets are pinned to v2.6.4 and checksum-verified before installation.
+- Network secret and pairing data are stored under `/etc/u-opti/smite/easytier/` with restricted permissions.
+- Pairing secret is not printed automatically; explicit `SHOW` confirmation is required.
+- Nginx integration backs up the selected vhost, inserts a managed block at the U-OPTI Xray marker, validates with `nginx -t`, reloads, and restores on failure.
+- The compatibility wrapper restores the caller's previous umask after leaving the EasyTier submenu.
 
 ## Smite TCP/443 Gateway
 
@@ -136,7 +175,7 @@ Nginx stream
     +-- default/no-SNI -> 127.0.0.1:9443 -> Backhaul data
 ```
 
-Backhaul control remains on its control port over the private network.
+Backhaul control remains on its control port over the EasyTier overlay.
 
 U-OPTI can detect Private Mode, back up the Smite database, move Backhaul data from public `:443` to `127.0.0.1:9443`, preserve the control listener, configure Nginx stream/SNI, verify the final state, and roll back protected changes on failure. Re-running an already-prepared gateway is idempotent and avoids unnecessary tunnel-spec rewrites or service restarts.
 
@@ -176,14 +215,28 @@ Safety properties:
 - Smite containers are not restarted or recreated by the migration helper.
 - X-UI PRO and Sanaei 3x-UI resources are not modified.
 
-### v0.14.5 Packaging / Upgrade Behavior
+## v0.15.0 Packaging / Upgrade Behavior
 
-- Clean installer includes the digest helper.
-- Docker/Smite loads the helper when present and syntax-valid.
-- If an older installation reaches v0.14.5 through a legacy fixed-file updater and the helper is still missing, Compatibility Tools can bootstrap it safely.
-- Helper downloads must be non-empty, pass `bash -n`, and contain the expected migration entry function before installation.
-- The helper loader prefers the exact installed release tag and falls back to `U_OPTI_BRANCH`/`main` for controlled branch workflows.
-- If refresh fails but an existing local helper validates, U-OPTI keeps using the validated local copy instead of replacing it with an unverified download.
+Clean installs include:
+
+```text
+modules/smite-digest-migrate.sh
+modules/smite-private-network.sh
+modules/smite-easytier.sh
+```
+
+Older U-OPTI versions use a fixed self-update file list. v0.15.0 therefore keeps the existing digest-helper bootstrap and adds an EasyTier pair bootstrap in Docker/Smite management. The EasyTier bootstrap:
+
+- treats the wrapper and EasyTier implementation as one validated pair,
+- requires both files to be non-empty,
+- runs `bash -n` on both files,
+- verifies `show_smite_private_network_menu()` and `show_smite_easytier_menu()` markers,
+- prefers the exact installed release tag,
+- falls back to the active `U_OPTI_BRANCH`/`main` source,
+- stages both files before activation,
+- keeps an already validated local pair if refresh is temporarily unavailable.
+
+The obsolete experimental `smite-private-peer.sh` / WireGuard peer-loader dependency is no longer part of Docker/Smite loading.
 
 ## Backup & Restore
 
@@ -193,14 +246,27 @@ Targeted backups can include `/etc/u-opti`, SSH configuration, UFW configuration
 
 U-OPTI self-update provides version comparison, staged/cache-busted downloads, required-file validation, Bash syntax checks, pre-update backup, installation verification, rollback, and automatic relaunch.
 
-The v0.14.5 digest-helper bootstrap closes the first-upgrade gap for machines whose older updater did not yet know about the helper file.
+New helper/module families that were unknown to a legacy fixed-file updater use validated on-demand bootstrap paths so the first upgrade can complete without a manual reinstall.
+
+## Release Automation and CI
+
+Repository CI validates:
+
+- Bash syntax for `install.sh`, `u-opti`, `lib/common.sh`, and all shell modules,
+- semantic VERSION format,
+- VERSION consistency with README, catalog, and changelog,
+- EasyTier clean-install packaging and bootstrap entry points.
+
+When a version bump reaches `main`, the release workflow extracts that version's changelog section, creates tag `v<version>`, and publishes the matching GitHub release if it does not already exist.
 
 ## Safe Uninstall
 
-U-OPTI removes its own application files only and leaves Nginx, Certbot, Docker, X-UI PRO, Sanaei 3x-UI, Xray, and Smite service data untouched.
+U-OPTI removes its own application files only and leaves Nginx, Certbot, Docker, X-UI PRO, Sanaei 3x-UI, Xray, Smite service data, and operator data untouched.
 
 ## Validation Boundary
 
-The Smite Private Network / shared-443 architecture was runtime-validated across v0.14.1-v0.14.4. v0.14.5 is a packaging and menu-integration patch around the already-existing digest migration helper and does not alter that tested tunnel data path.
+v0.15.0 was validated from clean Ubuntu 24.04.5 servers through Docker, Sanaei 3x-UI, Nginx/Let's Encrypt, EasyTier WSS/TCP443 overlay, clean Smite Private Network installation, Backhaul, shared public TCP/443, Xray/VLESS, and sequential reboot persistence on both Foreign and Iran hosts.
+
+For detailed test order and observed invariants, see [docs/SMITE-EASYTIER-CLEAN-TEST.md](docs/SMITE-EASYTIER-CLEAN-TEST.md).
 
 For detailed version history, see [CHANGELOG.md](CHANGELOG.md).
