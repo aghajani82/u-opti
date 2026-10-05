@@ -8,6 +8,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.15.1] - 2026-10-05
+
+### Added
+
+- Added the production Smite Private Setup Wizard as the default Smite Management workflow.
+- Added a live 10-step checklist covering Docker, Sanaei 3x-UI, EasyTier Foreign/Panel, Smite Panel/Iran and Foreign nodes, Panel 443 Gateway, Xray loopback, Backhaul, and final reboot validation.
+- Added host-aware `Next` / `Then` guidance that switches between KH/Foreign and IR/Panel as the deployment progresses.
+- Added compact Wizard controls: `1-10` for actions, `.1-.10` for read-only details, `n` for the next recommended step, and `r` for live progress refresh.
+- Added a direct `u-opti-smite-setup` command installed by the production Wizard bootstrap.
+- Added an upgrade-safe production Wizard bootstrap for v0.15.0 systems whose fixed-file updater does not yet know about the new Wizard module family.
+- Added release notes under `docs/RELEASE-v0.15.1.md`.
+
+### Changed
+
+- Docker Management -> Smite Management now opens the verified 10-step Wizard directly while retaining the legacy Smite menu as a fallback if Wizard preparation fails.
+- `[~]` is reserved for exactly one meaning: the next recommended setup step. Completed steps use `[✓]`; other pending steps use `[ ]`.
+- Step 1 and Step 10 use local evidence on each server while peer-observable steps are inferred from EasyTier/Smite runtime state when possible.
+- Step 10 wording now explicitly states that recording the reboot baseline does not itself reboot the host and that a real `reboot` must occur before validation.
+- The preferred Private Mode order is gateway-first: Panel HTTPS/TCP443 is configured before the first Backhaul tunnel and `127.0.0.1:9443` is reserved for future RAW Backhaul data.
+
+### Fixed
+
+- Fixed IR-side workflow guidance that could incorrectly recommend KH-only Steps 2/3 again before the EasyTier overlay made peer state observable.
+- Fixed Gateway ACME readiness checks that could fail locally immediately after a fresh Nginx install/reload even though the ACME webroot was valid.
+- The hardened local ACME probe now bypasses proxy environment variables with `--noproxy '*'`, uses IPv4 loopback explicitly, retries for bounded Nginx startup/reload timing, and reloads once during the retry window.
+
+### Security
+
+- Step 8 only marks Xray/VLESS complete when the configured target port is actually listening on loopback (`127.0.0.1` or `::1`). A wildcard/public listener such as `*:10000` is intentionally rejected even if end-to-end traffic works.
+- The Wizard does not request, persist, or print EasyTier secrets, Backhaul tokens, VLESS UUIDs, or other credentials.
+- Public service exposure remains designed for TCP `80` and `443` only; Smite API/control, EasyTier backends, Backhaul data/control, and Xray targets remain private or loopback-bound as appropriate.
+
+### Validation
+
+- Completed a fresh two-server deployment through all 10 Wizard steps on KH/Foreign and IR/Panel.
+- Verified live role switching and next-step guidance between KH and IR.
+- Verified Gateway-first certificate issuance, public Panel HTTPS, Nginx stream/SNI routing, reserved RAW backend `127.0.0.1:9443`, and runtime logical-443 Backhaul attachment.
+- Verified the Wizard detected an accidentally public Xray listener (`*:10000`) and refused Step 8 until the inbound was corrected to `127.0.0.1:10000`.
+- Verified Backhaul tunnel creation, client configuration, and end-to-end connectivity after the loopback correction.
+- Verified post-reboot persistence independently on Foreign and Iran and reached `Verified : 10 / 10` on both hosts.
+- Final clean deployment testing also completed successfully on Ubuntu 26.x.
+
 ## [0.15.0] - 2026-10-04
 
 ### Added
