@@ -8,6 +8,7 @@ PROFILE_FILE="/etc/profile.d/u-opti-test-branch.sh"
 WIZARD_BIN="/usr/local/bin/u-opti-smite-setup"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
+DOCKER_MODULE="$MODULES_PATH/docker.sh"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -71,29 +72,77 @@ echo "Installing Smite Setup Progress actions..."
 curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-actions.sh?cb=$(date +%s%N)" \
     -o "$TMP_DIR/smite-setup-progress-actions.sh"
 
+echo "Installing compact Wizard menu..."
+curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-compact-ui.sh?cb=$(date +%s%N)" \
+    -o "$TMP_DIR/smite-setup-progress-compact-ui.sh"
+
 bash -n "$TMP_DIR/smite-setup-progress.sh"
 bash -n "$TMP_DIR/smite-setup-progress-ui.sh"
 bash -n "$TMP_DIR/smite-setup-progress-actions.sh"
+bash -n "$TMP_DIR/smite-setup-progress-compact-ui.sh"
 
 install -m 0755 "$TMP_DIR/smite-setup-progress.sh" "$MODULES_PATH/smite-setup-progress.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-ui.sh" "$MODULES_PATH/smite-setup-progress-ui.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-actions.sh" "$MODULES_PATH/smite-setup-progress-actions.sh"
+install -m 0755 "$TMP_DIR/smite-setup-progress-compact-ui.sh" "$MODULES_PATH/smite-setup-progress-compact-ui.sh"
+
+# For this clean-test branch, make Docker Management -> Smite Management open
+# the new 10-step Wizard directly. Keep the normal Docker menu and all legacy
+# Smite functions intact; only the Smite Management entry function is
+# overridden after the original docker.sh definitions.
+python3 - "$DOCKER_MODULE" <<'PY'
+from pathlib import Path
+import re, sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+start = "# BEGIN U-OPTI SMITE WIZARD TEST ENTRY"
+end = "# END U-OPTI SMITE WIZARD TEST ENTRY"
+text = re.sub(rf"\n?{re.escape(start)}.*?{re.escape(end)}\n?", "\n", text, flags=re.S)
+block = r'''
+
+# BEGIN U-OPTI SMITE WIZARD TEST ENTRY
+# Experimental clean-install UX: Docker Management -> Smite Management opens
+# the private setup progress Wizard directly.
+if [ -f "$DOCKER_MODULE_DIR/smite-setup-progress.sh" ] && \
+   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh" ] && \
+   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh" ] && \
+   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh" ]; then
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh"
+
+    docker_smite_management_menu() {
+        smite_setup_actions_initial_role_prompt || return
+        show_smite_setup_progress_menu
+    }
+fi
+# END U-OPTI SMITE WIZARD TEST ENTRY
+'''
+path.write_text(text.rstrip() + block + "\n")
+PY
+
+bash -n "$DOCKER_MODULE"
 
 cat > "$WIZARD_BIN" <<'EOF_WIZARD'
 #!/bin/bash
 set -e
 export U_OPTI_BRANCH="feature/smite-private-setup-progress"
 
-# Load the normal Docker/Smite modules so Wizard steps can explicitly open
-# the real U-OPTI installers without bouncing through the full main menu.
+# docker.sh contains the experimental Smite Management -> Wizard entry block
+# installed by install-smite-wizard-test.sh.
 source /usr/local/lib/u-opti/modules/docker.sh
-source /usr/local/lib/u-opti/modules/smite-setup-progress.sh
-source /usr/local/lib/u-opti/modules/smite-setup-progress-ui.sh
-source /usr/local/lib/u-opti/modules/smite-setup-progress-actions.sh
 
-# A freshly rebuilt host has no Smite/EasyTier role state yet. Record only a
-# provisional Wizard role (IR/Panel or KH/Foreign); real runtime state takes
-# priority automatically as soon as it exists.
+if ! declare -F show_smite_setup_progress_menu >/dev/null 2>&1; then
+    echo "ERROR: Smite Setup Wizard modules are not loaded."
+    exit 1
+fi
+
 smite_setup_actions_initial_role_prompt || exit 0
 show_smite_setup_progress_menu
 EOF_WIZARD
@@ -108,7 +157,12 @@ echo "Installed version : 0.15.1-dev"
 echo "Pinned test branch: $BRANCH"
 echo "Wizard command    : u-opti-smite-setup"
 echo
-echo "The wizard will open now."
+echo "Normal menu path  : U-OPTI -> Docker Management -> Smite Management"
+echo "The Wizard main page now shows only the 10-step progress list."
+echo "Use .1 through .10 for read-only step details."
+echo "Step checks refresh silently whenever the Wizard page is redrawn."
+echo
+echo "The Wizard will open now."
 echo "On a fresh host it first asks whether this is IR/Panel or KH/Foreign."
 echo "After a future SSH login, the test branch is restored automatically."
 echo
