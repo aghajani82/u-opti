@@ -80,17 +80,23 @@ echo "Installing compact Wizard menu..."
 curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-compact-ui.sh?cb=$(date +%s%N)" \
     -o "$TMP_DIR/smite-setup-progress-compact-ui.sh"
 
+echo "Installing hardened Gateway ACME probe..."
+curl -fsSL --retry 3 "${BASE_URL}/modules/smite-gateway-acme-robust.sh?cb=$(date +%s%N)" \
+    -o "$TMP_DIR/smite-gateway-acme-robust.sh"
+
 bash -n "$TMP_DIR/smite-setup-progress.sh"
 bash -n "$TMP_DIR/smite-setup-progress-ui.sh"
 bash -n "$TMP_DIR/smite-setup-progress-actions.sh"
 bash -n "$TMP_DIR/smite-setup-progress-flow.sh"
 bash -n "$TMP_DIR/smite-setup-progress-compact-ui.sh"
+bash -n "$TMP_DIR/smite-gateway-acme-robust.sh"
 
 install -m 0755 "$TMP_DIR/smite-setup-progress.sh" "$MODULES_PATH/smite-setup-progress.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-ui.sh" "$MODULES_PATH/smite-setup-progress-ui.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-actions.sh" "$MODULES_PATH/smite-setup-progress-actions.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-flow.sh" "$MODULES_PATH/smite-setup-progress-flow.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-compact-ui.sh" "$MODULES_PATH/smite-setup-progress-compact-ui.sh"
+install -m 0755 "$TMP_DIR/smite-gateway-acme-robust.sh" "$MODULES_PATH/smite-gateway-acme-robust.sh"
 
 # For this clean-test branch, make Docker Management -> Smite Management open
 # the new 10-step Wizard directly. Keep the normal Docker menu and all legacy
@@ -114,7 +120,12 @@ if [ -f "$DOCKER_MODULE_DIR/smite-setup-progress.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-flow.sh" ] && \
-   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh" ]; then
+   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh" ] && \
+   [ -f "$DOCKER_MODULE_DIR/smite-gateway-acme-robust.sh" ]; then
+    # The base docker module has already loaded the normal gateway functions.
+    # Override only the local ACME readiness probe for this clean-install test.
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-gateway-acme-robust.sh"
     # shellcheck disable=SC1090
     source "$DOCKER_MODULE_DIR/smite-setup-progress.sh"
     # shellcheck disable=SC1090
@@ -172,6 +183,7 @@ echo "Use .1 through .10 for read-only step details."
 echo "The [~] marker identifies exactly one next recommended step."
 echo "Next/Then lines show which server should be used for the following work."
 echo "Step checks refresh silently whenever the Wizard page is redrawn."
+echo "Gateway ACME local readiness checks bypass proxy variables and retry safely."
 echo
 echo "The Wizard will open now."
 echo "On a fresh host it first asks whether this is IR/Panel or KH/Foreign."
