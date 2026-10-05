@@ -198,12 +198,13 @@ EOF
             ;;
         10)
             cat <<'EOF'
-BOTH servers:
+BOTH servers, one host at a time:
 1. Confirm the client works end-to-end.
-2. Open Step 10 and record a reboot baseline on the host.
-3. Reboot that host.
-4. Open Step 10 again and validate after reboot.
-5. Repeat on the peer host.
+2. Open Step 10 and record the reboot baseline on this host.
+3. Exit the Wizard and run: reboot
+4. Reconnect after the host returns.
+5. Open Step 10 again and validate after reboot.
+6. Repeat on the peer host.
 EOF
             ;;
     esac
@@ -354,9 +355,11 @@ smite_setup_ui_step_reboot() {
     echo "Current check :"
     echo "$detail"
     echo
-    echo "1) Prepare This Host for Reboot Validation"
+    echo "1) Record Reboot Baseline (does not reboot)"
     echo "2) Validate This Host After Reboot"
     echo "3) Show Step Details"
+    echo
+    echo "After option 1, exit and run 'reboot', then return and use option 2."
     echo
     echo "0) Back"
     echo

@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# U-OPTI - Smite Gateway ACME local probe hardening for clean-install testing.
-# This override keeps the existing gateway flow intact while making the local
-# webroot readiness check independent of proxy environment variables and a bit
-# more tolerant of fresh Nginx package/reload timing.
+# U-OPTI - Smite Gateway ACME local readiness hardening.
+# Keeps the normal gateway flow intact while making the local webroot probe
+# independent of proxy environment variables and tolerant of fresh Nginx
+# package/reload timing.
 
 smite_gateway_prepare_acme() {
     local domain="$1"
@@ -43,7 +43,7 @@ EOF_ACME
 
     # Force the readiness probe to stay local even if the shell has HTTP(S)
     # proxy variables. Fresh Nginx package installs can also take a short time
-    # to settle, so allow a longer bounded retry window and reload once midway.
+    # to settle, so allow a bounded retry window and reload once midway.
     for attempt in $(seq 1 30); do
         if curl --noproxy '*' -4 -fsS \
             --connect-timeout 2 --max-time 5 \

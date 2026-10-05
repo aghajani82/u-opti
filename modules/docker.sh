@@ -821,3 +821,111 @@ docker_management_menu() {
         esac
     done
 }
+
+# ---------------------------------------------------------------------------
+# Smite Private Setup Wizard - production entry point
+# ---------------------------------------------------------------------------
+# Keep the legacy Smite menu available as a fallback, while making Docker
+# Management -> Smite Management open the verified 10-step Wizard directly.
+
+if declare -F docker_smite_management_menu >/dev/null 2>&1 && \
+   ! declare -F docker_smite_management_menu_legacy >/dev/null 2>&1; then
+    eval "$(declare -f docker_smite_management_menu | sed '1s/^docker_smite_management_menu /docker_smite_management_menu_legacy /')"
+fi
+
+docker_smite_setup_wizard_files_ready() {
+    local file
+    for file in \
+        smite-setup-progress.sh \
+        smite-setup-progress-ui.sh \
+        smite-setup-progress-actions.sh \
+        smite-setup-progress-flow.sh \
+        smite-setup-progress-compact-ui.sh \
+        smite-gateway-acme-robust.sh; do
+        [ -s "$DOCKER_MODULE_DIR/$file" ] || return 1
+        bash -n "$DOCKER_MODULE_DIR/$file" >/dev/null 2>&1 || return 1
+    done
+    return 0
+}
+
+docker_smite_load_setup_wizard_modules() {
+    # Base docker.sh has already loaded normal Smite/Gateway functions.
+    # Source the hardened ACME readiness probe first, then the Wizard layers in
+    # the same order used by the validated clean-install test.
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-gateway-acme-robust.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-flow.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh"
+
+    declare -F smite_setup_actions_initial_role_prompt >/dev/null 2>&1 &&
+    declare -F show_smite_setup_progress_menu >/dev/null 2>&1
+}
+
+docker_smite_prepare_setup_wizard() {
+    local branch="${U_OPTI_BRANCH:-main}"
+    local installer=""
+
+    if docker_smite_setup_wizard_files_ready; then
+        docker_smite_load_setup_wizard_modules
+        return $?
+    fi
+
+    command -v curl >/dev/null 2>&1 || {
+        echo "ERROR: curl is required to prepare the Smite Setup Wizard."
+        return 1
+    }
+
+    installer="$(mktemp)" || return 1
+    if ! curl -fsSL --retry 3 \
+        "https://raw.githubusercontent.com/aghajani82/u-opti/${branch}/install-smite-wizard.sh?cb=$(date +%s%N)" \
+        -o "$installer"; then
+        rm -f "$installer"
+        echo "ERROR: Smite Setup Wizard installer could not be downloaded."
+        return 1
+    fi
+
+    if ! U_OPTI_BRANCH="$branch" bash "$installer" --prepare-only; then
+        rm -f "$installer"
+        echo "ERROR: Smite Setup Wizard modules could not be prepared."
+        return 1
+    fi
+    rm -f "$installer"
+
+    docker_smite_setup_wizard_files_ready || {
+        echo "ERROR: Smite Setup Wizard modules failed validation after installation."
+        return 1
+    }
+
+    docker_smite_load_setup_wizard_modules
+}
+
+docker_smite_open_setup_wizard() {
+    if docker_smite_prepare_setup_wizard; then
+        smite_setup_actions_initial_role_prompt || return
+        show_smite_setup_progress_menu
+        return
+    fi
+
+    clear
+    echo "======================================"
+    echo "        Smite Management"
+    echo "======================================"
+    echo
+    echo "The Smite Private Setup Wizard is not available."
+    echo "Opening the legacy Smite Management menu instead."
+    echo
+    read -rp "Press Enter to continue..."
+    docker_smite_management_menu_legacy
+}
+
+docker_smite_management_menu() {
+    docker_smite_open_setup_wizard
+}
