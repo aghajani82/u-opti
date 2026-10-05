@@ -33,6 +33,10 @@ jobs:
       - name: Commit production integration
         run: |
           set -euo pipefail
+          # GitHub Apps cannot modify workflow files without workflows permission.
+          # CI packaging checks remain in the existing workflow; discard only the
+          # one-shot helper's attempted CI edit before committing product files.
+          git checkout -- .github/workflows/ci.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
