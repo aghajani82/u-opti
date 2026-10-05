@@ -72,6 +72,10 @@ echo "Installing Smite Setup Progress actions..."
 curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-actions.sh?cb=$(date +%s%N)" \
     -o "$TMP_DIR/smite-setup-progress-actions.sh"
 
+echo "Installing sequential progress flow..."
+curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-flow.sh?cb=$(date +%s%N)" \
+    -o "$TMP_DIR/smite-setup-progress-flow.sh"
+
 echo "Installing compact Wizard menu..."
 curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-compact-ui.sh?cb=$(date +%s%N)" \
     -o "$TMP_DIR/smite-setup-progress-compact-ui.sh"
@@ -79,11 +83,13 @@ curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-compact-ui.sh?cb=
 bash -n "$TMP_DIR/smite-setup-progress.sh"
 bash -n "$TMP_DIR/smite-setup-progress-ui.sh"
 bash -n "$TMP_DIR/smite-setup-progress-actions.sh"
+bash -n "$TMP_DIR/smite-setup-progress-flow.sh"
 bash -n "$TMP_DIR/smite-setup-progress-compact-ui.sh"
 
 install -m 0755 "$TMP_DIR/smite-setup-progress.sh" "$MODULES_PATH/smite-setup-progress.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-ui.sh" "$MODULES_PATH/smite-setup-progress-ui.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-actions.sh" "$MODULES_PATH/smite-setup-progress-actions.sh"
+install -m 0755 "$TMP_DIR/smite-setup-progress-flow.sh" "$MODULES_PATH/smite-setup-progress-flow.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-compact-ui.sh" "$MODULES_PATH/smite-setup-progress-compact-ui.sh"
 
 # For this clean-test branch, make Docker Management -> Smite Management open
@@ -107,6 +113,7 @@ block = r'''
 if [ -f "$DOCKER_MODULE_DIR/smite-setup-progress.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh" ] && \
+   [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-flow.sh" ] && \
    [ -f "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh" ]; then
     # shellcheck disable=SC1090
     source "$DOCKER_MODULE_DIR/smite-setup-progress.sh"
@@ -114,6 +121,8 @@ if [ -f "$DOCKER_MODULE_DIR/smite-setup-progress.sh" ] && \
     source "$DOCKER_MODULE_DIR/smite-setup-progress-ui.sh"
     # shellcheck disable=SC1090
     source "$DOCKER_MODULE_DIR/smite-setup-progress-actions.sh"
+    # shellcheck disable=SC1090
+    source "$DOCKER_MODULE_DIR/smite-setup-progress-flow.sh"
     # shellcheck disable=SC1090
     source "$DOCKER_MODULE_DIR/smite-setup-progress-compact-ui.sh"
 
@@ -160,6 +169,8 @@ echo
 echo "Normal menu path  : U-OPTI -> Docker Management -> Smite Management"
 echo "The Wizard main page now shows only the 10-step progress list."
 echo "Use .1 through .10 for read-only step details."
+echo "The [~] marker identifies exactly one next recommended step."
+echo "Next/Then lines show which server should be used for the following work."
 echo "Step checks refresh silently whenever the Wizard page is redrawn."
 echo
 echo "The Wizard will open now."
