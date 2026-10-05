@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.15.1**
+**v0.15.2**
 
 ## Main Menu
 
@@ -22,6 +22,14 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Highlights in v0.15.2
+
+- Added production Multi-Instance TLS certificate synchronization for Sanaei 3x-UI Docker instances.
+- Certificate Management can select `3xui-01`, `3xui-02`, and later instances from the registry, reuse the instance domain's existing Let's Encrypt certificate, and expose it to Xray as `/root/cert/fullchain.pem` and `/root/cert/privkey.pem`.
+- Added certificate hostname/private-key validation, exact `/root/cert` bind-mount verification, atomic file synchronization, and container-side verification.
+- Added a per-instance Certbot deploy hook that synchronizes renewed certificates and restarts only the affected 3x-UI container.
+- Validated TLS end to end through the Smite gateway-first path with the client connecting to the Iran TCP/443 address while Xray terminates TLS on KH using the KH certificate/SNI.
 
 ## Highlights in v0.15.1
 

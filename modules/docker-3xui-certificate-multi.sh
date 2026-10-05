@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # U-OPTI - 3x-UI Docker Multi-Instance Certificate Sync
-# Experimental feature module for v0.15.1+
+# Production feature module for v0.15.2+
 #
 # Purpose:
 # - Reuse an existing Let's Encrypt certificate for a registered 3x-UI instance.
@@ -334,6 +334,10 @@ trap 'rm -f "\$TMP_CERT" "\$TMP_KEY"' EXIT
 install -m 0644 "\$SOURCE_DIR/fullchain.pem" "\$TMP_CERT"
 install -m 0600 "\$SOURCE_DIR/privkey.pem" "\$TMP_KEY"
 chown root:root "\$TMP_CERT" "\$TMP_KEY"
+openssl x509 -in "\$TMP_CERT" -noout -checkhost "\$SELECTED_DOMAIN" >/dev/null 2>&1 || exit 1
+CERT_FP="\$(openssl x509 -in "\$TMP_CERT" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+KEY_FP="\$(openssl pkey -in "\$TMP_KEY" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+[[ -n "\$CERT_FP" && "\$CERT_FP" == "\$KEY_FP" ]] || exit 1
 mv -f "\$TMP_CERT" "\$TARGET_DIR/fullchain.pem"
 mv -f "\$TMP_KEY" "\$TARGET_DIR/privkey.pem"
 trap - EXIT
@@ -778,7 +782,7 @@ docker_3xui_certificate_entry() {
 }
 
 
-# Override Certificate Management after certificate.sh has been loaded.
+# Production Certificate Management entry point loaded after the Multi-Instance registry.
 # Options 1-5 retain their existing behavior; option 6 becomes Instance-aware.
 show_certificate_menu() {
     while true; do

@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.15.2] - 2026-10-05
+
+### Added
+
+- Added production Sanaei 3x-UI Docker Multi-Instance TLS certificate synchronization under Certificate Management option 6.
+- Added registered Instance selection with domain/container/runtime status for `3xui-01`, `3xui-02`, and later instances.
+- Added per-Instance Certbot deploy hooks that re-sync renewed certificates and restart only the affected container.
+
+### Changed
+
+- 3x-UI Docker TLS certificate management now uses `/opt/3x-ui/instances/<ID>/cert/` on the host and `/root/cert/` inside the selected container instead of assuming the legacy single-container layout.
+- The existing legacy `3xui` certificate workflow remains available when no Multi-Instance registry exists.
+- The U-OPTI installer and self-updater now package and validate the Multi-Instance certificate module.
+
+### Security
+
+- Certificate sync validates the certificate hostname and matching private key before activation.
+- U-OPTI verifies that `/root/cert` is bound from the exact selected Instance directory before copying certificate material.
+- Certificate and key files are replaced atomically, the private key remains mode `0600`, and renewed material is validated before the deploy hook activates it.
+
+### Validation
+
+- Live KH/Foreign testing passed for Instance `01` using an existing valid Let's Encrypt certificate.
+- Host copy, container-visible files, certificate/key matching, current Let's Encrypt source matching, and the renewal deploy hook all passed verification.
+- A VLESS/XHTTP inbound bound to loopback successfully used `/root/cert/fullchain.pem` and `/root/cert/privkey.pem` with TLS end to end through the Iran TCP/443 Smite/Backhaul path.
+
 ## [0.15.1] - 2026-10-05
 
 ### Added
