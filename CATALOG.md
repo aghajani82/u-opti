@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.15.1**
+Current stable version: **v0.15.2**
 
 ## Core System Management
 
@@ -33,6 +33,9 @@ Current stable version: **v0.15.1**
 - Apex + www alias handling where applicable.
 - Repair of U-OPTI-managed domain coverage.
 - Nginx validation before reload.
+- Sanaei 3x-UI Docker Multi-Instance certificate sync into each instance's `/root/cert` mount.
+- Per-instance Certbot deploy hooks for automatic renewal synchronization and targeted container restart.
+- Certificate/domain/private-key, bind-mount, source-copy, and container readability verification.
 
 ## X-UI PRO
 

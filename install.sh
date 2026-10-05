@@ -40,6 +40,7 @@ MODULES=(
     "smite-easytier.sh"
     "docker-3xui.sh"
     "docker-3xui-instance.sh"
+    "docker-3xui-certificate-multi.sh"
     "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
     "fakesite.sh"
@@ -124,6 +125,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
         docker-3xui.sh) LABEL="3x-UI Docker Management" ;;
         docker-3xui-instance.sh) LABEL="3x-UI Instance Management" ;;
+        docker-3xui-certificate-multi.sh) LABEL="3x-UI Multi-Instance TLS Certificates" ;;
         docker-3xui-compat.sh) LABEL="3x-UI Compatibility Helpers" ;;
         docker-3xui-nginx.sh) LABEL="3x-UI Nginx / SSL Integration" ;;
         fakesite.sh) LABEL="Default Website / FakeSite" ;;
@@ -162,6 +164,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
    ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
+   ! grep -q 'docker_3xui_multi_certificate_menu()' "$TEMP_DIR/docker-3xui-certificate-multi.sh" || \
    ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh"; then
     echo
     echo "ERROR: Downloaded U-OPTI files failed feature verification."
@@ -267,6 +270,10 @@ echo
 
 echo "3x-UI Docker Module:"
 echo "$MODULES_PATH/docker-3xui.sh"
+echo
+
+echo "3x-UI Multi-Instance TLS Certificate Module:"
+echo "$MODULES_PATH/docker-3xui-certificate-multi.sh"
 echo
 
 echo "3x-UI Nginx / SSL Module:"
