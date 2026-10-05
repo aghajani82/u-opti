@@ -67,18 +67,34 @@ echo "Installing Smite Setup Progress UI..."
 curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-ui.sh?cb=$(date +%s%N)" \
     -o "$TMP_DIR/smite-setup-progress-ui.sh"
 
+echo "Installing Smite Setup Progress actions..."
+curl -fsSL --retry 3 "${BASE_URL}/modules/smite-setup-progress-actions.sh?cb=$(date +%s%N)" \
+    -o "$TMP_DIR/smite-setup-progress-actions.sh"
+
 bash -n "$TMP_DIR/smite-setup-progress.sh"
 bash -n "$TMP_DIR/smite-setup-progress-ui.sh"
+bash -n "$TMP_DIR/smite-setup-progress-actions.sh"
 
 install -m 0755 "$TMP_DIR/smite-setup-progress.sh" "$MODULES_PATH/smite-setup-progress.sh"
 install -m 0755 "$TMP_DIR/smite-setup-progress-ui.sh" "$MODULES_PATH/smite-setup-progress-ui.sh"
+install -m 0755 "$TMP_DIR/smite-setup-progress-actions.sh" "$MODULES_PATH/smite-setup-progress-actions.sh"
 
 cat > "$WIZARD_BIN" <<'EOF_WIZARD'
 #!/bin/bash
 set -e
 export U_OPTI_BRANCH="feature/smite-private-setup-progress"
+
+# Load the normal Docker/Smite modules so Wizard steps can explicitly open
+# the real U-OPTI installers without bouncing through the full main menu.
+source /usr/local/lib/u-opti/modules/docker.sh
 source /usr/local/lib/u-opti/modules/smite-setup-progress.sh
 source /usr/local/lib/u-opti/modules/smite-setup-progress-ui.sh
+source /usr/local/lib/u-opti/modules/smite-setup-progress-actions.sh
+
+# A freshly rebuilt host has no Smite/EasyTier role state yet. Record only a
+# provisional Wizard role (IR/Panel or KH/Foreign); real runtime state takes
+# priority automatically as soon as it exists.
+smite_setup_actions_initial_role_prompt || exit 0
 show_smite_setup_progress_menu
 EOF_WIZARD
 chmod 0755 "$WIZARD_BIN"
@@ -93,6 +109,7 @@ echo "Pinned test branch: $BRANCH"
 echo "Wizard command    : u-opti-smite-setup"
 echo
 echo "The wizard will open now."
+echo "On a fresh host it first asks whether this is IR/Panel or KH/Foreign."
 echo "After a future SSH login, the test branch is restored automatically."
 echo
 
