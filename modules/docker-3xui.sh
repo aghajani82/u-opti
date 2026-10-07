@@ -1032,6 +1032,592 @@ docker_3xui_stop() {
     read -rp "Press Enter to return..."
 }
 
+
+docker_3xui_change_panel_port_restore() {
+    local INSTANCE_ID="$1"
+    local CONTAINER="$2"
+    local WAS_RUNNING="$3"
+    local BACKUP_DIR="$4"
+    local STATE_FILE="$5"
+    local COMPAT_FILE="$6"
+    local DB_FILE="$7"
+    local NGINX_SITE="$8"
+    local NGINX_MANAGED="$9"
+    local NGINX_ENABLED_LINK="${10}"
+    local NGINX_WAS_ENABLED="${11}"
+    local rollback_ok=1
+
+    echo
+    echo "Starting automatic rollback..."
+
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$CONTAINER"; then
+        docker stop "$CONTAINER" >/dev/null 2>&1 || true
+    fi
+
+    if [ -f "$BACKUP_DIR/x-ui.db" ]; then
+        cp -f "$BACKUP_DIR/x-ui.db" "$DB_FILE" || rollback_ok=0
+    else
+        rollback_ok=0
+    fi
+
+    if [ -f "$BACKUP_DIR/state.env" ]; then
+        cp -f "$BACKUP_DIR/state.env" "$STATE_FILE" || rollback_ok=0
+    else
+        rollback_ok=0
+    fi
+
+    if [ -f "$BACKUP_DIR/compat.env" ]; then
+        cp -f "$BACKUP_DIR/compat.env" "$COMPAT_FILE" || rollback_ok=0
+    else
+        rollback_ok=0
+    fi
+
+    if [ "$NGINX_MANAGED" = "1" ]; then
+        if [ -f "$BACKUP_DIR/nginx-site.conf" ]; then
+            cp -f "$BACKUP_DIR/nginx-site.conf" "$NGINX_SITE" || rollback_ok=0
+        else
+            rollback_ok=0
+        fi
+
+        if [ "$NGINX_WAS_ENABLED" = "1" ]; then
+            ln -sfn "$NGINX_SITE" "$NGINX_ENABLED_LINK" || rollback_ok=0
+        else
+            rm -f "$NGINX_ENABLED_LINK" || rollback_ok=0
+        fi
+
+        if ! nginx -t >/dev/null 2>&1; then
+            rollback_ok=0
+        elif ! systemctl reload nginx >/dev/null 2>&1; then
+            rollback_ok=0
+        fi
+    fi
+
+    if [ "$WAS_RUNNING" = "1" ]; then
+        if ! docker start "$CONTAINER" >/dev/null 2>&1; then
+            rollback_ok=0
+        fi
+    fi
+
+    docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1 || true
+
+    if [ "$rollback_ok" = "1" ]; then
+        echo "Rollback completed successfully."
+        return 0
+    fi
+
+    echo "WARNING: Automatic rollback was not fully successful."
+    echo "Safety backup retained at:"
+    echo "$BACKUP_DIR"
+    return 1
+}
+
+
+docker_3xui_change_panel_port() {
+    clear
+
+    echo "======================================"
+    echo "       Change 3x-UI Panel Port"
+    echo "======================================"
+    echo
+
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: Root privileges are required."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker service is not active."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        echo "Error: sqlite3 is required."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_select_instance; then
+        return
+    fi
+
+    local INSTANCE_ID="${DOCKER_3XUI_SELECTED_INSTANCE_ID:-}"
+
+    if [ -z "$INSTANCE_ID" ] ||
+       ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1; then
+        echo "ERROR: Failed to load selected Instance context."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    local CONTAINER="$DOCKER_3XUI_CONTAINER"
+    local DOMAIN="$DOCKER_3XUI_DOMAIN"
+    local OLD_PORT="$DOCKER_3XUI_PANEL_PORT"
+    local API_PORT="$DOCKER_3XUI_API_PORT"
+    local SUB_PORT="$DOCKER_3XUI_SUBSCRIPTION_PORT"
+    local METRICS_PORT="$DOCKER_3XUI_METRICS_PORT"
+    local STATE_FILE="$DOCKER_3XUI_INSTANCE_STATE_FILE"
+    local COMPAT_FILE="$DOCKER_3XUI_COMPAT_ENV"
+    local DB_FILE="$DOCKER_3XUI_DIR/db/x-ui.db"
+    local WEB_BASE_PATH="/"
+    local NEW_PORT=""
+    local CONTAINER_STATUS=""
+    local WAS_RUNNING=0
+    local TIMESTAMP=""
+    local BACKUP_DIR=""
+    local NGINX_MANAGED=0
+    local NGINX_SITE=""
+    local NGINX_ENABLED_LINK=""
+    local NGINX_WAS_ENABLED=0
+    local PANEL_READY=0
+    local DETECTED_PORT=""
+    local i
+
+    if [ -z "$CONTAINER" ] || [ -z "$DOMAIN" ] || [ -z "$OLD_PORT" ] ||
+       [ -z "$API_PORT" ] || [ -z "$SUB_PORT" ] || [ -z "$METRICS_PORT" ]; then
+        echo "ERROR: Selected Instance state is incomplete."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$CONTAINER"; then
+        echo "Error: Container $CONTAINER is not installed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ ! -s "$DB_FILE" ]; then
+        echo "Error: 3x-UI database was not found:"
+        echo "$DB_FILE"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ ! -s "$STATE_FILE" ]; then
+        echo "Error: Instance state was not found:"
+        echo "$STATE_FILE"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ ! -s "$COMPAT_FILE" ]; then
+        echo "Error: Instance compatibility state was not found:"
+        echo "$COMPAT_FILE"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    WEB_BASE_PATH="$(sed -n 's/^WEB_BASE_PATH=//p' "$COMPAT_FILE" | head -n 1)"
+    [ -n "$WEB_BASE_PATH" ] || WEB_BASE_PATH="/"
+
+    CONTAINER_STATUS="$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ "$CONTAINER_STATUS" = "running" ]; then
+        WAS_RUNNING=1
+    fi
+
+    echo "Instance       : $INSTANCE_ID"
+    echo "Domain         : $DOMAIN"
+    echo "Container      : $CONTAINER"
+    echo "Current Port   : $OLD_PORT"
+    echo "Web Base Path  : $WEB_BASE_PATH"
+    echo "Status         : ${CONTAINER_STATUS:-Unknown}"
+    echo
+    echo "Enter new Panel Port [1-65535]"
+    echo "0) Cancel"
+    echo
+    read -r NEW_PORT
+
+    if [ "$NEW_PORT" = "0" ]; then
+        return
+    fi
+
+    if [[ ! "$NEW_PORT" =~ ^[0-9]+$ ]] ||
+       [ "$NEW_PORT" -lt 1 ] || [ "$NEW_PORT" -gt 65535 ]; then
+        echo
+        echo "Error: Invalid Panel Port."
+        echo "Expected a number between 1 and 65535."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$NEW_PORT" = "$OLD_PORT" ]; then
+        echo
+        echo "Panel Port is already set to $OLD_PORT."
+        echo "No changes were made."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_instance_port_available "$NEW_PORT"; then
+        echo
+        echo "ERROR: Port $NEW_PORT/tcp is not available."
+        echo "It is already listening or reserved by another U-OPTI / X-UI service."
+        echo
+        ss -lntp 2>/dev/null | grep -E ":${NEW_PORT}[[:space:]]" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_load_compat; then
+        echo
+        echo "ERROR: 3x-UI compatibility helper could not be loaded."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if docker_3xui_load_nginx >/dev/null 2>&1; then
+        if docker_3xui_nginx_load_compat >/dev/null 2>&1; then
+            NGINX_SITE="$(docker_3xui_nginx_site_path)"
+
+            if [ -f "$NGINX_SITE" ]; then
+                if ! docker_3xui_nginx_site_is_managed "$NGINX_SITE"; then
+                    echo
+                    echo "ERROR: Existing Nginx site is not managed by U-OPTI:"
+                    echo "$NGINX_SITE"
+                    echo "Panel Port was not changed."
+                    echo
+                    read -rp "Press Enter to return..."
+                    return
+                fi
+
+                if ! command -v nginx >/dev/null 2>&1 || ! nginx -t >/dev/null 2>&1; then
+                    echo
+                    echo "ERROR: Existing Nginx configuration is not healthy."
+                    echo "Fix Nginx before changing the Panel Port."
+                    echo
+                    read -rp "Press Enter to return..."
+                    return
+                fi
+
+                NGINX_MANAGED=1
+                NGINX_ENABLED_LINK="/etc/nginx/sites-enabled/$(basename "$NGINX_SITE")"
+                if [ -L "$NGINX_ENABLED_LINK" ]; then
+                    NGINX_WAS_ENABLED=1
+                fi
+            fi
+        fi
+    fi
+
+    echo
+    echo "Change plan:"
+    echo "  Instance       : $INSTANCE_ID"
+    echo "  Old Panel Port : $OLD_PORT"
+    echo "  New Panel Port : $NEW_PORT"
+    echo "  Sanaei DB      : Update webListen/webPort"
+    echo "  U-OPTI State   : Update state.env and compat.env"
+    if [ "$NGINX_MANAGED" = "1" ]; then
+        echo "  Nginx          : Update U-OPTI managed proxy"
+    else
+        echo "  Nginx          : No managed site detected; no Nginx file will be changed"
+    fi
+    if [ "$WAS_RUNNING" = "1" ]; then
+        echo "  Container      : Stop, apply, start, verify"
+    else
+        echo "  Container      : Remains stopped after the change"
+    fi
+    echo "  Rollback       : Automatic on failure"
+    echo
+    read -rp "Apply this Panel Port change? [y/N]: " CONFIRM
+
+    case "$CONFIRM" in
+        y|Y|yes|YES)
+            ;;
+        *)
+            echo
+            echo "Panel Port change cancelled."
+            sleep 1
+            return
+            ;;
+    esac
+
+    TIMESTAMP="$(date '+%Y%m%d-%H%M%S-%N')"
+    BACKUP_DIR="/root/u-opti-backups/3x-ui/instances/$INSTANCE_ID/$TIMESTAMP-pre-port-change"
+
+    if ! mkdir -p "$BACKUP_DIR"; then
+        echo
+        echo "ERROR: Failed to create safety backup directory."
+        echo "Panel Port was not changed."
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! cp -a "$STATE_FILE" "$BACKUP_DIR/state.env" ||
+       ! cp -a "$COMPAT_FILE" "$BACKUP_DIR/compat.env" ||
+       ! cp -a "$DB_FILE" "$BACKUP_DIR/x-ui.db"; then
+        echo
+        echo "ERROR: Failed to create the required safety backup."
+        echo "Panel Port was not changed."
+        echo "Backup directory: $BACKUP_DIR"
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$NGINX_MANAGED" = "1" ]; then
+        if ! cp -a "$NGINX_SITE" "$BACKUP_DIR/nginx-site.conf"; then
+            echo
+            echo "ERROR: Failed to back up the Nginx site."
+            echo "Panel Port was not changed."
+            echo "Backup directory: $BACKUP_DIR"
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    chmod 700 "$BACKUP_DIR" 2>/dev/null || true
+    chmod 600 "$BACKUP_DIR"/* 2>/dev/null || true
+
+    echo
+    echo "Safety backup created:"
+    echo "$BACKUP_DIR"
+
+    if [ "$WAS_RUNNING" = "1" ]; then
+        echo
+        echo "Stopping 3x-UI Instance $INSTANCE_ID..."
+        if ! docker stop "$CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to stop $CONTAINER."
+            echo "No configuration was changed."
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    echo
+    echo "Updating Sanaei Panel Port..."
+
+    if ! docker_3xui_compat_configure_panel "$DB_FILE" "$NEW_PORT" ||
+       ! docker_3xui_compat_verify_panel "$DB_FILE" "$NEW_PORT"; then
+        echo "ERROR: Failed to update/verify Sanaei Panel Port."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo "Updating U-OPTI Instance state..."
+
+    if ! docker_3xui_instance_save_state \
+        "$INSTANCE_ID" \
+        "$DOMAIN" \
+        "$NEW_PORT" \
+        "$API_PORT" \
+        "$SUB_PORT" \
+        "$METRICS_PORT"; then
+
+        echo "ERROR: Failed to update Instance state."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_instance_apply_runtime_context "$INSTANCE_ID" >/dev/null 2>&1; then
+        echo "ERROR: Failed to reload updated Instance state."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_save_compat_state \
+        "$DOMAIN" \
+        "$SUB_PORT" \
+        "$METRICS_PORT" \
+        "$API_PORT" \
+        "$WEB_BASE_PATH"; then
+
+        echo "ERROR: Failed to update compatibility state."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$NGINX_MANAGED" = "1" ]; then
+        echo "Updating U-OPTI managed Nginx proxy..."
+
+        if ! docker_3xui_nginx_load_compat >/dev/null 2>&1 ||
+           ! docker_3xui_nginx_write_site; then
+
+            echo "ERROR: Failed to update the U-OPTI Nginx site."
+            docker_3xui_change_panel_port_restore \
+                "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+                "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+                "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        if [ "$NGINX_WAS_ENABLED" != "1" ]; then
+            rm -f "$NGINX_ENABLED_LINK" || true
+            if ! nginx -t >/dev/null 2>&1 || ! systemctl reload nginx >/dev/null 2>&1; then
+                echo "ERROR: Failed to preserve the previous Nginx enabled/disabled state."
+                docker_3xui_change_panel_port_restore \
+                    "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+                    "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+                    "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+                echo
+                read -rp "Press Enter to return..."
+                return
+            fi
+        fi
+    fi
+
+    if [ "$WAS_RUNNING" = "1" ]; then
+        echo "Starting 3x-UI Instance $INSTANCE_ID..."
+
+        if ! docker start "$CONTAINER" >/dev/null; then
+            echo "ERROR: Failed to start $CONTAINER after changing the Panel Port."
+            docker_3xui_change_panel_port_restore \
+                "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+                "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+                "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        echo "Verifying Panel listener..."
+
+        for i in $(seq 1 15); do
+            if docker_3xui_instance_port_listening "$NEW_PORT"; then
+                PANEL_READY=1
+                break
+            fi
+            sleep 1
+        done
+
+        if [ "$PANEL_READY" != "1" ]; then
+            echo "ERROR: Panel is not listening on $NEW_PORT after startup."
+            docker logs "$CONTAINER" 2>&1 | tail -n 50 || true
+            docker_3xui_change_panel_port_restore \
+                "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+                "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+                "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+
+        DETECTED_PORT="$(
+            docker exec "$CONTAINER" sh -c \
+                'command -v x-ui >/dev/null 2>&1 && x-ui settings' 2>/dev/null |
+                sed -n 's/^port:[[:space:]]*//p' |
+                head -n 1
+        )"
+
+        if [ -n "$DETECTED_PORT" ] && [ "$DETECTED_PORT" != "$NEW_PORT" ]; then
+            echo "ERROR: Sanaei reports Panel Port $DETECTED_PORT instead of $NEW_PORT."
+            docker_3xui_change_panel_port_restore \
+                "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+                "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+                "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+            echo
+            read -rp "Press Enter to return..."
+            return
+        fi
+    fi
+
+    if ! docker_3xui_instance_load_state "$INSTANCE_ID" >/dev/null 2>&1 ||
+       [ "$DOCKER_3XUI_INSTANCE_PANEL_PORT" != "$NEW_PORT" ]; then
+
+        echo "ERROR: Final U-OPTI state verification failed."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if [ "$(sed -n 's/^PANEL_PORT=//p' "$COMPAT_FILE" | head -n 1)" != "$NEW_PORT" ]; then
+        echo "ERROR: Final compatibility state verification failed."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    if ! docker_3xui_compat_verify_panel "$DB_FILE" "$NEW_PORT"; then
+        echo "ERROR: Final Sanaei database verification failed."
+        docker_3xui_change_panel_port_restore \
+            "$INSTANCE_ID" "$CONTAINER" "$WAS_RUNNING" "$BACKUP_DIR" \
+            "$STATE_FILE" "$COMPAT_FILE" "$DB_FILE" \
+            "$NGINX_SITE" "$NGINX_MANAGED" "$NGINX_ENABLED_LINK" "$NGINX_WAS_ENABLED" || true
+        echo
+        read -rp "Press Enter to return..."
+        return
+    fi
+
+    echo
+    echo "======================================"
+    echo "       Panel Port Change OK"
+    echo "======================================"
+    echo
+    echo "Instance        : $INSTANCE_ID"
+    echo "Domain          : $DOMAIN"
+    echo "Container       : $CONTAINER"
+    echo "Old Panel Port  : $OLD_PORT"
+    echo "New Panel Port  : $NEW_PORT"
+    if [ "$WAS_RUNNING" = "1" ]; then
+        echo "Panel           : Listening on $NEW_PORT"
+    else
+        echo "Panel           : Container remains stopped"
+    fi
+    if [ "$NGINX_MANAGED" = "1" ]; then
+        echo "Nginx           : Updated and validated"
+    else
+        echo "Nginx           : No managed site detected"
+    fi
+    echo "Rollback Backup : $BACKUP_DIR"
+    echo
+    echo "Subscription, Metrics, API port and Web Base Path were not changed."
+    echo
+
+    read -rp "Press Enter to return..."
+}
+
 docker_3xui_restart() {
     clear
 
@@ -2971,34 +3557,36 @@ show_docker_3xui_menu() {
         echo "1) Install 3x-UI in Docker"
         echo "2) Start 3x-UI"
         echo "3) Stop 3x-UI"
-        echo "4) Restart 3x-UI"
-        echo "5) Update 3x-UI"
-        echo "6) Backup 3x-UI"
-        echo "7) Restore 3x-UI"
-        echo "8) Uninstall 3x-UI"
-        echo "9) Show Status"
-        echo "10) Sanaei 3x-UI Management"
-        echo "11) Nginx / SSL Configuration"
-        echo "12) Default Website / FakeSite"
+        echo "4) Change Panel Port"
+        echo "5) Restart 3x-UI"
+        echo "6) Update 3x-UI"
+        echo "7) Backup 3x-UI"
+        echo "8) Restore 3x-UI"
+        echo "9) Uninstall 3x-UI"
+        echo "10) Show Status"
+        echo "11) Sanaei 3x-UI Management"
+        echo "12) Nginx / SSL Configuration"
+        echo "13) Default Website / FakeSite"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-12]: " DOCKER_3XUI_CHOICE
+        read -rp "Please enter your selection [0-13]: " DOCKER_3XUI_CHOICE
 
         case "$DOCKER_3XUI_CHOICE" in
             1) docker_3xui_install ;;
             2) docker_3xui_start ;;
             3) docker_3xui_stop ;;
-            4) docker_3xui_restart ;;
-            5) docker_3xui_update ;;
-            6) docker_3xui_backup ;;
-            7) docker_3xui_restore ;;
-            8) docker_3xui_uninstall ;;
-            9) docker_3xui_status ;;
-            10) docker_3xui_sanaei_management ;;
-            11) docker_3xui_nginx_ssl_management ;;
-            12) docker_3xui_fakesite_management ;;
+            4) docker_3xui_change_panel_port ;;
+            5) docker_3xui_restart ;;
+            6) docker_3xui_update ;;
+            7) docker_3xui_backup ;;
+            8) docker_3xui_restore ;;
+            9) docker_3xui_uninstall ;;
+            10) docker_3xui_status ;;
+            11) docker_3xui_sanaei_management ;;
+            12) docker_3xui_nginx_ssl_management ;;
+            13) docker_3xui_fakesite_management ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
