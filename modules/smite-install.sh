@@ -15,6 +15,151 @@ SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
 
+
+# Experimental FRP upgrade for Smite v0.1.7 pinned Docker images.
+SMITE_FRP_VERSION="0.71.0"
+SMITE_FRP_BIN_DIR="/opt/u-opti/smite-frp/v$SMITE_FRP_VERSION"
+
+smite_frp_prepare_binaries() (
+    local arch expected_sha archive archive_root url workdir binary actual
+    case "$(uname -m)" in
+        x86_64|amd64)
+            arch="amd64"
+            expected_sha="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
+            ;;
+        aarch64|arm64)
+            arch="arm64"
+            expected_sha="f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266"
+            ;;
+        *)
+            echo "ERROR: Unsupported architecture for experimental Smite FRP $SMITE_FRP_VERSION."
+            return 1
+            ;;
+    esac
+
+    if [ -x "$SMITE_FRP_BIN_DIR/frpc" ] && [ -x "$SMITE_FRP_BIN_DIR/frps" ] &&
+       [ "$("$SMITE_FRP_BIN_DIR/frpc" -v 2>/dev/null)" = "$SMITE_FRP_VERSION" ] &&
+       [ "$("$SMITE_FRP_BIN_DIR/frps" -v 2>/dev/null)" = "$SMITE_FRP_VERSION" ]; then
+        echo "FRP v$SMITE_FRP_VERSION already prepared."
+        return 0
+    fi
+
+    for binary in curl tar sha256sum install mv; do
+        command -v "$binary" >/dev/null 2>&1 || {
+            echo "ERROR: FRP preparation requires $binary."
+            return 1
+        }
+    done
+
+    workdir="$(mktemp -d)" || return 1
+    trap 'rm -rf "$workdir"' EXIT
+    archive="frp_$SMITE_FRP_VERSION"_linux_"$arch".tar.gz
+    archive_root="frp_$SMITE_FRP_VERSION"_linux_"$arch"
+    url="https://github.com/fatedier/frp/releases/download/v$SMITE_FRP_VERSION/$archive"
+
+    echo "Downloading official FRP v$SMITE_FRP_VERSION ($arch)..."
+    curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' "$url" -o "$workdir/$archive" || return 1
+    if ! printf '%s  %s\n' "$expected_sha" "$workdir/$archive" | sha256sum -c - >/dev/null; then
+        echo "ERROR: Official FRP release SHA256 verification failed."
+        return 1
+    fi
+    tar -xzf "$workdir/$archive" -C "$workdir" \
+        "$archive_root/frpc" "$archive_root/frps" || return 1
+    for binary in frpc frps; do
+        [ -x "$workdir/$archive_root/$binary" ] || {
+            echo "ERROR: FRP archive is missing executable $binary."
+            return 1
+        }
+        actual="$("$workdir/$archive_root/$binary" -v 2>/dev/null)" || return 1
+        if [ "$actual" != "$SMITE_FRP_VERSION" ]; then
+            echo "ERROR: $binary reports '$actual', expected '$SMITE_FRP_VERSION'."
+            return 1
+        fi
+    done
+
+    install -d -m 0755 "$SMITE_FRP_BIN_DIR" || return 1
+    for binary in frpc frps; do
+        install -m 0755 "$workdir/$archive_root/$binary" "$SMITE_FRP_BIN_DIR/$binary.new.$$" || return 1
+        mv -f "$SMITE_FRP_BIN_DIR/$binary.new.$$" "$SMITE_FRP_BIN_DIR/$binary" || return 1
+    done
+    echo "Verified FRP v$SMITE_FRP_VERSION binaries at $SMITE_FRP_BIN_DIR"
+)
+
+smite_frp_mount_compose() {
+    local compose_file="$1" service="$2"
+    # Alter only the target Smite service. The pinned images stay unchanged.
+    python3 - "$compose_file" "$service" "$SMITE_FRP_BIN_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+compose = Path(sys.argv[1])
+service = sys.argv[2]
+host_dir = Path(sys.argv[3])
+if service not in {"smite-panel", "smite-node"} or not host_dir.is_absolute():
+    raise SystemExit("ERROR: Invalid Smite FRP Compose service/path.")
+
+original = compose.read_text()
+anchor = f"  {service}:\n"
+if original.count(anchor) != 1:
+    raise SystemExit(f"ERROR: Expected exactly one {service} service in {compose}.")
+before, tail = original.split(anchor, 1)
+lines = tail.splitlines(keepends=True)
+end = len(lines)
+for i, line in enumerate(lines):
+    if line.strip() and not line.lstrip().startswith("#") and (
+        not line.startswith((" ", "\t")) or
+        (line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"))
+    ):
+        end = i
+        break
+block = "".join(lines[:end])
+marker = "    volumes:\n"
+if block.count(marker) != 1:
+    raise SystemExit(f"ERROR: Expected exactly one volumes section in {service}.")
+
+binaries = ("frps",) if service == "smite-panel" else ("frpc", "frps")
+new_mounts = []
+for name in binaries:
+    target = f":/usr/local/bin/{name}"
+    expected = f"      - {host_dir}/{name}:/usr/local/bin/{name}:ro"
+    existing = [
+        line.strip() for line in block.splitlines()
+        if line.lstrip().startswith("- ") and target in line
+    ]
+    if existing and existing != [expected.strip()]:
+        raise SystemExit(f"ERROR: Conflicting FRP mount for {name} in {service}.")
+    if not existing:
+        if not (host_dir / name).is_file():
+            raise SystemExit(f"ERROR: Missing prepared FRP binary {host_dir / name}.")
+        new_mounts.append(expected + "\n")
+
+if new_mounts:
+    block = block.replace(marker, marker + "".join(new_mounts), 1)
+    compose.write_text(before + anchor + block + "".join(lines[end:]))
+print(f"Smite FRP read-only mounts ready: {service}")
+PY
+}
+
+smite_frp_verify_container() {
+    local container="$1" binary actual
+    case "$container" in
+        smite-panel) set -- frps ;;
+        smite-node) set -- frpc frps ;;
+        *) echo "ERROR: Unknown Smite FRP container: $container"; return 1 ;;
+    esac
+    for binary in "$@"; do
+        actual="$(docker exec "$container" "/usr/local/bin/$binary" -v 2>/dev/null)" || {
+            echo "ERROR: Cannot check $binary in $container."
+            return 1
+        }
+        if [ "$actual" != "$SMITE_FRP_VERSION" ]; then
+            echo "ERROR: $container $binary reports '$actual', expected '$SMITE_FRP_VERSION'."
+            return 1
+        fi
+        echo "Verified $container $binary v$actual"
+    done
+}
+
 smite_install_pause() {
     echo
     read -rp "Press Enter to return..."
@@ -250,6 +395,9 @@ smite_install_panel_files() {
         return 1
     fi
 
+    smite_frp_prepare_binaries || return 1
+    smite_frp_mount_compose "$SMITE_PANEL_COMPOSE" smite-panel || return 1
+
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
 PANEL_PORT=8000
 PANEL_HOST=$panel_host
@@ -295,6 +443,9 @@ smite_install_node_files() {
         echo "ERROR: Failed to pin the validated Smite node image digest."
         return 1
     fi
+
+    smite_frp_prepare_binaries || return 1
+    smite_frp_mount_compose "$SMITE_NODE_COMPOSE" smite-node || return 1
 
     if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
         cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
@@ -549,6 +700,11 @@ smite_install_panel_iran() {
         return
     fi
 
+    if ! smite_frp_verify_container smite-panel; then
+        smite_install_pause
+        return
+    fi
+
     mkdir -p "$SMITE_NODE_DIR/certs" || {
         echo "ERROR: Failed to create the Smite node certificate directory."
         smite_install_pause
@@ -590,6 +746,11 @@ smite_install_panel_iran() {
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Smite Node did not become healthy."
+        smite_install_pause
+        return
+    fi
+
+    if ! smite_frp_verify_container smite-node; then
         smite_install_pause
         return
     fi
@@ -867,6 +1028,11 @@ smite_install_foreign_node() {
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Foreign Smite Node did not become healthy."
+        smite_install_pause
+        return
+    fi
+
+    if ! smite_frp_verify_container smite-node; then
         smite_install_pause
         return
     fi

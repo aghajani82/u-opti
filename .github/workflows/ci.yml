@@ -28,6 +28,10 @@ jobs:
             bash -n "$file"
           done < <(find modules -type f -name '*.sh' -print0 | sort -z)
 
+      - name: Verify isolated Smite FRP Compose override
+        shell: bash
+        run: bash tests/test-smite-frp-compose.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
