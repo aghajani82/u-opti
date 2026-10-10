@@ -19,7 +19,15 @@ curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/feature/smite-frp
 bash /tmp/u-opti-frp-install.sh
 ~~~
 
-U-OPTI's default Smite menu currently opens a private-network wizard. For the first FRP-only trial, use the Smite Standard-mode installer; do not set up EasyTier or Backhaul merely to reach FRP. Confirm the appropriate Standard-mode entry path before installing Smite.
+U-OPTI's default Smite menu opens the private-network wizard. For the FRP-only trial, open the **existing Standard-mode installer** using the branch-only shortcut below; do not install EasyTier or Backhaul for this experiment.
+
+~~~bash
+# IR ROLE: after installing U-OPTI and Docker, choose Install Smite Panel + Iran Node, then Standard mode
+u-opti --menu smite-install
+
+# KH ROLE: after installing U-OPTI and Docker, choose Install Smite Foreign Node, then Standard mode
+u-opti --menu smite-install
+~~~
 
 ## Version checks after Smite install
 
