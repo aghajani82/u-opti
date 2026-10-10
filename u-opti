@@ -54,6 +54,7 @@ source "$MODULES_PATH/docker-3xui-nginx.sh"
 #
 # Usage:
 #   u-opti --menu docker
+#   u-opti --menu smite-install  (Standard Smite / FRP test)
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--menu" ] && [ -n "${2:-}" ]; then
     case "$2" in
@@ -62,6 +63,16 @@ if [ "${1:-}" = "--menu" ] && [ -n "${2:-}" ]; then
             # Fall through to the main menu loop below.
             # This way pressing 0 in Docker Management returns to the
             # main menu instead of exiting U-OPTI entirely.
+            ;;
+        smite-install)
+            # Branch-only shortcut for Standard-mode FRP experiments.
+            # The regular Smite Management wizard remains unchanged.
+            if declare -F show_smite_install_menu >/dev/null 2>&1; then
+                show_smite_install_menu
+            else
+                echo "U-OPTI: Smite installer module is unavailable." >&2
+                exit 1
+            fi
             ;;
         *)
             echo "U-OPTI: Unknown menu target: $2" >&2
