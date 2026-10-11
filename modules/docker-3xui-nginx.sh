@@ -393,6 +393,18 @@ docker_3xui_nginx_existing_domain_conflict() {
 
     output="$(nginx -T 2>/dev/null || true)"
 
+    # Smite Foreign is a verified U-OPTI-managed existing HTTPS owner.
+    # The final Nginx writer must converge both services into one vhost.
+    local foreign_smite_source=""
+    foreign_smite_source="$(docker_3xui_nginx_foreign_smite_source || true)"
+    if [[ -n "$foreign_smite_source" ]]; then
+        if [[ "$server_names" != "$DOCKER_3XUI_NGINX_DOMAIN" ]]; then
+            echo "ERROR: Shared Foreign domain cannot have additional aliases."
+            return 1
+        fi
+        return 0
+    fi
+
     for name in $server_names; do
         if grep -Eq \
             "server_name[[:space:]]+[^;]*(^|[[:space:]])${name}([[:space:]]|;)" \
@@ -618,6 +630,88 @@ docker_3xui_nginx_issue_certificate() {
 }
 
 
+
+# When Sanaei is installed on the existing Foreign Smite domain, it owns
+# the single HTTPS server{} and carries the restricted Smite control block.
+# Never remove Smite data, its Docker container, or the certificate.
+docker_3xui_nginx_activate_shared_smite() {
+    local candidate="$1" target="$2"
+    local smite_site="$DOCKER_3XUI_NGINX_SITES_AVAILABLE/$DOCKER_3XUI_NGINX_DOMAIN"
+    local smite_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$DOCKER_3XUI_NGINX_DOMAIN"
+    local sanaei_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$(basename "$target")"
+    local backup="/root/u-opti-backups/3xui-smite-shared-$(date -u +%Y%m%d-%H%M%S)"
+    local had_smite_link=0 had_site=0 had_sanaei_link=0 failed=0
+    local nginx_result="" control="" sanaei_http="" smite_http="" attempt
+
+    if [[ -e "$smite_link" || -L "$smite_link" ]]; then
+        if [[ ! -L "$smite_link" ||
+              "$(readlink -f "$smite_link")" != "$smite_site" ]] ||
+           ! grep -Fq '# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway' "$smite_site"; then
+            echo "ERROR: Foreign Smite HTTPS site is not managed; refusing to change it."
+            return 1
+        fi
+        had_smite_link=1
+    fi
+    if [[ -e "$sanaei_link" || -L "$sanaei_link" ]]; then
+        if [[ ! -L "$sanaei_link" || "$(readlink -f "$sanaei_link")" != "$target" ]]; then
+            echo "ERROR: Unexpected Sanaei enabled site; refusing to change it."
+            return 1
+        fi
+        had_sanaei_link=1
+    fi
+    if [[ -f "$target" ]]; then
+        docker_3xui_nginx_site_is_managed "$target" || {
+            echo "ERROR: Existing Sanaei site is not U-OPTI-managed."
+            return 1
+        }
+        had_site=1
+    fi
+    mkdir -p -m 700 "$backup" || return 1
+    if [[ "$had_site" -eq 1 ]]; then cp -a "$target" "$backup/sanaei.conf" || return 1; fi
+    if [[ "$had_smite_link" -eq 1 ]]; then cp -a "$smite_site" "$backup/smite.conf" || return 1; fi
+
+    mv -f "$candidate" "$target" || return 1
+    if [[ "$had_smite_link" -eq 1 ]]; then rm -f "$smite_link"; fi
+    docker_3xui_nginx_enable_site "$target" || failed=1
+    nginx_result="$(nginx -t 2>&1)" || failed=1
+    if grep -Eq 'conflicting server name .*on .*:443' <<< "$nginx_result"; then failed=1; fi
+    if [[ "$failed" -eq 0 ]]; then systemctl reload nginx || failed=1; fi
+
+    if [[ "$failed" -eq 0 ]]; then
+        control="$(sed -nE 's@^[[:space:]]*location[[:space:]]+\^~[[:space:]]+(/smite-node/[A-Za-z0-9_-]+/)[[:space:]]*\{.*@\1@p' "$target" | head -n1)"
+        if [[ -z "$control" ]]; then
+            failed=1
+        else
+            for attempt in {1..10}; do
+                sanaei_http="$(curl --noproxy '*' -sS --max-time 8 \
+                    --resolve "$DOCKER_3XUI_NGINX_DOMAIN:443:127.0.0.1" \
+                    -o /dev/null -w '%{http_code}' \
+                    "https://$DOCKER_3XUI_NGINX_DOMAIN$DOCKER_3XUI_NGINX_WEB_BASE_PATH" 2>/dev/null || true)"
+                smite_http="$(curl --noproxy '*' -sS --max-time 8 \
+                    --resolve "$DOCKER_3XUI_NGINX_DOMAIN:443:127.0.0.1" \
+                    -o /dev/null -w '%{http_code}' \
+                    "https://$DOCKER_3XUI_NGINX_DOMAIN${control}api/agent/status" 2>/dev/null || true)"
+                if [[ "$sanaei_http" = 200 && "$smite_http" = 200 ]]; then break; fi
+                sleep 2
+            done
+            if [[ "$sanaei_http" != 200 || "$smite_http" != 200 ]]; then failed=1; fi
+        fi
+    fi
+
+    if [[ "$failed" -ne 0 ]]; then
+        echo "ERROR: Shared 443 activation failed: Sanaei=${sanaei_http:-none} Smite=${smite_http:-none}"
+        echo "$nginx_result"
+        if [[ "$had_site" -eq 1 ]]; then cp -a "$backup/sanaei.conf" "$target"; else rm -f "$target"; fi
+        if [[ "$had_sanaei_link" -eq 0 ]]; then rm -f "$sanaei_link"; fi
+        if [[ "$had_smite_link" -eq 1 ]]; then ln -sfn "$smite_site" "$smite_link"; fi
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+        echo "Restored Nginx configuration; backup retained: $backup"
+        return 1
+    fi
+    echo "Shared Smite/Sanaei HTTPS/443 ready; rollback backup: $backup"
+    return 0
+}
+
 docker_3xui_nginx_write_site() {
     local site_path
     local temp_path
@@ -773,6 +867,17 @@ EOF_PANEL_PATH
     }
 }
 EOF_CONF
+
+    local smite_source=""
+    smite_source="$(docker_3xui_nginx_foreign_smite_source || true)"
+    if [[ -n "$smite_source" ]]; then
+        if ! docker_3xui_nginx_import_smite_control "$temp_path" "$smite_source"; then
+            rm -f "$temp_path"
+            return 1
+        fi
+        docker_3xui_nginx_activate_shared_smite "$temp_path" "$site_path"
+        return $?
+    fi
 
     if ! nginx -t >/dev/null 2>&1; then
         rm -f "$temp_path"
