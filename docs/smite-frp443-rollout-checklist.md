@@ -11,6 +11,14 @@ This document records the next steps so future changes do not silently replace t
 - Experimental Standard FRP must be opt-in and kept separate from Private Network and Backhaul; neither pathway should be auto-migrated to another provider.
 - **Never deploy the draft branch to the active IR or KH servers without an explicit test/maintenance window, backup/snapshot and rollback plan.** The draft PR should not be merged into a release until clean installation is verified.
 
+## Safe reboot order on the existing live setup (before snapshot/rebuild)
+
+1. **IR first only**: check Smite Panel + Iran Node, Nginx SNI/443, FRPS listener and existing FRP/XHTTP client connection. Reboot only IR, then repeat the same checks. If any tunnel fails, stop and preserve KH unchanged.
+2. **KH second, only after IR passes**: check Smite Foreign Node, Docker Sanaei, both HTTPS endpoints and FRPC reconnection. Reboot only KH, then repeat checks. If anything fails, stop before snapshots/rebuild.
+3. Once *both* servers work after reboot, take verified, separate IR/KH snapshots. Export critical Docker volumes/databases/settings separately and verify provider console/SSH recovery. Do not destroy/rebuild the hosts until snapshots have been confirmed recoverable.
+4. Rebuilding both hosts is an outage; test against the pinned draft branch, never accidentally download `main`. Keep a verified rollback target.
+5. Read-only tests on the live hosts are not proof the new installer works; a clean-snapshot installation is the release gate.
+
 ## Current real-world evidence (October 11, 2026)
 
 - KH: an existing Smite Foreign Node and freshly installed Docker Sanaei instance were successfully exposed on the same `kh.kolbe1.ir` hostname and TCP 443 **after manual Nginx consolidation**.
@@ -30,7 +38,7 @@ This document records the next steps so future changes do not silently replace t
 
 ## Required staged integration checks before release
 
-1. **Compatibility and image review.** The default Smite v0.1.7 Docker image digests remain upstream and might not include `frp_gateway_config.py`. Verify whether the planned opt-in FRP-TLS/SNI helpers actually exist in the chosen images; if not, prepare/test an **explicitly pinned experimental image** or a validated overlay. Do not assume FRPC-to-443 works just because FRP 0.71.0 is mounted.
+1. **Compatibility and image review.** The default Smite v0.1.7 Docker image digests remain upstream and might not include `frp_gateway_config.py`. The **explicit Standard FRP Test Guide** now prepares a validated, read-only host overlay helper and compatible `core_adapters.py`, so no custom image is required merely for this helper. Offline CI confirms the helper behavior and Compose mounts; the resulting fresh-container runtime and FRPC-to-443 must still pass the live rebuild test. The legacy guided/Private Wizard is unchanged.
 2. **Fresh IR setup (test server/snapshot only).** Run the existing guided Standard Panel + Iran Node flow unchanged, followed by IR Panel 443 Gateway. Confirm healthy Smite containers and accessible HTTPS control/API. Verify FRPS v0.71.0 binaries are present inside the containers.
 3. **Fresh KH setup (test server/snapshot only).** Run the existing Foreign Node guided flow, configure its HTTPS/443 gateway, then install Docker Sanaei on **the same KH domain** using the normal installer. Confirm exactly one Nginx 443 vhost and one HTTP-01/80 vhost for that hostname.
 4. **Security checks.** Smite control path must accept loopback and the configured real IR server IP, reject unrelated remote IPs, and never expose the Node API on untrusted public TCP/8888. Check that Sanaei panel/subscription/Xray paths and unrelated sites still work.
