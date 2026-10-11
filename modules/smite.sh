@@ -583,11 +583,79 @@ PY
 
 # Upgrade only the host-side compatibility overlay, not the running container.
 # The bind mount can be read-only and must be reconciled before recreation.
+# Optional Standard FRP trial only. The upstream v0.1.7 Smite image
+# is pinned but does not necessarily ship the FRP 443 TLS/SNI helper.
+# Vendoring the small validated helper as a read-only host bind mount
+# makes the experiment reproducible without altering the original Wizard
+# or republishing/upgrading the upstream Docker image.
+smite_prepare_frp443_trial_helper() {
+    local destination="$SMITE_OVERLAY_DIR/node/frp_gateway_config.py"
+    local staged
+    mkdir -p "$SMITE_OVERLAY_DIR/node" || return 1
+    staged="$(mktemp "$SMITE_OVERLAY_DIR/node/.frp-gateway-XXXXXXXX")" || return 1
+    cat > "$staged" <<'PY_FRP_HELPER'
+"""Optional U-OPTI Standard FRP TLS/SNI gateway configuration.
+
+No extra fields => the upstream FRP server port and legacy transport.
+"""
+
+import re
+
+_FRP_DNS_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+
+
+def frp_client_server_port(spec, default_port):
+    value = spec.get("frp_gateway_port")
+    if value is None or value == "":
+        return default_port
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("FRP gateway port must be a number between 1 and 65535")
+    raw = str(value)
+    if not raw.isascii() or not raw.isdecimal():
+        raise ValueError("FRP gateway port must be a number between 1 and 65535")
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise ValueError("FRP gateway port must be between 1 and 65535")
+    if not spec.get("frp_tls_server_name"):
+        raise ValueError("FRP gateway port requires frp_tls_server_name")
+    return port
+
+
+def frp_tls_transport_yaml(spec):
+    value = spec.get("frp_tls_server_name")
+    if value is None or value == "":
+        if spec.get("frp_gateway_port") is not None and spec.get("frp_gateway_port") != "":
+            raise ValueError("FRP gateway port requires frp_tls_server_name")
+        return ""
+    if not isinstance(value, str) or len(value) > 253:
+        raise ValueError("FRP TLS server name must be a valid DNS hostname")
+    labels = value.split(".")
+    if len(labels) < 2 or not all(_FRP_DNS_LABEL.fullmatch(label) for label in labels):
+        raise ValueError("FRP TLS server name must be a valid DNS hostname")
+    return (
+        "transport:\n"
+        "  tls:\n"
+        "    enable: true\n"
+        f'    serverName: "{value}"\n'
+        "    disableCustomTLSFirstByte: true\n"
+    )
+PY_FRP_HELPER
+    if ! python3 -m py_compile "$staged"; then
+        rm -f "$staged"
+        echo "ERROR: Smite FRP gateway helper did not compile."
+        return 1
+    fi
+    chmod 0644 "$staged" || { rm -f "$staged"; return 1; }
+    mv -f "$staged" "$destination" || return 1
+    echo "Prepared optional FRP 443 TLS/SNI helper for the Standard trial."
+}
+
 smite_patch_frp443_overlay() {
     local overlay="$SMITE_OVERLAY_DIR/node/core_adapters.py"
     [ -f "$overlay" ] || { echo "ERROR: Smite core adapter overlay is missing."; return 1; }
 
-    if ! docker exec smite-node test -f /app/app/frp_gateway_config.py; then
+    if [ ! -f "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py" ] &&
+       ! docker exec smite-node test -f /app/app/frp_gateway_config.py; then
         if grep -Fq 'frp_client_server_port(' "$overlay"; then
             echo "ERROR: FRP 443 overlay needs a gateway helper absent from this image."
             return 1
@@ -683,6 +751,11 @@ smite_prepare_overlays() {
         smite_patch_node_runtime || return 1
         docker cp smite-node:/app/app/panel_client.py "$SMITE_OVERLAY_DIR/node/panel_client.py" || return 1
         docker cp smite-node:/app/app/core_adapters.py "$SMITE_OVERLAY_DIR/node/core_adapters.py" || return 1
+        # Explicit Standard FRP Test Guide opt-in; Private Network/normal
+        # guided installation keeps its original image and behavior.
+        if [ "${SMITE_FRP_TRIAL_ONLY:-0}" = "1" ]; then
+            smite_prepare_frp443_trial_helper || return 1
+        fi
         smite_patch_frp443_overlay || return 1
         chmod 0644 "$SMITE_OVERLAY_DIR/node/panel_client.py" "$SMITE_OVERLAY_DIR/node/core_adapters.py"
     fi
@@ -736,6 +809,8 @@ mounts = [
     f"      - {overlay}/node/panel_client.py:/app/app/panel_client.py:ro\n",
     f"      - {overlay}/node/core_adapters.py:/app/app/core_adapters.py:ro\n",
 ]
+if (Path(overlay) / "node/frp_gateway_config.py").is_file():
+    mounts.append(f"      - {overlay}/node/frp_gateway_config.py:/app/app/frp_gateway_config.py:ro\n")
 missing = [mount for mount in mounts if mount not in s]
 if missing:
     if marker not in s:
