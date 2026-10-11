@@ -44,3 +44,12 @@ This document records the next steps so future changes do not silently replace t
 - KH: Smite Foreign Node, FRPC, optional Docker Sanaei; one 443 HTTPS Nginx vhost with restricted Smite control + Sanaei paths.
 - Provider-independent goal: no requirement for Hetzner Private Network, EasyTier or Backhaul in Standard FRP mode.
 - Preserve the original Private Network Wizard as a separately selectable workflow.
+
+## Agreed two-server rebuild rehearsal (user proposal, October 11, 2026)
+
+- **Before rebuild:** take and verify separate provider snapshots of **both** IR and KH in their known-good state. Record the exact snapshot IDs and server IDs. Retain an additional off-server export of Smite SQLite/data, Sanaei Docker database/config, Let's Encrypt, U-OPTI settings, FRP parameters and necessary SSH recovery credentials; protect sensitive backups. Provider snapshots are usually filesystem-level rather than synchronized database/network snapshots.
+- **No automatic rebuild:** the user will initiate provider Rebuild actions only after explicitly confirming each backup and after the image compatibility preflight is resolved. Both hosts will be unavailable during rebuild/testing, and existing working tunnels will be interrupted. Confirm console and SSH recovery first; rebuilt SSH host keys change.
+- **Test code, not production main:** install U-OPTI from a pinned **test branch or commit** on each fresh Ubuntu host. `install.sh` honors `U_OPTI_BRANCH`; all subsequent menu invocations must use the same branch selection so updates don't accidentally download `main`. Record a commit SHA before the rehearsal; test changes stay on PR #16.
+- **One step at a time, explicit host:** follow the existing Wizard order, keep original Private Network untouched. Start with IR base/Panel and its HTTPS gateway, then KH Foreign Node and its gateway, then same-domain Docker Sanaei and finally managed FRP TLS/SNI tunnels. IR FRPS listener port is distinct from the KH-to-IR public 443 gateway; don't open previously blocked FRP ports.
+- **At each failure:** capture logs, fix the test branch only, let CI complete, re-run the failed step on the rebuilt test system, and confirm the earlier successful steps still work. Preserve snapshots throughout.
+- **Final gate:** re-test ACME dry run, all shared host routes, FRP reconnect/reboot behavior, Repair, backup/restore, and security allowlists. Only after approval and CI/end-to-end success should the PR be merged into `main` and released.
