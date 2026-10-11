@@ -32,6 +32,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-compose.sh
 
+      - name: Verify Smite FRP 443 persistence and safe gateway repair
+        shell: bash
+        run: bash tests/test-smite-frp443-persistence.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
