@@ -901,6 +901,13 @@ smite_install_foreign_node() {
     echo
     read -rp "Please enter your selection [1-2]: " connection_choice
 
+    if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
+        echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
+        echo "No Private Network installation was started."
+        smite_install_pause
+        return
+    fi
+
     case "$connection_choice" in
         1)
             connection_mode="standard"
