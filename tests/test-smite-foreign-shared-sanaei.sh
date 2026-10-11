@@ -55,3 +55,66 @@ cp "$site" "$tmp/expected"
 smite_foreign_gateway_write_site "kh.example.test" "192.0.2.10" "/smite-node/test-control" "$site"
 cmp -s "$site" "$tmp/expected"
 echo "PASS: Foreign Gateway Repair preserves shared Sanaei panel and is idempotent"
+
+# New installations can copy only the existing Sanaei management route.
+source_site="$tmp/sanaei.conf"
+fresh_site="$tmp/foreign-new.conf"
+cat > "$source_site" <<'EOF_SANAEI'
+# U-OPTI-MANAGED-3XUI-NGINX
+# U-OPTI - Sanaei 3x-UI Docker Public Access
+# Domain: xui.example.test
+# Server Names: xui.example.test
+# Panel: 2053
+# Subscription: 2095
+# Web Base Path: /test-panel-base/
+
+server {
+    listen 443 ssl;
+    server_name xui.example.test;
+    location = /test-panel-base {
+        return 301 /test-panel-base/;
+    }
+    location ^~ /test-panel-base/ {
+        proxy_pass http://127.0.0.1:2053;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+    location ^~ /sub/ {
+        proxy_pass http://127.0.0.1:2095/sub/;
+    }
+    location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
+        proxy_pass http://127.0.0.1:$fwdport;
+    }
+}
+EOF_SANAEI
+
+cat > "$fresh_site" <<'EOF_FOREIGN'
+# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway
+server {
+    listen 443 ssl;
+    server_name kh.example.test;
+    # BEGIN U-OPTI SMITE FOREIGN CONTROL
+    location ^~ /smite-node/test-control/ {
+        allow 192.0.2.10;
+        deny all;
+        proxy_pass http://127.0.0.1:8888/;
+    }
+    # END U-OPTI SMITE FOREIGN CONTROL
+    location / { try_files $uri $uri/ =404; }
+}
+EOF_FOREIGN
+
+smite_foreign_gateway_prepare_shared_sanaei_site "$fresh_site" "$source_site"
+grep -Fq 'location ^~ /test-panel-base/ {' "$fresh_site"
+grep -Fq 'proxy_pass http://127.0.0.1:2053;' "$fresh_site"
+grep -Fq 'location ^~ /smite-node/test-control/ {' "$fresh_site"
+! grep -Fq '2095' "$fresh_site"
+! grep -Fq 'fwdport' "$fresh_site"
+cp "$fresh_site" "$tmp/shared.expected"
+smite_foreign_gateway_prepare_shared_sanaei_site "$fresh_site" "$source_site"
+cmp -s "$fresh_site" "$tmp/shared.expected"
+smite_foreign_gateway_write_site "kh.example.test" "192.0.2.11" "/smite-node/test-control" "$fresh_site"
+grep -Fq 'location ^~ /test-panel-base/ {' "$fresh_site"
+test "$(grep -Fc '# BEGIN U-OPTI SHARED SANAEI PANEL' "$fresh_site")" -eq 1
+echo "PASS: Optional shared Sanaei path preserves Smite, excludes Xray/subscription, and is idempotent"
+
