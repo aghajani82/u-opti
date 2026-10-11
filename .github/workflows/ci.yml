@@ -40,6 +40,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-foreign-shared-sanaei.sh
 
+      - name: Verify shared Smite and Sanaei Docker Nginx installation
+        shell: bash
+        run: bash tests/test-smite-sanaei-nginx-shared-install.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
