@@ -525,9 +525,10 @@ docker_3xui_nginx_test_acme() {
     local attempt
     local name
 
-    test_file="$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test"
+    test_file="$(mktemp "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test-XXXXXXXX")" || return 1
 
-    printf '%s\n' "u-opti-test" > "$test_file" || return 1
+    printf '%s\n' "u-opti-test" > "$test_file" || { rm -f "$test_file"; return 1; }
+    chmod 0644 "$test_file" || { rm -f "$test_file"; return 1; }
 
     # Test every server name; each must resolve to the same ACME webroot.
     for name in $(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN"); do
@@ -537,8 +538,9 @@ docker_3xui_nginx_test_acme() {
             response="$(
                 curl -fsS \
                     --max-time 10 \
+                    --noproxy '*' \
                     -H "Host: $name" \
-                    "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+                    "http://127.0.0.1/.well-known/acme-challenge/$(basename "$test_file")" \
                     2>/dev/null
             )"
             curl_status=$?
