@@ -10,9 +10,10 @@ SMITE_NODE_COMPOSE="${SMITE_NODE_COMPOSE:-$SMITE_NODE_DIR/docker-compose.yml}"
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="${SMITE_STATE_FILE:-$SMITE_STATE_DIR/state.env}"
 SMITE_GATEWAY_STATE_FILE="$SMITE_STATE_DIR/gateway.env"
-SMITE_GATEWAY_BACKEND_CONF="/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
-SMITE_GATEWAY_STREAM_CONF="/etc/nginx/modules-enabled/99-u-opti-smite-stream.conf"
-SMITE_GATEWAY_MAP_FILE="/etc/nginx/u-opti-smite-stream-map.conf"
+SMITE_GATEWAY_BACKEND_CONF="${SMITE_GATEWAY_BACKEND_CONF:-/etc/nginx/conf.d/u-opti-smite-panel-backend.conf}"
+SMITE_GATEWAY_STREAM_CONF="${SMITE_GATEWAY_STREAM_CONF:-/etc/nginx/modules-enabled/99-u-opti-smite-stream.conf}"
+SMITE_GATEWAY_MAP_FILE="${SMITE_GATEWAY_MAP_FILE:-/etc/nginx/u-opti-smite-stream-map.conf}"
+SMITE_GATEWAY_FRP_SNI_MAP_FILE="${SMITE_GATEWAY_FRP_SNI_MAP_FILE:-/etc/nginx/u-opti-smite-frp-sni-map.conf}"
 SMITE_GATEWAY_ACME_ROOT="/var/www/u-opti-acme"
 SMITE_GATEWAY_RENEW_HOOK="/etc/letsencrypt/renewal-hooks/deploy/u-opti-nginx-reload"
 SMITE_GATEWAY_DB="${SMITE_GATEWAY_DB:-$SMITE_PANEL_DIR/panel/data/smite.db}"
@@ -631,11 +632,75 @@ server {
 EOF_BACKEND
 }
 
+# Keep the FRP TLS/SNI allowlist separate from generated stream configuration.
+# Migrate existing manual canary rules once, before rewriting the stream file.
+smite_gateway_prepare_frp_sni_map() {
+    [ -f "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" ] && return 0
+
+    python3 - "$SMITE_GATEWAY_STREAM_CONF" "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" <<'PY_FRP_MAP'
+from pathlib import Path
+import ipaddress
+import os
+import re
+import sys
+import tempfile
+
+old_stream, dest = map(Path, sys.argv[1:3])
+rules = []
+header = re.compile(r'^\s*map\s+"\$ssl_preread_server_name\|\$remote_addr"\s+\$uopti_frp_canary_backend\s*\{\s*$')
+entry = re.compile(r'^\s*"([A-Za-z0-9.-]+)\|([0-9.]+)"\s+127\.0\.0\.1:(\d+);\s*$')
+hostname = re.compile(r'^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+if old_stream.is_file():
+    lines = old_stream.read_text().splitlines()
+    starts = [i for i, line in enumerate(lines) if header.fullmatch(line)]
+    if len(starts) > 1:
+        raise SystemExit("ERROR: Duplicate FRP SNI maps")
+    if starts:
+        seen, defaults, closing = set(), 0, False
+        for line in lines[starts[0] + 1:]:
+            val = line.strip()
+            if val == "}":
+                closing = True
+                break
+            if not val or val.startswith("#"):
+                continue
+            if val == "default $uopti_smite_backend;":
+                defaults += 1
+                continue
+            match = entry.fullmatch(line)
+            if not match:
+                raise SystemExit("ERROR: Unsafe FRP SNI route; refusing to overwrite stream")
+            domain, ip, port = match.groups()
+            if not hostname.fullmatch(domain) or not 1 <= int(port) <= 65535:
+                raise SystemExit("ERROR: Invalid FRP SNI route")
+            ipaddress.IPv4Address(ip)
+            key = (domain.lower(), ip)
+            if key in seen:
+                raise SystemExit("ERROR: Duplicate FRP SNI route")
+            seen.add(key)
+            rules.append(f'    "{domain}|{ip}" 127.0.0.1:{port};')
+        if not closing or defaults != 1:
+            raise SystemExit("ERROR: Incomplete FRP SNI map")
+dest.parent.mkdir(parents=True, exist_ok=True)
+if not dest.exists():
+    contents = "# U-OPTI FRP TLS/SNI allowlist (SNI + source IPv4 required)\n"
+    if rules:
+        contents += "\n".join(rules) + "\n"
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dest.parent, prefix=".frp-sni-", delete=False) as tmp:
+        tmp.write(contents)
+        staged = Path(tmp.name)
+    os.chmod(staged, 0o644)
+    os.replace(staged, dest)
+    print(f"FRP SNI routes preserved: {len(rules)}")
+PY_FRP_MAP
+}
+
 smite_gateway_write_stream() {
     local domain="$1"
     local map_tmp=""
     local connection_mode=""
     local default_backend="127.0.0.1:8443"
+    local local_probe_listener=""
 
     connection_mode="$(smite_gateway_connection_mode)"
 
@@ -649,6 +714,21 @@ smite_gateway_write_stream() {
         fi
 
         echo "Private Mode default TCP/443 backend: $default_backend"
+    fi
+
+    smite_gateway_prepare_frp_sni_map || return 1
+
+    # Retain the local 14443 listener if it was already configured.
+    if [ -f "$SMITE_GATEWAY_STREAM_CONF" ] &&
+       grep -Eq '^[[:space:]]*listen[[:space:]]+127\.0\.0\.1:14443;' "$SMITE_GATEWAY_STREAM_CONF"; then
+        local_probe_listener="$(cat <<'EOF_PROBE'
+    server {
+        listen 127.0.0.1:14443;
+        ssl_preread on;
+        proxy_pass $uopti_frp_canary_backend;
+    }
+EOF_PROBE
+)"
     fi
 
     map_tmp="$(mktemp)" || return 1
@@ -703,12 +783,19 @@ stream {
         default $default_backend;
     }
 
+    map "\$ssl_preread_server_name|\$remote_addr" \$uopti_frp_canary_backend {
+        include $SMITE_GATEWAY_FRP_SNI_MAP_FILE;
+        default \$uopti_smite_backend;
+    }
+
+$local_probe_listener
+
     server {
         listen 443;
         listen [::]:443;
 
         ssl_preread on;
-        proxy_pass \$uopti_smite_backend;
+        proxy_pass \$uopti_frp_canary_backend;
 
         proxy_connect_timeout 10s;
         proxy_timeout 1h;
