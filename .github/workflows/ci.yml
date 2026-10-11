@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-sanaei-shared-activation.sh
 
+      - name: Assert existing guided Smite Wizard is unchanged
+        shell: bash
+        run: bash tests/test-smite-wizard-preservation.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
