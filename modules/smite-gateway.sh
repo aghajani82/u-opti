@@ -182,6 +182,7 @@ EOF_ACME
     systemctl reload nginx || return 1
 
     printf '%s\n' 'u-opti-smite-acme-test' > "$acme_test_file" || return 1
+    chmod 0644 "$acme_test_file" || { rm -f "$acme_test_file"; return 1; }
 
     # A fresh Nginx install/reload may briefly keep serving the old worker
     # configuration. Retry the local ACME probe instead of treating that
