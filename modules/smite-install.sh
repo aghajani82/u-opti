@@ -623,13 +623,6 @@ smite_install_panel_iran() {
         return
     fi
 
-    if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
-        echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
-        echo "No Private Network installation was started."
-        smite_install_pause
-        return
-    fi
-
     case "$connection_choice" in
         1)
             connection_mode="standard"
