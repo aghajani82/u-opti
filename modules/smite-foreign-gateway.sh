@@ -239,6 +239,7 @@ EOF
 
     printf '%s\n' 'u-opti-smite-foreign-acme-test' > \
         "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
+    chmod 0644 "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
 
     while [ "$attempt" -le 10 ]; do
         if curl -fsS --connect-timeout 2 --max-time 5 -H "Host: $domain" \
