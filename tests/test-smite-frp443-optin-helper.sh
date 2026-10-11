@@ -16,9 +16,9 @@ cat > "$SMITE_OVERLAY_DIR/node/core_adapters.py" <<'PY'
 from pathlib import Path
 class FrpAdapter:
     def apply(self, spec):
-        server_port = spec.get('server_port', 7000)
-        config_content = "serverPort: {}\n".format(server_port)
-        config_content += "\nproxies:\n"
+            server_port = spec.get('server_port', 7000)
+            config_content = "serverPort: {}\n".format(server_port)
+            config_content += "\nproxies:\n"
 PY
 cp "$SMITE_OVERLAY_DIR/node/core_adapters.py" "$tmp/legacy"
 docker() { return 1; }
