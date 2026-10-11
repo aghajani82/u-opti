@@ -11,6 +11,9 @@ export SMITE_NODE_COMPOSE="$tmp/node-compose.yml"
 export SMITE_PANEL_COMPOSE="$tmp/no-panel.yml"
 mkdir -p "$SMITE_OVERLAY_DIR/node"
 source "$root/modules/smite.sh"
+# smite.sh derives Compose paths from SMITE_NODE_DIR; isolate them after sourcing.
+SMITE_NODE_COMPOSE="$tmp/node-compose.yml"
+SMITE_PANEL_COMPOSE="$tmp/no-panel.yml"
 
 cat > "$SMITE_OVERLAY_DIR/node/core_adapters.py" <<'PY'
 from pathlib import Path
