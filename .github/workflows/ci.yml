@@ -52,6 +52,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-wizard-preservation.sh
 
+      - name: Validate opt-in Smite FRP 443 helper for pinned images
+        shell: bash
+        run: bash tests/test-smite-frp443-optin-helper.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
