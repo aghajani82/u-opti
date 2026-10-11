@@ -602,6 +602,22 @@ smite_gateway_rollback_transaction() {
 smite_gateway_write_backend() {
     local domain="$1"
 
+    # A live TLS backend can also serve XHTTP/other custom locations.
+    # Never erase those locations during routine gateway repair.
+    if [ -f "$SMITE_GATEWAY_BACKEND_CONF" ]; then
+        if head -n 1 "$SMITE_GATEWAY_BACKEND_CONF" | grep -Fxq '# Managed by U-OPTI - Smite Panel TLS backend' &&
+           grep -Fq "server_name $domain;" "$SMITE_GATEWAY_BACKEND_CONF" &&
+           grep -Fq "/etc/letsencrypt/live/$domain/fullchain.pem;" "$SMITE_GATEWAY_BACKEND_CONF" &&
+           grep -Fq "/etc/letsencrypt/live/$domain/privkey.pem;" "$SMITE_GATEWAY_BACKEND_CONF"; then
+            echo "Existing Smite TLS backend preserved, including custom proxy locations."
+            return 0
+        fi
+
+        echo "ERROR: Existing Smite TLS backend has an unfamiliar domain/layout."
+        echo "Refusing to overwrite existing custom proxy locations."
+        return 1
+    fi
+
     cat > "$SMITE_GATEWAY_BACKEND_CONF" <<EOF_BACKEND
 # Managed by U-OPTI - Smite Panel TLS backend
 server {
