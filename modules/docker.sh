@@ -926,6 +926,176 @@ docker_smite_open_setup_wizard() {
     docker_smite_management_menu_legacy
 }
 
+
+# Standard FRP trial in U-OPTI; leave the production 10-step private wizard intact.
+smite_frp_std_state() {
+    [ -f /etc/u-opti/smite/state.env ] || return 0
+    awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' /etc/u-opti/smite/state.env
+}
+smite_frp_std_running() {
+    [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = "true" ]
+}
+smite_frp_std_panel_https() {
+    local temp domain="$1"
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+    temp="$(mktemp)" || return 1
+    if curl -fsS --noproxy '*' --connect-timeout 5 --max-time 12 \
+      "https://$domain/api/panel/ca/server" -o "$temp" 2>/dev/null &&
+      grep -q 'BEGIN CERTIFICATE' "$temp"; then
+        rm -f "$temp"
+        return 0
+    fi
+    rm -f "$temp"
+    return 1
+}
+smite_frp_std_install() {
+    local role="$1" panel=""
+    if [ "$(smite_frp_std_state SMITE_CONNECTION_MODE)" = private ]; then
+        echo "ERROR: Private mode detected. No Standard-mode changes made."
+        read -rp "Press Enter..."; return
+    fi
+    if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1 ||
+       ! systemctl is-active --quiet docker; then
+        echo "ERROR: Docker Engine and Compose are required."
+        read -rp "Press Enter..."; return
+    fi
+    if [ "$role" = ir ]; then
+        echo "IR: Install Smite Panel + Iran Node using Standard / Local."
+        echo "The existing guided installer will request domain and node name."
+        echo "Private Network mode is disabled for this test."
+        read -rp "Press Enter to open the U-OPTI installer..."
+        SMITE_FRP_TRIAL_ONLY=1 smite_install_panel_iran
+    else
+        echo "KH: First verify IR Panel HTTPS/443, used for Smite control only."
+        read -rp "IR Panel domain: " panel
+        if ! smite_frp_std_panel_https "$panel"; then
+            echo "ERROR: IR Panel HTTPS/443 not ready. Install its gateway first."
+            read -rp "Press Enter..."; return
+        fi
+        echo "KH: Install Smite Foreign Node using Standard / HTTPS."
+        echo "Private Network mode is disabled for this test."
+        read -rp "Press Enter to open the U-OPTI installer..."
+        SMITE_FRP_TRIAL_ONLY=1 smite_install_foreign_node
+    fi
+}
+smite_frp_std_verify() {
+    local role="$1" name version
+    clear
+    echo "===== FRP binary verification (expected v0.71.0) ====="
+    if smite_frp_std_running smite-node; then
+        for name in frpc frps; do
+            version="$(docker exec smite-node "/usr/local/bin/$name" -v 2>/dev/null || true)"
+            echo "smite-node $name: $version"
+        done
+    else
+        echo "smite-node: not running"
+    fi
+    if [ "$role" = ir ]; then
+        if smite_frp_std_running smite-panel; then
+            version="$(docker exec smite-panel /usr/local/bin/frps -v 2>/dev/null || true)"
+            echo "smite-panel frps: $version"
+        else
+            echo "smite-panel: not running"
+        fi
+    fi
+    echo "If any version is not 0.71.0, do not create a tunnel."
+    read -rp "Press Enter..."
+}
+docker_smite_frp_standard_guide() {
+    local role="" saved="" mode="" choice=""
+    saved="$(smite_frp_std_state SMITE_ROLE)"
+    mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
+    if [ -n "$mode" ] && [ "$mode" != standard ]; then
+        echo "ERROR: Existing Smite mode is $mode. This guide will not change it."
+        read -rp "Press Enter..."; return
+    fi
+    case "$saved" in
+        panel-iran) role=ir ;;
+        foreign) role=kh ;;
+    esac
+    if [ -z "$role" ]; then
+        while true; do
+            clear
+            echo "===== Standard FRP: Select logical host role ====="
+            echo "Both physical servers can be overseas."
+            echo "1) IR: Panel + Iran Node"
+            echo "2) KH: Foreign Node"
+            echo "0) Back"
+            read -rp "Choose [0-2]: " choice
+            case "$choice" in
+                1) role=ir; break ;;
+                2) role=kh; break ;;
+                0) return ;;
+                *) echo "Invalid selection"; sleep 1 ;;
+            esac
+        done
+    fi
+    while true; do
+        clear
+        echo "======================================"
+        echo "     Smite Standard + FRP Test"
+        echo "======================================"
+        echo "Role: $role (logical role; not physical location)"
+        echo "Docker: $(systemctl is-active docker 2>/dev/null || true)"
+        echo "Panel: $(smite_frp_std_running smite-panel && echo running || echo not-running)"
+        echo "Node: $(smite_frp_std_running smite-node && echo running || echo not-running)"
+        echo "Saved mode: $(smite_frp_std_state SMITE_CONNECTION_MODE)"
+        echo
+        if [ "$role" = ir ]; then
+            echo "Order: Docker -> Panel+Iran Standard -> Panel 443 Gateway"
+            echo "1) Guided Smite Panel + Iran Node installation"
+            echo "2) Configure / Repair IR Panel HTTPS/443 Gateway"
+        else
+            echo "Order: Docker -> IR Panel HTTPS -> Foreign Standard -> KH Gateway"
+            echo "1) Guided Smite Foreign Node installation"
+            echo "2) Configure / Repair KH HTTPS/443 Control Gateway"
+        fi
+        echo "3) Verify FRP 0.71.0 in containers"
+        echo "4) FRP isolated test plan"
+        echo "0) Back"
+        echo
+        read -rp "Choose [0-4]: " choice
+        case "$choice" in
+            1) smite_frp_std_install "$role" ;;
+            2)
+                if [ "$role" = ir ]; then
+                    show_smite_gateway_menu
+                else
+                    show_smite_foreign_gateway_menu
+                fi
+                ;;
+            3) smite_frp_std_verify "$role" ;;
+            4)
+                clear
+                echo "1. Confirm both Smite nodes are online and FRP is v0.71.0."
+                echo "2. Start a disposable local TCP test service on KH."
+                echo "3. Panel -> Tunnels -> FRP: IR = server, KH = client."
+                echo "4. Choose unused FRP test ports, separate from Smite control."
+                echo "5. Verify transfer and reboot resilience before 443 redesign."
+                echo "Do not install EasyTier, Backhaul or Xray for this test."
+                read -rp "Press Enter..."
+                ;;
+            0) break ;;
+            *) echo "Invalid selection"; sleep 1 ;;
+        esac
+    done
+}
 docker_smite_management_menu() {
-    docker_smite_open_setup_wizard
+    local choice
+    while true; do
+        clear
+        echo "======================================"
+        echo "          Smite Management"
+        echo "======================================"
+        echo "1) Private Network Wizard (existing 10-step flow)"
+        echo "2) Standard FRP Test Guide (experimental)"
+        echo "0) Back"
+        read -rp "Choose [0-2]: " choice
+        case "$choice" in
+            1) docker_smite_open_setup_wizard ;;
+            2) docker_smite_frp_standard_guide ;;
+            0) break ;;
+            *) echo "Invalid selection"; sleep 1 ;;
+        esac
+    done
 }
