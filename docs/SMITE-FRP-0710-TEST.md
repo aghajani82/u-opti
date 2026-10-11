@@ -19,15 +19,20 @@ curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/feature/smite-frp
 bash /tmp/u-opti-frp-install.sh
 ~~~
 
-U-OPTI's default Smite menu opens the private-network wizard. For the FRP-only trial, open the **existing Standard-mode installer** using the branch-only shortcut below; do not install EasyTier or Backhaul for this experiment.
+Use the **regular project menu**, not the direct installer shortcut. After Docker is installed on both roles, run U-OPTI on each host:
 
 ~~~bash
-# IR ROLE: after installing U-OPTI and Docker, choose Install Smite Panel + Iran Node, then Standard mode
-u-opti --menu smite-install
-
-# KH ROLE: after installing U-OPTI and Docker, choose Install Smite Foreign Node, then Standard mode
-u-opti --menu smite-install
+# BOTH ROLES: IR-role and KH-role
+u-opti
 ~~~
+
+In U-OPTI select **7) Docker Management -> 5) Smite Management -> 2) Standard FRP Test Guide (experimental)**.
+
+On the IR-role server, choose **IR**, then **1) Guided Smite Panel + Iran Node installation** and select **1) Standard / Local** when prompted. Next open **2) IR Panel HTTPS/443 Gateway** to make the Smite Panel accessible to the KH node.
+
+Only after IR Panel HTTPS is reachable, switch to the KH-role server, choose **KH**, then **1) Guided Smite Foreign Node installation** and select **1) Standard / HTTPS** when prompted. Next complete **2) KH HTTPS/443 Control Gateway** so the Panel can communicate with the Foreign Node.
+
+The old **Private Network Wizard (10-step flow)** remains available as option 1 but is **not** the FRP test path. Do not install EasyTier or Backhaul to proceed with this experiment. TLS/443 is needed for Smite management traffic, while initial FRP data/control ports remain separate.
 
 ## Version checks after Smite install
 
