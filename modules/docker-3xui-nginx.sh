@@ -24,6 +24,7 @@ DOCKER_3XUI_NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 
 DOCKER_3XUI_NGINX_ACME_ROOT="/var/www/u-opti-acme"
 DOCKER_3XUI_NGINX_ACME_CONF_DIR="/etc/nginx/conf.d"
+DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT="${DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT:-/root/u-opti-backups}"
 
 DOCKER_3XUI_NGINX_CERTBOT_BIN=""
 DOCKER_3XUI_NGINX_DOMAIN=""
@@ -641,7 +642,7 @@ docker_3xui_nginx_activate_shared_smite() {
     local smite_site="$DOCKER_3XUI_NGINX_SITES_AVAILABLE/$DOCKER_3XUI_NGINX_DOMAIN"
     local smite_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$DOCKER_3XUI_NGINX_DOMAIN"
     local sanaei_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$(basename "$target")"
-    local backup="/root/u-opti-backups/3xui-smite-shared-$(date -u +%Y%m%d-%H%M%S)"
+    local backup="$DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT/3xui-smite-shared-$(date -u +%Y%m%d-%H%M%S)"
     local had_smite_link=0 had_site=0 had_sanaei_link=0 failed=0
     local nginx_result="" control="" sanaei_http="" smite_http="" attempt
 
