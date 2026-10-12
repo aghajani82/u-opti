@@ -190,3 +190,20 @@ Standard FRP helper files from its backup list. This branch now adds both
 uses missing-file markers on upgrades from legacy installations, and verifies
 its expected backup file count dynamically. On rollback, these originals are
 restored or newly introduced copies are removed. No live FRP paths change.
+
+## Backhaul v0.7.2 mapping syntax verified from upstream source
+
+The official `internal/server/transport/ws.go` `parsePortMappings()`
+implementation supports **`ip:port=remoteAddress`** as a single-port map.
+It parses the numeric form separately; when the left side is `ip:port`,
+it forwards that literal local listen address into `net.Listen("tcp", ...)`
+through `localListener()`. This confirms the proposed
+`127.0.0.1:56053=127.0.0.1:56053` syntax is supported in WS transport
+without exposing the IR data socket on `0.0.0.0`.
+
+Source: https://github.com/Musixal/Backhaul/blob/v0.7.2/internal/server/transport/ws.go
+
+This is a **source-level verification only**, not a live process test.
+The remaining activation blockers are the real installed Smite overlays,
+live Nginx ownership/atomic rollback, persisted mounts and end-to-end
+connection testing. Do not deploy the stage candidates directly.
