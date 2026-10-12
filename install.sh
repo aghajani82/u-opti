@@ -36,6 +36,7 @@ MODULES=(
     "smite-install.sh"
     "smite-gateway.sh"
     "smite-frp-xhttp.sh"
+    "smite-frp-wizard.sh"
     "smite-foreign-gateway.sh"
     "smite-private-network.sh"
     "smite-easytier.sh"
