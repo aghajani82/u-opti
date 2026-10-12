@@ -15,7 +15,19 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
-BRANCH="${U_OPTI_BRANCH:-main}"
+# Explicit environment selection takes priority; otherwise persist install source.
+BRANCH="${U_OPTI_BRANCH:-}"
+if [ -z "$BRANCH" ]; then
+    if [ -f "$LIB_PATH/INSTALL_REF" ]; then
+        BRANCH="$(head -n 1 "$LIB_PATH/INSTALL_REF")"
+    else
+        BRANCH=main
+    fi
+fi
+if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$BRANCH" == /* ]]; then
+    echo "ERROR: Invalid persisted U-OPTI source branch/ref: $BRANCH" >&2
+    exit 1
+fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
@@ -824,6 +836,11 @@ while true; do
                 read -rp "Press Enter to return..."
                 continue
             fi
+
+            # Commit the selected source only after verified file replacement.
+            printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new" &&
+                mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
+            chmod 0644 "$LIB_PATH/INSTALL_REF"
 
             rm -rf "$BACKUP_DIR"
             cleanup_update_temp
