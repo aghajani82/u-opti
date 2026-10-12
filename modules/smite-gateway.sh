@@ -600,6 +600,64 @@ smite_gateway_rollback_transaction() {
         "$private_backhaul_changed"
 }
 
+# Experimental Standard-only FRP WebSocket listener through the existing
+# Panel hostname on 443. Nginx owns TLS; the FRPS TCP port stays on loopback.
+# This is intentionally separate from the legacy stream/SNI canary map.
+smite_gateway_enable_standard_frp_wss() {
+    local domain="$1"
+    [ "$(smite_gateway_connection_mode)" = standard ] || return 0
+    [ -f "\${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] || return 0
+    python3 - "$SMITE_GATEWAY_BACKEND_CONF" "$domain" <<'PY_FRP_WSS_NGINX'
+from pathlib import Path
+import os
+import re
+import sys
+import tempfile
+
+path, domain = Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+if not text.startswith("# Managed by U-OPTI - Smite Panel TLS backend\n"):
+    raise SystemExit("ERROR: Refusing FRP WSS edit of unmanaged backend")
+if text.count("server_name " + domain + ";") != 1:
+    raise SystemExit("ERROR: FRP WSS backend domain mismatch")
+begin = "    # BEGIN U-OPTI STANDARD FRP WSS"
+if begin in text:
+    if text.count(begin) != 1 or text.count("location = /~!frp {") != 1:
+        raise SystemExit("ERROR: Conflicting FRP WSS location")
+    print("Existing Standard FRP WSS/443 route preserved")
+    raise SystemExit(0)
+if re.search(r"(?m)^\s*location\s+(?:=\s*)?/~!frp\s*\{", text):
+    raise SystemExit("ERROR: Unmanaged FRP WSS location exists")
+anchor = "    location / {\n"
+if text.count(anchor) != 1:
+    raise SystemExit("ERROR: Unknown Smite backend location layout")
+block = """    # BEGIN U-OPTI STANDARD FRP WSS
+    location = /~!frp {
+        proxy_pass http://127.0.0.1:7000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+    }
+    # END U-OPTI STANDARD FRP WSS
+
+"""
+updated = text.replace(anchor, block + anchor, 1)
+with tempfile.NamedTemporaryFile(
+    mode="w", encoding="utf-8", dir=path.parent, prefix=".smite-wss-", delete=False
+) as output:
+    output.write(updated)
+    staged = Path(output.name)
+os.chmod(staged, 0o644)
+os.replace(staged, path)
+print("Standard FRP WSS route prepared on existing Smite HTTPS/443 backend")
+PY_FRP_WSS_NGINX
+}
+
 smite_gateway_write_backend() {
     local domain="$1"
 
@@ -610,6 +668,7 @@ smite_gateway_write_backend() {
            grep -Fq "server_name $domain;" "$SMITE_GATEWAY_BACKEND_CONF" &&
            grep -Fq "/etc/letsencrypt/live/$domain/fullchain.pem;" "$SMITE_GATEWAY_BACKEND_CONF" &&
            grep -Fq "/etc/letsencrypt/live/$domain/privkey.pem;" "$SMITE_GATEWAY_BACKEND_CONF"; then
+            smite_gateway_enable_standard_frp_wss "$domain" || return 1
             echo "Existing Smite TLS backend preserved, including custom proxy locations."
             return 0
         fi
@@ -647,6 +706,7 @@ server {
     }
 }
 EOF_BACKEND
+    smite_gateway_enable_standard_frp_wss "$domain" || return 1
 }
 
 # Keep the FRP TLS/SNI allowlist separate from generated stream configuration.
