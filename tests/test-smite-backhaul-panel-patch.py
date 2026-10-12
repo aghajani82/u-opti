@@ -73,7 +73,7 @@ for name, content in (("node_client.py", client), ("main.py", main), ("tunnels.p
     if name == "node_client.py":
         assert "compile_standard_specs(" in output
         assert 'role == "iran"' in output
-        assert 'role == "foreign"' in output
+        assert 'role not in ("iran", "foreign")' in output
         assert "persisted opt-in tunnel" in output
         assert "select(Tunnel)" in output
     elif name == "main.py":
