@@ -83,7 +83,7 @@ uopti_bh_render_ir_xhttp() {
 EOF
     done
 }
-if [[ "$0" == "\${BASH_SOURCE[0]}" ]]; then
+if [[ "$0" == "${BASH_SOURCE[0]}" ]]; then
     case "$1" in
         --render-ir-control) uopti_bh_render_ir_control "$2" ;;
         --render-kh-bridge) uopti_bh_render_kh_bridge "$2" "$3" ;;
