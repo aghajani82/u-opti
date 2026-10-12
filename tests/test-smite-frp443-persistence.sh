@@ -45,6 +45,8 @@ touch "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py"
 smite_gateway_write_backend "ir.kolbe1.ir"
 test "$(grep -Fc 'location = /~!frp {' "$SMITE_GATEWAY_BACKEND_CONF")" -eq 1
 grep -Fq 'proxy_pass http://127.0.0.1:7000;' "$SMITE_GATEWAY_BACKEND_CONF"
+grep -Fq "    include $SMITE_FRP_XHTTP_CONF;" "$SMITE_GATEWAY_BACKEND_CONF"
+test -f "$SMITE_FRP_XHTTP_CONF"
 grep -Fq 'location /19001/web {' "$SMITE_GATEWAY_BACKEND_CONF"
 grep -Fq 'proxy_pass http://127.0.0.1:8000;' "$SMITE_GATEWAY_BACKEND_CONF"
 cp "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/wss.expected"
