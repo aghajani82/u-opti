@@ -6,7 +6,7 @@ SMITE_FRP_XHTTP_STATE="${SMITE_STATE_FILE:-/etc/u-opti/smite/state.env}"
 SMITE_FRP_XHTTP_HELPER="${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py"
 
 smite_frp_xhttp_enabled() {
-    [ -f "$SMITE_FRP_XHTTP_HELPER" ] &&
+    [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] &&
     [ -f "$SMITE_FRP_XHTTP_STATE" ] &&
     grep -Fxq 'SMITE_CONNECTION_MODE=standard' "$SMITE_FRP_XHTTP_STATE"
 }
