@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source modules/smite-backhaul-standard.sh
+ir="$(uopti_bh_render_ir_control 3080)"
+kh="$(uopti_bh_render_kh_bridge ir.kolbe1.ir 13080)"
+data="$(uopti_bh_render_ir_xhttp 56053)"
+grep -Fq 'location = /channel {' <<< "$ir"
+grep -Fq 'location ^~ /tunnel/ {' <<< "$ir"
+[[ "$(grep -Fc 'proxy_pass http://127.0.0.1:3080;' <<< "$ir")" = 2 ]]
+grep -Fq 'Authorization $http_authorization;' <<< "$ir"
+! grep -Fq 'location = /~!frp' <<< "$ir"
+grep -Fq 'listen 127.0.0.1:13080;' <<< "$kh"
+[[ "$(grep -Fc 'proxy_pass https://ir.kolbe1.ir:443;' <<< "$kh")" = 2 ]]
+[[ "$(grep -Fc 'proxy_ssl_verify on;' <<< "$kh")" = 2 ]]
+[[ "$(grep -Fc 'proxy_ssl_server_name on;' <<< "$kh")" = 2 ]]
+[[ "$(grep -Fc 'proxy_ssl_name ir.kolbe1.ir;' <<< "$kh")" = 2 ]]
+[[ "$(grep -Fc 'proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;' <<< "$kh")" = 2 ]]
+grep -Fq 'location / { return 404; }' <<< "$kh"
+grep -Fq 'location = /56053/web {' <<< "$data"
+grep -Fq 'location ^~ /56053/web/ {' <<< "$data"
+[[ "$(grep -Fc 'proxy_pass http://127.0.0.1:56053;' <<< "$data")" = 2 ]]
+! grep -Fq 'proxy_pass http://127.0.0.1:56053/' <<< "$data"
+if uopti_bh_render_kh_bridge 'bad.com;include' 13080 >/dev/null; then exit 1; fi
+if uopti_bh_render_ir_control 443 >/dev/null; then exit 1; fi
+if uopti_bh_render_ir_xhttp 18476 >/dev/null; then exit 1; fi
+grep -Fq 'smite_frp_xhttp_sync()' modules/smite-frp-xhttp.sh
+echo 'Backhaul Standard render-only tests passed'

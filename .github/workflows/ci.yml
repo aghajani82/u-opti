@@ -68,6 +68,12 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-release-upgrade.sh
 
+      - name: Test experimental Backhaul Standard renderer
+        shell: bash
+        run: |
+          bash -n modules/smite-backhaul-standard.sh
+          bash tests/test-smite-backhaul-standard.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
