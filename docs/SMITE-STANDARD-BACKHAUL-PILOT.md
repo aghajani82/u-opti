@@ -49,3 +49,27 @@ bash modules/smite-backhaul-standard.sh --render-kh-bridge ir.kolbe1.ir 13080
 bash modules/smite-backhaul-standard.sh --render-ir-xhttp 56053
 bash tests/test-smite-backhaul-standard.sh
 ```
+
+## Stage 1: fail-closed, pure Smite spec normalization (not deployed)
+
+`modules/smite-backhaul-spec.py` provides a stateless, opt-in compiler for
+Backhaul server and client specs. It requires a deliberate
+`uopti_standard_backhaul=true` flag, a generated 24+ character token,
+transport `ws`, one identical-port mapping and disjoint nonreserved ports.
+It forces the IR control + data listener to 127.0.0.1 and KH client remote
+address to the KH loopback WS bridge. It refuses public/ambiguous mappings.
+
+This compiler **is not yet connected to Smite Panel or Node**, so a new
+Backhaul tunnel created through the unmodified Smite UI would still get the
+upstream wildcard/default behavior. Do not create a live Backhaul tunnel yet.
+
+After tests pass, integrate this compiler into the persistent overlays for
+Smite Panel's create/reapply/startup and Smite Node's BackhaulAdapter. The
+flag will be populated by an explicit opt-in U-OPTI wizard; the existing
+Private Network mode and production FRP must never call this compiler.
+
+Test:
+
+```bash
+python3 tests/test-smite-backhaul-spec.py
+```

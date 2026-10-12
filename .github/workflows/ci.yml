@@ -74,6 +74,10 @@ jobs:
           bash -n modules/smite-backhaul-standard.sh
           bash tests/test-smite-backhaul-standard.sh
 
+      - name: Test Standard Backhaul fail-closed spec compiler
+        shell: bash
+        run: python3 tests/test-smite-backhaul-spec.py
+
       - name: Validate release metadata
         shell: bash
         run: |
