@@ -19,6 +19,11 @@ cat > "$SMITE_OVERLAY_DIR/node/core_adapters.py" <<'PY'
 from pathlib import Path
 class FrpAdapter:
     def apply(self, spec):
+            bind_port = spec.get('bind_port', 7000)
+            token = spec.get('token')
+            config_content = f"""bindPort: {bind_port}
+"""
+            server_addr = spec.get('server_addr', '').strip()
             server_port = spec.get('server_port', 7000)
             config_content = "serverPort: {}\n".format(server_port)
             config_content += "\nproxies:\n"
@@ -66,6 +71,16 @@ for invalid in [
         pass
     else:
         raise AssertionError("Unsafe FRP gateway setting was accepted")
+import os
+os.environ["PANEL_ADDRESS"] = "ir.kolbe1.ir:443"
+assert module.frp_standard_wss_host() == "ir.kolbe1.ir"
+assert module.frp_client_server_addr("91.107.174.237") == "ir.kolbe1.ir"
+assert module.frp_client_server_port({"server_port": 7000}, 7000) == 443
+assert module.frp_tls_transport_yaml({}) == "transport:\\n  protocol: wss\\n".replace("\\n", "\n")
+os.environ["PANEL_ADDRESS"] = "10.89.10.10:8000"
+assert module.frp_standard_wss_host() == ""
+assert module.frp_client_server_port({}, 7000) == 7000
+del os.environ["PANEL_ADDRESS"]
 print("PASS: FRP gateway helper is safe and backwards-compatible")
 PY
 
