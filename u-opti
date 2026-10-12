@@ -15,7 +15,19 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
-BRANCH="${U_OPTI_BRANCH:-main}"
+# Explicit environment selection takes priority; otherwise persist install source.
+BRANCH="${U_OPTI_BRANCH:-}"
+if [ -z "$BRANCH" ]; then
+    if [ -f "$LIB_PATH/INSTALL_REF" ]; then
+        BRANCH="$(head -n 1 "$LIB_PATH/INSTALL_REF")"
+    else
+        BRANCH=main
+    fi
+fi
+if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$BRANCH" == /* ]]; then
+    echo "ERROR: Invalid persisted U-OPTI source branch/ref: $BRANCH" >&2
+    exit 1
+fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
@@ -41,6 +53,10 @@ source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 source "$MODULES_PATH/backup.sh"
 source "$MODULES_PATH/docker.sh"
+# FRP Wizard extends the Smite submenu only; original Private Wizard stays untouched.
+if [ -f "$MODULES_PATH/smite-frp-wizard.sh" ]; then
+    source "$MODULES_PATH/smite-frp-wizard.sh"
+fi
 source "$MODULES_PATH/docker-3xui-instance.sh"
 source "$MODULES_PATH/docker-3xui-certificate-multi.sh"
 source "$MODULES_PATH/docker-3xui-nginx.sh"
@@ -333,6 +349,8 @@ while true; do
                 "smite.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
+                "smite-frp-xhttp.sh"
+                "smite-frp-wizard.sh"
                 "smite-foreign-gateway.sh"
                 "docker-3xui-instance.sh"
                 "docker-3xui-certificate-multi.sh"
@@ -426,6 +444,8 @@ while true; do
                 ["smite.sh"]="$BASE_URL/modules/smite.sh"
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
                 ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
+                ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
+                ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
                 ["smite-foreign-gateway.sh"]="$BASE_URL/modules/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$BASE_URL/modules/docker-3xui-instance.sh"
                 ["docker-3xui-certificate-multi.sh"]="$BASE_URL/modules/docker-3xui-certificate-multi.sh"
@@ -454,6 +474,8 @@ while true; do
                 ["smite.sh"]="$TEMP_DIR/smite.sh"
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
                 ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
+                ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
+                ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
                 ["smite-foreign-gateway.sh"]="$TEMP_DIR/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$TEMP_DIR/docker-3xui-instance.sh"
                 ["docker-3xui-certificate-multi.sh"]="$TEMP_DIR/docker-3xui-certificate-multi.sh"
@@ -549,6 +571,7 @@ while true; do
                ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh" || \
                ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
                ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
+               ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
                ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
                ! grep -q 'docker_3xui_multi_certificate_menu()' "$TEMP_DIR/docker-3xui-certificate-multi.sh"; then
                 echo
@@ -813,6 +836,11 @@ while true; do
                 read -rp "Press Enter to return..."
                 continue
             fi
+
+            # Commit the selected source only after verified file replacement.
+            printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new" &&
+                mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
+            chmod 0644 "$LIB_PATH/INSTALL_REF"
 
             rm -rf "$BACKUP_DIR"
             cleanup_update_temp

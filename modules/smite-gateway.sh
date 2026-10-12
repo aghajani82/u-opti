@@ -10,9 +10,10 @@ SMITE_NODE_COMPOSE="${SMITE_NODE_COMPOSE:-$SMITE_NODE_DIR/docker-compose.yml}"
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="${SMITE_STATE_FILE:-$SMITE_STATE_DIR/state.env}"
 SMITE_GATEWAY_STATE_FILE="$SMITE_STATE_DIR/gateway.env"
-SMITE_GATEWAY_BACKEND_CONF="/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
-SMITE_GATEWAY_STREAM_CONF="/etc/nginx/modules-enabled/99-u-opti-smite-stream.conf"
-SMITE_GATEWAY_MAP_FILE="/etc/nginx/u-opti-smite-stream-map.conf"
+SMITE_GATEWAY_BACKEND_CONF="${SMITE_GATEWAY_BACKEND_CONF:-/etc/nginx/conf.d/u-opti-smite-panel-backend.conf}"
+SMITE_GATEWAY_STREAM_CONF="${SMITE_GATEWAY_STREAM_CONF:-/etc/nginx/modules-enabled/99-u-opti-smite-stream.conf}"
+SMITE_GATEWAY_MAP_FILE="${SMITE_GATEWAY_MAP_FILE:-/etc/nginx/u-opti-smite-stream-map.conf}"
+SMITE_GATEWAY_FRP_SNI_MAP_FILE="${SMITE_GATEWAY_FRP_SNI_MAP_FILE:-/etc/nginx/u-opti-smite-frp-sni-map.conf}"
 SMITE_GATEWAY_ACME_ROOT="/var/www/u-opti-acme"
 SMITE_GATEWAY_RENEW_HOOK="/etc/letsencrypt/renewal-hooks/deploy/u-opti-nginx-reload"
 SMITE_GATEWAY_DB="${SMITE_GATEWAY_DB:-$SMITE_PANEL_DIR/panel/data/smite.db}"
@@ -21,6 +22,11 @@ SMITE_GATEWAY_PRIVATE_DATA_PORT="${SMITE_GATEWAY_PRIVATE_DATA_PORT:-9443}"
 # Runtime transaction state. These are intentionally not persisted.
 SMITE_GATEWAY_PRIVATE_DB_BACKUP=""
 SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED=0
+
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh" ]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh"
+fi
+
 
 smite_gateway_pause() {
     echo
@@ -181,6 +187,7 @@ EOF_ACME
     systemctl reload nginx || return 1
 
     printf '%s\n' 'u-opti-smite-acme-test' > "$acme_test_file" || return 1
+    chmod 0644 "$acme_test_file" || { rm -f "$acme_test_file"; return 1; }
 
     # A fresh Nginx install/reload may briefly keep serving the old worker
     # configuration. Retry the local ACME probe instead of treating that
@@ -598,8 +605,86 @@ smite_gateway_rollback_transaction() {
         "$private_backhaul_changed"
 }
 
+# Experimental Standard-only FRP WebSocket listener through the existing
+# Panel hostname on 443. Nginx owns TLS; the FRPS TCP port stays on loopback.
+# This is intentionally separate from the legacy stream/SNI canary map.
+smite_gateway_enable_standard_frp_wss() {
+    local domain="$1"
+    [ "$(smite_gateway_connection_mode)" = standard ] || return 0
+    [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] || return 0
+    python3 - "$SMITE_GATEWAY_BACKEND_CONF" "$domain" <<'PY_FRP_WSS_NGINX'
+from pathlib import Path
+import os
+import re
+import sys
+import tempfile
+
+path, domain = Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+if not text.startswith("# Managed by U-OPTI - Smite Panel TLS backend\n"):
+    raise SystemExit("ERROR: Refusing FRP WSS edit of unmanaged backend")
+if text.count("server_name " + domain + ";") != 1:
+    raise SystemExit("ERROR: FRP WSS backend domain mismatch")
+begin = "    # BEGIN U-OPTI STANDARD FRP WSS"
+if begin in text:
+    if text.count(begin) != 1 or text.count("location = /~!frp {") != 1:
+        raise SystemExit("ERROR: Conflicting FRP WSS location")
+    print("Existing Standard FRP WSS/443 route preserved")
+    raise SystemExit(0)
+if re.search(r"(?m)^\s*location\s+(?:=\s*)?/~!frp\s*\{", text):
+    raise SystemExit("ERROR: Unmanaged FRP WSS location exists")
+anchor = "    location / {\n"
+if text.count(anchor) != 1:
+    raise SystemExit("ERROR: Unknown Smite backend location layout")
+block = """    # BEGIN U-OPTI STANDARD FRP WSS
+    location = /~!frp {
+        proxy_pass http://127.0.0.1:7000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+    }
+    # END U-OPTI STANDARD FRP WSS
+
+"""
+updated = text.replace(anchor, block + anchor, 1)
+with tempfile.NamedTemporaryFile(
+    mode="w", encoding="utf-8", dir=path.parent, prefix=".smite-wss-", delete=False
+) as output:
+    output.write(updated)
+    staged = Path(output.name)
+os.chmod(staged, 0o644)
+os.replace(staged, path)
+print("Standard FRP WSS route prepared on existing Smite HTTPS/443 backend")
+PY_FRP_WSS_NGINX
+}
+
 smite_gateway_write_backend() {
     local domain="$1"
+
+    # A live TLS backend can also serve XHTTP/other custom locations.
+    # Never erase those locations during routine gateway repair.
+    if [ -f "$SMITE_GATEWAY_BACKEND_CONF" ]; then
+        if head -n 1 "$SMITE_GATEWAY_BACKEND_CONF" | grep -Fxq '# Managed by U-OPTI - Smite Panel TLS backend' &&
+           grep -Fq "server_name $domain;" "$SMITE_GATEWAY_BACKEND_CONF" &&
+           grep -Fq "/etc/letsencrypt/live/$domain/fullchain.pem;" "$SMITE_GATEWAY_BACKEND_CONF" &&
+           grep -Fq "/etc/letsencrypt/live/$domain/privkey.pem;" "$SMITE_GATEWAY_BACKEND_CONF"; then
+            smite_gateway_enable_standard_frp_wss "$domain" || return 1
+            if declare -F smite_frp_xhttp_include >/dev/null; then
+                smite_frp_xhttp_include "$domain" || return 1
+            fi
+            echo "Existing Smite TLS backend preserved, including custom proxy locations."
+            return 0
+        fi
+
+        echo "ERROR: Existing Smite TLS backend has an unfamiliar domain/layout."
+        echo "Refusing to overwrite existing custom proxy locations."
+        return 1
+    fi
 
     cat > "$SMITE_GATEWAY_BACKEND_CONF" <<EOF_BACKEND
 # Managed by U-OPTI - Smite Panel TLS backend
@@ -629,6 +714,73 @@ server {
     }
 }
 EOF_BACKEND
+    smite_gateway_enable_standard_frp_wss "$domain" || return 1
+    if declare -F smite_frp_xhttp_include >/dev/null; then
+        smite_frp_xhttp_include "$domain" || return 1
+    fi
+}
+
+# Keep the FRP TLS/SNI allowlist separate from generated stream configuration.
+# Migrate existing manual canary rules once, before rewriting the stream file.
+smite_gateway_prepare_frp_sni_map() {
+    [ -f "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" ] && return 0
+
+    python3 - "$SMITE_GATEWAY_STREAM_CONF" "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" <<'PY_FRP_MAP'
+from pathlib import Path
+import ipaddress
+import os
+import re
+import sys
+import tempfile
+
+old_stream, dest = map(Path, sys.argv[1:3])
+rules = []
+header = re.compile(r'^\s*map\s+"\$ssl_preread_server_name\|\$remote_addr"\s+\$uopti_frp_canary_backend\s*\{\s*$')
+entry = re.compile(r'^\s*"([A-Za-z0-9.-]+)\|([0-9.]+)"\s+127\.0\.0\.1:(\d+);\s*$')
+hostname = re.compile(r'^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$')
+if old_stream.is_file():
+    lines = old_stream.read_text().splitlines()
+    starts = [i for i, line in enumerate(lines) if header.fullmatch(line)]
+    if len(starts) > 1:
+        raise SystemExit("ERROR: Duplicate FRP SNI maps")
+    if starts:
+        seen, defaults, closing = set(), 0, False
+        for line in lines[starts[0] + 1:]:
+            val = line.strip()
+            if val == "}":
+                closing = True
+                break
+            if not val or val.startswith("#"):
+                continue
+            if val == "default $uopti_smite_backend;":
+                defaults += 1
+                continue
+            match = entry.fullmatch(line)
+            if not match:
+                raise SystemExit("ERROR: Unsafe FRP SNI route; refusing to overwrite stream")
+            domain, ip, port = match.groups()
+            if not hostname.fullmatch(domain) or not 1 <= int(port) <= 65535:
+                raise SystemExit("ERROR: Invalid FRP SNI route")
+            ipaddress.IPv4Address(ip)
+            key = (domain.lower(), ip)
+            if key in seen:
+                raise SystemExit("ERROR: Duplicate FRP SNI route")
+            seen.add(key)
+            rules.append(f'    "{domain}|{ip}" 127.0.0.1:{port};')
+        if not closing or defaults != 1:
+            raise SystemExit("ERROR: Incomplete FRP SNI map")
+dest.parent.mkdir(parents=True, exist_ok=True)
+if not dest.exists():
+    contents = "# U-OPTI FRP TLS/SNI allowlist (SNI + source IPv4 required)\n"
+    if rules:
+        contents += "\n".join(rules) + "\n"
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dest.parent, prefix=".frp-sni-", delete=False) as tmp:
+        tmp.write(contents)
+        staged = Path(tmp.name)
+    os.chmod(staged, 0o644)
+    os.replace(staged, dest)
+    print(f"FRP SNI routes preserved: {len(rules)}")
+PY_FRP_MAP
 }
 
 smite_gateway_write_stream() {
@@ -636,6 +788,7 @@ smite_gateway_write_stream() {
     local map_tmp=""
     local connection_mode=""
     local default_backend="127.0.0.1:8443"
+    local local_probe_listener=""
 
     connection_mode="$(smite_gateway_connection_mode)"
 
@@ -649,6 +802,21 @@ smite_gateway_write_stream() {
         fi
 
         echo "Private Mode default TCP/443 backend: $default_backend"
+    fi
+
+    smite_gateway_prepare_frp_sni_map || return 1
+
+    # Retain the local 14443 listener if it was already configured.
+    if [ -f "$SMITE_GATEWAY_STREAM_CONF" ] &&
+       grep -Eq '^[[:space:]]*listen[[:space:]]+127\.0\.0\.1:14443;' "$SMITE_GATEWAY_STREAM_CONF"; then
+        local_probe_listener="$(cat <<'EOF_PROBE'
+    server {
+        listen 127.0.0.1:14443;
+        ssl_preread on;
+        proxy_pass $uopti_frp_canary_backend;
+    }
+EOF_PROBE
+)"
     fi
 
     map_tmp="$(mktemp)" || return 1
@@ -703,12 +871,19 @@ stream {
         default $default_backend;
     }
 
+    map "\$ssl_preread_server_name|\$remote_addr" \$uopti_frp_canary_backend {
+        include $SMITE_GATEWAY_FRP_SNI_MAP_FILE;
+        default \$uopti_smite_backend;
+    }
+
+$local_probe_listener
+
     server {
         listen 443;
         listen [::]:443;
 
         ssl_preread on;
-        proxy_pass \$uopti_smite_backend;
+        proxy_pass \$uopti_frp_canary_backend;
 
         proxy_connect_timeout 10s;
         proxy_timeout 1h;
@@ -1035,6 +1210,9 @@ smite_gateway_configure_panel() {
 
     smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
     smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
+    if declare -F smite_frp_xhttp_install_timer >/dev/null; then
+        smite_frp_xhttp_install_timer || echo "WARNING: FRP XHTTP automatic route timer could not be activated."
+    fi
 
     smite_gateway_remove_unchanged_backup "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
     smite_gateway_remove_unchanged_backup "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"

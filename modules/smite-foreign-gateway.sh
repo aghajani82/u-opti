@@ -239,6 +239,7 @@ EOF
 
     printf '%s\n' 'u-opti-smite-foreign-acme-test' > \
         "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
+    chmod 0644 "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
 
     while [ "$attempt" -le 10 ]; do
         if curl -fsS --connect-timeout 2 --max-time 5 -H "Host: $domain" \
@@ -837,6 +838,164 @@ smite_foreign_gateway_configure() {
     smite_foreign_gateway_pause
 }
 
+# Opt-in sharing of the *existing* managed Sanaei panel location.
+# Subscription and Xray forwarding stay on their original vhost.
+smite_foreign_gateway_prepare_shared_sanaei_site() {
+    python3 - "$1" "$2" <<'PY_SHARED_SANAEI'
+from pathlib import Path
+import os, re, sys, tempfile
+
+target, source = map(Path, sys.argv[1:])
+if not target.is_file() or not source.is_file() or target.resolve() == source.resolve():
+    raise SystemExit("ERROR: Expected separate existing Nginx sites")
+old, original = target.read_text(), source.read_text()
+if not old.startswith("# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway"):
+    raise SystemExit("ERROR: Target is not a managed Foreign gateway")
+if "# U-OPTI-MANAGED-3XUI-NGINX" not in original.splitlines()[:5]:
+    raise SystemExit("ERROR: Sanaei source is not U-OPTI-managed")
+bases = re.findall(r'(?m)^# Web Base Path:\s*(/[A-Za-z0-9_-]{6,80}/)\s*$', original)
+if len(bases) != 1:
+    raise SystemExit("ERROR: Expected exactly one managed Sanaei panel base path")
+base = bases[0]
+
+def block(kind, path):
+    lines = original.splitlines(keepends=True)
+    wanted = re.compile(r'^\s*location\s+' + re.escape(kind) + r'\s+' + re.escape(path) + r'\s*\{\s*$')
+    starts = [i for i, line in enumerate(lines) if wanted.fullmatch(line.rstrip("\n"))]
+    if len(starts) != 1:
+        raise SystemExit("ERROR: Unique Sanaei location not found: " + path)
+    depth, start = 0, starts[0]
+    for i in range(start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if depth == 0:
+            return "".join(lines[start:i+1])
+    raise SystemExit("ERROR: Unterminated Sanaei location")
+
+redirect = block("=", base.rstrip("/"))
+panel = block("^~", base)
+if not re.search(r'(?m)^\s*return\s+301\s+' + re.escape(base) + r';\s*$', redirect):
+    raise SystemExit("ERROR: Unexpected Sanaei redirect")
+upstreams = re.findall(r'(?m)^\s*proxy_pass\s+http://127\.0\.0\.1:(\d{1,5});\s*$', panel)
+if len(upstreams) != 1 or not 1 <= int(upstreams[0]) <= 65535:
+    raise SystemExit("ERROR: Sanaei panel upstream must be local TCP")
+begin = "    # BEGIN U-OPTI SHARED SANAEI PANEL"
+end = "    # END U-OPTI SHARED SANAEI PANEL"
+managed = begin + "\n" + redirect + "\n" + panel + "\n" + end
+if old.count(begin) != old.count(end) or old.count(begin) > 1:
+    raise SystemExit("ERROR: Invalid existing shared panel markers")
+if begin in old:
+    start = old.index(begin)
+    finish = old.index(end, start) + len(end)
+    updated = old[:start] + managed + old[finish:]
+else:
+    if re.search(
+        r'(?m)^\s*location\s+(?:=|\^~)\s+' + re.escape(base.rstrip('/')) + r'/?\s*\{',
+        old
+    ):
+        raise SystemExit("ERROR: An unmanaged Sanaei panel route already exists")
+    anchor = "    location / { try_files $uri $uri/ =404; }"
+    if old.count(anchor) != 1:
+        raise SystemExit("ERROR: Unexpected Foreign gateway layout")
+    updated = old.replace(anchor, managed + "\n\n" + anchor, 1)
+
+if updated != old:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=target.parent,
+        prefix=".shared-sanaei-", delete=False
+    ) as tmp:
+        tmp.write(updated)
+        staged = Path(tmp.name)
+    os.chmod(staged, target.stat().st_mode & 0o777)
+    os.replace(staged, target)
+    print("Sanaei management route shared; other proxy paths preserved")
+else:
+    print("Shared Sanaei management route already up to date")
+PY_SHARED_SANAEI
+}
+
+smite_foreign_gateway_share_sanaei() {
+    local domain target source="" detected="" count=0 choice route backup smite_path status attempt ok=0
+    if [ "$(id -u)" -ne 0 ] || [ "$(smite_foreign_gateway_role)" != "foreign" ]; then
+        echo "ERROR: Run on a Foreign Smite server as root."
+        smite_foreign_gateway_pause
+        return
+    fi
+
+    domain="$(smite_foreign_gateway_domain)"
+    target="$(smite_foreign_gateway_site_path "$domain")"
+    if ! smite_foreign_gateway_validate_domain "$domain" || [ ! -f "$target" ]; then
+        echo "ERROR: Foreign HTTPS/443 gateway not ready."
+        smite_foreign_gateway_pause
+        return
+    fi
+
+    echo "===== Existing managed Sanaei Nginx sites ====="
+    for source in /etc/nginx/sites-enabled/3xui-*; do
+        if [ -f "$source" ] && grep -Fq '# U-OPTI-MANAGED-3XUI-NGINX' "$source"; then
+            echo "$source"
+            detected="$source"
+            count=$((count + 1))
+        fi
+    done
+    if [ "$count" -eq 0 ]; then
+        echo "ERROR: No managed Sanaei site found."
+        smite_foreign_gateway_pause
+        return
+    fi
+    echo
+    read -rp "Source site path [auto if only one]: " choice
+    source="$choice"
+    if [ -z "$source" ] && [ "$count" -eq 1 ]; then source="$detected"; fi
+    if [[ "$source" != /etc/nginx/sites-enabled/3xui-* ]] || [ ! -f "$source" ]; then
+        echo "ERROR: Select a listed Sanaei Nginx site."
+        smite_foreign_gateway_pause
+        return
+    fi
+    route="$(sed -nE 's@^# Web Base Path: (/[A-Za-z0-9_-]+/)$@\1@p' "$source" | head -n 1)"
+    if [ -z "$route" ]; then
+        echo "ERROR: Cannot identify Sanaei panel base path."
+        smite_foreign_gateway_pause
+        return
+    fi
+    echo "Proposed shared panel: https://$domain$route"
+    echo "Only the management route will be added. Subscription and Xray paths remain untouched."
+    read -rp "Confirm sharing this Sanaei panel? [y/N]: " choice
+    case "$choice" in y|Y|yes|YES) ;; *) echo "Cancelled."; smite_foreign_gateway_pause; return ;; esac
+
+    backup="$target.before-shared-sanaei-$(date -u +%Y%m%d-%H%M%S).bak"
+    cp -a "$target" "$backup" || { smite_foreign_gateway_pause; return; }
+    if ! smite_foreign_gateway_prepare_shared_sanaei_site "$target" "$source" ||
+       ! nginx -t || ! systemctl reload nginx; then
+        cp -a "$backup" "$target"
+        nginx -t && systemctl reload nginx || true
+        echo "ERROR: Shared panel preparation failed; original Nginx site restored."
+        smite_foreign_gateway_pause
+        return
+    fi
+
+    smite_path="$(smite_foreign_gateway_control_path "$target")"
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        status="$(curl --noproxy '*' -sS --max-time 10 \
+            --resolve "$domain:443:127.0.0.1" -o /dev/null -w '%{http_code}' \
+            "https://$domain$route" 2>/dev/null || true)"
+        if [ "$status" = "200" ] &&
+           smite_foreign_gateway_verify_local "$domain" "$smite_path" >/dev/null 2>&1; then
+            ok=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$ok" -ne 1 ]; then
+        cp -a "$backup" "$target"
+        nginx -t && systemctl reload nginx || true
+        echo "ERROR: Validation failed; previous Nginx site restored."
+    else
+        echo "SUCCESS: Sanaei and Smite share https://$domain:443"
+        echo "Old Sanaei domain, subscriptions, FRP and Xray remain unchanged."
+    fi
+    smite_foreign_gateway_pause
+}
+
 show_smite_foreign_gateway_menu() {
     if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
         smite_foreign_gateway_private_notice
@@ -851,13 +1010,15 @@ show_smite_foreign_gateway_menu() {
         echo
         echo "1) Configure / Repair Foreign Gateway"
         echo "2) Foreign Gateway Status"
+        echo "3) Share Existing Sanaei Panel"
         echo
         echo "0) Back"
         echo
-        read -rp "Please enter your selection [0-2]: " choice
+        read -rp "Please enter your selection [0-3]: " choice
         case "$choice" in
             1) smite_foreign_gateway_configure ;;
             2) smite_foreign_gateway_status ;;
+            3) smite_foreign_gateway_share_sanaei ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac

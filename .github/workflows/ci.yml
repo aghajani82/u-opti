@@ -32,6 +32,38 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-compose.sh
 
+      - name: Verify Smite FRP 443 persistence and safe gateway repair
+        shell: bash
+        run: bash tests/test-smite-frp443-persistence.sh
+
+      - name: Verify independent Standard FRP Wizard and ALPN recipe
+        shell: bash
+        run: bash tests/test-smite-frp-wizard.sh
+
+      - name: Verify automatic Standard FRP XHTTP routing and rollback
+        shell: bash
+        run: bash tests/test-smite-frp-xhttp-auto.sh
+
+      - name: Verify shared Sanaei vhost survives Foreign Gateway repair
+        shell: bash
+        run: bash tests/test-smite-foreign-shared-sanaei.sh
+
+      - name: Verify shared Smite and Sanaei Docker Nginx installation
+        shell: bash
+        run: bash tests/test-smite-sanaei-nginx-shared-install.sh
+
+      - name: Verify simulated shared HTTPS activation and rollback
+        shell: bash
+        run: bash tests/test-smite-sanaei-shared-activation.sh
+
+      - name: Assert existing guided Smite Wizard is unchanged
+        shell: bash
+        run: bash tests/test-smite-wizard-preservation.sh
+
+      - name: Validate opt-in Smite FRP 443 helper for pinned images
+        shell: bash
+        run: bash tests/test-smite-frp443-optin-helper.sh
+
       - name: Validate release metadata
         shell: bash
         run: |

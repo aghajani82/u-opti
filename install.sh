@@ -12,6 +12,10 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 BRANCH="${U_OPTI_BRANCH:-main}"
+if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$BRANCH" == /* ]]; then
+    echo "ERROR: Invalid U-OPTI source branch/ref."
+    exit 1
+fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
@@ -35,6 +39,8 @@ MODULES=(
     "smite-digest-migrate.sh"
     "smite-install.sh"
     "smite-gateway.sh"
+    "smite-frp-xhttp.sh"
+    "smite-frp-wizard.sh"
     "smite-foreign-gateway.sh"
     "smite-private-network.sh"
     "smite-easytier.sh"
@@ -120,6 +126,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-digest-migrate.sh) LABEL="Smite Digest Migration" ;;
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
+        smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
@@ -161,6 +168,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'smite_digest_migrate_existing()' "$TEMP_DIR/smite-digest-migrate.sh" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
+   ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
    ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
@@ -196,6 +204,11 @@ cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
 for MODULE in "${MODULES[@]}"; do
     cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"
 done
+
+# Reuse the same source branch after shell logout, reboot and Update U-OPTI.
+printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
+mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
+chmod 0644 "$LIB_PATH/INSTALL_REF"
 
 echo
 echo "Setting permissions..."

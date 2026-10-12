@@ -581,6 +581,210 @@ for path, updated, label, changed in plans:
 PY
 }
 
+# Upgrade only the host-side compatibility overlay, not the running container.
+# The bind mount can be read-only and must be reconciled before recreation.
+# Optional Standard FRP trial only. The upstream v0.1.7 Smite image
+# is pinned but does not necessarily ship the FRP 443 TLS/SNI helper.
+# Vendoring the small validated helper as a read-only host bind mount
+# makes the experiment reproducible without altering the original Wizard
+# or republishing/upgrading the upstream Docker image.
+smite_prepare_frp443_trial_helper() {
+    local destination="$SMITE_OVERLAY_DIR/node/frp_gateway_config.py"
+    local staged
+    mkdir -p "$SMITE_OVERLAY_DIR/node" || return 1
+    staged="$(mktemp "$SMITE_OVERLAY_DIR/node/.frp-gateway-XXXXXXXX")" || return 1
+    cat > "$staged" <<'PY_FRP_HELPER'
+"""Opt-in Standard Smite FRP through the existing Panel hostname and WSS/443.
+
+This helper is mounted only when the Standard FRP trial was selected.
+Non-443/private transports keep their original FRP TCP behavior.
+"""
+import os
+import re
+
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+
+
+def frp_standard_wss_host():
+    address = os.environ.get("PANEL_ADDRESS", "").strip()
+    if not address or "://" in address:
+        return ""
+    hostname, separator, port = address.rpartition(":")
+    if not separator or port != "443":
+        return ""
+    if len(hostname) > 253 or not all(
+        _HOST_LABEL.fullmatch(label) for label in hostname.split(".")
+    ) or "." not in hostname:
+        raise ValueError("Standard FRP WSS requires a valid Panel DNS hostname")
+    return hostname
+
+
+def frp_client_server_addr(original):
+    return frp_standard_wss_host() or original
+
+
+def frp_client_server_port(spec, default_port):
+    host = frp_standard_wss_host()
+    value = spec.get("frp_gateway_port")
+    if host:
+        if value not in (None, "", 443, "443"):
+            raise ValueError("Standard FRP WSS uses the existing Panel port 443")
+        return 443
+    if value is None or value == "":
+        return default_port
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("FRP gateway port must be a number between 1 and 65535")
+    raw = str(value)
+    if not raw.isascii() or not raw.isdecimal():
+        raise ValueError("FRP gateway port must be a number between 1 and 65535")
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise ValueError("FRP gateway port must be between 1 and 65535")
+    if not spec.get("frp_tls_server_name"):
+        raise ValueError("FRP gateway port requires frp_tls_server_name")
+    return port
+
+
+def frp_tls_transport_yaml(spec):
+    host = frp_standard_wss_host()
+    if host:
+        extra = spec.get("frp_tls_server_name")
+        if extra not in (None, "", host):
+            raise ValueError("WSS uses the existing Panel hostname, not a custom SNI")
+        return "transport:\n  protocol: wss\n"
+    value = spec.get("frp_tls_server_name")
+    if value is None or value == "":
+        if spec.get("frp_gateway_port") not in (None, ""):
+            raise ValueError("FRP gateway port requires frp_tls_server_name")
+        return ""
+    if not isinstance(value, str) or len(value) > 253:
+        raise ValueError("FRP TLS server name must be a valid DNS hostname")
+    labels = value.split(".")
+    if len(labels) < 2 or not all(_HOST_LABEL.fullmatch(label) for label in labels):
+        raise ValueError("FRP TLS server name must be a valid DNS hostname")
+    return (
+        "transport:\n"
+        "  tls:\n"
+        "    enable: true\n"
+        f'    serverName: "{value}"\n'
+        "    disableCustomTLSFirstByte: true\n"
+    )
+PY_FRP_HELPER
+    if ! python3 -m py_compile "$staged"; then
+        rm -f "$staged"
+        echo "ERROR: Standard FRP WSS helper did not compile."
+        return 1
+    fi
+    chmod 0644 "$staged" || { rm -f "$staged"; return 1; }
+    mv -f "$staged" "$destination" || return 1
+    echo "Prepared Standard FRP WSS/443 helper (existing Panel hostname)."
+}
+
+smite_patch_frp443_overlay() {
+    local overlay="$SMITE_OVERLAY_DIR/node/core_adapters.py"
+    [ -f "$overlay" ] || { echo "ERROR: Smite core adapter overlay is missing."; return 1; }
+
+    if [ ! -f "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py" ] &&
+       ! docker exec smite-node test -f /app/app/frp_gateway_config.py; then
+        if grep -Fq 'frp_client_server_port(' "$overlay"; then
+            echo "ERROR: FRP 443 overlay needs a gateway helper absent from this image."
+            return 1
+        fi
+        echo "FRP 443 helper not present in this Smite image; legacy FRP retained."
+        return 0
+    fi
+
+    python3 - "$overlay" <<'PY_FRP_OVERLAY'
+from pathlib import Path
+import os
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+original = path.read_text()
+head, marker, body = original.partition("class FrpAdapter:")
+if not marker:
+    raise SystemExit("ERROR: FRP adapter class is missing")
+
+old_port = "            server_port = spec.get('server_port', 7000)\n"
+new_port = "            server_port = frp_client_server_port(spec, spec.get('server_port', 7000))\n"
+tls_line = "            tls_transport = frp_tls_transport_yaml(spec)\n"
+old_proxies = '            config_content += "\\nproxies:\\n"\n'
+new_proxies = (
+    "            if tls_transport:\n"
+    "                config_content += tls_transport\n" + old_proxies
+)
+import_line = "from app.frp_gateway_config import frp_client_server_addr, frp_client_server_port, frp_standard_wss_host, frp_tls_transport_yaml\n"
+
+if new_port in body:
+    if tls_line not in body:
+        raise SystemExit("ERROR: Incomplete FRP 443 port patch")
+elif body.count(old_port) == 1:
+    body = body.replace(old_port, new_port + tls_line, 1)
+else:
+    raise SystemExit("ERROR: Unknown FRP client port code; refusing unsafe patch")
+
+if new_proxies not in body:
+    if body.count(old_proxies) != 1:
+        raise SystemExit("ERROR: Unknown FRP proxies YAML layout; refusing unsafe patch")
+    body = body.replace(old_proxies, new_proxies, 1)
+
+
+# The Standard WSS path is selected from the existing PANEL_ADDRESS=host:443
+# instead of Smite's resolved numeric server_addr / public FRPS port.
+old_addr = "            server_addr = spec.get('server_addr', '').strip()\n"
+new_addr = old_addr + "            server_addr = frp_client_server_addr(server_addr)\n"
+if new_addr not in body:
+    if body.count(old_addr) != 1:
+        raise SystemExit("ERROR: Unexpected FRP client address layout")
+    body = body.replace(old_addr, new_addr, 1)
+
+server_conf = '            config_content = f"""bindPort: {bind_port}\n"""\n'
+server_bind = (
+    '            if frp_standard_wss_host():\n'
+    '                if int(bind_port) != 7000 or not token:\n'
+    '                    raise ValueError("Standard FRP WSS requires bind port 7000 and a token")\n'
+    '                config_content += \'bindAddr: "127.0.0.1"\\nproxyBindAddr: "127.0.0.1"\\n\'\n'
+)
+if server_bind not in body:
+    if body.count(server_conf) != 1:
+        raise SystemExit("ERROR: Unexpected FRPS configuration layout")
+    body = body.replace(server_conf, server_conf + server_bind, 1)
+
+retry = (
+    '            if frp_standard_wss_host():\n'
+    '                if not token:\n'
+    '                    raise ValueError("Standard FRP WSS requires a token")\n'
+    '                config_content = "loginFailExit: false\\n" + config_content\n'
+)
+if retry not in body:
+    if body.count(new_proxies) != 1:
+        raise SystemExit("ERROR: Unexpected FRPC transport configuration layout")
+    body = body.replace(new_proxies, new_proxies + retry, 1)
+
+if import_line not in head:
+    anchor = "from pathlib import Path\n"
+    if head.count(anchor) != 1:
+        raise SystemExit("ERROR: FRP gateway import anchor not found")
+    head = head.replace(anchor, anchor + import_line, 1)
+
+patched = head + marker + body
+compile(patched, str(path), "exec")
+if patched != original:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent,
+        prefix=".smite-frp443-", delete=False
+    ) as tmp:
+        tmp.write(patched)
+        stage = Path(tmp.name)
+    os.chmod(stage, 0o644)
+    os.replace(stage, path)
+    print("Smite FRP 443 host overlay patched; existing compatibility retained.")
+else:
+    print("Smite FRP 443 host overlay already compatible.")
+PY_FRP_OVERLAY
+}
+
 smite_prepare_overlays() {
     smite_require_docker || return 1
 
@@ -610,6 +814,13 @@ smite_prepare_overlays() {
         smite_patch_node_runtime || return 1
         docker cp smite-node:/app/app/panel_client.py "$SMITE_OVERLAY_DIR/node/panel_client.py" || return 1
         docker cp smite-node:/app/app/core_adapters.py "$SMITE_OVERLAY_DIR/node/core_adapters.py" || return 1
+        # Explicit Standard FRP Test Guide opt-in; Private Network/normal
+        # guided installation keeps its original image and behavior.
+        if [ "${SMITE_FRP_TRIAL_ONLY:-0}" = "1" ] ||
+           [ -f "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py" ]; then
+            smite_prepare_frp443_trial_helper || return 1
+        fi
+        smite_patch_frp443_overlay || return 1
         chmod 0644 "$SMITE_OVERLAY_DIR/node/panel_client.py" "$SMITE_OVERLAY_DIR/node/core_adapters.py"
     fi
 
@@ -662,6 +873,8 @@ mounts = [
     f"      - {overlay}/node/panel_client.py:/app/app/panel_client.py:ro\n",
     f"      - {overlay}/node/core_adapters.py:/app/app/core_adapters.py:ro\n",
 ]
+if (Path(overlay) / "node/frp_gateway_config.py").is_file():
+    mounts.append(f"      - {overlay}/node/frp_gateway_config.py:/app/app/frp_gateway_config.py:ro\n")
 missing = [mount for mount in mounts if mount not in s]
 if missing:
     if marker not in s:

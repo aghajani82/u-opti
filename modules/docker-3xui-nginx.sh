@@ -24,6 +24,7 @@ DOCKER_3XUI_NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 
 DOCKER_3XUI_NGINX_ACME_ROOT="/var/www/u-opti-acme"
 DOCKER_3XUI_NGINX_ACME_CONF_DIR="/etc/nginx/conf.d"
+DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT="${DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT:-/root/u-opti-backups}"
 
 DOCKER_3XUI_NGINX_CERTBOT_BIN=""
 DOCKER_3XUI_NGINX_DOMAIN=""
@@ -299,6 +300,78 @@ docker_3xui_nginx_site_is_managed() {
 }
 
 
+
+# Source-of-truth order: an already shared Sanaei vhost, then the
+# existing U-OPTI Smite Foreign standalone vhost (enabled or disabled).
+# Never import untrusted or non-U-OPTI locations.
+docker_3xui_nginx_foreign_smite_source() {
+    local existing_site standalone
+    existing_site="$(docker_3xui_nginx_site_path)"
+    standalone="$DOCKER_3XUI_NGINX_SITES_AVAILABLE/$DOCKER_3XUI_NGINX_DOMAIN"
+
+    if [[ -f "$existing_site" ]] &&
+       grep -Fq '# BEGIN U-OPTI SMITE FOREIGN CONTROL' "$existing_site"; then
+        printf '%s\n' "$existing_site"
+        return 0
+    fi
+    if [[ -f "$standalone" ]] &&
+       grep -Fq '# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway' "$standalone"; then
+        printf '%s\n' "$standalone"
+        return 0
+    fi
+    return 1
+}
+
+# The Sanaei generator remains authoritative for its own login,
+# subscription and Xray locations; only the restricted Smite control
+# location is carried into the newly generated shared HTTPS vhost.
+docker_3xui_nginx_import_smite_control() {
+    python3 - "$1" "$2" <<'PY_SMITE_MERGE'
+from pathlib import Path
+import re
+import sys
+
+generated, source = map(Path, sys.argv[1:])
+new = generated.read_text()
+old = source.read_text()
+
+begin = '# BEGIN U-OPTI SMITE FOREIGN CONTROL'
+end = '# END U-OPTI SMITE FOREIGN CONTROL'
+if old.count(begin) != 1 or old.count(end) != 1:
+    raise SystemExit('ERROR: Foreign gateway control markers missing or duplicated')
+pattern = re.compile(
+    r'(?ms)^[ \t]*# BEGIN U-OPTI SMITE FOREIGN CONTROL[^\n]*\n'
+    r'.*?^[ \t]*# END U-OPTI SMITE FOREIGN CONTROL[^\n]*(?:\n|$)'
+)
+blocks = pattern.findall(old)
+if len(blocks) != 1:
+    raise SystemExit('ERROR: Cannot isolate one Foreign Smite control block')
+block = blocks[0]
+
+control = re.findall(
+    r'(?m)^\s*location\s+\^~\s+(/smite-node/[A-Za-z0-9_-]+/)\s*\{',
+    block,
+)
+if len(control) != 1:
+    raise SystemExit('ERROR: Smite control route missing')
+if not re.search(r'(?m)^\s*deny\s+all\s*;', block):
+    raise SystemExit('ERROR: Smite control allowlist must deny all by default')
+if not re.search(r'(?m)^\s*allow\s+(?:127\.0\.0\.1|::1)\s*;', block):
+    raise SystemExit('ERROR: Smite control localhost allow missing')
+if not re.search(r'(?m)^\s*proxy_pass\s+http://127\.0\.0\.1:8888/\s*;', block):
+    raise SystemExit('ERROR: Smite control local upstream missing')
+
+if begin in new or end in new or control[0] in new:
+    raise SystemExit('ERROR: Generated Sanaei site already contains Smite control')
+anchor = '    # Sanaei Panel'
+if new.count(anchor) != 1:
+    raise SystemExit('ERROR: Unexpected generated Sanaei Nginx layout')
+updated = new.replace(anchor, '    ' + block.lstrip() + '\n' + anchor, 1)
+generated.write_text(updated)
+print('Imported protected Smite control path into Sanaei Nginx candidate')
+PY_SMITE_MERGE
+}
+
 docker_3xui_nginx_existing_domain_conflict() {
     local server_names
     local site_path
@@ -320,6 +393,18 @@ docker_3xui_nginx_existing_domain_conflict() {
     fi
 
     output="$(nginx -T 2>/dev/null || true)"
+
+    # Smite Foreign is a verified U-OPTI-managed existing HTTPS owner.
+    # The final Nginx writer must converge both services into one vhost.
+    local foreign_smite_source=""
+    foreign_smite_source="$(docker_3xui_nginx_foreign_smite_source || true)"
+    if [[ -n "$foreign_smite_source" ]]; then
+        if [[ "$server_names" != "$DOCKER_3XUI_NGINX_DOMAIN" ]]; then
+            echo "ERROR: Shared Foreign domain cannot have additional aliases."
+            return 1
+        fi
+        return 0
+    fi
 
     for name in $server_names; do
         if grep -Eq \
@@ -349,6 +434,25 @@ docker_3xui_nginx_prepare_acme() {
 
     conf_path="$(docker_3xui_nginx_acme_conf_path)"
     server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
+
+    # Reuse the verified Smite HTTP-01 webroot when the two panels
+    # intentionally share one public domain. Never create two :80 vhosts.
+    local smite_acme="$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-acme-${DOCKER_3XUI_NGINX_DOMAIN}.conf"
+    if [[ -f "$smite_acme" ]]; then
+        if [[ -f "$conf_path" ]]; then
+            echo "ERROR: Both Smite and Sanaei ACME sites exist for this domain."
+            echo "Consolidate the duplicate HTTP/80 vhosts before Nginx/SSL Repair."
+            return 1
+        fi
+        if ! grep -Fq '# U-OPTI Smite Foreign ACME webroot' "$smite_acme" ||
+           ! grep -Fq "root $DOCKER_3XUI_NGINX_ACME_ROOT;" "$smite_acme" ||
+           ! grep -Fq "server_name $DOCKER_3XUI_NGINX_DOMAIN;" "$smite_acme"; then
+            echo "ERROR: Existing Smite ACME vhost cannot be verified as compatible."
+            return 1
+        fi
+        echo "Reusing existing Smite ACME HTTP/80 vhost: $smite_acme"
+        return 0
+    fi
 
     mkdir -p \
         "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge" ||
@@ -422,9 +526,10 @@ docker_3xui_nginx_test_acme() {
     local attempt
     local name
 
-    test_file="$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test"
+    test_file="$(mktemp "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test-XXXXXXXX")" || return 1
 
-    printf '%s\n' "u-opti-test" > "$test_file" || return 1
+    printf '%s\n' "u-opti-test" > "$test_file" || { rm -f "$test_file"; return 1; }
+    chmod 0644 "$test_file" || { rm -f "$test_file"; return 1; }
 
     # Test every server name; each must resolve to the same ACME webroot.
     for name in $(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN"); do
@@ -434,8 +539,9 @@ docker_3xui_nginx_test_acme() {
             response="$(
                 curl -fsS \
                     --max-time 10 \
+                    --noproxy '*' \
                     -H "Host: $name" \
-                    "http://127.0.0.1/.well-known/acme-challenge/u-opti-test" \
+                    "http://127.0.0.1/.well-known/acme-challenge/$(basename "$test_file")" \
                     2>/dev/null
             )"
             curl_status=$?
@@ -526,6 +632,88 @@ docker_3xui_nginx_issue_certificate() {
     return 0
 }
 
+
+
+# When Sanaei is installed on the existing Foreign Smite domain, it owns
+# the single HTTPS server{} and carries the restricted Smite control block.
+# Never remove Smite data, its Docker container, or the certificate.
+docker_3xui_nginx_activate_shared_smite() {
+    local candidate="$1" target="$2"
+    local smite_site="$DOCKER_3XUI_NGINX_SITES_AVAILABLE/$DOCKER_3XUI_NGINX_DOMAIN"
+    local smite_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$DOCKER_3XUI_NGINX_DOMAIN"
+    local sanaei_link="$DOCKER_3XUI_NGINX_SITES_ENABLED/$(basename "$target")"
+    local backup="$DOCKER_3XUI_NGINX_SHARED_BACKUP_ROOT/3xui-smite-shared-$(date -u +%Y%m%d-%H%M%S)"
+    local had_smite_link=0 had_site=0 had_sanaei_link=0 failed=0
+    local nginx_result="" control="" sanaei_http="" smite_http="" attempt
+
+    if [[ -e "$smite_link" || -L "$smite_link" ]]; then
+        if [[ ! -L "$smite_link" ||
+              "$(readlink -f "$smite_link")" != "$smite_site" ]] ||
+           ! grep -Fq '# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway' "$smite_site"; then
+            echo "ERROR: Foreign Smite HTTPS site is not managed; refusing to change it."
+            return 1
+        fi
+        had_smite_link=1
+    fi
+    if [[ -e "$sanaei_link" || -L "$sanaei_link" ]]; then
+        if [[ ! -L "$sanaei_link" || "$(readlink -f "$sanaei_link")" != "$target" ]]; then
+            echo "ERROR: Unexpected Sanaei enabled site; refusing to change it."
+            return 1
+        fi
+        had_sanaei_link=1
+    fi
+    if [[ -f "$target" ]]; then
+        docker_3xui_nginx_site_is_managed "$target" || {
+            echo "ERROR: Existing Sanaei site is not U-OPTI-managed."
+            return 1
+        }
+        had_site=1
+    fi
+    mkdir -p -m 700 "$backup" || return 1
+    if [[ "$had_site" -eq 1 ]]; then cp -a "$target" "$backup/sanaei.conf" || return 1; fi
+    if [[ "$had_smite_link" -eq 1 ]]; then cp -a "$smite_site" "$backup/smite.conf" || return 1; fi
+
+    mv -f "$candidate" "$target" || return 1
+    if [[ "$had_smite_link" -eq 1 ]]; then rm -f "$smite_link"; fi
+    docker_3xui_nginx_enable_site "$target" || failed=1
+    nginx_result="$(nginx -t 2>&1)" || failed=1
+    if grep -Eq 'conflicting server name .*on .*:443' <<< "$nginx_result"; then failed=1; fi
+    if [[ "$failed" -eq 0 ]]; then systemctl reload nginx || failed=1; fi
+
+    if [[ "$failed" -eq 0 ]]; then
+        control="$(sed -nE 's@^[[:space:]]*location[[:space:]]+\^~[[:space:]]+(/smite-node/[A-Za-z0-9_-]+/)[[:space:]]*\{.*@\1@p' "$target" | head -n1)"
+        if [[ -z "$control" ]]; then
+            failed=1
+        else
+            for attempt in {1..10}; do
+                sanaei_http="$(curl --noproxy '*' -sS --max-time 8 \
+                    --resolve "$DOCKER_3XUI_NGINX_DOMAIN:443:127.0.0.1" \
+                    -o /dev/null -w '%{http_code}' \
+                    "https://$DOCKER_3XUI_NGINX_DOMAIN$DOCKER_3XUI_NGINX_WEB_BASE_PATH" 2>/dev/null || true)"
+                smite_http="$(curl --noproxy '*' -sS --max-time 8 \
+                    --resolve "$DOCKER_3XUI_NGINX_DOMAIN:443:127.0.0.1" \
+                    -o /dev/null -w '%{http_code}' \
+                    "https://$DOCKER_3XUI_NGINX_DOMAIN${control}api/agent/status" 2>/dev/null || true)"
+                if [[ "$sanaei_http" = 200 && "$smite_http" = 200 ]]; then break; fi
+                sleep 2
+            done
+            if [[ "$sanaei_http" != 200 || "$smite_http" != 200 ]]; then failed=1; fi
+        fi
+    fi
+
+    if [[ "$failed" -ne 0 ]]; then
+        echo "ERROR: Shared 443 activation failed: Sanaei=${sanaei_http:-none} Smite=${smite_http:-none}"
+        echo "$nginx_result"
+        if [[ "$had_site" -eq 1 ]]; then cp -a "$backup/sanaei.conf" "$target"; else rm -f "$target"; fi
+        if [[ "$had_sanaei_link" -eq 0 ]]; then rm -f "$sanaei_link"; fi
+        if [[ "$had_smite_link" -eq 1 ]]; then ln -sfn "$smite_site" "$smite_link"; fi
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+        echo "Restored Nginx configuration; backup retained: $backup"
+        return 1
+    fi
+    echo "Shared Smite/Sanaei HTTPS/443 ready; rollback backup: $backup"
+    return 0
+}
 
 docker_3xui_nginx_write_site() {
     local site_path
@@ -683,6 +871,17 @@ EOF_PANEL_PATH
 }
 EOF_CONF
 
+    local smite_source=""
+    smite_source="$(docker_3xui_nginx_foreign_smite_source || true)"
+    if [[ -n "$smite_source" ]]; then
+        if ! docker_3xui_nginx_import_smite_control "$temp_path" "$smite_source"; then
+            rm -f "$temp_path"
+            return 1
+        fi
+        docker_3xui_nginx_activate_shared_smite "$temp_path" "$site_path"
+        return $?
+    fi
+
     if ! nginx -t >/dev/null 2>&1; then
         rm -f "$temp_path"
 
@@ -783,7 +982,11 @@ docker_3xui_nginx_show_result() {
     echo
     echo "Nginx Site   : $(docker_3xui_nginx_site_path)"
     echo "Certificate  : /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/"
-    echo "ACME Config  : $(docker_3xui_nginx_acme_conf_path)"
+    local acme_display="$(docker_3xui_nginx_acme_conf_path)"
+    if [[ ! -f "$acme_display" && -f "$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-acme-${DOCKER_3XUI_NGINX_DOMAIN}.conf" ]]; then
+        acme_display="$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-acme-${DOCKER_3XUI_NGINX_DOMAIN}.conf"
+    fi
+    echo "ACME Config  : $acme_display"
     echo "Renew Hook   : /etc/letsencrypt/renewal-hooks/deploy/u-opti-3xui-nginx-${DOCKER_3XUI_NGINX_DOMAIN}.sh"
     echo
     echo "Xray paths   : /PORT/PATH"
@@ -940,7 +1143,7 @@ docker_3xui_nginx_status() {
         echo "Nginx Site   : Not configured"
     fi
 
-    if [[ -f "$acme_conf" ]]; then
+    if [[ -f "$acme_conf" || -f "$DOCKER_3XUI_NGINX_ACME_CONF_DIR/u-opti-acme-${DOCKER_3XUI_NGINX_DOMAIN}.conf" ]]; then
         echo "ACME         : Configured"
     else
         echo "ACME         : Not configured"
