@@ -56,8 +56,24 @@ smite_frp_xhttp_sync() {
     candidate="$(mktemp "$(dirname "$SMITE_FRP_XHTTP_CONF")/.frp-xhttp-new-XXXXXXXX")" || { rm -f "$snapshot"; return 1; }
     backup="$(mktemp "$(dirname "$SMITE_FRP_XHTTP_CONF")/.frp-xhttp-old-XXXXXXXX")" || { rm -f "$snapshot" "$candidate"; return 1; }
     chmod 0600 "$snapshot" "$candidate" "$backup"
-    if ! docker exec smite-node cat /var/lib/smite-node/tunnels.json > "$snapshot"; then
-        echo "ERROR: Cannot read persisted FRP tunnels; retaining existing routes" >&2
+    # Smite creates tunnels.json only after its first tunnel is applied.
+    # On a fresh Standard installation, this is a normal zero-tunnel state.
+    # Never interpret an unavailable Docker node or a disappeared state file
+    # with existing routes as an empty set: that could silently drop routes.
+    if docker exec smite-node test -f /var/lib/smite-node/tunnels.json >/dev/null 2>&1; then
+        if ! docker exec smite-node cat /var/lib/smite-node/tunnels.json > "$snapshot"; then
+            echo "ERROR: Cannot read persisted FRP tunnels; retaining existing routes" >&2
+            rm -f "$snapshot" "$candidate" "$backup"
+            return 1
+        fi
+    elif docker exec smite-node test -d /var/lib/smite-node >/dev/null 2>&1 &&
+         ! grep -Eq '^[[:space:]]*location[[:space:]]' "$SMITE_FRP_XHTTP_CONF"; then
+        # No persisted tunnel file and no previously published FRP routes.
+        # Do not change Nginx; keep the timer active for first tunnel creation.
+        printf '{}\n' > "$snapshot"
+        echo "No FRP tunnels yet; XHTTP auto-sync ready."
+    else
+        echo "ERROR: FRP state unavailable after routes existed, or Smite node is offline; retaining existing routes" >&2
         rm -f "$snapshot" "$candidate" "$backup"
         return 1
     fi
