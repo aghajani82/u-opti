@@ -35,6 +35,7 @@ MODULES=(
     "smite-digest-migrate.sh"
     "smite-install.sh"
     "smite-gateway.sh"
+    "smite-frp-xhttp.sh"
     "smite-foreign-gateway.sh"
     "smite-private-network.sh"
     "smite-easytier.sh"
@@ -120,6 +121,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-digest-migrate.sh) LABEL="Smite Digest Migration" ;;
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
+        smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
