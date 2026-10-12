@@ -606,7 +606,7 @@ smite_gateway_rollback_transaction() {
 smite_gateway_enable_standard_frp_wss() {
     local domain="$1"
     [ "$(smite_gateway_connection_mode)" = standard ] || return 0
-    [ -f "\${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] || return 0
+    [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] || return 0
     python3 - "$SMITE_GATEWAY_BACKEND_CONF" "$domain" <<'PY_FRP_WSS_NGINX'
 from pathlib import Path
 import os
