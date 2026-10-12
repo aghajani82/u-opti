@@ -6,6 +6,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 export SMITE_STATE_DIR="$tmp/state"
+export SMITE_FRP_XHTTP_CONF="$tmp/managed-xhttp.conf"
 export SMITE_GATEWAY_BACKEND_CONF="$tmp/backend.conf"
 export SMITE_GATEWAY_STREAM_CONF="$tmp/stream.conf"
 export SMITE_GATEWAY_MAP_FILE="$tmp/regular-map.conf"
