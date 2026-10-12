@@ -98,6 +98,11 @@ from pathlib import Path
 class FrpAdapter:
     def apply(self, spec):
         if spec.get("mode") == "client":
+            bind_port = spec.get('bind_port', 7000)
+            token = spec.get('token')
+            config_content = f"""bindPort: {bind_port}
+"""
+            server_addr = spec.get('server_addr', '').strip()
             server_port = spec.get('server_port', 7000)
             token = spec.get('token')
             config_content = "serverPort: {}\n".format(server_port)
