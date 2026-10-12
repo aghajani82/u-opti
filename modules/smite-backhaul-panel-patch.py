@@ -120,23 +120,30 @@ def patch_panel_source(filename: str, source: str) -> str:
         )
         output = head + begin + patched + end + tail
     elif filename == "tunnels.py":
-        if "    # Never allow an edit to silently downgrade" in source:
-            if source.count("    # Never allow an edit to silently downgrade") != 1:
+        # A real Smite v0.1.7 Panel has TWO 'elif needs_backhaul_server:'
+        # blocks: one in update_tunnel (may START a second Backhaul server)
+        # and one in delete_tunnel (correctly STOPS it). Only patch the
+        # update_tunnel method and preserve the delete handler verbatim.
+        head, begin, rest = source.partition("async def update_tunnel(")
+        body, end, tail = rest.partition('@router.post("/{tunnel_id}/apply")')
+        if not begin or not end or "async def apply_tunnel(" not in tail:
+            raise ValueError("Pinned Smite update/apply handler boundaries missing")
+        if "    # Never allow an edit to silently downgrade" in body:
+            if body.count("    # Never allow an edit to silently downgrade") != 1:
                 raise ValueError("Ambiguous existing tunnel downgrade guard")
-            output = source
-        elif source.count(UPDATE_ANCHOR) == 1:
-            # Insert BEFORE the existing if-body. Appending after the if line
-            # would create invalid Python and shadow the real update action.
-            output = source.replace(UPDATE_ANCHOR, UPDATE_GUARD + UPDATE_ANCHOR, 1)
+        elif body.count(UPDATE_ANCHOR) == 1:
+            # Insert BEFORE the existing if-body; do not shadow update logic.
+            body = body.replace(UPDATE_ANCHOR, UPDATE_GUARD + UPDATE_ANCHOR, 1)
         else:
             raise ValueError("Tunnel update upstream anchor missing")
-        if MANAGER_GUARD in output:
-            if output.count(MANAGER_GUARD) != 1:
-                raise ValueError("Ambiguous Backhaul panel manager guard")
-        elif output.count(MANAGER_ANCHOR) == 1:
-            output = output.replace(MANAGER_ANCHOR, MANAGER_GUARD, 1)
+        if MANAGER_GUARD in body:
+            if body.count(MANAGER_GUARD) != 1:
+                raise ValueError("Ambiguous existing Backhaul update guard")
+        elif body.count(MANAGER_ANCHOR) == 1:
+            body = body.replace(MANAGER_ANCHOR, MANAGER_GUARD, 1)
         else:
-            raise ValueError("Backhaul panel manager update anchor missing")
+            raise ValueError("Backhaul update manager anchor missing")
+        output = head + begin + body + end + tail
     else:
         raise ValueError(f"Unexpected panel file {filename!r}")
     compile(output, filename, "exec")
