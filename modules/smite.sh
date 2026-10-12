@@ -816,7 +816,8 @@ smite_prepare_overlays() {
         docker cp smite-node:/app/app/core_adapters.py "$SMITE_OVERLAY_DIR/node/core_adapters.py" || return 1
         # Explicit Standard FRP Test Guide opt-in; Private Network/normal
         # guided installation keeps its original image and behavior.
-        if [ "${SMITE_FRP_TRIAL_ONLY:-0}" = "1" ]; then
+        if [ "${SMITE_FRP_TRIAL_ONLY:-0}" = "1" ] ||
+           [ -f "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py" ]; then
             smite_prepare_frp443_trial_helper || return 1
         fi
         smite_patch_frp443_overlay || return 1
