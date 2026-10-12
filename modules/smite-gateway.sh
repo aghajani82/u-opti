@@ -3,10 +3,6 @@
 # U-OPTI - Smite 443 Gateway Management
 # Host Nginx + Let's Encrypt webroot + stream/SNI gateway for Smite Panel.
 
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh"
-fi
-
 SMITE_PANEL_DIR="${SMITE_PANEL_DIR:-/opt/smite}"
 SMITE_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 SMITE_PANEL_COMPOSE="${SMITE_PANEL_COMPOSE:-$SMITE_PANEL_DIR/docker-compose.yml}"
@@ -26,6 +22,11 @@ SMITE_GATEWAY_PRIVATE_DATA_PORT="${SMITE_GATEWAY_PRIVATE_DATA_PORT:-9443}"
 # Runtime transaction state. These are intentionally not persisted.
 SMITE_GATEWAY_PRIVATE_DB_BACKUP=""
 SMITE_GATEWAY_PRIVATE_BACKHAUL_CHANGED=0
+
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh" ]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh"
+fi
+
 
 smite_gateway_pause() {
     echo
