@@ -2,6 +2,8 @@
 
 Status: **EXPERIMENTAL / DO NOT DEPLOY ON PRODUCTION**, PR #16 on `fix/smite-frp443-persistence`.
 
+**Live update, 2026-10-12:** Standard FRP native WSS/443, IR localhost TCP forward, generated XHTTP Nginx route and a v2rayN VLESS/XHTTP client have now succeeded on the two experimental servers. The client required explicit `ALPN=http/1.1` (blank ALPN failed); observed v2rayN latency was approximately 141 ms. See [the clean-rebuild wizard guide](standard-frp-wizard-rebuild.md). The older failure investigation below is historical; clean reinstall, full-host reboots and security gates remain pending.
+
 This document records the next steps so future changes do not silently replace the working Smite installation procedure or production FRP/XHTTP service.
 
 ## Non-negotiable compatibility boundary
@@ -62,7 +64,7 @@ This document records the next steps so future changes do not silently replace t
 - **At each failure:** capture logs, fix the test branch only, let CI complete, re-run the failed step on the rebuilt test system, and confirm the earlier successful steps still work. Preserve snapshots throughout.
 - **Final gate:** re-test ACME dry run, all shared host routes, FRP reconnect/reboot behavior, Repair, backup/restore, and security allowlists. Only after approval and CI/end-to-end success should the PR be merged into `main` and released.
 
-## Fresh-install FRP failure observed (2026-10-12; not fixed yet)
+## Historical fresh-install FRP failure observed (2026-10-12; subsequently fixed in the experimental branch)
 
 The clean **Standard** IR/KH installation passed Docker, Smite Panel + two nodes, IR and KH HTTPS/443 gateways, and shared KH Sanaei/Smite Nginx without manual edits. A fresh Sanaei XHTTP inbound listened on KH loopback TCP/13914. The native Smite UI then created a TCP FRP tunnel with `bind_port=7000`, forwarded TCP/13914, and an automatically generated token.
 
@@ -89,4 +91,4 @@ Auto-managed responsibilities to implement **before executing on the test server
 - **IR HTTPS XHTTP data route:** separately create/reconcile an approved path such as `/13914/web` forwarded to the correct **IR-side FRPS exposed data port**, preserving the intended `/web` path for KH's loopback Xray; do not route any arbitrary numeric URL to unvalidated localhost ports. FRP WSS control transport and XHTTP data proxy are two **different paths**.
 - **Lifecycle:** source foreign-peer IP from verified Smite node registration; handle IP changes, multiple FRP tunnels and automatic reassignment; ensure staging/atomic rollback, DNS/certificate consistency, and that panel-to-node HTTPS requests are not rerouted; report FRPC connection readiness rather than just application of a spec; verify renewal, Repair, and reboots.
 
-Native FRP v0.71 config supports `transport.protocol = "wss"`, top-level `loginFailExit = false`; FRP source documents fixed WS path `/~!frp`. This design remains **unimplemented**, needs a minimal no-secrets WSS proof test and integration regression suite, and must not be merged based on documentation alone.
+Native FRP v0.71 config supports `transport.protocol = "wss"`, top-level `loginFailExit = false`; FRP source documents fixed WS path `/~!frp`. **Status update:** The experimental branch implements WSS/443, persists compatibility overlays and reconciles IR XHTTP locations; real WSS login, FRP proxy start and client traffic were confirmed on 2026-10-12. Security hardening, fresh-install reproducibility and full reboot/renewal regression remain mandatory before merging.
