@@ -3,6 +3,10 @@
 # U-OPTI - Smite 443 Gateway Management
 # Host Nginx + Let's Encrypt webroot + stream/SNI gateway for Smite Panel.
 
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh" ]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/smite-frp-xhttp.sh"
+fi
+
 SMITE_PANEL_DIR="${SMITE_PANEL_DIR:-/opt/smite}"
 SMITE_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 SMITE_PANEL_COMPOSE="${SMITE_PANEL_COMPOSE:-$SMITE_PANEL_DIR/docker-compose.yml}"
@@ -669,6 +673,9 @@ smite_gateway_write_backend() {
            grep -Fq "/etc/letsencrypt/live/$domain/fullchain.pem;" "$SMITE_GATEWAY_BACKEND_CONF" &&
            grep -Fq "/etc/letsencrypt/live/$domain/privkey.pem;" "$SMITE_GATEWAY_BACKEND_CONF"; then
             smite_gateway_enable_standard_frp_wss "$domain" || return 1
+            if declare -F smite_frp_xhttp_include >/dev/null; then
+                smite_frp_xhttp_include "$domain" || return 1
+            fi
             echo "Existing Smite TLS backend preserved, including custom proxy locations."
             return 0
         fi
@@ -707,6 +714,9 @@ server {
 }
 EOF_BACKEND
     smite_gateway_enable_standard_frp_wss "$domain" || return 1
+    if declare -F smite_frp_xhttp_include >/dev/null; then
+        smite_frp_xhttp_include "$domain" || return 1
+    fi
 }
 
 # Keep the FRP TLS/SNI allowlist separate from generated stream configuration.
@@ -1199,6 +1209,9 @@ smite_gateway_configure_panel() {
 
     smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
     smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
+    if declare -F smite_frp_xhttp_install_timer >/dev/null; then
+        smite_frp_xhttp_install_timer || echo "WARNING: FRP XHTTP automatic route timer could not be activated."
+    fi
 
     smite_gateway_remove_unchanged_backup "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
     smite_gateway_remove_unchanged_backup "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"
