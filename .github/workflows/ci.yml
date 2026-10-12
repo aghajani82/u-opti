@@ -84,6 +84,12 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-node-patch.py
           python3 tests/test-smite-backhaul-node-patch.py
 
+      - name: Validate Standard Backhaul panel candidate patch
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-panel-patch.py
+          python3 tests/test-smite-backhaul-panel-patch.py
+
       - name: Validate release metadata
         shell: bash
         run: |

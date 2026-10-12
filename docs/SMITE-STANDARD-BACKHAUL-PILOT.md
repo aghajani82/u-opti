@@ -117,3 +117,29 @@ managers and startup/reapply/create paths; some default to `0.0.0.0` and
 can spawn an additional server. These must be made Standard-aware before any
 Backhaul tunnel is created from the panel. Do NOT activate the candidate
 node adapter on a live Smite server yet.
+
+## Stage 3: fail-closed panel overlay candidates (NOT installed)
+
+`modules/smite-backhaul-panel-patch.py` prepares three **candidate** Smite
+Panel v0.1.7 overlays. It does not edit running containers:
+
+- `node_client.py`: all node-bound Standard Backhaul `apply` commands,
+  including create, manual/auto Reapply and panel startup sync, are compiled
+  from the canonical database tunnel spec. Node roles select IR loopback
+  server versus KH loopback TLS-bridge client. A missing/invalid canonical
+  opt-in source is rejected without contacting the Node.
+- `main.py`: the Panel's separate Backhaul manager does not start a
+  duplicate listener during startup for Standard tunnels; Smite Node owns it.
+- `tunnels.py`: the Panel's older direct Backhaul manager is skipped on
+  manual update, and editing a Standard tunnel cannot silently remove its
+  `uopti_standard_backhaul` marker.
+
+This is not a complete deployment: it must be reconciled with U-OPTI's existing
+Panel/Node persistent overlays, installed and mounted only via a guarded opt-in
+procedure, then checked against actual create/reapply/restart workflows.
+An ordinary Smite UI Backhaul tunnel is **not** a Standard opt-in tunnel.
+
+The pinned upstream Smite token helper defaults to 16 characters. Standard
+mode therefore requires a separate Wizard generating and storing a longer
+random token BEFORE sending any apply command; a default upstream token is
+intentionally rejected by the fail-closed guard.
