@@ -22,7 +22,7 @@ smite_frp_xhttp_include() {
     python3 - "$SMITE_FRP_XHTTP_BACKEND" "$SMITE_FRP_XHTTP_CONF" "$domain" <<'PY'
 from pathlib import Path
 import os, sys, tempfile
-backend, snippet, domain = map(Path, sys.argv[1:3]) if False else (Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])
+backend, snippet, domain = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 text = backend.read_text()
 if not text.startswith("# Managed by U-OPTI - Smite Panel TLS backend\n") or text.count(f"server_name {domain};") != 1:
     raise SystemExit("ERROR: Unrecognized Panel TLS backend")
