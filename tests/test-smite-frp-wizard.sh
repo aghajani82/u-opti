@@ -29,6 +29,8 @@ smite_frp_wizard_port() { printf 13914; }
 
 # The original functions above must remain untouched when wizard is sourced.
 source modules/smite-frp-wizard.sh
+smite_frp_wizard_pause() { :; }
+smite_frp_wizard_port() { printf 13914; }
 test "$(smite_frp_wizard_role)" = ir
 smite_frp_wizard_client_out="$(smite_frp_wizard_client)"
 grep -Fq 'ALPN: http/1.1' <<< "$smite_frp_wizard_client_out"
