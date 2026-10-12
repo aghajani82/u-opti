@@ -65,8 +65,13 @@ JSON
 smite_frp_xhttp_sync
 grep -Fq 'location = /13914/web {' "$SMITE_FRP_XHTTP_CONF"
 grep -Fq 'location ^~ /13914/web/ {' "$SMITE_FRP_XHTTP_CONF"
-grep -Fq 'proxy_pass http://127.0.0.1:13914/web;' "$SMITE_FRP_XHTTP_CONF"
-grep -Fq 'proxy_pass http://127.0.0.1:13914/web/;' "$SMITE_FRP_XHTTP_CONF"
+# Both /13914/web and /13914/web/ must reach KH unmodified.
+# proxy_pass with a URI suffix would silently rewrite the upstream XHTTP path.
+test "$(grep -Fc 'proxy_pass http://127.0.0.1:13914;' "$SMITE_FRP_XHTTP_CONF")" -eq 2
+if grep -Fq 'proxy_pass http://127.0.0.1:13914/' "$SMITE_FRP_XHTTP_CONF"; then
+    echo "ERROR: Client XHTTP path must not be rewritten to /web"
+    exit 1
+fi
 if grep -Fq '30000' "$SMITE_FRP_XHTTP_CONF" || grep -Fq '30001' "$SMITE_FRP_XHTTP_CONF"; then
     echo "ERROR: Non-server FRP ports were exposed"
     exit 1
