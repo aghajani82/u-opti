@@ -143,3 +143,43 @@ The pinned upstream Smite token helper defaults to 16 characters. Standard
 mode therefore requires a separate Wizard generating and storing a longer
 random token BEFORE sending any apply command; a default upstream token is
 intentionally rejected by the fail-closed guard.
+
+## Stage 4: packaged, preparation-only management — NOT activated
+
+`modules/smite-backhaul-management.sh` introduces a fourth Smite submenu
+choice: **Standard Backhaul (preparation only)**. Options 1–3 retain their
+original Private Network and Standard FRP handlers without changing those
+modules. Fresh installation and the *newer* U-OPTI updater bundle its Bash and
+Python dependencies. Update backups include missing-file markers and a dynamic
+count so a failed update can remove newly installed modules.
+
+The menu offers:
+- Read-only status, strict Standard-only role and pinned image preflight.
+- Offline preparation of **candidate** Panel/Node Python overlays and Nginx
+  fragments under a private, versioned staging directory. The original host
+  overlays are copied for review before any patching, not replaced.
+- SHA256 integrity verification and removal of **unused staging files only**.
+
+The preflight confirms no Backhaul process or TOML, expected Docker image and
+bind-mounted Node adapter, valid existing Nginx, reserved ports, live IR FRP or
+KH loopback Xray, and a supported Standard role. It never opens provider ports.
+
+**This is not operational activation or live rollback.** No running Docker
+container, Nginx configuration, TLS certificate, firewall, Sanaei inbound or
+FRP tunnel is changed by these commands. Stage deletion is NOT a restoration
+of live production services. There is deliberately no Activate menu choice.
+
+Important caveat: an older pre-upgrade U-OPTI updater may not fetch newly
+introduced files; an end-to-end upgrade should be simulated before trying it
+on production. The project version remains v0.16.0 because PR #18 is Draft.
+
+Offline regression tests:
+
+```bash
+bash tests/test-smite-backhaul-packaging.sh
+bash tests/test-smite-backhaul-management.sh
+```
+
+Next: scrutinize exact v0.7.2 control/data bind syntax, test the candidate
+against the *existing* patched U-OPTI overlays on IR/KH (without modifying
+them), then implement separately reviewed atomic activation and live rollback.

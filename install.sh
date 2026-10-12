@@ -41,6 +41,11 @@ MODULES=(
     "smite-gateway.sh"
     "smite-frp-xhttp.sh"
     "smite-frp-wizard.sh"
+    "smite-backhaul-management.sh"
+    "smite-backhaul-standard.sh"
+    "smite-backhaul-spec.py"
+    "smite-backhaul-node-patch.py"
+    "smite-backhaul-panel-patch.py"
     "smite-foreign-gateway.sh"
     "smite-private-network.sh"
     "smite-easytier.sh"
@@ -127,6 +132,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
+        smite-backhaul-management.sh) LABEL="Smite Standard Backhaul Preparation (no activation)" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
@@ -169,6 +175,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
    ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
+   ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
    ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
@@ -188,9 +195,12 @@ echo "Checking Bash syntax..."
 bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
 for MODULE in "${MODULES[@]}"; do
-    bash -n "$TEMP_DIR/$MODULE"
+    case "$MODULE" in
+        *.py) python3 -m py_compile "$TEMP_DIR/$MODULE" || exit 1 ;;
+        *) bash -n "$TEMP_DIR/$MODULE" || exit 1 ;;
+    esac
 done
-echo "Bash syntax check passed."
+echo "Bash/Python syntax checks passed."
 
 echo
 echo "Creating directories..."

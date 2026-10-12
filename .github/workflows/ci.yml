@@ -90,6 +90,13 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-panel-patch.py
           python3 tests/test-smite-backhaul-panel-patch.py
 
+      - name: Validate Standard Backhaul prepare-only packaging
+        shell: bash
+        run: |
+          bash -n modules/smite-backhaul-management.sh
+          bash tests/test-smite-backhaul-packaging.sh
+          bash tests/test-smite-backhaul-management.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
