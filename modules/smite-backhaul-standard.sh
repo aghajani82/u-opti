@@ -64,16 +64,35 @@ EOF
     printf '%s\n' '    location / { return 404; }' '}'
 }
 uopti_bh_render_ir_xhttp() {
-    local p="$1" typ
+    # Opt-in renderer only, NOT a live route installer.
+    # Inputs must match KH Sanaei's actual XHTTP Path and Host.
+    local p="$1" path="$2" host="$3" typ
     [ -n "$p" ] || p=56053
+    [ -n "$path" ] || path="/$p/www"
+    [ -n "$host" ] || host="kh.kolbe1.ir"
     uopti_bh_valid_port "$p" || return 1
+    uopti_bh_valid_domain "$host" || return 1
+    # Restrict to the forwarded port's URL namespace; reject Nginx injections,
+    # existing FRP locations and paths with a trailing slash here.
+    [[ "$path" =~ ^/$p/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || return 1
     echo "# IR: add only AFTER Backhaul data listener 127.0.0.1:$p is verified."
+    echo "# KH Sanaei XHTTP path: $path/ | upstream Host: $host"
     for typ in exact prefix; do
-        if [ "$typ" = exact ]; then echo "    location = /$p/web {"; else echo "    location ^~ /$p/web/ {"; fi
+        if [ "$typ" = exact ]; then
+            echo "    location = $path {"
+            # KH Xray returns 404 on the bare path but 200 + X-Padding on
+            # the trailing slash. Rewrite ONLY this exact request upstream,
+            # retaining method/body; do not redirect an XHTTP POST client.
+            echo "        proxy_pass http://127.0.0.1:$p$path/;"
+        else
+            echo "    location ^~ $path/ {"
+            # No URI in proxy_pass for prefix: preserve the actual XHTTP URI.
+            echo "        proxy_pass http://127.0.0.1:$p;"
+        fi
         cat <<EOF
-        proxy_pass http://127.0.0.1:$p;
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off;
         proxy_request_buffering off;
@@ -87,7 +106,7 @@ if [[ "$0" == "${BASH_SOURCE[0]}" ]]; then
     case "$1" in
         --render-ir-control) uopti_bh_render_ir_control "$2" ;;
         --render-kh-bridge) uopti_bh_render_kh_bridge "$2" "$3" ;;
-        --render-ir-xhttp) uopti_bh_render_ir_xhttp "$2" ;;
-        *) echo "Usage: $0 --render-ir-control [3080] | --render-kh-bridge IR_DOMAIN [13080] | --render-ir-xhttp [56053]" >&2; exit 2 ;;
+        --render-ir-xhttp) uopti_bh_render_ir_xhttp "$2" "$3" "$4" ;;
+        *) echo "Usage: $0 --render-ir-control [3080] | --render-kh-bridge IR_DOMAIN [13080] | --render-ir-xhttp [56053] [/56053/www] [kh.kolbe1.ir]" >&2; exit 2 ;;
     esac
 fi

@@ -17,7 +17,7 @@ TOML; historical log files may contain credentials and must remain private.
 - KH Nginx verifies CA, hostname, SNI on outbound HTTPS to ir.kolbe1.ir:443.
 - IR HTTPS Nginx proxies fixed WS paths `/channel` and `/tunnel/*`
   to Backhaul Server WS bound 127.0.0.1:3080.
-- IR Nginx /56053/web -> local Backhaul data listener 127.0.0.1:56053
+- IR Nginx /56053/www/ -> local Backhaul data listener 127.0.0.1:56053
   -> KH Xray 127.0.0.1:56053.
 - FRP remains unchanged, public ports remain only 80 and 443.
 
@@ -46,7 +46,7 @@ Renderer commands (safe previews only):
 ```bash
 bash modules/smite-backhaul-standard.sh --render-ir-control 3080
 bash modules/smite-backhaul-standard.sh --render-kh-bridge ir.kolbe1.ir 13080
-bash modules/smite-backhaul-standard.sh --render-ir-xhttp 56053
+bash modules/smite-backhaul-standard.sh --render-ir-xhttp 56053 /56053/www kh.kolbe1.ir
 bash tests/test-smite-backhaul-standard.sh
 ```
 
@@ -73,3 +73,22 @@ Test:
 ```bash
 python3 tests/test-smite-backhaul-spec.py
 ```
+
+## KH XHTTP path and Host confirmed (2026-10-12)
+
+Actual Sanaei inbound #2 (VLESS/XHTTP, local listener 127.0.0.1:56053)
+uses **Path `/56053/www`**, **Host `kh.kolbe1.ir`**, mode auto and
+padding bytes 100-1000. Local `OPTIONS` with matching Host returned:
+
+- `/56053/www/`: HTTP 200 with X-Padding header.
+- `/56053/www`: HTTP 404.
+- All previously assumed `/56053/web` routes returned 404.
+
+The IR XHTTP renderer now accepts validated port/path/host arguments,
+forwards `Host: kh.kolbe1.ir`, preserves the slash-terminated URI and
+normalizes **only** the bare exact path upstream (without redirect).
+It does not change existing FRP paths or actual server configurations.
+
+The OPTIONS response verifies only that the *local* Xray XHTTP handler is
+reachable on KH. It does **not** verify Backhaul transport or authenticated
+end-to-end VLESS. These remain pending live tests after safe installation.
