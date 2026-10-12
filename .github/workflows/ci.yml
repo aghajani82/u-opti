@@ -78,6 +78,12 @@ jobs:
         shell: bash
         run: python3 tests/test-smite-backhaul-spec.py
 
+      - name: Validate candidate Backhaul node adapter patch
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-node-patch.py
+          python3 tests/test-smite-backhaul-node-patch.py
+
       - name: Validate release metadata
         shell: bash
         run: |

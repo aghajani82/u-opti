@@ -92,3 +92,28 @@ It does not change existing FRP paths or actual server configurations.
 The OPTIONS response verifies only that the *local* Xray XHTTP handler is
 reachable on KH. It does **not** verify Backhaul transport or authenticated
 end-to-end VLESS. These remain pending live tests after safe installation.
+
+## Stage 2: guarded Smite node adapter candidate (NOT installed)
+
+`modules/smite-backhaul-node-patch.py` produces a separate candidate
+`core_adapters.py` for the pinned Smite v0.1.7 node. It inserts the
+Standard-only spec validator **before** any existing process is removed,
+retains the FRP and other adapters byte-for-byte, and prevents the original
+Backhaul adapter from copying Standard tokens into its debug log. Standard
+TOML is created with `O_NOFOLLOW` and file permissions `0600`.
+
+The candidate imports `app.uopti_backhaul_standard.normalize_node_spec`.
+When staged later, copy `modules/smite-backhaul-spec.py` to that container
+module filename and mount it read-only alongside the patched overlay.
+Neither the candidate patcher nor the module is mounted or activated yet.
+
+```bash
+python3 modules/smite-backhaul-node-patch.py ORIGINAL_CORE_ADAPTERS.py CANDIDATE_CORE_ADAPTERS.py
+python3 tests/test-smite-backhaul-node-patch.py
+```
+
+Critical remaining blocker: the **Smite panel** has separate Backhaul
+managers and startup/reapply/create paths; some default to `0.0.0.0` and
+can spawn an additional server. These must be made Standard-aware before any
+Backhaul tunnel is created from the panel. Do NOT activate the candidate
+node adapter on a live Smite server yet.
