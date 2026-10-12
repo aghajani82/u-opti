@@ -90,6 +90,8 @@ for value in data.values():
 if len(ports) > 128:
     raise SystemExit("ERROR: Too many FRP routes")
 content = ["# Managed by U-OPTI - Standard FRP XHTTP\n"]
+# Keep the incoming client URI unchanged: KH XHTTP may listen at /{port}/web.
+# Adding /web to proxy_pass here silently rewrites /{port}/web to /web.
 for port in sorted(ports):
     shared = (
         "        proxy_http_version 1.1;\n"
@@ -101,8 +103,8 @@ for port in sorted(ports):
         "        proxy_read_timeout 3600s;\n"
         "        proxy_send_timeout 3600s;\n"
     )
-    content.append(f"\n    location = /{port}/web {{\n        proxy_pass http://127.0.0.1:{port}/web;\n"+shared+"    }\n")
-    content.append(f"\n    location ^~ /{port}/web/ {{\n        proxy_pass http://127.0.0.1:{port}/web/;\n"+shared+"    }\n")
+    content.append(f"\n    location = /{port}/web {{\n        proxy_pass http://127.0.0.1:{port};\n"+shared+"    }\n")
+    content.append(f"\n    location ^~ /{port}/web/ {{\n        proxy_pass http://127.0.0.1:{port};\n"+shared+"    }\n")
 with open(output, "w") as f:
     f.write("".join(content))
 print("Valid Standard FRP XHTTP routes:", len(ports))
