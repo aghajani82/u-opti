@@ -113,10 +113,16 @@ def patch_panel_source(filename: str, source: str) -> str:
         )
         output = head + begin + patched + end + tail
     elif filename == "tunnels.py":
-        output = one(
-            source, UPDATE_ANCHOR, UPDATE_GUARD,
-            "    # Never allow an edit to silently downgrade", "Tunnel update",
-        )
+        if "    # Never allow an edit to silently downgrade" in source:
+            if source.count("    # Never allow an edit to silently downgrade") != 1:
+                raise ValueError("Ambiguous existing tunnel downgrade guard")
+            output = source
+        elif source.count(UPDATE_ANCHOR) == 1:
+            # Insert BEFORE the existing if-body. Appending after the if line
+            # would create invalid Python and shadow the real update action.
+            output = source.replace(UPDATE_ANCHOR, UPDATE_GUARD + UPDATE_ANCHOR, 1)
+        else:
+            raise ValueError("Tunnel update upstream anchor missing")
         if MANAGER_GUARD in output:
             if output.count(MANAGER_GUARD) != 1:
                 raise ValueError("Ambiguous Backhaul panel manager guard")
