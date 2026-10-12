@@ -55,12 +55,16 @@ routes = '''async def update_tunnel():
 routes = '''async def update_tunnel():
     if tunnel_update.spec is not None:
         tunnel.spec = tunnel_update.spec
-    if needs_gost_forwarding:
-        pass
-    elif needs_backhaul_server:
-        manager = getattr(request.app.state, "backhaul_manager", None)
-        if manager:
-            manager.start_server(tunnel.id, tunnel.spec or {})
+    if spec_changed:
+        try:
+            if needs_gost_forwarding:
+                pass
+            elif needs_backhaul_server:
+                manager = getattr(request.app.state, "backhaul_manager", None)
+                if manager:
+                    manager.start_server(tunnel.id, tunnel.spec or {})
+        except Exception:
+            pass
     if needs_node_apply:
         pass
 '''
