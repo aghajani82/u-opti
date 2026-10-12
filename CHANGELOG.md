@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.0] - 2026-10-12
+
+### Added
+
+- Released the opt-in Standard FRP IR/KH Setup Wizard under Docker Management -> Smite Management, alongside the unchanged 10-step Private Network Wizard.
+- Added FRP v0.71.0 WSS/TCP443 routing through the existing IR Panel HTTPS hostname using the fixed `/~!frp` WebSocket path and local-only FRPS listener.
+- Added atomic, validated IR Nginx XHTTP `/PORT/web` route reconciliation, including timer-driven persistence and protections against disappearing tunnel state.
+- Added shared KH Smite Foreign Node control and Sanaei 3x-UI HTTPS/443 integration, with managed ACME/vhost and Repair rollback safeguards.
+- Added backward-compatible first-upgrade bootstrap for Standard FRP module files absent from the v0.15.2 updater's fixed file list.
+
+### Changed
+
+- New installs package both Standard FRP modules; updated U-OPTI self-updates fetch and verify them. Legacy v0.15.2 upgrades prepare the missing pair upon relaunch.
+- The Standard FRP WSS/TLS helper is explicitly opt-in and does not replace the upstream Smite image or modify the legacy Private Network Wizard.
+
+### Validation
+
+- Clean IR/KH rebuild, real FRP login, local XHTTP forwarding and authenticated v2rayN/VLESS traffic were validated on October 12, 2026.
+- The operator confirmed healthy Smite panels and working FRP client connectivity after sequential reboots of IR and KH.
+- Gateway client required explicit `ALPN=http/1.1`; other ALPN settings are not assumed compatible.
+- CI covers Nginx shared-vhost cases, FRP persistence, Standard Wizard behavior and bootstrap packaging. Comprehensive Repair, renewal, allowlist and rollback regression is still recommended before claiming full production hardening.
+
+### Scope
+
+- No new Standard Backhaul transport is included in v0.16.0.
+- Running installations pinned to a test `INSTALL_REF` are not automatically switched to `main`.
+
 ## [0.15.2] - 2026-10-05
 
 ### Added

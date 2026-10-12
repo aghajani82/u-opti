@@ -64,6 +64,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp443-optin-helper.sh
 
+      - name: Verify Standard FRP module bootstrap for legacy updates
+        shell: bash
+        run: bash tests/test-smite-frp-release-upgrade.sh
+
       - name: Validate release metadata
         shell: bash
         run: |

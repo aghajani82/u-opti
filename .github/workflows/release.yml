@@ -53,6 +53,19 @@ jobs:
           Path("release-notes.md").write_text(notes)
           PY
 
+      - name: Validate source before publishing release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          bash -n u-opti
+          bash tests/test-smite-frp-release-upgrade.sh
+          bash tests/test-smite-frp-wizard.sh
+          bash tests/test-smite-frp-xhttp-auto.sh
+          bash tests/test-smite-frp443-persistence.sh
+          grep -Fq "**v$(cat VERSION | tr -d '[:space:]')**" README.md
+          grep -Fq "Current stable version: **v$(cat VERSION | tr -d '[:space:]')**" CATALOG.md
+
       - name: Create GitHub release
         shell: bash
         env:

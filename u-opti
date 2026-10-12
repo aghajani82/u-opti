@@ -53,6 +53,66 @@ source "$MODULES_PATH/xui-pro.sh"
 source "$MODULES_PATH/certificate.sh"
 source "$MODULES_PATH/backup.sh"
 source "$MODULES_PATH/docker.sh"
+# BEGIN: U-OPTI legacy Standard FRP bundle upgrade compatibility
+# v0.15.2's fixed-file updater does not know about these two new modules.
+# After it installs the newer u-opti and restarts, provision the validated pair.
+# Existing valid modules are not modified; running services are never restarted.
+u_opti_ensure_standard_frp_bundle() {
+    local file marker tmp_dir stage_dir
+    local complete=true
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+        if [ ! -s "$MODULES_PATH/$file" ] || ! bash -n "$MODULES_PATH/$file" >/dev/null 2>&1; then
+            complete=false
+            break
+        fi
+    done
+    if [ "$complete" = true ] &&
+       grep -Fq 'smite_frp_wizard_menu()' "$MODULES_PATH/smite-frp-wizard.sh" &&
+       grep -Fq 'smite_frp_xhttp_sync()' "$MODULES_PATH/smite-frp-xhttp.sh"; then
+        return 0
+    fi
+
+    command -v curl >/dev/null 2>&1 || return 1
+    tmp_dir="$(mktemp -d)" || return 1
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+        if ! curl -fsSL --retry 3 \
+                "$BASE_URL/modules/$file?cb=$(date +%s%N)" -o "$tmp_dir/$file" ||
+           [ ! -s "$tmp_dir/$file" ] ||
+           ! bash -n "$tmp_dir/$file" >/dev/null 2>&1; then
+            rm -rf "$tmp_dir"
+            return 1
+        fi
+    done
+    if ! grep -Fq 'smite_frp_wizard_menu()' "$tmp_dir/smite-frp-wizard.sh" ||
+       ! grep -Fq 'smite_frp_xhttp_sync()' "$tmp_dir/smite-frp-xhttp.sh"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+    stage_dir="$(mktemp -d "$MODULES_PATH/.frp-upgrade-XXXXXXXX")" || {
+        rm -rf "$tmp_dir"
+        return 1
+    }
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+        if ! install -m 0755 "$tmp_dir/$file" "$stage_dir/$file"; then
+            rm -rf "$tmp_dir" "$stage_dir"
+            return 1
+        fi
+    done
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+        if ! mv -f "$stage_dir/$file" "$MODULES_PATH/$file"; then
+            rm -rf "$tmp_dir" "$stage_dir"
+            return 1
+        fi
+    done
+    rm -rf "$tmp_dir" "$stage_dir"
+    return 0
+}
+
+if ! u_opti_ensure_standard_frp_bundle; then
+    echo "WARNING: Standard FRP modules could not be prepared; retry Update U-OPTI when online." >&2
+fi
+# END: U-OPTI legacy Standard FRP bundle upgrade compatibility
+
 # FRP Wizard extends the Smite submenu only; original Private Wizard stays untouched.
 if [ -f "$MODULES_PATH/smite-frp-wizard.sh" ]; then
     source "$MODULES_PATH/smite-frp-wizard.sh"
