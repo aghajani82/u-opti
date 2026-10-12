@@ -36,6 +36,29 @@ if smite_gateway_write_backend "unexpected.ir.kolbe1.ir"; then
 fi
 cmp -s "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/backend.expected"
 
+# Opt-in Standard only: the same IR HTTPS backend must carry native FRP WSS
+# while keeping the Panel and existing XHTTP locations unchanged.
+mkdir -p "$SMITE_STATE_DIR" "$tmp/optin-overlay/node"
+printf 'SMITE_CONNECTION_MODE=standard\n' > "$SMITE_STATE_DIR/state.env"
+export SMITE_OVERLAY_DIR="$tmp/optin-overlay"
+touch "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py"
+smite_gateway_write_backend "ir.kolbe1.ir"
+test "$(grep -Fc 'location = /~!frp {' "$SMITE_GATEWAY_BACKEND_CONF")" -eq 1
+grep -Fq 'proxy_pass http://127.0.0.1:7000;' "$SMITE_GATEWAY_BACKEND_CONF"
+grep -Fq 'location /19001/web {' "$SMITE_GATEWAY_BACKEND_CONF"
+grep -Fq 'proxy_pass http://127.0.0.1:8000;' "$SMITE_GATEWAY_BACKEND_CONF"
+cp "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/wss.expected"
+smite_gateway_write_backend "ir.kolbe1.ir"
+cmp -s "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/wss.expected"
+
+# Legacy Private Network should never add a WSS route to an otherwise
+# unchanged managed backend.
+cp "$tmp/backend.expected" "$SMITE_GATEWAY_BACKEND_CONF"
+printf 'SMITE_CONNECTION_MODE=private\n' > "$SMITE_STATE_DIR/state.env"
+smite_gateway_write_backend "ir.kolbe1.ir"
+cmp -s "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/backend.expected"
+printf 'SMITE_CONNECTION_MODE=standard\n' > "$SMITE_STATE_DIR/state.env"
+
 cat > "$SMITE_GATEWAY_STREAM_CONF" <<'EOF_STREAM'
 # Managed by U-OPTI - Smite TCP/443 SNI gateway
 stream {
