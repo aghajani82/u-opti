@@ -66,7 +66,7 @@ EOF
 uopti_bh_render_ir_xhttp() {
     # Opt-in renderer only, NOT a live route installer.
     # Inputs must match KH Sanaei's actual XHTTP Path and Host.
-    local p="$1" path="$2" host="$3" typ
+    local p="${1:-}" path="${2:-}" host="${3:-}" typ
     [ -n "$p" ] || p=56053
     [ -n "$path" ] || path="/$p/www"
     [ -n "$host" ] || host="kh.kolbe1.ir"
