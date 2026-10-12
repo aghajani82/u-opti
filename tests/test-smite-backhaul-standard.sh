@@ -3,6 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source modules/smite-backhaul-standard.sh
 ir="$(uopti_bh_render_ir_control 3080)"
+cli="$(bash modules/smite-backhaul-standard.sh --render-ir-control 3080)"
+[[ "$cli" = "$ir" ]]
 kh="$(uopti_bh_render_kh_bridge ir.kolbe1.ir 13080)"
 data="$(uopti_bh_render_ir_xhttp 56053)"
 grep -Fq 'location = /channel {' <<< "$ir"
