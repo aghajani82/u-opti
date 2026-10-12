@@ -97,10 +97,17 @@ def one(source: str, anchor: str, addition: str, marker: str, label: str) -> str
 
 def patch_panel_source(filename: str, source: str) -> str:
     if filename == "node_client.py":
-        output = one(
-            source, SEND_ANCHOR, "\n" + SEND_GUARD,
+        # 'if not node' also appears in get_tunnel_status; only patch
+        # the send_to_node method that transmits /api/agent/tunnels/apply.
+        head, begin, rest = source.partition("    async def send_to_node(")
+        body, end, tail = rest.partition("    async def apply_tunnel(")
+        if not begin or not end:
+            raise ValueError("NodeClient send_to_node method boundaries missing")
+        patched = one(
+            body, SEND_ANCHOR, "\n" + SEND_GUARD,
             "            # U-OPTI Standard Backhaul (opt-in):", "NodeClient",
         )
+        output = head + begin + patched + end + tail
     elif filename == "main.py":
         # Anchor constrained to the Backhaul restore method.
         head, begin, rest = source.partition("async def _restore_backhaul_servers():")
