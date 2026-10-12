@@ -36,6 +36,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp443-persistence.sh
 
+      - name: Verify independent Standard FRP Wizard and ALPN recipe
+        shell: bash
+        run: bash tests/test-smite-frp-wizard.sh
+
       - name: Verify automatic Standard FRP XHTTP routing and rollback
         shell: bash
         run: bash tests/test-smite-frp-xhttp-auto.sh
