@@ -19,6 +19,9 @@ class NodeClient:
             if not node:
                 return {"status": "error", "message": f"Node {node_id} not found"}
             return {"status": "success"}
+
+    async def apply_tunnel(self, node_id, data):
+        pass
 '''
 main = '''async def _restore_rathole_servers():
     pass
