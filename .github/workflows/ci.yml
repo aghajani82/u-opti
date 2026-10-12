@@ -36,6 +36,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp443-persistence.sh
 
+      - name: Verify automatic Standard FRP XHTTP routing and rollback
+        shell: bash
+        run: bash tests/test-smite-frp-xhttp-auto.sh
+
       - name: Verify shared Sanaei vhost survives Foreign Gateway repair
         shell: bash
         run: bash tests/test-smite-foreign-shared-sanaei.sh
