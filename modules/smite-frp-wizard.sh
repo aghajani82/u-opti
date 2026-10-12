@@ -23,6 +23,8 @@ smite_frp_wizard_status() {
     mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
     echo "==== Standard FRP Health / Read-only ===="
     echo "Role: $role | Mode: $mode"
+    echo "Docker Engine: $(systemctl is-active docker 2>/dev/null || echo unavailable)"
+    echo "Docker Compose: $(docker compose version --short 2>/dev/null || echo unavailable)"
     echo "Smite node: $(smite_frp_std_running smite-node && echo running || echo missing)"
     if [ "$role" = ir ]; then
         echo "Smite panel: $(smite_frp_std_running smite-panel && echo running || echo missing)"
@@ -116,8 +118,10 @@ smite_frp_wizard_client() {
     echo "Network: xhttp | Path: /$port/web | Mode: auto"
     echo "TLS: tls | SNI: $panel | Fingerprint: chrome"
     echo "ALPN: http/1.1  (IMPORTANT: successful tested profile)"
+    echo 'XHTTP Extra JSON: {"mode":"auto","xPaddingBytes":"100-1000"}'
     echo "Host: empty | Flow: empty"
     echo "KH Xray inbound security: none (TLS terminates at IR Nginx)"
+    echo "Note: Xray normalizes /PORT/web to /PORT/web/ internally."
     echo "Do not assume default/blank ALPN will work on this gateway."
     smite_frp_wizard_pause
 }
