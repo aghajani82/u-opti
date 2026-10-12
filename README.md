@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.15.2**
+**v0.16.0**
 
 ## Main Menu
 
@@ -22,6 +22,16 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Highlights in v0.16.0
+
+- Adds an **opt-in Smite Standard FRP Setup Wizard** for IR/Panel and KH/Foreign that is separate from the existing 10-step Private Network Wizard.
+- Provides native FRP v0.71.0 WSS control connectivity through the existing IR HTTPS/443 hostname (Nginx `/~!frp`), keeping raw FRPS and Xray ports private.
+- Automatically reconciles validated IR XHTTP `/PORT/web` locations to local FRPS forwarding endpoints, including persistence on reboot/reconciliation.
+- Preserves the shared KH HTTPS vhost for both Smite Foreign control and Sanaei 3x-UI, with Nginx/ACME and Repair safeguards.
+- Tested end-to-end after a fresh IR/KH rebuild with real VLESS/XHTTP traffic and sequential reboots; the confirmed gateway client uses `ALPN=http/1.1`. Full Repair/security regression remains separate follow-up work.
+- **Legacy updater compatibility:** systems updating from v0.15.2 automatically prepare the two missing Standard FRP modules after relaunch. Fresh installs and the current updater already package them.
+- Existing servers pinned to an experimental `INSTALL_REF` continue using that source; changing to `main` requires an explicit operator decision. The update does not switch installed Smite modes or reconfigure running tunnels.
 
 ## Highlights in v0.15.2
 

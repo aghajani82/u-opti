@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.15.2**
+Current stable version: **v0.16.0**
 
 ## Core System Management
 
@@ -157,6 +157,17 @@ Underlying lifecycle actions remain reusable by the Wizard:
 ### Managed State
 
 The state can record role, connection mode, Panel domain/private IP, node name, Foreign domain/private IP, managed Smite version/ref, verified Xray loopback port, and reboot-validation boot IDs. Connection mode defaults to `standard` for backward compatibility.
+
+## Standard FRP (v0.16.0, opt-in)
+
+Docker Management -> Smite Management -> **Standard FRP Setup Wizard (IR/KH)** provides a separate Standard setup path. It does not run or alter the 10-step Private Network Wizard.
+
+- The FRP v0.71.0 control connection uses WSS on the current IR HTTPS/TCP 443 domain, routed by Nginx at the fixed FRP WebSocket location `/~!frp`.
+- FRPS and Xray forwarding listeners remain private. The IR gateway publishes only validated XHTTP paths such as `/18476/web`, preserving the upstream request URI.
+- On KH the Smite Foreign control location and Sanaei 3x-UI share one managed HTTPS domain/vhost; ACME, Nginx validation and Repair are guarded.
+- The verified VLESS/XHTTP client uses IR-domain:443 and `ALPN=http/1.1`. Establishing a tunnel in the UI is not proof of functional client traffic.
+- Legacy v0.15.2 fixed-list upgrades acquire the previously unknown Standard FRP module pair on first launch of the updated U-OPTI; fresh installs and future self-updates install/update both directly.
+- Standard FRP is opt-in. Existing Private Network/Backhaul deployments are not migrated. Standard Backhaul is future separate work.
 
 ## Standard Mode
 
