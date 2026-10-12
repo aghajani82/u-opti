@@ -68,6 +68,18 @@ async def update_tunnel():
                     manager.start_server(tunnel.id, tunnel.spec or {})
         except Exception:
             pass
+
+@router.post("/{tunnel_id}/apply")
+async def apply_tunnel():
+    pass
+
+@router.delete("/{tunnel_id}")
+async def delete_tunnel():
+    if needs_gost_forwarding:
+        pass
+    elif needs_backhaul_server:
+        if hasattr(request.app.state, "backhaul_manager"):
+            request.app.state.backhaul_manager.stop_server(tunnel.id)
 PY
 cp "$tmp/overlay/node/core_adapters.py" "$tmp/node-before"
 cp "$tmp/overlay/panel/tunnels.py" "$tmp/panel-before"
