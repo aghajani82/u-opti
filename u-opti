@@ -764,6 +764,8 @@ while true; do
                 "smite.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
+                "smite-frp-xhttp.sh"
+                "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
                 "smite-backhaul-standard.sh"
                 "smite-backhaul-spec.py"
@@ -804,7 +806,7 @@ while true; do
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"

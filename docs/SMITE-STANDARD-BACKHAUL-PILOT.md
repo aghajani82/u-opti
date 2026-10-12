@@ -183,3 +183,10 @@ bash tests/test-smite-backhaul-management.sh
 Next: scrutinize exact v0.7.2 control/data bind syntax, test the candidate
 against the *existing* patched U-OPTI overlays on IR/KH (without modifying
 them), then implement separately reviewed atomic activation and live rollback.
+
+**Updater rollback hardening:** The fixed older updater also omitted the
+Standard FRP helper files from its backup list. This branch now adds both
+`smite-frp-xhttp.sh` and `smite-frp-wizard.sh` to the backup snapshot,
+uses missing-file markers on upgrades from legacy installations, and verifies
+its expected backup file count dynamically. On rollback, these originals are
+restored or newly introduced copies are removed. No live FRP paths change.

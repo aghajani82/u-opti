@@ -17,6 +17,9 @@ grep -Fq 'source "$MODULES_PATH/smite-backhaul-management.sh"' u-opti
 grep -Fq 'smite_bh_management_menu()' modules/smite-backhaul-management.sh
 grep -Fq '3 + ${#BACKUP_FILES[@]}' u-opti
 grep -Fq 'smite-backhaul-*' u-opti
+grep -Fq '"smite-frp-xhttp.sh"' u-opti
+grep -Fq '"smite-frp-wizard.sh"' u-opti
+grep -Fq 'smite-frp-*' u-opti
 grep -Fq '*.py) python3 -m py_compile' install.sh
 grep -Fq '"$TEMP_DIR/"*.py)' u-opti
 ! grep -Fq 'smite_bh_activate()' modules/smite-backhaul-management.sh
