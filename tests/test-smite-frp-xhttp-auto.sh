@@ -30,8 +30,14 @@ id() {
     if [ "$1" = "-u" ]; then printf '0\n'; else command id "$@"; fi
 }
 docker() {
-    [ "$1" = exec ] && [ "$2" = smite-node ] && [ "$3" = cat ] || return 1
-    cat "$MOCK_FRP_TUNNELS"
+    [ "${1:-}" = exec ] && [ "${2:-}" = smite-node ] || return 1
+    [ "${MOCK_DOCKER_UNAVAILABLE:-0}" != 1 ] || return 1
+    case "${3:-}:${4:-}:${5:-}" in
+        test:-f:/var/lib/smite-node/tunnels.json) [ -f "$MOCK_FRP_TUNNELS" ] ;;
+        test:-d:/var/lib/smite-node) return 0 ;;
+        cat:/var/lib/smite-node/tunnels.json:) cat "$MOCK_FRP_TUNNELS" ;;
+        *) return 1 ;;
+    esac
 }
 nginx() {
     [ "$1" = -t ] || return 1
@@ -45,6 +51,24 @@ grep -Fq "    include $SMITE_FRP_XHTTP_CONF;" "$SMITE_GATEWAY_BACKEND_CONF"
 cp "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/backend.expected"
 smite_frp_xhttp_include ir.kolbe1.ir
 cmp -s "$SMITE_GATEWAY_BACKEND_CONF" "$tmp/backend.expected"
+
+# Fresh IR install: a Smite node exists but no FRP tunnels.json yet.
+# No warning/failed sync is acceptable at this point.
+test ! -f "$MOCK_FRP_TUNNELS"
+smite_frp_xhttp_sync
+grep -Fxq '# Managed by U-OPTI - Standard FRP XHTTP' "$SMITE_FRP_XHTTP_CONF"
+! grep -Eq '^[[:space:]]*location[[:space:]]' "$SMITE_FRP_XHTTP_CONF"
+cp "$SMITE_FRP_XHTTP_CONF" "$tmp/pristine.expected"
+
+# If the Smite node is unavailable, do not pretend this means zero tunnels.
+MOCK_DOCKER_UNAVAILABLE=1
+export MOCK_DOCKER_UNAVAILABLE
+if smite_frp_xhttp_sync; then
+    echo "ERROR: Smite node outage falsely treated as fresh zero-tunnel state"
+    exit 1
+fi
+cmp -s "$SMITE_FRP_XHTTP_CONF" "$tmp/pristine.expected"
+unset MOCK_DOCKER_UNAVAILABLE
 
 cat > "$MOCK_FRP_TUNNELS" <<'JSON'
 {
@@ -79,6 +103,16 @@ fi
 cp "$SMITE_FRP_XHTTP_CONF" "$tmp/expected"
 smite_frp_xhttp_sync
 cmp -s "$SMITE_FRP_XHTTP_CONF" "$tmp/expected"
+
+# Missing file *after* an FRP route was published must preserve the route
+# rather than erasing the already-working XHTTP gateway.
+mv "$MOCK_FRP_TUNNELS" "$tmp/tunnels.saved"
+if smite_frp_xhttp_sync; then
+    echo "ERROR: Missing tunnel state erased or accepted after FRP routes existed"
+    exit 1
+fi
+cmp -s "$SMITE_FRP_XHTTP_CONF" "$tmp/expected"
+mv "$tmp/tunnels.saved" "$MOCK_FRP_TUNNELS"
 
 # Fail-closed on corrupt, unsafe, or newly invalid tunnel state.
 printf '%s\n' '{"bad":{"core":"frp","spec":{"mode":"server","type":"tcp","ports":[7000]}}}' > "$MOCK_FRP_TUNNELS"
