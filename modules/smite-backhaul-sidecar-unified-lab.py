@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+import tempfile
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -47,6 +48,50 @@ class TransactionRefused(ValueError):
 
 class SimulatedPowerLoss(BaseException):
     pass
+
+
+def file_identity(target: Path) -> tuple[int, int, int]:
+    """Capture owner/group/mode without following the final symlink.
+
+    The sandbox path is checked independently by its caller. Exact identity
+    is durable journal evidence; SHA256 alone cannot detect permission drift.
+    """
+    st = target.lstat()
+    if not stat.S_ISREG(st.st_mode):
+        raise TransactionRefused("Owned resource is not a regular file")
+    mode = stat.S_IMODE(st.st_mode)
+    if (mode & 0o022) or (mode & 0o7000):
+        raise TransactionRefused("Unexpected writable/special-mode Nginx file")
+    return st.st_uid, st.st_gid, mode
+
+
+def atomic_payload(root: Path, target: Path, data: bytes,
+                   *, uid: int, gid: int, mode: int) -> None:
+    """Persist contents+metadata on a temporary inode BEFORE atomic rename.
+
+    This applies ONLY to marker-protected /tmp sandboxes. No intermediate
+    0600 replacement is ever visible as the active Nginx vhost.
+    """
+    sandbox.check_sandbox(root)
+    sandbox.check_path(root, "/" + str(target.relative_to(root)), create_parents=True)
+    if (type(uid) is not int or type(gid) is not int or
+            type(mode) is not int or uid < 0 or gid < 0 or
+            mode not in (0o600, 0o640, 0o644, 0o660)):
+        raise TransactionRefused("Unsupported synthetic target metadata")
+    if uid != os.geteuid() or gid != os.getegid():
+        raise TransactionRefused("Synthetic file identity differs from current owner")
+    fd, tmp = tempfile.mkstemp(prefix=".uopti-unified-txn-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, target)
+        legacy._sync_dir(target.parent)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def original_runtime(role: str) -> dict:
@@ -142,11 +187,19 @@ def _journal(root: Path) -> dict:
         raise TransactionRefused("Journal lacks all owned files, including KH guard")
     for row, (name, (action, _, _)) in zip(rows, pair.LAYOUT[role].items()):
         if not isinstance(row, dict) or set(row) != {
-            "path", "operation", "before_sha256", "applied_sha256"
+            "path", "operation", "before_sha256", "applied_sha256",
+            "uid", "gid", "mode"
         } or row["path"] != name or row["operation"] != action:
             raise TransactionRefused("Journal has unknown/duplicated owned resources")
         if not isinstance(row["applied_sha256"], str) or not HEX.fullmatch(row["applied_sha256"]):
             raise TransactionRefused("Invalid applied SHA256")
+        if (type(row["uid"]) is not int or type(row["gid"]) is not int
+                or type(row["mode"]) is not int
+                or row["uid"] < 0 or row["gid"] < 0
+                or row["mode"] not in (0o600, 0o640, 0o644, 0o660)):
+            raise TransactionRefused("Invalid saved file ownership or permissions")
+        if action == "create" and row["mode"] != 0o600:
+            raise TransactionRefused("Created files must be private")
         before = row["before_sha256"]
         if action == "create":
             if before is not None:
@@ -162,6 +215,10 @@ def _states(root: Path, doc: dict) -> dict[str, str]:
     for item in doc["resources"]:
         target = sandbox.check_path(root, item["path"])
         if target.is_file():
+            st_uid, st_gid, st_mode = file_identity(target)
+            if (st_uid, st_gid, st_mode) != (
+                    item["uid"], item["gid"], item["mode"]):
+                raise TransactionRefused("File permissions/ownership drift detected")
             payload = target.read_bytes()
             actual = pair.sha(payload)
             if actual == item["applied_sha256"]:
@@ -234,12 +291,19 @@ def install_mock(root: Path, sidecar_dir: Path, nginx_dir: Path, role: str, *,
                     raise TransactionRefused("Created target already exists")
             elif not target.is_file() or target.read_bytes() != row["before"]:
                 raise TransactionRefused("Original vhost does not match reviewed backup")
-        rows = [
-            {"path": r["path"], "operation": r["operation"],
-             "before_sha256": pair.sha(r["before"]) if r["before"] is not None else None,
-             "applied_sha256": pair.sha(r["after"])}
-            for r in resources
-        ]
+        rows = []
+        for r in resources:
+            if r["operation"] == "edit":
+                uid, gid, mode = file_identity(
+                    sandbox.check_path(safe, r["path"]))
+            else:
+                uid, gid, mode = os.geteuid(), os.getegid(), 0o600
+            rows.append({
+                "path": r["path"], "operation": r["operation"],
+                "before_sha256": pair.sha(r["before"]) if r["before"] is not None else None,
+                "applied_sha256": pair.sha(r["after"]),
+                "uid": uid, "gid": gid, "mode": mode,
+            })
         journal = {"version": 2, "role": role,
                    "container": f"uopti-backhaul-sidecar-{role}",
                    "resources": rows}
@@ -256,9 +320,11 @@ def install_mock(root: Path, sidecar_dir: Path, nginx_dir: Path, role: str, *,
             before = next(x["before"] for x in resources if x["operation"] == "edit")
             legacy._persist(safe / BACKUP, before)  # Original backup SECOND.
             checkpoint("after-backup")
-            for i, row in enumerate(resources, 1):
+            for i, (row, metadata) in enumerate(zip(resources, rows), 1):
                 target = sandbox.check_path(safe, row["path"], create_parents=True)
-                legacy._persist(target, row["after"])
+                atomic_payload(safe, target, row["after"],
+                               uid=metadata["uid"], gid=metadata["gid"],
+                               mode=metadata["mode"])
                 if crash_after_file == i:
                     raise SimulatedPowerLoss("Synthetic mid-file power loss")
             checkpoint("after-files")
@@ -298,7 +364,8 @@ def _recover_locked(root: Path, *, crash_after_service: bool = False,
             else:
                 if backup is None:
                     raise TransactionRefused("Missing original backup for edit")
-                legacy._persist(target, backup)
+                atomic_payload(root, target, backup,
+                               uid=item["uid"], gid=item["gid"], mode=item["mode"])
             restored += 1
             if restored == crash_after_file:
                 raise SimulatedPowerLoss("Synthetic crash while recovering a file")
