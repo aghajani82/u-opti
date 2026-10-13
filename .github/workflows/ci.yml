@@ -188,3 +188,17 @@ jobs:
         run: |
           bash -n tests/test-smite-backhaul-sidecar-transport.sh
           bash tests/test-smite-backhaul-sidecar-transport.sh
+
+  sidecar-tls-bridge:
+    # Only ephemeral GitHub runner containers on private Docker network.
+    # No connection to live IR/KH or changes to production Nginx/FRP/Smite.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify two Nginx proxies, SAN/TLS verification and Backhaul WS data
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-tls.sh
+          bash tests/test-smite-backhaul-sidecar-tls.sh
