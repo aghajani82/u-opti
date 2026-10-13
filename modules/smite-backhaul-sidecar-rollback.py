@@ -90,7 +90,7 @@ def plan_reversal(manifest: object, observed: object) -> list[str]:
         raise RollbackUnsafe("Incomplete rollback scope")
     # Reports only: actual container stop must be separately designed and
     # authorized, and only after confirming its exact ownership.
-    steps = ["PLAN ONLY: stop the specifically named independent Sidecar container"]
+    steps = [f"PLAN ONLY: stop independent container {CONTAINER[role]} (verify ownership first)"]
     for path in reversed(list(ALLOW[role])):
         action = "restore verified original backup" if found[path]["operation"] == "edit" else "remove solely owned created file"
         steps.append(f"PLAN ONLY: {action}: {path}")
