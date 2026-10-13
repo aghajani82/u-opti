@@ -48,6 +48,7 @@ MODULES=(
     "smite-backhaul-sidecar-readiness.py"
     "smite-backhaul-sidecar-admission.py"
     "smite-backhaul-sidecar-reconcile.py"
+    "smite-backhaul-rebuild-gate.sh"
     "smite-backhaul-sidecar-nginx-plan.py"
     "smite-backhaul-standard.sh"
     "smite-backhaul-spec.py"
