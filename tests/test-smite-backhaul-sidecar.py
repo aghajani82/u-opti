@@ -59,13 +59,13 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual(kh_toml["client"]["web_port"], 0)
         ir_control = (ir / "ir-control.inc").read_text()
         self.assertIn("location = /channel {", ir_control)
-        # Backhaul v0.7.2 WS dialer connects to /tunnel (no trailing slash).
-        self.assertIn("location = /tunnel {", ir_control)
-        self.assertNotIn("location ^~ /tunnel/", ir_control)
+        # v0.7.2's WebSocketDialer appends a random path segment.
+        self.assertIn("location ^~ /tunnel/ {", ir_control)
+        self.assertNotIn("location = /tunnel {", ir_control)
         self.assertIn("location ^~ /56053/www/", (ir / "ir-xhttp.inc").read_text())
         kh_bridge = (kh / "kh-bridge.conf").read_text()
         self.assertIn("proxy_pass https://ir.kolbe1.ir:443;", kh_bridge)
-        self.assertIn("location = /tunnel {", kh_bridge)
+        self.assertIn("location ^~ /tunnel/ {", kh_bridge)
         self.assertIn("proxy_ssl_verify on;", kh_bridge)
         for stage in (ir, kh):
             compose = (stage / "compose.candidate.yaml").read_text()
