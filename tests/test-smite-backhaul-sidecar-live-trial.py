@@ -72,7 +72,7 @@ class TrialTests(unittest.TestCase):
                     raise trial.TrialRefused("Daemon unavailable")
                 return "uopti-backhaul-sidecar-ir" if self.fake_container["exists"] else ""
             if action == ["docker", "inspect"]:
-                return "sha256:synthetic|"+trial.IMAGE+"|"+self.fake_container["label"]
+                return "sha256:synthetic|"+trial.IMAGE+"|"+self.fake_container["label"]+"|true"
             if action == ["docker", "run"]:
                 self.fake_container["exists"] = True
                 label = argv[argv.index("--label") + 1]
