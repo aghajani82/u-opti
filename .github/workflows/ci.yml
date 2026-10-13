@@ -174,3 +174,17 @@ jobs:
             --entrypoint /usr/local/bin/backhaul "$image" -v)"
           test "$actual" = "v0.7.2"
           echo "Pinned image Backhaul version verified: $actual (isolated runner, no network)"
+
+  sidecar-ws-transport:
+    # Actual Backhaul traffic ONLY between ephemeral private-network containers.
+    # No WAN access or live IR/KH access; container names only owned by this run.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Exercise Backhaul v0.7.2 WebSocket control and data channels
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-transport.sh
+          bash tests/test-smite-backhaul-sidecar-transport.sh
