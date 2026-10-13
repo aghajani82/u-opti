@@ -96,6 +96,7 @@ class TrialTests(unittest.TestCase):
             patch.object(trial, "_create_dirs", return_value=None),
             patch.object(trial, "_root", side_effect=fake_root),
             patch.object(trial, "mutex", return_value=nullcontext()),
+            patch.object(trial.os, "geteuid", return_value=0),
             patch.object(trial, "run", side_effect=fake_run),
             patch.dict(os.environ, {"UOPTI_BH_TEST_HOST": "I_ACCEPT_REBUILD_TEST_HOST"}),
         ]
