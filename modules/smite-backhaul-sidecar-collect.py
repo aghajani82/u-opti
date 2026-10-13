@@ -21,6 +21,9 @@ import re
 import subprocess
 import sys
 
+# Disable bytecode-cache writes when loading local reviewer modules.
+sys.dont_write_bytecode = True
+
 PREFLIGHT = Path(__file__).resolve().with_name("smite-backhaul-sidecar-preflight.py")
 _spec = importlib.util.spec_from_file_location("uopti_sidecar_gate", PREFLIGHT)
 _gate = importlib.util.module_from_spec(_spec)
