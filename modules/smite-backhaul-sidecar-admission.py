@@ -79,6 +79,16 @@ def _original_source(path: Path, expected: bytes) -> str | None:
     return None
 
 
+def _created_resource_available(path: Path) -> str | None:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "Cannot inspect proposed resource: " + path.name
+    return "Resource already exists; NO OVERWRITE: " + path.name
+
+
 def admission(role: str, sidecar_dir: Path, nginx_dir: Path,
               *, observed_host: bool = True) -> list[str]:
     if role not in paired.LAYOUT:
@@ -97,14 +107,9 @@ def admission(role: str, sidecar_dir: Path, nginx_dir: Path,
             issues.append("Non-root or writable/symlinked ancestor: " + path.name)
             continue
         if row["operation"] == "create":
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                issues.append("Cannot inspect proposed resource: " + path.name)
-            else:
-                issues.append("Resource already exists; NO OVERWRITE: " + path.name)
+            failure = _created_resource_available(path)
+            if failure:
+                issues.append(failure)
         else:
             failure = _original_source(path, row["before"])
             if failure:
