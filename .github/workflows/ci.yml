@@ -135,6 +135,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-transaction-lab.py
 
+      - name: Verify unified staged IR/KH Nginx and Sidecar rollback scope
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-unified-lab.py
+
       - name: Verify Sidecar no-execution installation blueprint and backup provenance
         shell: bash
         run: |
