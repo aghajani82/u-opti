@@ -63,6 +63,7 @@ def run(argv: list[str], *, capture: bool = False) -> str:
         argv[:3] == ["systemctl", "is-active", "nginx"],
         argv[:3] == ["systemctl", "reload", "nginx"],
         argv[:2] == ["docker", "pull"] and len(argv) == 3 and argv[2] == IMAGE,
+        argv[:2] == ["docker", "ps"] and len(argv) == 8,
         argv[:2] == ["docker", "inspect"] and len(argv) >= 4,
         argv[:2] == ["docker", "run"] and len(argv) >= 4,
         argv[:3] == ["docker", "rm", "-f"] and len(argv) == 4,
@@ -78,11 +79,17 @@ def run(argv: list[str], *, capture: bool = False) -> str:
 
 
 def _read_docker(name: str) -> tuple[str, str, str] | None:
-    fmt = '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}'
-    try:
-        out = run(["docker", "inspect", "-f", fmt, name], capture=True)
-    except TrialRefused:
+    # A failed docker inspect MUST NOT be interpreted as a missing container:
+    # Docker daemon downtime during rollback could otherwise bypass ownership.
+    listed = run(["docker", "ps", "-a", "--filter",
+                  "name=^/" + name + "$", "--format", "{{.Names}}"],
+                 capture=True)
+    if not listed:
         return None
+    if listed != name:
+        raise TrialRefused("Ambiguous Docker container name")
+    fmt = '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}'
+    out = run(["docker", "inspect", "-f", fmt, name], capture=True)
     fields = out.split("|")
     if len(fields) != 3:
         raise TrialRefused("Unexpected Docker ownership evidence")
@@ -309,14 +316,19 @@ def _recover_locked(root: Path) -> None:
 
 
 def _create_dirs(resources: list[dict]) -> None:
-    # Only directory needed by the reviewed Sidecar TOML and compose files.
+    # Never create an unjournaled directory before the install journal.
+    # Candidate preparation already requires shared.token in this private dir.
     allowed = Path("/etc/u-opti/backhaul-sidecar")
-    needed = any(Path(r["path"]).parent == allowed for r in resources)
-    if needed and not allowed.exists():
-        allowed.mkdir(mode=0o700)
-    # Existing path verification must refuse symlinks and writable dirs.
-    for r in resources:
-        if not admission._existing_ancestors_safe(Path(r["path"])):
+    info = allowed.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or info.st_gid != 0 or stat.S_IMODE(info.st_mode) & 0o077):
+        raise TrialRefused("Private token directory must pre-exist with mode 0700")
+    secret = allowed / "shared.token"
+    token, mode = _safe_file(secret, mode=0o600)
+    if not token or len(token) > 256:
+        raise TrialRefused("Private shared.token missing or invalid")
+    for row in resources:
+        if not admission._existing_ancestors_safe(Path(row["path"])):
             raise TrialRefused("Unsafe directory during install")
 
 
