@@ -408,3 +408,49 @@ running service's prior in-memory state. An actual production installer,
 operational health checks, nginx -t staging, service lifecycle management,
 crash-consistent manifest recovery and real-hardware validation must still
 be separately designed and explicitly approved before attempting IR/KH.
+
+## Stage 11 — offline-only activation blueprint and backup provenance gate
+
+`modules/smite-backhaul-sidecar-activation-plan.py` produces a **non-executable
+review plan** from two independently reviewed IR/KH preflight snapshots,
+private generated candidate directories, and two role-specific backup
+attestation JSON documents. This module has no installation, service, network,
+Nginx, Docker, filesystem-write, backup-creation or rollback execution action.
+
+Key validations before even issuing a review blueprint:
+
+- Both snapshots must pass the strict role-specific preflight verifier,
+  including fresh timestamp, version, unchanged baseline and port ownership.
+  The actual sanitized collector yields unknown flags; it **cannot pass**
+  this gate without separately obtained and verified evidence.
+- Stage directories must be owned by the invoking user, non-symlink, private
+  and contain precisely the expected artifacts; files must be private,
+  regular, reasonably sized and non-symlink. Neither token nor TOML body
+  is printed or copied into the blueprint.
+- The independently generated IR and KH candidate tokens must match;
+  host-network Backhaul must use the expected loopback listeners,
+  `transport=ws`, `skip_optz=true` and `web_port=0`.
+- Nginx fragments must contain exact `/channel`, prefix `/tunnel/`,
+  the expected IR XHTTP routes and KH TLS verification/SNI directives.
+  Compose references the previously pinned image digest and has host
+  networking, restart disabled, read-only mount and capability restrictions.
+- Backup attestations must cover **exactly** the expected IR HTTPS backend,
+  IR stream router and KH main Nginx config; the independently verified
+  stored-backup SHA256 must match the observed original-file SHA256.
+  Any missing, unknown, duplicate, tampered or unverified record blocks.
+- Generated output contains only fixed allowlisted file paths, SHA256 hashes
+  and manual review order. It never emits live execution commands and
+  always states `REVIEW_ONLY_NO_DEPLOYMENT_AUTHORIZATION`.
+
+Offline tests (`tests/test-smite-backhaul-sidecar-activation-plan.py`)
+exercise valid **synthetic** evidence, stale/missing review, occupied
+ports, legacy count drift, mismatched or missing backup digests, unsafe
+TOML/Nginx/Compose changes, symlinked or public candidate files,
+and confirmation that no secret appears in CLI output.
+
+**Important distinction:** The hash-only backup attestation is not a
+file backup, proof of off-host durability or proof of restoreability.
+This tool does not inspect the live Nginx stream SNI exceptions or install
+anything on IR/KH, and does not implement an executable production rollback.
+All such work requires future independently reviewed evidence, a genuine
+transactional installer and explicit approval for any host mutation.
