@@ -4,6 +4,20 @@
 # FRP setup is delegated ONLY when the operator explicitly selects its wizard.
 # "LOCAL READY" is NOT a claim of an authenticated end-to-end tunnel.
 
+twcc_badge() {
+    local status="$1" color
+    case "$status" in
+        LOCAL-READY|IR-CONTROLLER-SEEN|SMITE-NODE-SEEN) color=32 ;;
+        REVIEW-BINDING|NEEDS-REVIEW) color=31 ;;
+        *) color=33 ;;
+    esac
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
+        printf '\033[1;%sm[%s]\033[0m' "$color" "$status"
+    else
+        printf '[%s]' "$status"
+    fi
+}
+
 twcc_line() { printf '%s\n' '------------------------------------------------------------'; }
 
 twcc_header() {
@@ -116,7 +130,7 @@ twcc_frp() {
 
 twcc_status_text() {
     case "$1" in
-        LOCAL-READY) printf 'Local pieces present; end-to-end untested' ;;
+        LOCAL-READY) printf 'Container + loopback listeners seen; audit still required' ;;
         NOT-INSTALLED) printf 'No independent Sidecar found locally' ;;
         REVIEW-BINDING) printf 'Unexpected public/non-loopback listener' ;;
         NEEDS-REVIEW) printf 'Sidecar or listeners require review' ;;
@@ -145,8 +159,8 @@ twcc_recommend() {
     printf '%s\n' '  RECOMMENDED NEXT ACTION'
     case "$bh" in
         LOCAL-READY)
-            printf '%s\n' '  1. Inspect the other server (IR and KH separately).'
-            printf '%s\n' '  2. Verify genuine VLESS/XHTTP traffic with your client.'
+            printf '%s\n' '  1. Run full Sidecar audit for route and listener ownership.'
+            printf '%s\n' '  2. Inspect IR and KH separately, then test actual VLESS/XHTTP.'
             printf '%s\n' '  3. HTTP 401/400 is NOT proof of tunnel connectivity.'
             ;;
         NOT-INSTALLED)
@@ -176,7 +190,7 @@ twcc_dashboard() {
     case "$role" in ir|kh) ;; *) printf 'ERROR: Choose IR or KH.\n' >&2; return 2 ;; esac
     if [ "$mode" = demo ]; then
         bh=LOCAL-READY
-        frp=IR-CONTROLLER-SEEN
+        if [ "$role" = ir ]; then frp=IR-CONTROLLER-SEEN; else frp=SMITE-NODE-SEEN; fi
     else
         bh="$(twcc_backhaul "$role")"
         frp="$(twcc_frp "$role")"
@@ -188,11 +202,11 @@ twcc_dashboard() {
         printf '%s\n' '  Snapshot of LOCAL metadata only; no remote probe'
     fi
     printf '\n'
-    printf '  BACKHAUL  [%s]\n' "$bh"
+    printf '  BACKHAUL  '; twcc_badge "$bh"; printf '\n'
     printf '            %s\n' "$(twcc_status_text "$bh")"
-    printf '  FRP       [%s]\n' "$frp"
+    printf '  FRP       '; twcc_badge "$frp"; printf '\n'
     printf '            %s\n' "$(twcc_status_text "$frp")"
-    printf '%s\n' '  RATHOLE   [PLAN-ONLY]'
+    printf '  RATHOLE   '; twcc_badge PLAN-ONLY; printf '\n'
     printf '            %s\n' "$(twcc_status_text PLAN-ONLY)"
     twcc_topology "$role"
     twcc_recommend "$role" "$bh" "$frp"
