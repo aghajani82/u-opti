@@ -36,7 +36,7 @@ grep -Fq 'TLS: on' <<< "$profile"
 steps="$(smite_tw_backhaul_steps ir)"
 grep -Fq 'REVIEW ONLY' <<< "$steps"
 grep -Fq 'NOT' <<< "$steps"
-grep -Fq 'Rathole' <<< "$(smite_tw_rathole_menu kh <<< 
+grep -Fq 'Rathole' modules/smite-tunnel-wizard.sh
 
 good="$(smite_tw_rathole_plan ir 23333 45000)"
 grep -Fq 'NO INSTALL' <<< "$good"
