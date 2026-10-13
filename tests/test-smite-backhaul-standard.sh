@@ -10,7 +10,9 @@ data="$(uopti_bh_render_ir_xhttp 56053 /56053/www kh.kolbe1.ir)"
 cli_data="$(bash modules/smite-backhaul-standard.sh --render-ir-xhttp 56053 /56053/www kh.kolbe1.ir)"
 [[ "$cli_data" = "$data" ]]
 grep -Fq 'location = /channel {' <<< "$ir"
-grep -Fq 'location ^~ /tunnel/ {' <<< "$ir"
+grep -Fq 'location = /tunnel {' <<< "$ir"
+! grep -Fq 'location ^~ /tunnel/' <<< "$ir"
+grep -Fq 'location = /tunnel {' <<< "$kh"
 [[ "$(grep -Fc 'proxy_pass http://127.0.0.1:3080;' <<< "$ir")" = 2 ]]
 grep -Fq 'Authorization $http_authorization;' <<< "$ir"
 ! grep -Fq 'location = /~!frp' <<< "$ir"
