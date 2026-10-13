@@ -15,8 +15,8 @@ uopti_bh_render_ir_control() {
     [ -n "$p" ] || p=3080
     uopti_bh_valid_port "$p" || return 1
     echo "# IR: Include within existing HTTPS backend; Backhaul WS must bind 127.0.0.1:$p"
-    for path in '/channel' '/tunnel/'; do
-        if [ "$path" = /channel ]; then echo "    location = $path {"; else echo "    location ^~ $path {"; fi
+    for path in '/channel' '/tunnel'; do
+        echo "    location = $path {"
         cat <<EOF
         proxy_pass http://127.0.0.1:$p;
         proxy_http_version 1.1;
@@ -41,8 +41,8 @@ server {
     listen 127.0.0.1:$p;
     server_name localhost;
 EOF
-    for path in '/channel' '/tunnel/'; do
-        if [ "$path" = /channel ]; then echo "    location = $path {"; else echo "    location ^~ $path {"; fi
+    for path in '/channel' '/tunnel'; do
+        echo "    location = $path {"
         cat <<EOF
         proxy_pass https://$domain:443;
         proxy_http_version 1.1;
