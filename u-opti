@@ -420,6 +420,7 @@ while true; do
                 "smite-frp-xhttp.sh"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
+                "smite-tunnel-wizard.sh"
                 "smite-backhaul-standard.sh"
                 "smite-backhaul-spec.py"
                 "smite-backhaul-node-patch.py"
@@ -520,6 +521,7 @@ while true; do
                 ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
                 ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
+                ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
                 ["smite-backhaul-standard.sh"]="$BASE_URL/modules/smite-backhaul-standard.sh"
                 ["smite-backhaul-spec.py"]="$BASE_URL/modules/smite-backhaul-spec.py"
                 ["smite-backhaul-node-patch.py"]="$BASE_URL/modules/smite-backhaul-node-patch.py"
@@ -555,6 +557,7 @@ while true; do
                 ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
                 ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
+                ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
                 ["smite-backhaul-standard.sh"]="$TEMP_DIR/smite-backhaul-standard.sh"
                 ["smite-backhaul-spec.py"]="$TEMP_DIR/smite-backhaul-spec.py"
                 ["smite-backhaul-node-patch.py"]="$TEMP_DIR/smite-backhaul-node-patch.py"
@@ -656,6 +659,7 @@ while true; do
                ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
                ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
                ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
+               ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
                ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
                ! grep -q 'docker_3xui_multi_certificate_menu()' "$TEMP_DIR/docker-3xui-certificate-multi.sh"; then
                 echo
@@ -767,6 +771,7 @@ while true; do
                 "smite-frp-xhttp.sh"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
+                "smite-tunnel-wizard.sh"
                 "smite-backhaul-standard.sh"
                 "smite-backhaul-spec.py"
                 "smite-backhaul-node-patch.py"
