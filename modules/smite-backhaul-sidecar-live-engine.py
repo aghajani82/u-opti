@@ -263,6 +263,37 @@ class LiveEngine:
     def __init__(self, *, root: Path, driver: SubprocessDriver):
         self.root = Path(root)
         self.driver = driver
+        self._approved = None
+
+    def _root_allowed(self) -> bool:
+        if self.root == Path("/"):
+            # This marker must be provided on a deliberately rebuilt,
+            # manually approved test VPS; it is NOT created by this module.
+            marker = self.root / "root/.uopti-backhaul-rebuilt-test-host"
+            try:
+                st = marker.lstat()
+                return (os.geteuid() == 0 and stat.S_ISREG(st.st_mode)
+                        and st.st_uid == 0
+                        and stat.S_IMODE(st.st_mode) == 0o600
+                        and marker.read_text().strip() ==
+                        "I APPROVE DISPOSABLE BACKHAUL TEST HOST")
+            except OSError:
+                return False
+        # Hermetic unit-test trees must be private direct /tmp children.
+        try:
+            st = self.root.lstat()
+            marker = self.root / ".uopti-live-engine-fixture"
+            m = marker.lstat()
+            return (self.root.parent == Path("/tmp")
+                    and self.root.name.startswith("uopti-bh-live-fixture-")
+                    and stat.S_ISDIR(st.st_mode)
+                    and stat.S_IMODE(st.st_mode) == 0o700
+                    and st.st_uid == os.geteuid()
+                    and stat.S_ISREG(m.st_mode)
+                    and m.st_uid == os.geteuid()
+                    and stat.S_IMODE(m.st_mode) == 0o600)
+        except OSError:
+            return False
 
     def _txn_dir(self, txn_id: str) -> Path:
         if not (len(txn_id) == 32 and all(ch in "0123456789abcdef" for ch in txn_id)):
@@ -280,21 +311,31 @@ class LiveEngine:
         return line == txn_id + "|" + IMAGE
 
     def prepare(self, role: str, sidecar_stage: Path, nginx_stage: Path):
-        # Does not create a transaction; runs actual local admission on LIVE hosts.
-        if self.root != Path("/"):
-            raise ActivationRefused("Not a production host root")
-        if os.geteuid() != 0:
-            raise ActivationRefused("Root access required for explicit test installation")
+        # No activation without an explicit test-host marker and admission.
+        if not self._root_allowed():
+            raise ActivationRefused("Test root marker missing; no host changes allowed")
+        if role not in CONTAINER:
+            raise ActivationRefused("Unknown host role")
         issues = admission.admission(role, sidecar_stage, nginx_stage)
         if issues:
-            raise ActivationRefused("Admission HOLD: " + "; ".join(issues))
-        return pair.reconcile(role, sidecar_stage, nginx_stage)
+            raise ActivationRefused("Read-only admission HOLD")
+        resources = pair.reconcile(role, sidecar_stage, nginx_stage)
+        self._approved = (role, tuple((r["path"], shasum(r["after"]))
+                                       for r in resources))
+        return resources
 
     def apply(self, role: str, resources: list[dict], *, txn_id: str) -> str:
         """Only call following explicit operator approval and full preflight.
 
         Transaction directory must already have been provisioned safely.
         """
+        if not self._root_allowed():
+            raise ActivationRefused("Activation root no longer authorized")
+        evidence = (role, tuple((r["path"], shasum(r["after"]))
+                                for r in resources))
+        if self._approved != evidence or role not in CONTAINER:
+            raise ActivationRefused("Fresh admission approval missing or outdated")
+        self._approved = None  # One-time scoped admission, no replay.
         with exclusive(self.root):
             target_dir = self._txn_dir(txn_id)
             target_dir.mkdir(mode=0o700, exist_ok=False)
@@ -419,6 +460,8 @@ class LiveEngine:
         state_write(target_dir / "journal.json", doc)
 
     def rollback(self, role: str, txn_id: str) -> None:
+        if not self._root_allowed() or role not in CONTAINER:
+            raise ActivationRefused("Rollback requires approved test-host identity")
         with exclusive(self.root):
             self._rollback_locked(role, txn_id)
 
