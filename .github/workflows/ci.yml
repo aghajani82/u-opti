@@ -63,6 +63,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-package-closure.py
 
+      - name: Test explicitly gated experimental host activation and rollback
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-live-trial.py
+
       - name: Verify safe IR/KH rebuild readiness gate without real services
         shell: bash
         run: bash tests/test-smite-backhaul-rebuild-gate.sh
