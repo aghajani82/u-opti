@@ -206,6 +206,17 @@ smite_tw_backhaul_prepare() {
         --ir-domain "$ir_domain" --kh-host "$kh_host"
 }
 
+smite_tw_backhaul_readiness() {
+    local role="$1" mode="$2" module
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-readiness.py"
+    echo "===== Non-destructive Sidecar readiness / $role / $mode ====="
+    if [ ! -s "$module" ]; then
+        echo "READINESS MODULE MISSING: update the preview U-OPTI branch."
+        return 1
+    fi
+    python3 -B "$module" --role "$role" --mode "$mode"
+}
+
 smite_tw_backhaul_client() {
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
@@ -228,14 +239,18 @@ smite_tw_backhaul_menu() {
         echo "3) Guided safe installation checklist"
         echo "4) Show v2rayN / Android profile fields"
         echo "5) Prepare private offline candidate (NO activation)"
+        echo "6) Audit existing installation (read-only; fail-closed)"
+        echo "7) Check NEW host before installation (read-only)"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-7]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
             3) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
             4) smite_tw_backhaul_client; smite_tw_pause ;;
             5) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
+            6) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
+            7) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
