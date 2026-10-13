@@ -248,6 +248,22 @@ smite_tw_backhaul_nginx_plan() {
         --ir-domain "$ir_domain" --kh-host "$kh_host"
 }
 
+smite_tw_backhaul_admission() {
+    local role="$1" module sidecar_stage nginx_stage confirm
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-admission.py"
+    echo "===== Fresh-host deployment admission / READ ONLY ====="
+    echo "Checks both PRIVATE candidate folders, real local file ownership, Nginx,"
+    echo "Docker and reserved port baseline. It never installs or reloads anything."
+    echo "A passing check is NOT approval to apply files or activate a Sidecar."
+    [ -s "$module" ] || { echo "Admission module missing"; return 1; }
+    read -rp "Sidecar candidate directory (/tmp/uopti-backhaul-sidecar-*): " sidecar_stage || return 1
+    read -rp "Nginx proposal directory (/tmp/uopti-bh-nginx-plan-*): " nginx_stage || return 1
+    read -rp "Run READ-ONLY checks for role $role? Type CHECK: " confirm || return 1
+    [ "$confirm" = CHECK ] || { echo "Cancelled."; return 0; }
+    python3 -B "$module" --role "$role" \
+        --sidecar-dir "$sidecar_stage" --nginx-dir "$nginx_stage"
+}
+
 smite_tw_backhaul_client() {
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
@@ -273,8 +289,9 @@ smite_tw_backhaul_menu() {
         echo "6) Audit existing installation (read-only; fail-closed)"
         echo "7) Check NEW host before installation (read-only)"
         echo "8) Prepare Nginx merge/rollback file plan (OFFLINE ONLY)"
+        echo "9) Check BOTH candidate bundles against fresh host (READ ONLY)"
         echo "0) Back"
-        read -rp "Choose [0-8]: " choice || return
+        read -rp "Choose [0-9]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
@@ -284,6 +301,7 @@ smite_tw_backhaul_menu() {
             6) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
             7) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
             8) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
+            9) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
