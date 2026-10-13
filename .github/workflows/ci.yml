@@ -78,6 +78,12 @@ jobs:
         shell: bash
         run: python3 tests/test-smite-backhaul-spec.py
 
+      - name: Test independent Backhaul Sidecar offline candidates
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar.py
+          python3 tests/test-smite-backhaul-sidecar.py
+
       - name: Validate candidate Backhaul node adapter patch
         shell: bash
         run: |
