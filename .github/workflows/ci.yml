@@ -130,3 +130,41 @@ jobs:
           grep -Fq 'show_smite_private_network_menu()' modules/smite-private-network.sh
           grep -Fq 'show_smite_easytier_menu()' modules/smite-easytier.sh
           grep -Fq 'docker_smite_ensure_private_network_modules()' modules/docker.sh
+
+  sidecar-image-smoke:
+    # Isolated GitHub-hosted runner only. No access to live IR/KH servers.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate isolated Compose candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          openssl rand -hex 32 > "$tmp/token"
+          for role in ir kh; do
+            output="$(python3 modules/smite-backhaul-sidecar.py \
+              --role "$role" --token-file "$tmp/token")"
+            stage="$(printf '%s\n' "$output" | sed -n "s/^PREPARED PRIVATE OFFLINE CANDIDATE: \(.*\) ($role)$/\1/p")"
+            test -n "$stage" && test -d "$stage"
+            docker compose -f "$stage/compose.candidate.yaml" config --quiet
+            echo "Offline $role Compose candidate: valid syntax"
+            rm -rf -- "$stage"
+          done
+
+      - name: Verify pinned Backhaul binary without starting a service
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+          docker pull --platform linux/amd64 "$image"
+          actual="$(docker run --rm --platform linux/amd64 \
+            --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --entrypoint /usr/local/bin/backhaul "$image" -v)"
+          test "$actual" = "v0.7.2"
+          echo "Pinned image Backhaul version verified: $actual (isolated runner, no network)"
