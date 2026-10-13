@@ -88,6 +88,7 @@ for role in ir kh; do
         --security-opt no-new-privileges \
         --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
+        --tmpfs /var/cache/nginx:rw,noexec,nosuid,mode=1777,size=8m \
         --mount "type=bind,src=$ROOT/$role,dst=/etc/nginx,readonly" \
         nginx:stable-alpine -t -c /etc/nginx/nginx.conf
 
@@ -97,6 +98,7 @@ for role in ir kh; do
         --security-opt no-new-privileges \
         --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
+        --tmpfs /var/cache/nginx:rw,noexec,nosuid,mode=1777,size=8m \
         --mount "type=bind,src=$ROOT/$role,dst=/etc/nginx,readonly" \
         nginx:stable-alpine -t -c /etc/nginx/nginx.conf >/dev/null 2>&1; then
         echo "ERROR: Nginx accepted deliberate invalid directive ($role)" >&2
