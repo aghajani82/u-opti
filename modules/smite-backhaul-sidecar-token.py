@@ -20,13 +20,20 @@ class TokenRefused(ValueError):
     pass
 
 
+def secure_dir(directory: Path) -> bool:
+    try:
+        info = directory.lstat()
+        return (stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+                and info.st_gid == 0
+                and stat.S_IMODE(info.st_mode) & 0o077 == 0)
+    except OSError:
+        return False
+
+
 def inspect(path: Path = TOKEN_FILE) -> bool:
     try:
-        directory = path.parent.lstat()
         item = path.lstat()
-        if (not stat.S_ISDIR(directory.st_mode)
-                or directory.st_uid != 0 or directory.st_gid != 0
-                or stat.S_IMODE(directory.st_mode) & 0o077
+        if (not secure_dir(path.parent)
                 or not stat.S_ISREG(item.st_mode)
                 or item.st_uid != 0 or item.st_gid != 0
                 or stat.S_IMODE(item.st_mode) != 0o600
@@ -47,9 +54,7 @@ def generate(directory: Path = TOKEN_DIR) -> None:
         raise TokenRefused("Unsafe token directory")
     if not directory.exists():
         directory.mkdir(mode=0o700)
-    st = directory.lstat()
-    if (not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0
-            or stat.S_IMODE(st.st_mode) & 0o077):
+    if not secure_dir(directory):
         raise TokenRefused("Existing private token directory has unsafe ownership/mode")
     path = directory / "shared.token"
     value = secrets.token_urlsafe(32).encode("ascii") + b"\n"
