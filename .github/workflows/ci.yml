@@ -92,6 +92,12 @@ jobs:
           python3 tests/test-smite-backhaul-sidecar-audit.py
           python3 tests/test-smite-backhaul-sidecar-rollback.py
 
+      - name: Simulate isolated Sidecar installation and exact rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-sandbox.py
+          python3 tests/test-smite-backhaul-sidecar-sandbox.py
+
       - name: Validate candidate Backhaul node adapter patch
         shell: bash
         run: |
