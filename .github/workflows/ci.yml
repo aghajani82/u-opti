@@ -84,6 +84,14 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-sidecar.py
           python3 tests/test-smite-backhaul-sidecar.py
 
+      - name: Verify Sidecar host-port inventory and rollback simulation
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-audit.py
+          python3 -m py_compile modules/smite-backhaul-sidecar-rollback.py
+          python3 tests/test-smite-backhaul-sidecar-audit.py
+          python3 tests/test-smite-backhaul-sidecar-rollback.py
+
       - name: Validate candidate Backhaul node adapter patch
         shell: bash
         run: |
