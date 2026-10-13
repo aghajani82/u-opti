@@ -43,6 +43,7 @@ MODULES=(
     "smite-frp-wizard.sh"
     "smite-backhaul-management.sh"
     "smite-tunnel-wizard.sh"
+    "smite-backhaul-sidecar.py"
     "smite-backhaul-standard.sh"
     "smite-backhaul-spec.py"
     "smite-backhaul-node-patch.py"
