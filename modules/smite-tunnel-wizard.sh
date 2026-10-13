@@ -181,6 +181,25 @@ smite_tw_backhaul_steps() {
     echo "Do NOT create a second Backhaul tunnel in Smite using these ports."
 }
 
+smite_tw_backhaul_prepare() {
+    local role="$1" choice module token
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar.py"
+    token="/etc/u-opti/backhaul-sidecar/shared.token"
+    echo "===== Private Backhaul candidate / PREPARE ONLY ====="
+    echo "This creates private 0600 files under a new /tmp directory."
+    echo "No Nginx, Docker, Smite, firewall, restart, or port will change."
+    echo "The candidate contains a token: NEVER share or publish the directory."
+    if [ "$(id -u)" -ne 0 ] || [ ! -f "$module" ] || [ ! -f "$token" ] || [ -L "$token" ]; then
+        echo "NOT READY: root, candidate generator and existing private token required."
+        echo "Prepare the secure token on IR first and transfer it to KH privately."
+        return 1
+    fi
+    read -rp "Create private OFFLINE candidate for $role? Type PREPARE: " choice || return 1
+    [ "$choice" = PREPARE ] || { echo "Cancelled; nothing written."; return 0; }
+    python3 "$module" --role "$role" --token-file "$token" \
+        --ir-domain ir.kolbe1.ir --kh-host kh.kolbe1.ir
+}
+
 smite_tw_backhaul_client() {
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
@@ -202,13 +221,15 @@ smite_tw_backhaul_menu() {
         echo "2) Diagnose installed Sidecar (read-only)"
         echo "3) Guided safe installation checklist"
         echo "4) Show v2rayN / Android profile fields"
+        echo "5) Prepare private offline candidate (NO activation)"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
             3) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
             4) smite_tw_backhaul_client; smite_tw_pause ;;
+            5) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
