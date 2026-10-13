@@ -63,7 +63,7 @@ def run(argv: list[str], *, capture: bool = False) -> str:
         argv[:3] == ["systemctl", "is-active", "nginx"],
         argv[:3] == ["systemctl", "reload", "nginx"],
         argv[:2] == ["docker", "pull"] and len(argv) == 3 and argv[2] == IMAGE,
-        argv[:2] == ["docker", "ps"] and len(argv) == 8,
+        argv[:2] == ["docker", "ps"] and len(argv) == 7,
         argv[:2] == ["docker", "inspect"] and len(argv) >= 4,
         argv[:2] == ["docker", "run"] and len(argv) >= 4,
         argv[:3] == ["docker", "rm", "-f"] and len(argv) == 4,
