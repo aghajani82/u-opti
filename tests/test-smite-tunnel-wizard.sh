@@ -11,6 +11,9 @@ grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_readiness()' modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-backhaul-sidecar-readiness.py"' install.sh
+grep -Fq '"smite-backhaul-sidecar-nginx-plan.py"' install.sh
+grep -Fq '"smite-backhaul-sidecar-nginx-plan.py"' u-opti
+grep -Fq 'smite_tw_backhaul_nginx_plan()' modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-backhaul-sidecar-readiness.py"' u-opti
 grep -Fq 'IR HTTPS domain (required)' modules/smite-tunnel-wizard.sh
 grep -Fq 'KH upstream/Xray Host domain (required)' modules/smite-tunnel-wizard.sh
