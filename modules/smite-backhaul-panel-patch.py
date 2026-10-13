@@ -18,8 +18,8 @@ import tempfile
 # lines. Match the two *statements*, not byte-for-byte whitespace. A match
 # is allowed only within send_to_node and only once; otherwise fail closed.
 SEND_LOOKUP_PATTERN = re.compile(
-    r'(?m)^(?P<indent> {12})if not node:[ \\t]*\\n'
-    r'(?P=indent)    return \\{"status": "error", "message": f"Node \\{node_id\\} not found"\\}[ \\t]*(?:\\n|$)'
+    r'(?m)^(?P<indent> {12})if not node:[ \t]*\n'
+    r'(?P=indent)    return \{"status": "error", "message": f"Node \{node_id\} not found"\}[ \t]*(?:\n|$)'
 )
 SEND_GUARD = '''            # U-OPTI Standard Backhaul (opt-in): normalize all create/reapply
             # and startup node sends from the canonical persisted tunnel spec.
