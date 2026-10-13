@@ -68,6 +68,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-live-trial.py
 
+      - name: Validate safe IR token provisioning and no-overwrite policy
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-token.py
+
       - name: Verify safe IR/KH rebuild readiness gate without real services
         shell: bash
         run: bash tests/test-smite-backhaul-rebuild-gate.sh
