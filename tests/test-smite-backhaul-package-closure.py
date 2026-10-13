@@ -28,6 +28,7 @@ RUNTIME = (
     "smite-backhaul-sidecar-reconcile.py",
     "smite-backhaul-sidecar-admission.py",
     "smite-backhaul-rebuild-gate.sh",
+    "smite-backhaul-sidecar-live-trial.py",
 )
 
 
