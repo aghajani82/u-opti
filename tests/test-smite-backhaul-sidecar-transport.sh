@@ -26,7 +26,19 @@ ir_stage=""
 kh_stage=""
 
 cleanup() {
+    local status="$?"
     set +e
+    if (( status != 0 )); then
+        echo "Isolated WS smoke failed; container states and redacted errors:"
+        for name in "$server" "$client"; do
+            if docker container inspect "$name" >/dev/null 2>&1; then
+                docker inspect -f '{{.Name}} status={{.State.Status}} exit={{.State.ExitCode}}' "$name"
+                docker logs "$name" 2>&1 | grep -Ei 'error|fail|fatal|permission|not found' |
+                    sed -E 's/[0-9a-fA-F]{32,}/[redacted]/g;s/Bearer [^[:space:]]+/Bearer [redacted]/g' |
+                    tail -n 12 || true
+            fi
+        done
+    fi
     if (( created_client )); then docker rm -f "$client" >/dev/null 2>&1; fi
     if (( created_server )); then docker rm -f "$server" >/dev/null 2>&1; fi
     if (( created_network )); then docker network rm "$network" >/dev/null 2>&1; fi
