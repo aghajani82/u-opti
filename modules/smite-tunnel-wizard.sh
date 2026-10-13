@@ -217,6 +217,31 @@ smite_tw_backhaul_readiness() {
     python3 -B "$module" --role "$role" --mode "$mode"
 }
 
+smite_tw_backhaul_nginx_plan() {
+    local role="$1" module source ir_domain kh_host consent
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-nginx-plan.py"
+    case "$role" in
+        ir) source="/etc/nginx/conf.d/u-opti-smite-panel-backend.conf" ;;
+        kh) source="/etc/nginx/sites-available/3xui-kh.kolbe1.ir" ;;
+        *) echo "Unknown host role; no action."; return 1 ;;
+    esac
+    echo "===== Private Nginx integration plan (OFFLINE ONLY) ====="
+    echo "Reads the existing Nginx vhost and writes only a PRIVATE /tmp proposal."
+    echo "Never reloads Nginx, never edits /etc, never starts a container."
+    echo "A host with Sidecar already installed will be REFUSED to prevent overlap."
+    echo "IMPORTANT: this plan copies the original vhost, which may be sensitive."
+    if [ ! -s "$module" ]; then
+        echo "Nginx planner missing; update U-OPTI on the TEST branch."
+        return 1
+    fi
+    read -rp "Type PLAN to prepare private proposal: " consent || return 1
+    [ "$consent" = PLAN ] || { echo "Cancelled; no proposal created."; return 0; }
+    read -rp "IR HTTPS domain: " ir_domain || return 1
+    read -rp "KH Host/domain: " kh_host || return 1
+    python3 -B "$module" --role "$role" --input "$source" \
+        --ir-domain "$ir_domain" --kh-host "$kh_host"
+}
+
 smite_tw_backhaul_client() {
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
@@ -241,8 +266,9 @@ smite_tw_backhaul_menu() {
         echo "5) Prepare private offline candidate (NO activation)"
         echo "6) Audit existing installation (read-only; fail-closed)"
         echo "7) Check NEW host before installation (read-only)"
+        echo "8) Prepare Nginx merge/rollback file plan (OFFLINE ONLY)"
         echo "0) Back"
-        read -rp "Choose [0-7]: " choice || return
+        read -rp "Choose [0-8]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
@@ -251,6 +277,7 @@ smite_tw_backhaul_menu() {
             5) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
             6) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
             7) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            8) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
