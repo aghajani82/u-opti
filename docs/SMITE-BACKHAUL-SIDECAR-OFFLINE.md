@@ -9,7 +9,7 @@ Scope: independent Backhaul v0.7.2 without replacing or restarting the existing 
 - IR HTTPS 8443 backend has two direct locations and a separate include adding two more. A read-only preliminary check found no direct collision with the proposed routes. This is **not** a deployment-safe Nginx ownership proof.
 - KH Sanaei Xray: 127.0.0.1:56053, XHTTP path /56053/www/, Host kh.kolbe1.ir.
 - IR 3080 currently has no listener or Docker-published port; four existing KH Backhaul TCP clients still target public IR:3080 and were observed SYN-SENT. They must **not** be deleted/restarted merely because disconnected.
-- Backhaul v0.7.2 client WS code dials **exact /channel and /tunnel**, NOT /tunnel/ or /tunnel/ID. Source: https://github.com/Musixal/Backhaul/blob/v0.7.2/internal/client/transport/ws.go
+- Backhaul v0.7.2 uses **exact `/channel`** for control, but `tunnelDialer()` supplies `/tunnel` to `WebSocketDialer()`, which appends `/<random-id>`. The actual data URI is **`/tunnel/<random-id>`** and Nginx must use `location ^~ /tunnel/` on both IR and KH. Sources: https://github.com/Musixal/Backhaul/blob/v0.7.2/internal/client/transport/ws.go and https://github.com/Musixal/Backhaul/blob/v0.7.2/internal/utils/network/ws_dialer.go
 - The server WS source supports `127.0.0.1:56053=127.0.0.1:56053`, preserving loopback data bind. Source: https://github.com/Musixal/Backhaul/blob/v0.7.2/internal/server/transport/ws.go
 
 ## Candidate-only flow
@@ -43,7 +43,7 @@ The commands only produce temporary candidate files and run offline tests. Do no
 2. Audit actual Nginx HTTP include insertion points and all exact/prefix/regex location priorities, including Stream SNI/Canary exceptions. Validate candidate configs using `nginx -t` in an isolated namespace before review.
 3. Verify actual Sidecar binary/entrypoint/version in the pinned digest independently; do not assume the image works as an isolated runtime merely because it includes `backhaul -v`.
 4. Design atomic creation of secret/Config/Compose/Nginx paths and a genuine **live** rollback that restores precise originals and never touches Smite or FRP.
-5. Before rollout, verify reverse proxy TLS validation, WebSocket upgrades for /channel and exact /tunnel, and all client pool traffic over verified KH bridge.
+5. Before rollout, verify reverse proxy TLS validation, WebSocket upgrades for exact `/channel` and prefix `/tunnel/<random-id>`, and all client pool traffic over verified KH bridge.
 6. Require **separate user approval** before starting a container, creating any network route, changing a service, deploying configs, or touching production.
 7. Test authenticated end-to-end XHTTP, health checks, reconnect, restore, cert renewal and sequential reboots. Do not merge PR to main before these and explicit approval.
 
@@ -167,3 +167,36 @@ In particular, it does not cover a power loss during the commit/rollback,
 production Nginx include editing, service ownership, or any real container
 lifecycle. A separately approved installation transaction and production
 backups must be designed and reviewed before testing on live servers.
+
+## Stage 7: live WS process/HTTP roundtrip on GitHub-hosted private network
+
+CI job `sidecar-ws-transport` runs **real Backhaul v0.7.2 server and client
+processes** from the pinned image digest, **only** on GitHub's disposable runner
+with an internal Docker network, no published ports and no live IR/KH access.
+It generates both TOML configs with a one-use 64-hex-character token; strictly
+for this container-to-container test, its synthetic copy changes IR bind to
+container-only `0.0.0.0:3080`, data listener to container-only
+`0.0.0.0:56053` and KH remote to the Docker-internal IR name.
+Production Sidecar candidates **remain loopback-only**.
+
+The KH container also runs a temporary Python HTTP endpoint bound to its own
+loopback `127.0.0.1:56053`; the IR container requests
+`http://127.0.0.1:56053/health` over the Backhaul data listener and receives
+exactly `uopti-isolated-ws-roundtrip-ok`. This confirms authentic WS control
+and data traffic in a hermetic Docker environment, **not** the public
+TLS bridge, Nginx stream/HTTP routing or Xray authentication.
+
+The source audit also found that Backhaul's default `skip_optz=false` tries
+to update **host TCP sysctl settings**; the Sidecar generator now writes
+`skip_optz = true` for both roles, with regression assertions. The container
+test uses the GitHub runner's UID to read mode-0600 private bind-mounted
+TOML while dropping all Linux capabilities. All test containers and networks
+are removed on completion or failure.
+
+Successful CI including real isolated traffic:
+https://github.com/aghajani82/u-opti/actions/runs/38369512541
+
+**No production deployment or end-to-end IR↔KH tunnel has taken place.**
+Next blockers: reproduce the final two-Nginx verified-TLS WS bridge entirely
+in a sandbox; implement and separately review a true production-safe install
+and rollback. Require explicit user approval before any host action.
