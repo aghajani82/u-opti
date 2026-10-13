@@ -130,6 +130,11 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-sidecar-recovery-lab.py
           python3 tests/test-smite-backhaul-sidecar-recovery-lab.py
 
+      - name: Coordinate synthetic file and service transactions with resumable rollback
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-transaction-lab.py
+
       - name: Verify Sidecar no-execution installation blueprint and backup provenance
         shell: bash
         run: |
