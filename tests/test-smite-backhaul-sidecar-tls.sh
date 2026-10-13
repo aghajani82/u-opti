@@ -72,12 +72,15 @@ server,bridge=sys.argv[4:6]
 s=(ir/"ir.toml").read_text()
 c=(kh/"kh.toml").read_text()
 il=(ir/"ir-control.inc").read_text()
+ix=(ir/"ir-xhttp.inc").read_text()
 kl=(kh/"kh-bridge.conf").read_text()
 assert s.count('skip_optz = true')==1 and c.count('skip_optz = true')==1
 assert s.count('bind_addr = "127.0.0.1:3080"')==1
 assert c.count('remote_addr = "127.0.0.1:13080"')==1
 assert il.count('proxy_pass http://127.0.0.1:3080;')==2
 assert il.count('location ^~ /tunnel/ {')==1
+assert ix.count('location ^~ /56053/www/ {')==1
+assert ix.count('proxy_set_header Host kh.kolbe1.ir;')==2
 assert kl.count('proxy_ssl_verify on;')==2
 assert kl.count('proxy_ssl_server_name on;')==2
 assert kl.count('location ^~ /tunnel/ {')==1
@@ -88,11 +91,14 @@ c=c.replace('remote_addr = "127.0.0.1:13080"',
             f'remote_addr = "{bridge}:13080"')
 il=il.replace('proxy_pass http://127.0.0.1:3080;',
               f'proxy_pass http://{server}:3080;')
+ix=ix.replace('http://127.0.0.1:56053',
+              f'http://{server}:56053')
 kl=kl.replace('listen 127.0.0.1:13080;','listen 0.0.0.0:13080;')
 kl=kl.replace('/etc/ssl/certs/ca-certificates.crt','/etc/nginx/conf.d/ca.pem')
 (dst/"ir.toml").write_text(s)
 (dst/"kh.toml").write_text(c)
 (dst/"ir-control.inc").write_text(il)
+(dst/"ir-xhttp.inc").write_text(ix)
 (dst/"kh-bridge.conf").write_text(kl)
 (dst/"bad-bridge.conf").write_text(kl.replace('ca.pem','bad-ca.pem'))
 (dst/"ir-nginx.conf").write_text("""events { worker_connections 256; }
@@ -103,6 +109,7 @@ http {
   ssl_certificate /etc/nginx/conf.d/ir.crt;
   ssl_certificate_key /etc/nginx/conf.d/ir.key;
   include /etc/nginx/conf.d/ir-control.inc;
+  include /etc/nginx/conf.d/ir-xhttp.inc;
   location / { return 404; }
  }
 }
@@ -114,8 +121,12 @@ http { include /etc/nginx/conf.d/kh-bridge.conf; }
 from http.server import BaseHTTPRequestHandler,HTTPServer
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
-  if self.path!='/health': self.send_error(404); return
-  body=b'uopti-tls-nginx-backhaul-ok'
+  if self.path not in ('/health','/56053/www/'):
+   self.send_error(404); return
+  if self.path=='/56053/www/' and self.headers.get('Host')!='kh.kolbe1.ir':
+   self.send_error(421); return
+  body=(b'uopti-tls-nginx-backhaul-ok' if self.path=='/health'
+        else b'uopti-ir-xhttp-backhaul-ok')
   self.send_response(200)
   self.send_header('Content-Length',str(len(body)))
   self.end_headers()
@@ -134,12 +145,14 @@ docker run -d --name "$ir_bh" --network "$network" --read-only \
     --platform linux/amd64 --cap-drop ALL \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges \
     --mount "type=bind,src=$tmp/ir.toml,dst=/tmp/config.toml,readonly" \
+    --mount "type=bind,src=$tmp/ca.pem,dst=/tmp/test-root-ca.pem,readonly" \
     --entrypoint /usr/local/bin/backhaul "$image" -c /tmp/config.toml >/dev/null
 created="$ir_bh $created"
 
 docker run -d --name "$ir_ng" --network "$network" --network-alias ir.kolbe1.ir \
     --mount "type=bind,src=$tmp/ir-nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
     --mount "type=bind,src=$tmp/ir-control.inc,dst=/etc/nginx/conf.d/ir-control.inc,readonly" \
+    --mount "type=bind,src=$tmp/ir-xhttp.inc,dst=/etc/nginx/conf.d/ir-xhttp.inc,readonly" \
     --mount "type=bind,src=$tmp/ir.crt,dst=/etc/nginx/conf.d/ir.crt,readonly" \
     --mount "type=bind,src=$tmp/ir.key,dst=/etc/nginx/conf.d/ir.key,readonly" \
     nginx:stable-alpine >/dev/null
@@ -202,4 +215,28 @@ for i in range(40):
     sys.exit(0)
  except Exception: time.sleep(1)
 raise SystemExit('FAIL: full Nginx/TLS/Backhaul roundtrip not established')
+PY
+
+
+# Verify the actual generated IR XHTTP reverse-proxy route over the same
+# authenticated Backhaul data tunnel, with hostname verification of the IR
+# synthetic TLS certificate. Requests stay inside the ephemeral network.
+docker exec -i "$ir_bh" python3 - <<'PY'
+import ssl
+import sys
+import time
+from urllib.request import urlopen
+expected=b'uopti-ir-xhttp-backhaul-ok'
+ctx=ssl.create_default_context(cafile='/tmp/test-root-ca.pem')
+for path in ('/56053/www/', '/56053/www'):
+ for attempt in range(20):
+  try:
+   with urlopen('https://ir.kolbe1.ir:443'+path,context=ctx,timeout=2) as r:
+    if r.status==200 and r.read()==expected:
+     print('PASS: IR TLS Nginx XHTTP path '+path+' -> WS Backhaul -> KH mock')
+     break
+  except Exception:
+   time.sleep(1)
+ else:
+  raise SystemExit('FAIL: isolated IR XHTTP location '+path)
 PY
