@@ -43,6 +43,7 @@ MODULES=(
     "smite-frp-wizard.sh"
     "smite-backhaul-management.sh"
     "smite-tunnel-wizard.sh"
+    "smite-tunnel-control-center.sh"
     "smite-backhaul-sidecar.py"
     "smite-backhaul-sidecar-readiness.py"
     "smite-backhaul-sidecar-nginx-plan.py"
@@ -138,6 +139,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
         smite-backhaul-management.sh) LABEL="Smite Standard Backhaul Preparation (no activation)" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Setup Wizard (guided review)" ;;
+        smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
@@ -182,6 +184,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
    ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
    ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
+   ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
    ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
