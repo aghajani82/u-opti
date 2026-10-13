@@ -494,3 +494,42 @@ continuity, production certificate and operational restore paths have
 not been tested. Before host activity, complete an independently reviewed
 installer, recovery journal/restore integration, live preflight and
 separately granted user authorization.
+
+## Stage 13 — KH independent Sidecar lifecycle and Nginx rollback (Docker lab)
+
+The existing `sidecar-tls-bridge` GitHub Actions job now covers the **KH-side
+independent lifecycle and bridge rollback**, in addition to the earlier
+actual IR/KH WebSocket and TLS data roundtrip. Only disposable, isolated
+containers are used (no host network, public port, or production bind mount).
+
+The CI flow now executes these additional lifecycle checks:
+
+- Start KH synthetic Nginx **without** the Sidecar bridge. Confirm a
+  separate `/legacy` endpoint returns 200 and port 13080 is unavailable.
+- Install only the synthetic bridge file with an atomic replace, run
+  `nginx -t`, reload the KH Nginx container, confirm `/channel` returns
+  Backhaul 401 while the unrelated legacy route continues returning 200.
+- Validate correct and incorrect CA trust, the two-Nginx WS transfer,
+  and the generated IR XHTTP path through to the synthetic KH responder.
+- Stop **only** the test's independently named KH Backhaul container.
+  Confirm the data tunnel fails while Nginx legacy continues returning 200.
+- Restart only the KH Backhaul container and the synthetic responder.
+  Verify that authenticated WS data traffic recovers.
+- Introduce invalid KH bridge Nginx configuration. Confirm `nginx -t`
+  rejects it with **no reload**, and running workers continue to serve
+  both the legacy route and the authenticated Backhaul control endpoint.
+- Confirm SHA256/content drift prevents rollback until the test deliberately
+  undoes only its own known injected corruption. Do NOT use this lab-only
+  overwrite procedure to resolve unknown real-server drift.
+- Stop the KH Sidecar, restore the exact synthetic pre-bridge bytes,
+  test configuration, reload real Nginx, confirm `/legacy` still returns
+  200 and the optional bridge listener is absent.
+
+Successful CI: https://github.com/aghajani82/u-opti/actions/runs/38380112775
+
+**Important:** Synthetic legacy HTTP 200 is a lab fixture, NOT proof that
+production Smite/FRP/Xray or four previous KH Backhaul client sessions
+will survive the same steps. Production installation and executable
+recovery with verified live backups are still outstanding. Live IR/KH
+inspection requires user authorization, separately from any deployment
+permission; PR #18 must remain Draft until a later approved decision.
