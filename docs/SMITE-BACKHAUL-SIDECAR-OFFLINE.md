@@ -356,3 +356,55 @@ python3 tests/test-smite-backhaul-sidecar-collect.py
 manual Nginx vhost/stream ownership review, production-grade atomic
 install and real rollback with a fail-closed recovery plan, and explicit
 separate user approval. CI success alone is insufficient.
+
+## Stage 10 — journal-first interrupted-install recovery laboratory
+
+`modules/smite-backhaul-sidecar-recovery-lab.py` is a **sandbox-only**
+implementation of a fail-closed journal protocol. Its sole writable root
+is a private, marker-protected direct child of `/tmp/uopti-bh-sandbox-*`.
+It reuses the exact IR/KH Sidecar-owned allowlists and the synthetic Nginx
+test hook; it **cannot modify `/etc` on any real host**, and never runs Docker,
+systemctl, Nginx, Certbot, SSH or live network operations.
+
+All resource paths in the journal are fixed allowlisted paths,
+re-rooted under the synthetic directory. Journal entries store SHA256
+hashes but no token or config text. The invented IR backend's prior bytes
+are kept separately in a private mock-original backup file. The sequence is:
+
+1. Acquire an exclusive synthetic-directory lock and validate full resource
+   scope, non-symlink paths, absent owned candidate files and the preexisting
+   synthetic backend.
+2. Persist the recovery journal **before** making any resource change, then
+   persist the original synthetic backend backup, with parent-directory
+   fsync after atomic file replacements.
+3. Replace only allowlisted synthetic files one at a time, and retain the
+   recovery journal even if all writes complete.
+4. On a later, independent call, hash-check **every resource and backup before
+   touching any resource**. Fail completely if any hash, path, role, owner or
+   source baseline is unexpected. Reverse only exact allowlisted changes.
+5. On cleanup, remove the original backup first, and the journal **last**.
+   If interrupted during this finalization, a subsequent call recognizes
+   fully restored resources and finishes safely without the backup.
+
+Automated tests inject simulated process interruption before any file, after
+each synthetic file replacement, during a separate rollback, after journal
+creation before backup, and during final metadata cleanup. They also verify
+restart/resume, exact original-content restoration, simultaneous-install
+refusal, missing backup, modified journal, symlinks and edited-file drift.
+
+Offline test command:
+
+```bash
+python3 tests/test-smite-backhaul-sidecar-recovery-lab.py
+```
+
+**IMPORTANT LIMITS:** These are simulated termination points, not real
+electrical power-loss, kernel crash, filesystem-corruption or network-partition
+tests. Filesystem metadata durability depends on OS/storage behavior beyond
+the laboratory's model; this code must not be marketed as proven
+production-power-loss-safe. It does not update any real Nginx include or
+test a production atomic deploy/rollback, and it cannot restore an already
+running service's prior in-memory state. An actual production installer,
+operational health checks, nginx -t staging, service lifecycle management,
+crash-consistent manifest recovery and real-hardware validation must still
+be separately designed and explicitly approved before attempting IR/KH.
