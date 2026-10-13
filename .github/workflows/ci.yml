@@ -40,6 +40,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-wizard.sh
 
+      - name: Verify safe unified Tunnel Setup Wizard and protocol navigation
+        shell: bash
+        run: bash tests/test-smite-tunnel-wizard.sh
+
       - name: Verify automatic Standard FRP XHTTP routing and rollback
         shell: bash
         run: bash tests/test-smite-frp-xhttp-auto.sh
