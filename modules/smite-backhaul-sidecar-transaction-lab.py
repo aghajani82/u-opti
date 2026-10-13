@@ -197,7 +197,9 @@ def rollback(root: Path, *, interrupt_after_service: bool = False,
 
 
 def deploy(root: Path, candidate: Path, role: str, *,
-           fail_at: str | None = None, interrupt_at: str | None = None) -> dict:
+           fail_at: str | None = None, interrupt_at: str | None = None,
+           file_crash_after: int | None = None,
+           file_crash_before_backup: bool = False) -> dict:
     """Simulate prepare > file install > validation > sidecar > reload > verify.
 
     Normal injected failure auto-rolls back; BaseException power loss retains
@@ -207,6 +209,16 @@ def deploy(root: Path, candidate: Path, role: str, *,
                "after-reload", "health"}
     if fail_at not in allowed | {None} or interrupt_at not in allowed | {None}:
         raise TransactionRefused("Unknown fault injection point")
+    if file_crash_after is not None and (
+        type(file_crash_after) is not int
+        or role not in ROLES
+        or not 0 <= file_crash_after <= len(sb.rollback.ALLOW[role])
+    ):
+        raise TransactionRefused("Invalid synthetic file failure point")
+    if type(file_crash_before_backup) is not bool or (
+        file_crash_before_backup and file_crash_after is not None
+    ):
+        raise TransactionRefused("Conflicting file failure injection")
     with coordinator_lock(root) as safe:
         if role not in ROLES or (safe / INTENT).exists() or (safe / INTENT).is_symlink():
             raise TransactionRefused("Another transaction exists or role invalid")
@@ -232,7 +244,10 @@ def deploy(root: Path, candidate: Path, role: str, *,
 
         try:
             checkpoint("after-intent")
-            lab.begin_synthetic_transaction(safe, candidate, role)
+            lab.begin_synthetic_transaction(
+                safe, candidate, role, crash_after=file_crash_after,
+                crash_after_journal_only=file_crash_before_backup,
+            )
             checkpoint("after-files")
             # Only mock validation, not a real Nginx syntax test. CI has a
             # separate isolated Nginx job checking the actual templates.
