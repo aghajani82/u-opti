@@ -96,13 +96,16 @@ docker() {
     elif [ "$1" = exec ] && [ "$2" = smite-node ] && [ "$3" = backhaul ]; then
         echo v0.7.2
     elif [ "$1" = exec ] && [ "$2" = smite-node ] && [ "$3" = sh ]; then
-        return 0
+        if [ "$(smite_bh_role)" = kh ]; then echo 4; else echo 0; fi
     else
         echo "Unexpected Docker call: $*" >&2; return 1
     fi
 }
 nginx() { [ "$1" = -t ]; }
-pgrep() { return 1; }
+pgrep() {
+    if [ "$(smite_bh_role)" = kh ]; then echo 4; return 0; fi
+    return 1
+}
 ss() {
     case "$1" in
         -lntH) if [ "$(smite_bh_role)" = ir ]; then
@@ -118,11 +121,17 @@ ir="$(find "$SMITE_BH_STAGE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
 smite_bh_verify_stage "$ir" >/dev/null
 grep -Fq 'normalize_node_spec(spec)' "$SMITE_BH_STAGE_ROOT/$ir/candidate/node/core_adapters.py"
 grep -Fq 'compile_standard_specs(' "$SMITE_BH_STAGE_ROOT/$ir/candidate/panel/node_client.py"
+cmp -s "$SMITE_BH_STAGE_ROOT/$ir/candidate/panel/uopti_backhaul_standard.py" \
+    modules/smite-backhaul-spec.py
 grep -Fq 'location ^~ /56053/www/' "$SMITE_BH_STAGE_ROOT/$ir/candidate/nginx/ir-xhttp.conf"
 cmp -s "$tmp/node-before" "$SMITE_BH_OVERLAY_ROOT/node/core_adapters.py"
 cmp -s "$tmp/panel-before" "$SMITE_BH_OVERLAY_ROOT/panel/tunnels.py"
 printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
-smite_bh_preflight kh >/dev/null
+# Four live KH Backhaul clients and TOMLs must NOT block offline staging.
+# They must still be reported explicitly, never treated as activation-ready.
+kh_precheck="$(smite_bh_preflight kh)"
+grep -Fq 'WARNING: Existing Backhaul processes=4, configs=4.' <<< "$kh_precheck"
+grep -Fq 'Prepare-only preflight PASS (kh)' <<< "$kh_precheck"
 smite_bh_prepare kh >/dev/null
 kh="$(find "$SMITE_BH_STAGE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -v "^$ir$" | head -n1)"
 smite_bh_verify_stage "$kh" >/dev/null
@@ -138,6 +147,8 @@ smite_bh_discard_unused "$kh" >/dev/null
 test ! -e "$SMITE_BH_STAGE_ROOT/$kh"
 smite_bh_verify_stage "$ir" >/dev/null
 cmp -s "$tmp/node-before" "$SMITE_BH_OVERLAY_ROOT/node/core_adapters.py"
+# The four simulated KH Backhaul processes/configs remain untouched.
+test "$(pgrep -xc backhaul)" = 4
 clear() { :; }
 docker_smite_open_setup_wizard() { echo PRIVATE_OK; }
 docker_smite_frp_standard_guide() { echo FRP_GUIDE_OK; }
