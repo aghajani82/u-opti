@@ -8,19 +8,15 @@ touched. The original and running containers are never modified here.
 from __future__ import annotations
 
 import argparse
+import ast
 import os
-import re
 from pathlib import Path
 import tempfile
 
 
-# The existing U-OPTI Panel overlay may have trailing spaces on these
-# lines. Match the two *statements*, not byte-for-byte whitespace. A match
-# is allowed only within send_to_node and only once; otherwise fail closed.
-SEND_LOOKUP_PATTERN = re.compile(
-    r'(?m)^(?P<indent> {12})if not node:[ \t]*\n'
-    r'(?P=indent)    return \{"status": "error", "message": f"Node \{node_id\} not found"\}[ \t]*(?:\n|$)'
-)
+# Parse the actual Python AST rather than line-matching a fragile regex.
+# Only insert the opt-in guard after the single canonical missing-node return
+# in NodeClient.send_to_node; leave get_tunnel_status and all other code alone.
 SEND_GUARD = '''            # U-OPTI Standard Backhaul (opt-in): normalize all create/reapply
             # and startup node sends from the canonical persisted tunnel spec.
             if endpoint == "/api/agent/tunnels/apply" and data.get("core") == "backhaul":
@@ -101,27 +97,75 @@ def one(source: str, anchor: str, addition: str, marker: str, label: str) -> str
 
 def patch_panel_source(filename: str, source: str) -> str:
     if filename == "node_client.py":
-        # 'if not node' also appears in get_tunnel_status; only patch
-        # the send_to_node method that transmits /api/agent/tunnels/apply.
-        head, begin, rest = source.partition("    async def send_to_node(")
-        body, end, tail = rest.partition("    async def apply_tunnel(")
-        if not begin or not end:
-            raise ValueError("NodeClient send_to_node method boundaries missing")
-        marker = "            # U-OPTI Standard Backhaul (opt-in):"
-        if marker in body:
-            if body.count(marker) != 1:
-                raise ValueError("NodeClient: ambiguous existing Standard guard")
-            patched = body
+        # Do not use a textual pattern: IR's source formatting is not identical
+        # to the upstream fixture. AST ensures we match statements, not spaces.
+        tree = ast.parse(source, filename=filename)
+        candidates = [
+            node
+            for cls in tree.body
+            if isinstance(cls, ast.ClassDef) and cls.name == "NodeClient"
+            for node in cls.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "send_to_node"
+        ]
+        if len(candidates) != 1:
+            raise ValueError("NodeClient.send_to_node must occur exactly once")
+        method = candidates[0]
+        guard_marker = "            # U-OPTI Standard Backhaul (opt-in):"
+        method_source = ast.get_source_segment(source, method) or ""
+        expected_return = ast.parse(
+            'return {"status": "error", "message": f"Node {node_id} not found"}'
+        ).body[0]
+        lookup_blocks = []
+        for section in ast.walk(method):
+            if not isinstance(section, ast.AsyncWith):
+                continue
+            # The missing-node guard must be in the body of the session block
+            # and immediately follow a lookup of 'node' from the DB result.
+            for i, statement in enumerate(section.body):
+                if not (
+                    isinstance(statement, ast.If)
+                    and isinstance(statement.test, ast.UnaryOp)
+                    and isinstance(statement.test.op, ast.Not)
+                    and isinstance(statement.test.operand, ast.Name)
+                    and statement.test.operand.id == "node"
+                    and not statement.orelse
+                    and len(statement.body) == 1
+                    and ast.dump(statement.body[0], include_attributes=False)
+                    == ast.dump(expected_return, include_attributes=False)
+                    and statement.col_offset == 12
+                    and i > 0
+                ):
+                    continue
+                previous = section.body[i - 1]
+                if not (
+                    isinstance(previous, ast.Assign)
+                    and len(previous.targets) == 1
+                    and isinstance(previous.targets[0], ast.Name)
+                    and previous.targets[0].id == "node"
+                    and isinstance(previous.value, ast.Call)
+                    and isinstance(previous.value.func, ast.Attribute)
+                    and previous.value.func.attr == "scalar_one_or_none"
+                ):
+                    continue
+                lookup_blocks.append(statement)
+        if len(lookup_blocks) != 1:
+            raise ValueError(
+                "NodeClient: expected one canonical missing-node return after "
+                "the database lookup inside send_to_node"
+            )
+        marker_count = method_source.count(guard_marker)
+        if marker_count:
+            if marker_count != 1:
+                raise ValueError("NodeClient: duplicate Standard guard markers")
+            output = source
         else:
-            matches = list(SEND_LOOKUP_PATTERN.finditer(body))
-            if len(matches) != 1:
-                raise ValueError(
-                    "NodeClient: expected exactly one safe node lookup and return "
-                    "inside send_to_node"
-                )
-            match = matches[0]
-            patched = body[:match.end()] + "\n" + SEND_GUARD + body[match.end():]
-        output = head + begin + patched + end + tail
+            insertion_line = lookup_blocks[0].end_lineno
+            lines = source.splitlines(keepends=True)
+            if not lines[insertion_line - 1].endswith(("\n", "\r")):
+                raise ValueError("NodeClient: cannot safely insert after unterminated line")
+            lines.insert(insertion_line, SEND_GUARD)
+            output = "".join(lines)
     elif filename == "main.py":
         # Anchor constrained to the Backhaul restore method.
         head, begin, rest = source.partition("async def _restore_backhaul_servers():")
