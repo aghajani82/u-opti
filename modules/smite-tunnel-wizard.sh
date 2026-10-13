@@ -257,7 +257,8 @@ smite_tw_rathole_plan() {
     echo "KH: client forwards local service at 127.0.0.1:$data."
     echo "IR: forwarded service listener requires separate safety review."
     echo "Use a unique service token stored in a root-only 0600 file."
-    echo "WARNING: Rathole does NOT provide Backhaul-style /channel WSS URLs."
+    echo "Rathole may use a WebSocket transport in a suitably built/pinned version."
+    echo "Do not assume Rathole uses Backhaul /channel or /tunnel/ endpoints."
     echo "Do not proxy Rathole TCP via an HTTP location or silently reuse :443."
     echo "A direct port requires reviewing firewall/provider exposure and TLS/noise."
     echo "No config files, firewall rules or services have been changed."
@@ -269,12 +270,16 @@ smite_tw_rathole_menu() {
         smite_tw_header
         printf 'Protocol: Rathole | This machine: %s\n\n' "$role"
         echo "1) Explain secure Rathole TCP architecture"
-        echo "2) Validate port choices and preview deployment plan"
+        echo "2) Validate dedicated TCP ports and preview deployment plan"
+        echo "3) WebSocket/TLS/443 compatibility checklist (NO activation)"
         echo "0) Back"
-        read -rp "Choose [0-2]: " choice || return
+        read -rp "Choose [0-3]: " choice || return
         case "$choice" in
             1)
-                echo "Rathole is a TCP/UDP reverse tunnel, NOT an HTTP/WebSocket proxy."
+                echo "Rathole forwards TCP/UDP services; transport can be TCP, TLS, Noise"
+                echo "or WebSocket in versions/builds that include WS support."
+                echo "It is not a general-purpose HTTP reverse proxy and does NOT"
+                echo "reuse Backhaul /channel and /tunnel/ control endpoints."
                 echo "It needs an independently reviewed public TCP entry or SNI routing."
                 echo "Version/pinning, authentication, process supervision, backup and"
                 echo "rollback must be validated before an automatic installer is offered."
@@ -283,6 +288,17 @@ smite_tw_rathole_menu() {
                 read -rp "Dedicated control TCP port [e.g. 23333]: " control || return
                 read -rp "Target local service port [e.g. 45000]: " data || return
                 smite_tw_rathole_plan "$role" "$control" "$data" || :
+                smite_tw_pause ;;
+            3)
+                echo "===== Rathole WSS feasibility (REVIEW ONLY) ====="
+                echo "1. Pin a Rathole release WITH WebSocket support and verify it."
+                echo "2. Validate the exact WS path/handshake with the pinned binary."
+                echo "3. Choose a separate safe HTTP Nginx route or SNI/vhost."
+                echo "4. Keep IR website, FRP /~!frp, Backhaul /channel and"
+                echo "   /tunnel/ paths UNCHANGED. No global root-location takeover."
+                echo "5. Terminate TLS at the reviewed gateway and verify peer TLS."
+                echo "6. Test public exposure, auth and clean rollback offline first."
+                echo "NO RATHOLE INSTALLER OR NGINX MUTATION IN THIS WIZARD."
                 smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
