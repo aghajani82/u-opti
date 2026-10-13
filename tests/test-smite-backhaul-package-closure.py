@@ -27,6 +27,8 @@ RUNTIME = (
     "smite-backhaul-sidecar-nginx-plan.py",
     "smite-backhaul-sidecar-reconcile.py",
     "smite-backhaul-sidecar-admission.py",
+    "smite-backhaul-sidecar-token.py",
+    "smite-backhaul-sidecar-live-trial.py",
     "smite-backhaul-rebuild-gate.sh",
     "smite-backhaul-sidecar-live-trial.py",
 )
@@ -73,6 +75,14 @@ class PackageClosureTest(unittest.TestCase):
             self.assertTrue(hasattr(module.paired, "reconcile"))
             self.assertTrue(hasattr(module.local, "inspect_local"))
             self.assertTrue((root / "smite-backhaul-standard.sh").is_file())
+            trial_path = root / "smite-backhaul-sidecar-live-trial.py"
+            trial_spec = importlib.util.spec_from_file_location("isolated_trial", trial_path)
+            trial_module = importlib.util.module_from_spec(trial_spec)
+            assert trial_spec.loader is not None
+            trial_spec.loader.exec_module(trial_module)
+            self.assertTrue(hasattr(trial_module, "install"))
+            self.assertTrue(hasattr(trial_module, "rollback"))
+
 
     def test_dependency_chain_is_still_explicit(self):
         admission = (BASE / "modules/smite-backhaul-sidecar-admission.py").read_text()
