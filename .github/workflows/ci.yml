@@ -67,6 +67,11 @@ jobs:
         shell: bash
         run: bash tests/test-smite-backhaul-rebuild-gate.sh
 
+      - name: Exercise experimental activation engine on synthetic filesystem only
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-live-engine.py
+
       - name: Test private offline IR/KH Nginx integration and rollback manifests
         shell: bash
         run: |
