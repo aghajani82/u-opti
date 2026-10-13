@@ -20,6 +20,7 @@ grep -Fq 'KH upstream/Xray Host domain (required)' modules/smite-tunnel-wizard.s
 grep -Fq '["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"' u-opti
 grep -Fq '["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"' u-opti
 grep -Fq 'smite_tw_menu()' modules/smite-tunnel-wizard.sh
+grep -Fq 'twcc_menu()' modules/smite-tunnel-control-center.sh
 grep -Fq 'source "$SMITE_BH_DIR/smite-tunnel-wizard.sh"' modules/smite-backhaul-management.sh
 grep -Fq '5) Tunnel Setup Wizard' modules/smite-backhaul-management.sh
 
@@ -78,6 +79,11 @@ out="$(printf '1\n6\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"
 out="$(printf '1\n7\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:new' <<< "$out"
+
+# New Control Center route preserves existing direct FRP and Backhaul options.
+twcc_menu() { echo "TUNNEL_CENTER_ROLE:$1"; }
+out="$(printf '5\n0\n' | smite_tw_menu)"
+grep -Fq 'TUNNEL_CENTER_ROLE:ir' <<< "$out"
 
 # Role selection without Smite setup is explicit, never inferred from hostname/IP.
 smite_bh_role() { return 1; }
