@@ -421,6 +421,7 @@ while true; do
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
                 "smite-tunnel-wizard.sh"
+                "smite-tunnel-control-center.sh"
                 "smite-backhaul-sidecar.py"
                 "smite-backhaul-sidecar-readiness.py"
                 "smite-backhaul-sidecar-nginx-plan.py"
@@ -525,6 +526,7 @@ while true; do
                 ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
                 ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
+                ["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"
                 ["smite-backhaul-sidecar.py"]="$BASE_URL/modules/smite-backhaul-sidecar.py"
                 ["smite-backhaul-sidecar-readiness.py"]="$BASE_URL/modules/smite-backhaul-sidecar-readiness.py"
                 ["smite-backhaul-sidecar-nginx-plan.py"]="$BASE_URL/modules/smite-backhaul-sidecar-nginx-plan.py"
@@ -564,6 +566,7 @@ while true; do
                 ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
                 ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
+                ["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"
                 ["smite-backhaul-sidecar.py"]="$TEMP_DIR/smite-backhaul-sidecar.py"
                 ["smite-backhaul-sidecar-readiness.py"]="$TEMP_DIR/smite-backhaul-sidecar-readiness.py"
                 ["smite-backhaul-sidecar-nginx-plan.py"]="$TEMP_DIR/smite-backhaul-sidecar-nginx-plan.py"
@@ -669,6 +672,7 @@ while true; do
                ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
                ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
                ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
+               ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
                ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
                ! grep -q 'docker_3xui_multi_certificate_menu()' "$TEMP_DIR/docker-3xui-certificate-multi.sh"; then
                 echo
@@ -781,6 +785,7 @@ while true; do
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
                 "smite-tunnel-wizard.sh"
+                "smite-tunnel-control-center.sh"
                 "smite-backhaul-sidecar.py"
                 "smite-backhaul-sidecar-readiness.py"
                 "smite-backhaul-sidecar-nginx-plan.py"
