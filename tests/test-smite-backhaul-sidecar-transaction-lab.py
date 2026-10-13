@@ -113,6 +113,46 @@ class TransactionTests(unittest.TestCase):
                     engine.rollback(root)
                     self.assert_clean(root, role, original)
 
+    def test_crash_inside_each_file_write_recovers_after_restart(self):
+        for role in ("ir", "kh"):
+            count = len(engine.sb.rollback.ALLOW[role])
+            for point in range(count + 1):
+                with self.subTest(role=role, file_step=point):
+                    root, stage = self.fixture(role)
+                    original = self.original(root, role)
+                    with self.assertRaises(engine.lab.SimulatedPowerLoss):
+                        engine.deploy(root, stage, role, file_crash_after=point)
+                    self.assertTrue((root / engine.INTENT).exists())
+                    self.assertTrue((root / engine.lab.JOURNAL).exists())
+                    engine.rollback(root)
+                    self.assert_clean(root, role, original)
+
+    def test_crash_between_file_journal_and_first_backup(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, stage = self.fixture(role)
+                original = self.original(root, role)
+                with self.assertRaises(engine.lab.SimulatedPowerLoss):
+                    engine.deploy(root, stage, role,
+                                  file_crash_before_backup=True)
+                self.assertTrue((root / engine.INTENT).exists())
+                self.assertTrue((root / engine.lab.JOURNAL).exists())
+                engine.rollback(root)
+                self.assert_clean(root, role, original)
+
+    def test_invalid_fault_injection_rejected_before_journal(self):
+        root, stage = self.fixture("ir")
+        for kwargs in (
+            {"file_crash_after": -1},
+            {"file_crash_after": True},
+            {"file_crash_after": 99},
+            {"file_crash_after": 0, "file_crash_before_backup": True},
+            {"file_crash_before_backup": "yes"},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(engine.TransactionRefused):
+                engine.deploy(root, stage, "ir", **kwargs)
+            self.assertFalse((root / engine.INTENT).exists())
+
     def test_power_loss_during_rollback_can_resume_twice(self):
         for role in ("ir", "kh"):
             for cut in ("service", "files"):
