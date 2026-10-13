@@ -52,7 +52,7 @@ def plan_reversal(manifest: object, observed: object) -> list[str]:
     if not isinstance(manifest, dict) or not isinstance(observed, dict):
         raise RollbackUnsafe("Manifest/observation must be objects")
     role = manifest.get("role")
-    if role not in ALLOW or manifest.get("container_name") != CONTAINER[role]:
+    if not isinstance(role, str) or role not in ALLOW or manifest.get("container_name") != CONTAINER[role]:
         raise RollbackUnsafe("Unexpected sidecar role or container name")
     if observed.get("container_name") != CONTAINER[role]:
         raise RollbackUnsafe("Observed container does not match owned sidecar")
