@@ -236,3 +236,29 @@ filters, Xray XHTTP protocol, or any production deployment and rollback.
 The Sidecar remains uninstalled on IR/KH. The next step is a reviewed
 production-safe install/rollback design and a strict read-only final host
 preflight **before separate explicit approval** for any production changes.
+
+## Isolated IR HTTPS XHTTP location regression (2026-10-13)
+
+CI also exercises the actual **rendered IR XHTTP locations** inside the
+disposable TLS Nginx vhost. Both `/56053/www/` and exact `/56053/www` are
+requested with verification of a synthetic CA and DNS SAN
+`ir.kolbe1.ir`. IR Nginx forwards to its private Backhaul data listener,
+and the authenticated WebSocket tunnel reaches a synthetic HTTP service
+on KH. The KH mock enforces `Host: kh.kolbe1.ir`, checking the XHTTP
+renderer’s Host header rather than merely a generic tunnel endpoint.
+
+Confirmed by CI output:
+
+- `PASS: verified CA produced HTTP 401` (unauthenticated control reaches Backhaul)
+- `PASS: wrong CA produced HTTP 502` (KH rejects untrusted upstream)
+- `PASS: two Nginx proxies, verified TLS, Backhaul WS data roundtrip`
+- `PASS: IR TLS Nginx XHTTP path /56053/www/ -> WS Backhaul -> KH mock`
+- `PASS: IR TLS Nginx XHTTP path /56053/www -> WS Backhaul -> KH mock`
+
+CI: https://github.com/aghajani82/u-opti/actions/runs/38373855043
+
+**Scope limit:** This validates HTTP routing, TLS and the underlying WS data
+tunnel, not Xray's application-level XHTTP negotiation or real client use.
+It does not test the live stream-SNI/FRP Canary rules at public 443,
+production certificate, or real IR/KH reachability. No production settings
+have been changed and the live install/rollback is still not implemented.
