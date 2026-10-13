@@ -24,6 +24,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 sys.dont_write_bytecode = True
 MODULE = Path(__file__).resolve().parent
@@ -78,7 +79,7 @@ def run(argv: list[str], *, capture: bool = False) -> str:
     return result.stdout.strip() if capture else ""
 
 
-def _read_docker(name: str) -> tuple[str, str, str] | None:
+def _read_docker(name: str) -> tuple[str, str, str, str] | None:
     # A failed docker inspect MUST NOT be interpreted as a missing container:
     # Docker daemon downtime during rollback could otherwise bypass ownership.
     listed = run(["docker", "ps", "-a", "--filter",
@@ -88,10 +89,10 @@ def _read_docker(name: str) -> tuple[str, str, str] | None:
         return None
     if listed != name:
         raise TrialRefused("Ambiguous Docker container name")
-    fmt = '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}'
+    fmt = '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}|{{.State.Running}}'
     out = run(["docker", "inspect", "-f", fmt, name], capture=True)
     fields = out.split("|")
-    if len(fields) != 3:
+    if len(fields) != 4 or fields[3] not in ("true", "false"):
         raise TrialRefused("Unexpected Docker ownership evidence")
     return tuple(fields)
 
@@ -262,14 +263,16 @@ def _verify_resource_states(doc: dict) -> dict[str, str]:
     return found
 
 
-def _docker_owned(doc: dict) -> bool:
+def _docker_owned(doc: dict, *, require_running: bool = False) -> bool:
     name = f"uopti-backhaul-sidecar-{doc['role']}"
     found = _read_docker(name)
     if found is None:
         return False
-    _, image, label = found
+    _, image, label, running = found
     if image != IMAGE or label != doc["trial_id"]:
         raise TrialRefused("Foreign Docker container; recovery blocked")
+    if require_running and running != "true":
+        raise TrialRefused("Sidecar container is not running")
     return True
 
 
@@ -325,8 +328,22 @@ def _create_dirs(resources: list[dict]) -> None:
         raise TrialRefused("Private token directory must pre-exist with mode 0700")
     secret = allowed / "shared.token"
     token, mode = _safe_file(secret, mode=0o600)
-    if not token or len(token) > 256:
+    secret_value = token.decode("ascii", errors="ignore").strip()
+    if (not paired.sidecar.TOKEN_PATTERN.fullmatch(secret_value)
+            or len(token) > 256):
         raise TrialRefused("Private shared.token missing or invalid")
+    candidate = next((r["after"] for r in resources
+                      if r["path"] == str(allowed / "ir.toml")
+                      or r["path"] == str(allowed / "kh.toml")), None)
+    if candidate is None:
+        raise TrialRefused("Private Sidecar TOML not in proposal")
+    try:
+        config = tomllib.loads(candidate.decode("utf-8"))
+        configured = config.get("server", config.get("client", {}))["token"]
+    except (ValueError, UnicodeError, KeyError, TypeError) as exc:
+        raise TrialRefused("Invalid private Sidecar candidate") from exc
+    if not secrets.compare_digest(secret_value, configured):
+        raise TrialRefused("Secret file does not match candidate; regenerate plans")
     for row in resources:
         if not admission._existing_ancestors_safe(Path(row["path"])):
             raise TrialRefused("Unsafe directory during install")
@@ -355,7 +372,8 @@ def install(role: str, sidecar_dir: Path, nginx_dir: Path) -> str:
         # Re-check host evidence just before creating the journal.
         if admission.admission(role, sidecar_dir, nginx_dir):
             raise TrialRefused("Host state changed during Docker image pull")
-        _check_targets(resources, role)
+        if rows != _check_targets(resources, role):
+            raise TrialRefused("Nginx file metadata changed during admission")
         _create_dirs(resources)
         root = _root(role, create=True)
         trial_id = secrets.token_hex(12)
@@ -378,17 +396,17 @@ def install(role: str, sidecar_dir: Path, nginx_dir: Path) -> str:
                  "--read-only", "--cap-drop", "ALL",
                  "--security-opt", "no-new-privileges",
                  "--mount", ("type=bind,src=/etc/u-opti/backhaul-sidecar/"
-                             f"{role}.toml,dst=/run/backhaul/config.toml,readonly"),
+                             f"{role}.toml,dst=/tmp/bh.toml,readonly"),
                  "--entrypoint", "/usr/local/bin/backhaul", IMAGE,
-                 "-c", "/run/backhaul/config.toml"])
-            if not _docker_owned(doc):
+                 "-c", "/tmp/bh.toml"])
+            if not _docker_owned(doc, require_running=True):
                 raise TrialRefused("Sidecar container did not start as expected")
             doc["phase"] = "container_started"
             _journal_store(root, doc)
             run(["systemctl", "reload", "nginx"])
             run(["nginx", "-t"])
             _verify_resource_states(doc)
-            if not _docker_owned(doc):
+            if not _docker_owned(doc, require_running=True):
                 raise TrialRefused("Sidecar container disappeared")
             doc["phase"] = "trial_active"
             _journal_store(root, doc)
