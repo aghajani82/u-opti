@@ -70,6 +70,26 @@ async def delete_tunnel():
             request.app.state.backhaul_manager.stop_server(tunnel.id)
 '''
 
+# Reproduce the actual IR situation: equivalent Python lookup statements
+# but one or both lines contain invisible trailing spaces/tabs. The patch
+# must remain confined to send_to_node, never touching get_tunnel_status.
+node_anchor = '            if not node:\n                return {"status": "error", "message": f"Node {node_id} not found"}\n'
+assert client.count(node_anchor) == 1
+variant = client.replace(
+    node_anchor,
+    '            if not node:  \t\n                return {"status": "error", "message": f"Node {node_id} not found"}  \t\n',
+)
+variant += '''
+    async def get_tunnel_status(self, node_id):
+        if not node:
+            return {"status": "error", "message": f"Node {node_id} not found"}
+'''
+patched_variant = patcher.patch_panel_source("node_client.py", variant)
+assert patched_variant.count("# U-OPTI Standard Backhaul (opt-in):") == 1
+assert patcher.patch_panel_source("node_client.py", patched_variant) == patched_variant
+assert patched_variant.split("    async def get_tunnel_status(", 1)[1] == variant.split("    async def get_tunnel_status(", 1)[1]
+assert 'if not node:  \t\n' in patched_variant
+
 assert routes.count("elif needs_backhaul_server:") == 2
 original_delete_handler = routes.split('@router.delete("/{tunnel_id}")', 1)[1]
 
