@@ -46,3 +46,73 @@ The commands only produce temporary candidate files and run offline tests. Do no
 5. Before rollout, verify reverse proxy TLS validation, WebSocket upgrades for /channel and exact /tunnel, and all client pool traffic over verified KH bridge.
 6. Require **separate user approval** before starting a container, creating any network route, changing a service, deploying configs, or touching production.
 7. Test authenticated end-to-end XHTTP, health checks, reconnect, restore, cert renewal and sequential reboots. Do not merge PR to main before these and explicit approval.
+
+## Source audit and revised Compose safety (offline)
+
+At upstream Smite v0.1.7, `node/Dockerfile` explicitly builds Backhaul v0.7.2
+and copies its executable into `/usr/local/bin/backhaul`:
+https://github.com/zZedix/Smite/blob/v0.1.7/node/Dockerfile .
+The candidate now uses this absolute entrypoint and Compose long-syntax bind
+mount with `bind.create_host_path: false` so a nonexistent host config is not
+silently created as a directory. **Important:** this proves upstream Dockerfile
+intent, not the binary or entrypoint inside the exact live image digest. An
+independent digest/runtime verification remains mandatory before activation.
+
+## Strict offline port-conflict audit
+
+`modules/smite-backhaul-sidecar-audit.py` reads a **user-supplied** JSON
+listener snapshot (it never scans a server). It requires host networking,
+IR's existing Nginx 443 + loopback 8443 and FRPS loopback 7000, or KH's
+existing loopback Xray 56053; it rejects any occupied proposed new listener
+port on *any* IP interface (IR 3080 and 56053; KH 13080), malformed snapshots,
+duplicate entries, or missing expected service owners. This is conservative:
+even binding an unrelated IP on the same port causes a review blocker.
+
+Example simulated IR snapshot, with no actual service discovery:
+
+```json
+{
+  "role": "ir",
+  "network_mode": "host",
+  "listeners": [
+    {"address":"0.0.0.0","port":443,"owner":"nginx"},
+    {"address":"127.0.0.1","port":8443,"owner":"nginx"},
+    {"address":"127.0.0.1","port":7000,"owner":"frps"}
+  ]
+}
+```
+
+Run offline: `python3 modules/smite-backhaul-sidecar-audit.py --role ir --snapshot ./inventory-ir.json`.
+PASS means only that the supplied static snapshot met structural expectations;
+it does NOT prove a live server is unchanged or activate any service.
+
+## Rollback safety model (NOT an executable live rollback)
+
+`modules/smite-backhaul-sidecar-rollback.py` validates an offline JSON
+manifest with an exact allowlist of candidate-owned resources per role and a
+separate simulated observed-state JSON. New Sidecar TOML, Compose, Nginx include
+fragments and KH bridge config can only be removed when their recorded
+`applied_sha256` matches the observed file's digest. The sole IR existing-file
+edit contemplated is `/etc/nginx/conf.d/u-opti-smite-panel-backend.conf`, and
+it requires a matching backed-up original `before_sha256` and `backup_sha256`.
+
+Any unknown path, changed checksum, missing backup, incomplete manifest or
+unexpected container identity fails closed. Only the specifically named
+`uopti-backhaul-sidecar-ir` or `uopti-backhaul-sidecar-kh` would ever be in
+scope for a future authorized container stop. Smite containers, Smite backhaul
+configs, FRP processes, Xray and the Nginx stream router are NEVER rollback
+targets. The current script **does not remove files, restore backups,
+stop containers or reload Nginx**; it prints hypothetical operations only.
+
+Actual activation and reversal still require a separately reviewed and approved
+transactional installer with pre-change backups, atomic file ownership and
+safe Nginx config validation. There is **no approved live rollback yet**.
+
+Offline regression commands:
+
+```bash
+python3 tests/test-smite-backhaul-sidecar-audit.py
+python3 tests/test-smite-backhaul-sidecar-rollback.py
+```
+
+**Production IR and KH remain untouched; PR #18 remains a draft.**
