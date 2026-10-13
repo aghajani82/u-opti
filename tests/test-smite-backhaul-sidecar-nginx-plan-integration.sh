@@ -86,17 +86,19 @@ for role in ir kh; do
     # Nginx runner is isolated and does not bind any host TCP sockets.
     docker run --rm --network none --read-only --cap-drop ALL \
         --security-opt no-new-privileges \
+        --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
         --mount "type=bind,src=$ROOT/$role,dst=/etc/nginx,readonly" \
-        nginx:stable-alpine nginx -t -c /etc/nginx/nginx.conf
+        nginx:stable-alpine -t -c /etc/nginx/nginx.conf
 
     # Invalid directive must be rejected by the real Nginx parser.
     printf '\nnot_a_real_nginx_directive yes;\n' >> "$ROOT/$role/nginx.conf"
     if docker run --rm --network none --read-only --cap-drop ALL \
         --security-opt no-new-privileges \
+        --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
         --mount "type=bind,src=$ROOT/$role,dst=/etc/nginx,readonly" \
-        nginx:stable-alpine nginx -t -c /etc/nginx/nginx.conf >/dev/null 2>&1; then
+        nginx:stable-alpine -t -c /etc/nginx/nginx.conf >/dev/null 2>&1; then
         echo "ERROR: Nginx accepted deliberate invalid directive ($role)" >&2
         exit 1
     fi
