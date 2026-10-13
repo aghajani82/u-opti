@@ -156,7 +156,8 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(('127.0.0.1',56053),Handler).serve_forever()
 """)
 PY
-chmod 0600 "$tmp/"*
+find "$tmp" -maxdepth 1 -type f -exec chmod 0600 {} +
+chmod 0700 "$tmp/kh-good" "$tmp/kh-bad"
 docker pull --platform linux/amd64 "$image" >/dev/null
 docker pull nginx:stable-alpine >/dev/null
 docker network create --internal "$network" >/dev/null
