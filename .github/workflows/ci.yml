@@ -226,3 +226,17 @@ jobs:
         run: |
           bash -n tests/test-smite-backhaul-sidecar-tls.sh
           bash tests/test-smite-backhaul-sidecar-tls.sh
+
+  sidecar-service-reload-rollback:
+    # Only on disposable GitHub-hosted runners in pull requests.
+    # Private Docker network; no host ports or live server access.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test real isolated Nginx config activation and rollback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-service-rollback.sh
+          bash tests/test-smite-backhaul-sidecar-service-rollback.sh
