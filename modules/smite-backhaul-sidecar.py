@@ -134,7 +134,7 @@ def candidate_files(role: str, token: str, domain: str, kh_host: str) -> dict[st
     else:
         raise UnsafeCandidate("Unsupported Sidecar role")
     files["NOT-INSTALLED.txt"] = (
-        "OFFLINE CANDIDATE ONLY. NOTHING WAS INSTALLED OR STARTED.\n"
+        "OFFLINE CANDIDATE ONLY. NOT INSTALLED OR STARTED.\n"
         "Never run compose directly from this staging folder.\n"
         "Before an explicitly authorized deployment: check all listener owners,\n"
         "pin/verify the Backhaul binary v0.7.2, review Nginx 443/8443 routing,\n"
