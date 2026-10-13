@@ -44,6 +44,11 @@ jobs:
         shell: bash
         run: bash tests/test-smite-tunnel-wizard.sh
 
+      - name: Fail-closed read-only existing/new Backhaul audit tests
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-readiness.py
+
       - name: Verify automatic Standard FRP XHTTP routing and rollback
         shell: bash
         run: bash tests/test-smite-frp-xhttp-auto.sh
