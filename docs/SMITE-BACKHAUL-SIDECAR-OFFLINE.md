@@ -116,3 +116,23 @@ python3 tests/test-smite-backhaul-sidecar-rollback.py
 ```
 
 **Production IR and KH remain untouched; PR #18 remains a draft.**
+
+## GitHub-hosted image and Compose smoke test (2026-10-13)
+
+CI workflow `.github/workflows/ci.yml` includes a dedicated
+`sidecar-image-smoke` job on a GitHub-hosted `ubuntu-latest` runner.
+
+- `docker compose ... config --quiet` succeeded for **both** independent IR
+  and KH candidate Compose files generated using a temporary test-only token.
+- `docker pull --platform linux/amd64` fetched the explicitly pinned
+  `ghcr.io/zzedix/smite-node` image digest.
+- `docker run --rm --network none --read-only --cap-drop ALL` ran **only**
+  `/usr/local/bin/backhaul -v`, which printed **`v0.7.2`**.
+- No live IR/KH server was accessed, and no real tunnel service was started.
+
+Successful job: https://github.com/aghajani82/u-opti/actions/runs/38366411281
+
+This clears the pinned-image binary existence/version and Compose syntax
+questions, **not** the following: actual WS/TLS traffic, Nginx runtime
+integration, host port ownership at the instant of deployment, or any
+executable installer/rollback transaction. Sidecar remains NOT INSTALLED.
