@@ -63,6 +63,7 @@ def backhaul_toml(role: str, token: str) -> str:
             'heartbeat = 40\n'
             'nodelay = true\n'
             'sniffer = false\n'
+            'skip_optz = true\n'
             'web_port = 0\n'
             'log_level = "info"\n'
         )
@@ -78,6 +79,7 @@ def backhaul_toml(role: str, token: str) -> str:
             'keepalive_period = 75\n'
             'nodelay = true\n'
             'sniffer = false\n'
+            'skip_optz = true\n'
             'web_port = 0\n'
             'log_level = "info"\n'
         )
