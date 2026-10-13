@@ -70,12 +70,16 @@ def check_path(root: Path, path: str, *, create_parents: bool = False) -> Path:
     ancestor = root
     for component in Path(path.lstrip("/")).parts[:-1]:
         ancestor = ancestor / component
-        if create_parents and not ancestor.exists() and not ancestor.is_symlink():
-            ancestor.mkdir(mode=0o700)
-        if ancestor.exists():
+        try:
             info = ancestor.lstat()
-            if not stat.S_ISDIR(info.st_mode):
-                raise SandboxRefused("Non-directory or symlink ancestor")
+        except FileNotFoundError:
+            if create_parents:
+                ancestor.mkdir(mode=0o700)
+                info = ancestor.lstat()
+            else:
+                continue
+        if not stat.S_ISDIR(info.st_mode):
+            raise SandboxRefused("Non-directory or symlink ancestor")
     if target.exists() or target.is_symlink():
         info = target.lstat()
         if not stat.S_ISREG(info.st_mode):
