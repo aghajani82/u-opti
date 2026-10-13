@@ -173,6 +173,60 @@ from HTTP GET probes and mock health state.
 
 **No live IR/KH changes are made by this transaction laboratory.**
 
+## Phase 5: Unified IR/KH ownership and Nginx rollback lab
+
+The offline proposal and rollback logic now have a **common,
+fail-closed resource definition** in
+`modules/smite-backhaul-sidecar-reconcile.py`. The reconciler reads
+two independently private candidate folders, recomputes the output of
+both the pinned Sidecar candidate generator and the Nginx compiler,
+checks the hashes and exact target paths in `plan.json`, and blocks
+an incorrect token, domain, Nginx file, include, symlink, weak file
+permissions, unknown target or duplicate file. It does **not** print
+or put authentication material into a recovery journal.
+
+The reconciled synthetic transaction covers:
+
+| Role | Created resources | Existing Nginx file edited and backed up |
+| --- | --- | --- |
+| IR | Sidecar TOML, Compose candidate, Backhaul WS and XHTTP includes | Smite HTTPS backend on 127.0.0.1:8443 |
+| KH | Sidecar TOML, Compose candidate, TLS-validating loopback Bridge | KH HTTPS vhost containing the guarded numeric port-forwarding regex |
+
+**KH guard integrity is a prerequisite**: the edited KH vhost must deny
+`/13080/` and its leading-zero variants before the existing numeric
+forwarding regex. Both its exact original bytes and the patched version
+are included in the mock file journal, making its rollback scope
+symmetric with IR's backend edit.
+
+`modules/smite-backhaul-sidecar-unified-lab.py` is a marker-guarded,
+private `/tmp`-only simulator. It writes a durable intent before
+file changes, saves the original vhost, applies only recognized
+synthetic paths, exercises mock Sidecar start/Nginx reload, checks all
+file and mock-service states before recovery, and deletes its journal
+last. A simulated interruption during install, restoration, or
+journal finalization can be recovered by a separate invocation.
+Unknown Nginx drift, journal tampering, symlinks, absent backups and
+unexpected mock service mutations cause a HOLD without guessing.
+
+Hermetic CI tests cover IR and KH, each file write checkpoint,
+all service checkpoints, double installs, missing files, the KH
+public-forwarding guard, restorable original vhost bytes, and
+interrupted rollback. These tests **do not** change any real machine
+or perform a live container start, Nginx reload, TLS handshake or
+VLESS connection.
+
+**Still not a production installer:** the existing historical
+simulation modules retain an older sandbox allowlist and must not
+be treated as equivalent to this newer unified scope. Before live
+deployment we need an audited transition to a production journal,
+host file ownership/mode preservation, durable backup of actual
+Nginx/certificate dependencies, exact container provenance and
+lifecycle, full Nginx configuration validation on target machines,
+a public-forwarding bypass review, end-to-end authenticated network
+checks, and failure/reboot handling on two disposable servers.
+The PR remains draft; do **not** merge or execute the simulator
+against IR/KH.
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
