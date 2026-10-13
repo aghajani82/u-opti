@@ -123,7 +123,12 @@ def bootstrap_mock(root: Path, role: str) -> None:
     root = Path(root)
     if root.parent != Path("/tmp") or not root.name.startswith("uopti-bh-sandbox-"):
         raise SandboxRefused("Refusing non-sandbox root")
-    root.mkdir(mode=0o700)
+    if root.exists() or root.is_symlink():
+        info = root.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077:
+            raise SandboxRefused("Sandbox must be private real directory")
+    else:
+        root.mkdir(mode=0o700)
     if any(root.iterdir()):
         raise SandboxRefused("Sandbox fixture must start empty")
     atomic_write(root / MARKER, MAGIC.encode())
