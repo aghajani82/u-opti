@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 import tempfile
 
 
-SEND_ANCHOR = (
-    '            if not node:\n'
-    '                return {"status": "error", "message": f"Node {node_id} not found"}\n'
+# The existing U-OPTI Panel overlay may have trailing spaces on these
+# lines. Match the two *statements*, not byte-for-byte whitespace. A match
+# is allowed only within send_to_node and only once; otherwise fail closed.
+SEND_LOOKUP_PATTERN = re.compile(
+    r'(?m)^(?P<indent> {12})if not node:[ \\t]*\\n'
+    r'(?P=indent)    return \\{"status": "error", "message": f"Node \\{node_id\\} not found"\\}[ \\t]*(?:\\n|$)'
 )
 SEND_GUARD = '''            # U-OPTI Standard Backhaul (opt-in): normalize all create/reapply
             # and startup node sends from the canonical persisted tunnel spec.
@@ -103,10 +107,20 @@ def patch_panel_source(filename: str, source: str) -> str:
         body, end, tail = rest.partition("    async def apply_tunnel(")
         if not begin or not end:
             raise ValueError("NodeClient send_to_node method boundaries missing")
-        patched = one(
-            body, SEND_ANCHOR, "\n" + SEND_GUARD,
-            "            # U-OPTI Standard Backhaul (opt-in):", "NodeClient",
-        )
+        marker = "            # U-OPTI Standard Backhaul (opt-in):"
+        if marker in body:
+            if body.count(marker) != 1:
+                raise ValueError("NodeClient: ambiguous existing Standard guard")
+            patched = body
+        else:
+            matches = list(SEND_LOOKUP_PATTERN.finditer(body))
+            if len(matches) != 1:
+                raise ValueError(
+                    "NodeClient: expected exactly one safe node lookup and return "
+                    "inside send_to_node"
+                )
+            match = matches[0]
+            patched = body[:match.end()] + "\n" + SEND_GUARD + body[match.end():]
         output = head + begin + patched + end + tail
     elif filename == "main.py":
         # Anchor constrained to the Backhaul restore method.
