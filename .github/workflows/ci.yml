@@ -44,6 +44,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-tunnel-wizard.sh
 
+      - name: Verify Tunnel Control Center status, demo and navigation
+        shell: bash
+        run: bash tests/test-smite-tunnel-control-center.sh
+
       - name: Fail-closed read-only existing/new Backhaul audit tests
         shell: bash
         run: |
