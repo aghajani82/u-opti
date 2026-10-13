@@ -136,3 +136,34 @@ This clears the pinned-image binary existence/version and Compose syntax
 questions, **not** the following: actual WS/TLS traffic, Nginx runtime
 integration, host port ownership at the instant of deployment, or any
 executable installer/rollback transaction. Sidecar remains NOT INSTALLED.
+
+## Stage 6: synthetic file transaction and rollback (offline-only)
+
+`modules/smite-backhaul-sidecar-sandbox.py` now performs a **real write and
+reversal of candidate files only inside a specially marked private
+`/tmp/uopti-bh-sandbox-*` directory**. The sandbox requires an exact
+`OFFLINE MOCK ONLY` marker and refuses other roots, symlinks, unknown
+paths and any role outside IR/KH. It does not run a container, inspect live
+ports or execute Nginx. Host `/etc` is NEVER used; all `/etc/...`
+resource paths are re-rooted under the synthetic temporary directory.
+
+Test fixture uses an invented Nginx 8443 backend with a deliberately unique
+`# UOPTI_SIDECAR_TEST_HOOK` marker. There is no such assumed marker in the
+real host config, and the offline simulator must NEVER be pointed at IR/KH.
+Simulation applies candidate TOML, Compose and Nginx fragments as private
+files using per-file atomic replacement, records an exact SHA256 manifest,
+saves the original synthetic backend, then checks the rollback allowlist
+and reverses the transaction with a content-identical restoration.
+
+Regression tests cover both roles, failure injection at every file-write
+step, second-install refusal, symlinked parent directory refusal, drift
+detection (rollback must stop without overwriting an altered file), exact
+restoration of synthetic prior state and retained isolation. CI runs:
+
+    python3 tests/test-smite-backhaul-sidecar-sandbox.py
+
+**This is NOT a production installer or a production rollback mechanism.**
+In particular, it does not cover a power loss during the commit/rollback,
+production Nginx include editing, service ownership, or any real container
+lifecycle. A separately approved installation transaction and production
+backups must be designed and reviewed before testing on live servers.
