@@ -43,7 +43,7 @@ grep -Fq 'Rathole' modules/smite-tunnel-wizard.sh
 
 good="$(smite_tw_rathole_plan ir 23333 45000)"
 grep -Fq 'NO INSTALL' <<< "$good"
-grep -Fq 'NOT provide Backhaul-style' <<< "$good"
+grep -Fq 'Do not assume Rathole uses Backhaul' <<< "$good"
 grep -Fq 'IR: server' <<< "$good"
 
 for pair in '443 45000' '3080 45000' '23333 23333' \
