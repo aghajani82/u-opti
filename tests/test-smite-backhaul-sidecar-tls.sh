@@ -94,7 +94,7 @@ il=il.replace('proxy_pass http://127.0.0.1:3080;',
 ix=ix.replace('http://127.0.0.1:56053',
               f'http://{server}:56053')
 kl=kl.replace('listen 127.0.0.1:13080;','listen 0.0.0.0:13080;')
-kl=kl.replace('/etc/ssl/certs/ca-certificates.crt','/etc/nginx/conf.d/ca.pem')
+kl=kl.replace('/etc/ssl/certs/ca-certificates.crt','/run/kh-lab/ca.pem')
 (dst/"ir.toml").write_text(s)
 (dst/"kh.toml").write_text(c)
 (dst/"ir-control.inc").write_text(il)
@@ -115,8 +115,29 @@ http {
 }
 """)
 (dst/"kh-nginx.conf").write_text("""events { worker_connections 256; }
-http { include /etc/nginx/conf.d/kh-bridge.conf; }
+http {
+ server {
+  listen 13081;
+  location = /legacy { return 200 'kh-legacy-preserved'; }
+ }
+ include /run/kh-lab/bridge.conf;
+}
 """)
+# Per-Nginx separate directories, so replacement happens atomically and does
+# not mutate a mounted file inode.
+import os
+for label, content in (('kh-good', kl), ('kh-bad', kl.replace('ca.pem','bad-ca.pem'))):
+ directory=dst/label
+ directory.mkdir(mode=0o700)
+ (directory/'bridge.candidate.conf').write_text(content)
+ (directory/'bridge.conf').write_text(
+     '# REVIEWED SYNTHETIC KH BRIDGE NOT ACTIVE\n' if label=='kh-good'
+     else content
+ )
+ if label=='kh-good':
+  (directory/'ca.pem').write_bytes((dst/'ca.pem').read_bytes())
+ else:
+  (directory/'bad-ca.pem').write_bytes((dst/'bad-ca.pem').read_bytes())
 (dst/"echo.py").write_text("""
 from http.server import BaseHTTPRequestHandler,HTTPServer
 class Handler(BaseHTTPRequestHandler):
@@ -161,19 +182,47 @@ created="$ir_ng $created"
 for name in "$kh_ng" "$bad_ng"; do
     if [[ "$name" == "$kh_ng" ]]; then
         bundle="ca.pem"
-        snippet="kh-bridge.conf"
+        snippet="kh-good"
     else
         bundle="bad-ca.pem"
-        snippet="bad-bridge.conf"
+        snippet="kh-bad"
     fi
     docker run -d --name "$name" --network "$network" \
         --mount "type=bind,src=$tmp/kh-nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
-        --mount "type=bind,src=$tmp/$snippet,dst=/etc/nginx/conf.d/kh-bridge.conf,readonly" \
-        --mount "type=bind,src=$tmp/$bundle,dst=/etc/nginx/conf.d/$bundle,readonly" \
+        --mount "type=bind,src=$tmp/$snippet,dst=/run/kh-lab" \
         nginx:stable-alpine >/dev/null
     created="$name $created"
 done
 for name in "$ir_ng" "$kh_ng" "$bad_ng"; do docker exec "$name" nginx -t >/dev/null 2>&1; done
+
+# KH bridge is initially absent, but the separate synthetic legacy endpoint
+# remains healthy. Enable only the owned KH bridge via atomic config swap.
+docker exec -i "$ir_bh" python3 - "$kh_ng" <<'PY'
+from urllib.request import urlopen
+from urllib.error import URLError
+import sys
+with urlopen('http://'+sys.argv[1]+':13081/legacy',timeout=2) as r:
+ assert r.status==200 and r.read()==b'kh-legacy-preserved'
+try:
+ urlopen('http://'+sys.argv[1]+':13080/channel',timeout=2)
+except (URLError, OSError):
+ pass
+else:
+ raise SystemExit('FAIL: KH bridge unexpectedly active in synthetic baseline')
+print('PASS: KH legacy endpoint up; optional bridge absent before activation')
+PY
+python3 - "$tmp/kh-good" <<'PY'
+from pathlib import Path
+import os,sys,tempfile
+d=Path(sys.argv[1])
+payload=(d/'bridge.candidate.conf').read_bytes()
+fd,p=tempfile.mkstemp(prefix='.uopti-kh-',dir=d)
+with os.fdopen(fd,'wb') as f:
+ f.write(payload);f.flush();os.fsync(f.fileno())
+os.replace(p,d/'bridge.conf')
+PY
+docker exec "$kh_ng" nginx -t >/dev/null 2>&1
+docker exec "$kh_ng" nginx -s reload >/dev/null 2>&1
 
 # No Authorization header: good TLS reaches Backhaul and yields 401.
 # Wrong CA: verification fails at KH Nginx and yields 502.
