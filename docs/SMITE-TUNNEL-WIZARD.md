@@ -12,7 +12,7 @@ Standard FRP Setup Wizard, or the Backhaul candidate staging menu.
 
 | Protocol | IR and KH role screens | Status checks | Installs live tunnel? |
 | --- | --- | --- | --- |
-| Independent Backhaul 0.7.2 | Yes | Read-only diagnostics; explicit private offline candidate generation | **No** — setup checklist and secure candidate only |
+| Independent Backhaul 0.7.2 | Yes | Read-only host readiness + explicit private offline candidate generation | **No** — setup checklist and secure candidate only |
 | Standard FRP | Yes, delegated to existing `smite-frp-wizard.sh` | Existing FRP diagnostics | Existing FRP wizard handles its opt-in setup steps |
 | Rathole | Yes | Validates dedicated ports; explains TCP and optional WSS feasibility | **No** — TCP planning only until pinned binary, auth, bind, TLS/Noise, backup and rollback are reviewed |
 
@@ -66,6 +66,34 @@ service token without terminal/log exposure, TLS/Noise review, inbound port
 and firewall review, hostname and certificate controls where applicable,
 systemd or container lifecycle, fail-closed ownership checking, complete
 backups and a proved rollback on disposable hosts.
+
+## Phase 2: Local readiness checks (implemented in Draft PR)
+
+A read-only local auditor is now available as
+`modules/smite-backhaul-sidecar-readiness.py`. The beginner Backhaul
+submenu exposes two role-aware commands:
+
+- **Audit existing installation**: inspects the pinned Sidecar image,
+  host networking and auto-start policy, loopback port ownership, Nginx
+  syntax, private file modes, fixed Sidecar routes, TLS verify directive
+  and KH public-forwarding guard. Prints only safe status messages,
+  not tokens, config contents, IPs, PIDs or container mount paths.
+- **Preflight a fresh server**: refuses if a named Sidecar, pre-existing
+  Sidecar files, or conflicting reserved listeners are present; verifies
+  the expected FRP/Smite/Nginx/Xray baseline for the selected role.
+
+This is **not** a transactional installer and does not claim that
+certificates, external reachability, authenticated WSS, end-to-end
+XHTTP/VLESS, safe Nginx integration, backup provenance or tested
+rollback are complete. The chosen role is user-supplied if Smite
+state cannot identify it. Unexpected owners or missing inspection
+permissions produce HOLD, not success.
+
+Synthetic CI tests cover port collisions, incorrect ownership,
+unexpected public binds, non-verifying TLS bridge, swapped Nginx
+location order, partial installation, stale image/restart policy
+and absent inspection evidence. These are hermetic tests and do not
+connect to real IR/KH machines.
 
 ## Next development milestones
 
