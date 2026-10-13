@@ -34,7 +34,7 @@ def inspect(path: Path = TOKEN_FILE) -> bool:
             return False
         value = path.read_bytes().strip()
         return 24 <= len(value) <= 128 and all(
-            chr(c).isalnum() or c in b"_-"
+            (48 <= c <= 57) or (65 <= c <= 90) or (97 <= c <= 122) or c in b"_-"
             for c in value)
     except (OSError, ValueError):
         return False
