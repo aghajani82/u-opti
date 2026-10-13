@@ -262,3 +262,34 @@ tunnel, not Xray's application-level XHTTP negotiation or real client use.
 It does not test the live stream-SNI/FRP Canary rules at public 443,
 production certificate, or real IR/KH reachability. No production settings
 have been changed and the live install/rollback is still not implemented.
+
+## Stage 8 — strict final-host evidence gate (OFFLINE review only)
+
+`modules/smite-backhaul-sidecar-preflight.py` is a **static reviewer for a
+user-provided, sanitized JSON snapshot**. It neither collects live host
+state nor runs Docker, Nginx, SSH, network requests, or writes. No snapshot
+has been collected from the real IR/KH servers. Its output explicitly says
+`NOT AUTHORIZED TO DEPLOY OR MERGE` even when every evidence flag is true.
+
+Each role's snapshot must be younger than 15 minutes, use an offset-aware
+timestamp, declare exact Smite `v0.1.7` and Backhaul `v0.7.2` versions,
+carry a host-mode listener inventory, and include all role-specific review
+flags. Flags are *assertions from an external reviewed collector*, not
+proof independently obtained by this script.
+
+The conservative listener check rejects occupied proposed ports, missing
+expected service ownership and wildcard/IPv6 conflicts. IR requires
+unchanged FRP, Smite Panel/Node, Nginx stream 443, loopback HTTPS 8443,
+SNI/Canary routing review, current TLS certificate and a confirmed
+nonconflicting candidate include. KH requires unchanged legacy Backhaul
+clients and Xray, loopback 56053, remote HTTPS route and certificate
+verification evidence. The historical KH baseline is four legacy Backhaul
+client configurations (IR zero), and any count change triggers review.
+
+Offline tests: `python3 tests/test-smite-backhaul-sidecar-preflight.py`.
+
+**Next actions requiring fresh user authorization:** build and inspect a
+read-only, secret-redacting live snapshot collector; request one command at
+a time on IR and KH; manually analyze real Nginx routing and process ownership;
+and only then design/review an actual transactional installer/rollback.
+No production changes or merge are authorized by this gate.
