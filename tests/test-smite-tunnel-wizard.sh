@@ -11,6 +11,9 @@ grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_readiness()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_admission()' modules/smite-tunnel-wizard.sh
+grep -Fq 'smite_tw_backhaul_live_trial()' modules/smite-tunnel-wizard.sh
+grep -Fq '"smite-backhaul-sidecar-live-trial.py"' install.sh
+grep -Fq '"smite-backhaul-sidecar-live-trial.py"' u-opti
 grep -Fq '"smite-backhaul-sidecar-admission.py"' install.sh
 grep -Fq '"smite-backhaul-sidecar-admission.py"' u-opti
 grep -Fq '"smite-backhaul-sidecar-readiness.py"' install.sh
@@ -91,6 +94,10 @@ grep -Fq 'TUNNEL_CENTER_ROLE:ir' <<< "$out"
 smite_tw_backhaul_admission() { echo "ADMISSION_CHECK_FOR:$1"; }
 out="$(printf '1\n9\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ADMISSION_CHECK_FOR:ir' <<< "$out"
+
+smite_tw_backhaul_live_trial() { echo "TRIAL_MENU_FOR:$1"; }
+out="$(printf '1\n10\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'TRIAL_MENU_FOR:ir' <<< "$out"
 
 # Role selection without Smite setup is explicit, never inferred from hostname/IP.
 smite_bh_role() { return 1; }
