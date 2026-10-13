@@ -14,7 +14,7 @@ Standard FRP Setup Wizard, or the Backhaul candidate staging menu.
 | --- | --- | --- | --- |
 | Independent Backhaul 0.7.2 | Yes | Read-only diagnostics; explicit private offline candidate generation | **No** — setup checklist and secure candidate only |
 | Standard FRP | Yes, delegated to existing `smite-frp-wizard.sh` | Existing FRP diagnostics | Existing FRP wizard handles its opt-in setup steps |
-| Rathole | Yes | Validates proposed dedicated ports; explains topology | **No** — TCP planning only until pinned binary, auth, bind, TLS/Noise, backup and rollback are reviewed |
+| Rathole | Yes | Validates dedicated ports; explains TCP and optional WSS feasibility | **No** — TCP planning only until pinned binary, auth, bind, TLS/Noise, backup and rollback are reviewed |
 
 Never present a staged candidate, a HTTP 400 from Xray, a HTTP 401 on
 Backhaul `/channel`, or an `ESTABLISHED` local Nginx connection as proof
