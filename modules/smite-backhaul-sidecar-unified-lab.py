@@ -60,8 +60,9 @@ def file_identity(target: Path) -> tuple[int, int, int]:
     if not stat.S_ISREG(st.st_mode):
         raise TransactionRefused("Owned resource is not a regular file")
     mode = stat.S_IMODE(st.st_mode)
-    if (mode & 0o022) or (mode & 0o7000):
-        raise TransactionRefused("Unexpected writable/special-mode Nginx file")
+    if (mode not in (0o600, 0o640, 0o644)
+            or st.st_uid != os.geteuid() or st.st_gid != os.getegid()):
+        raise TransactionRefused("Unsafe or foreign original Nginx owner/mode")
     return st.st_uid, st.st_gid, mode
 
 
@@ -76,7 +77,7 @@ def atomic_payload(root: Path, target: Path, data: bytes,
     sandbox.check_path(root, "/" + str(target.relative_to(root)), create_parents=True)
     if (type(uid) is not int or type(gid) is not int or
             type(mode) is not int or uid < 0 or gid < 0 or
-            mode not in (0o600, 0o640, 0o644, 0o660)):
+            mode not in (0o600, 0o640, 0o644)):
         raise TransactionRefused("Unsupported synthetic target metadata")
     if uid != os.geteuid() or gid != os.getegid():
         raise TransactionRefused("Synthetic file identity differs from current owner")
