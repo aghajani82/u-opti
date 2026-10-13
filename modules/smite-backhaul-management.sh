@@ -6,6 +6,11 @@ SMITE_BH_STATE="${SMITE_BH_STATE_FILE:-/etc/u-opti/smite/state.env}"
 SMITE_BH_OVERLAYS="${SMITE_BH_OVERLAY_ROOT:-/opt/u-opti-smite}"
 SMITE_BH_IMAGE='ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e'
 
+# Optional additive beginner wizard. Existing Private/FRP menus remain unchanged.
+if [ -s "$SMITE_BH_DIR/smite-tunnel-wizard.sh" ]; then
+    source "$SMITE_BH_DIR/smite-tunnel-wizard.sh"
+fi
+
 smite_bh_role() {
     local mode role
     [ -f "$SMITE_BH_STATE" ] || { echo "ERROR: Smite state missing" >&2; return 1; }
@@ -225,13 +230,19 @@ docker_smite_management_menu() {
         echo "2) Standard FRP Test Guide (experimental)"
         echo "3) Standard FRP Setup Wizard (IR/KH, experimental)"
         echo "4) Standard Backhaul (preparation only)"
+        echo "5) Tunnel Setup Wizard (Backhaul / FRP / Rathole; reviewed steps)"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice
+        read -rp "Choose [0-5]: " choice
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) docker_smite_frp_standard_guide ;;
             3) smite_frp_wizard_menu ;;
             4) smite_bh_management_menu ;;
+            5) if declare -F smite_tw_menu >/dev/null 2>&1; then
+                   smite_tw_menu
+               else
+                   echo "Tunnel Wizard missing; update the experimental branch first."
+               fi ;;
             0) return ;;
             *) echo "Invalid selection."; sleep 1 ;;
         esac
