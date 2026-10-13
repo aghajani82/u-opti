@@ -49,6 +49,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-readiness.py
 
+      - name: Test private offline IR/KH Nginx integration and rollback manifests
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-nginx-plan.py
+
       - name: Verify automatic Standard FRP XHTTP routing and rollback
         shell: bash
         run: bash tests/test-smite-frp-xhttp-auto.sh
