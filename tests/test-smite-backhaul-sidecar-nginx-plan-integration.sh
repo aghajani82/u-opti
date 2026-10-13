@@ -84,7 +84,8 @@ PY
 for role in ir kh; do
     echo "Nginx integrated role: $role"
     # Nginx runner is isolated and does not bind any host TCP sockets.
-    docker run --rm --network none --read-only --cap-drop ALL \
+    docker run --rm --network none --add-host ir.example.com:127.0.0.1 \
+        --read-only --cap-drop ALL \
         --security-opt no-new-privileges \
         --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
@@ -94,7 +95,8 @@ for role in ir kh; do
 
     # Invalid directive must be rejected by the real Nginx parser.
     printf '\nnot_a_real_nginx_directive yes;\n' >> "$ROOT/$role/nginx.conf"
-    if docker run --rm --network none --read-only --cap-drop ALL \
+    if docker run --rm --network none --add-host ir.example.com:127.0.0.1 \
+        --read-only --cap-drop ALL \
         --security-opt no-new-privileges \
         --user "$(id -u):$(id -g)" --entrypoint nginx \
         --tmpfs /tmp:rw,noexec,nosuid,size=8m \
