@@ -51,11 +51,14 @@ port bindings, existing services, certificates and rollback.
 
 ## Rathole is a different transport
 
-Rathole is a reverse TCP/UDP tunnel, not an HTTP WebSocket tunnel using
-Backhaul's `/channel` and `/tunnel/` endpoints. The first Rathole
-wizard stage validates nonprivileged distinct control/data ports, rejects
-known reserved pilot ports, and prints a **non-executable plan**. The plan
-is not sufficient to operate or secure Rathole.
+Rathole forwards TCP/UDP services and supports optional WebSocket transport
+in compatible builds (official Rathole v0.5.0 introduced WebSocket). It does
+**not** use Backhaul's `/channel` and `/tunnel/` endpoints. The first Rathole
+wizard stage validates distinct control/data ports and prints a **non-executable
+TCP plan**. The WSS/443 checklist is review-only: sharing IR 443 requires
+a reviewed Nginx route, verified WS handshake/path support for the pinned
+binary, and explicit protection of the existing site, FRP and Backhaul.
+Neither checklist is an installer.
 
 Before Rathole installation can be offered, the project needs:
 a pinned verifiable release/artifact, explicit protocol choice, authenticated
