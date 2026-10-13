@@ -116,6 +116,12 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-sidecar-recovery-lab.py
           python3 tests/test-smite-backhaul-sidecar-recovery-lab.py
 
+      - name: Verify Sidecar no-execution installation blueprint and backup provenance
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-activation-plan.py
+          python3 tests/test-smite-backhaul-sidecar-activation-plan.py
+
       - name: Validate candidate Backhaul node adapter patch
         shell: bash
         run: |
