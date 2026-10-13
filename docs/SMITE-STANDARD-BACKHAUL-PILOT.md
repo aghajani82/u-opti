@@ -15,7 +15,7 @@ TOML; historical log files may contain credentials and must remain private.
 
 - KH Backhaul client transport=ws to local KH Nginx 127.0.0.1:13080.
 - KH Nginx verifies CA, hostname, SNI on outbound HTTPS to ir.kolbe1.ir:443.
-- IR HTTPS Nginx proxies fixed WS paths `/channel` and `/tunnel`
+- IR HTTPS Nginx proxies WS routes `/channel` and `/tunnel/<random-id>`
   to Backhaul Server WS bound 127.0.0.1:3080.
 - IR Nginx /56053/www/ -> local Backhaul data listener 127.0.0.1:56053
   -> KH Xray 127.0.0.1:56053.
@@ -225,5 +225,5 @@ Following explicit permission for offline coding only, the independent Sidecar
 candidate generator and tests are documented in
 [SMITE-BACKHAUL-SIDECAR-OFFLINE.md](SMITE-BACKHAUL-SIDECAR-OFFLINE.md).
 Neither Smite overlays nor live FRP/Nginx/Smite/Xray services are modified.
-The v0.7.2 WS data endpoint is the **exact `/tunnel`**, not `/tunnel/`.
+The v0.7.2 client passes `/tunnel` to `WebSocketDialer`, which adds a random ID, so the on-wire route is **`/tunnel/<random-id>`**. Nginx needs `location ^~ /tunnel/`, not an exact match.
 No host activation or live rollback is implemented in this stage.
