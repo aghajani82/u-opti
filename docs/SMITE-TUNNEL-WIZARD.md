@@ -12,7 +12,7 @@ Standard FRP Setup Wizard, or the Backhaul candidate staging menu.
 
 | Protocol | IR and KH role screens | Status checks | Installs live tunnel? |
 | --- | --- | --- | --- |
-| Independent Backhaul 0.7.2 | Yes | Read-only; only allowlisted listeners and HTTP probes | **No** — setup checklist only; currently audited staging is separate |
+| Independent Backhaul 0.7.2 | Yes | Read-only diagnostics; explicit private offline candidate generation | **No** — setup checklist and secure candidate only |
 | Standard FRP | Yes, delegated to existing `smite-frp-wizard.sh` | Existing FRP diagnostics | Existing FRP wizard handles its opt-in setup steps |
 | Rathole | Yes | Validates proposed dedicated ports; explains topology | **No** — TCP planning only until pinned binary, auth, bind, TLS/Noise, backup and rollback are reviewed |
 
@@ -86,8 +86,11 @@ backups and a proved rollback on disposable hosts.
 ## Security boundary
 
 The new unified wizard itself has **no live deployment, stop,
-restart, reload, config write, firewall mutation, credential print or
-public port open** operation. Only the existing FRP wizard is delegated to
+restart, reload, active Nginx/config write, firewall mutation,
+credential print or public port open** operation. Its only
+new write action is an explicitly confirmed, private, uninstalled
+candidate bundle under a fresh temporary directory; this contains
+credentials and must never be uploaded or posted. Only the existing FRP wizard is delegated to
 for its previously implemented actions. All commands behind Backhaul
 "Status" are bounded read-only local checks. Operators must still
 explicitly consent to any actual installation and have access to
