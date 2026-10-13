@@ -9,6 +9,9 @@ grep -Fq '"smite-tunnel-wizard.sh"' u-opti
 grep -Fq '"smite-backhaul-sidecar.py"' install.sh
 grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
+grep -Fq 'smite_tw_backhaul_readiness()' modules/smite-tunnel-wizard.sh
+grep -Fq '"smite-backhaul-sidecar-readiness.py"' install.sh
+grep -Fq '"smite-backhaul-sidecar-readiness.py"' u-opti
 grep -Fq 'IR HTTPS domain (required)' modules/smite-tunnel-wizard.sh
 grep -Fq 'KH upstream/Xray Host domain (required)' modules/smite-tunnel-wizard.sh
 grep -Fq '["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"' u-opti
@@ -65,6 +68,13 @@ out="$(printf '1\n1\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'Backhaul v0.7.2' <<< "$out"
 out="$(printf '3\n2\n23333\n45000\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'NO INSTALL' <<< "$out"
+
+# Unit-test the new menu routes without ever calling host inspection.
+smite_tw_backhaul_readiness() { echo "READINESS_CALLED:$1:$2"; }
+out="$(printf '1\n6\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"
+out="$(printf '1\n7\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'READINESS_CALLED:ir:new' <<< "$out"
 
 # Role selection without Smite setup is explicit, never inferred from hostname/IP.
 smite_bh_role() { return 1; }
