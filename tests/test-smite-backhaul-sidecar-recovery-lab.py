@@ -112,6 +112,29 @@ class RecoveryLabTests(unittest.TestCase):
                     lab.recover_synthetic_transaction(root)
                     self.assert_reverted(root, role, before)
 
+    def test_finalization_crash_keeps_journal_until_cleanup_completes(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, stage = self.fixture(role)
+                before = (
+                    self.target(
+                        root, "/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
+                    ).read_bytes() if role == "ir" else None
+                )
+                lab.begin_synthetic_transaction(root, stage, role)
+                with self.assertRaises(lab.SimulatedPowerLoss):
+                    lab.recover_synthetic_transaction(
+                        root, crash_during_finalization=True
+                    )
+                self.assertTrue((root / lab.JOURNAL).is_file())
+                self.assertFalse((root / lab.ORIGINAL).exists())
+                status = lab.inspect_synthetic_recovery(root)
+                self.assertEqual(status["applied"], 0)
+                with self.assertRaises(lab.RecoveryRefused):
+                    lab.begin_synthetic_transaction(root, stage, role)
+                lab.recover_synthetic_transaction(root)
+                self.assert_reverted(root, role, before)
+
     def test_drift_detected_before_touching_any_other_resource(self):
         for role in ("ir", "kh"):
             root, stage = self.fixture(role)
