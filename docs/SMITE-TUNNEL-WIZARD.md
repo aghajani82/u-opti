@@ -95,6 +95,40 @@ location order, partial installation, stale image/restart policy
 and absent inspection evidence. These are hermetic tests and do not
 connect to real IR/KH machines.
 
+## Phase 3: Nginx integration plan (offline, implemented)
+
+The beginner Backhaul wizard now offers **Prepare Nginx merge/rollback file
+plan**, using `modules/smite-backhaul-sidecar-nginx-plan.py`.
+
+- For IR, it refuses unknown HTTPS backend topology and only prepares
+  `/channel`, `/tunnel/`, and `/56053/www/` include candidates
+  within the existing single HTTPS backend, preserving FRP and the root
+  Smite upstream.
+- For KH, it checks the existing numeric port-forwarding expression and
+  proposes an explicit /0*13080 block before that expression, alongside
+  a separate loopback Nginx bridge verifying the IR certificate.
+- Exact original and prepared vhost **bytes** are staged privately with
+  SHA256 hashes and a manifest listing intended create/replace targets.
+  The folder mode is 0700; all staged files are 0600. Existing Nginx
+  vhosts are **never changed** by this planner.
+- Existing Backhaul locations, duplicate anchors, missing or unknown
+  server blocks, mismatched domain names and incompatible vhosts
+  result in **REFUSED**, not a guessed rewrite.
+- Both proposal layouts have Python fixture tests plus a separate
+  isolated real-Nginx-in-Docker syntax validation job. Those tests do
+  not operate on the user's live servers or prove production TLS,
+  wildcard routing, backup restorability or Xray connectivity.
+
+**Important:** Because the plan contains a copy of the original Nginx
+vhost, it may hold private information. Never upload or paste its
+`original.conf`, `patched.conf` or other staged files publicly.
+Unlike a transactional installer, this planner is **not executable
+deployment authorization**: there is still no live journal/backup
+activation, lifecycle reconciliation, cross-host trust check or proven
+rollback action attached to it. A server with the successful manual
+Sidecar already present is expected to fail the "fresh install" plan
+rather than overwrite that installation.
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
