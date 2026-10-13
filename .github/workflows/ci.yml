@@ -98,6 +98,12 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-sidecar-preflight.py
           python3 tests/test-smite-backhaul-sidecar-preflight.py
 
+      - name: Ensure Backhaul host evidence collection is read-only and redacted
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-collect.py
+          python3 tests/test-smite-backhaul-sidecar-collect.py
+
       - name: Simulate isolated Sidecar installation and exact rollback
         shell: bash
         run: |
