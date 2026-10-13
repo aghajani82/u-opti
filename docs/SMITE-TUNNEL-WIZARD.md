@@ -64,6 +64,39 @@ setup actions), and Rathole planning. It never auto-launches an
 installation. Terminal colors are optional, disabled without a TTY or
 when `NO_COLOR` is set.
 
+## Rebuilt test VPS: explicitly gated live trial
+
+After manual Snapshot/console verification and an **intentional rebuild of
+the existing experimental IR/KH machines**, the Backhaul menu now exposes:
+
+`10) Rebuilt test VPS: trial install / own rollback (EXPERIMENTAL)`
+
+The experimental tool `smite-backhaul-sidecar-live-trial.py` is distributed
+only through the **draft feature branch** and refuses installation without
+all of: Linux root, complete private Sidecar/Nginx candidates, successful
+read-only paired admission and local prerequisites, an exact test-host
+environment acknowledgement and `INSTALL-IR` / `INSTALL-KH` confirmation.
+The wizard requires another typed `REBUILT-TEST-VPS` acknowledgement.
+Rollback requires `ROLLBACK-IR` or `ROLLBACK-KH` and verifies exact
+owned-file hashes plus a container transaction label before deletion.
+
+`smite-backhaul-sidecar-token.py` is a separate **root-only, non-overwriting**
+pairing-token helper: create the shared token privately on IR; copy to KH
+by trusted SFTP without printing it in chat or shell history. The token
+helper does not transfer credentials automatically.
+
+The operator may instead inspect a fresh/test host with:
+`bash modules/smite-backhaul-rebuild-gate.sh --role ir|kh --phase fresh-baseline`.
+This test remains **READ-ONLY**, and does not validate Hetzner snapshots.
+See [two-existing-VPS test plan](BACKHAUL-IR-KH-REBUILD-TEST.md).
+
+**NOT PRODUCTION READY:** CI uses mocked commands and disposable containers,
+not the rebuilt VPS. The tested fixed Nginx layout/ports must match the host.
+Server #3 is excluded. Neither a green CI run, a snapshot, nor an HTTP 401
+alone confirms end-to-end VPN operation. Do not merge into `main` until
+IR + KH clean install, actual VLESS traffic, single-host reboots and
+trial rollback have been validated.
+
 ## Protocol support and truthful capabilities
 
 | Protocol | IR and KH role screens | Status checks | Installs live tunnel? |
