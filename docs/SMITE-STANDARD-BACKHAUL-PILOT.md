@@ -160,9 +160,20 @@ The menu offers:
   overlays are copied for review before any patching, not replaced.
 - SHA256 integrity verification and removal of **unused staging files only**.
 
-The preflight confirms no Backhaul process or TOML, expected Docker image and
+The **prepare-only** preflight confirms the expected Docker image and
 bind-mounted Node adapter, valid existing Nginx, reserved ports, live IR FRP or
-KH loopback Xray, and a supported Standard role. It never opens provider ports.
+KH loopback Xray, and a supported Standard role. It reports existing Backhaul
+processes and TOML counts **as warnings**, not blockers, because an already
+running KH Smite Node may have legitimate Backhaul clients. A prepare-only
+PASS **does not approve activation**; a separate, as-yet unimplemented live
+activation preflight must check tunnel inventory, port ownership and safe
+rollback without disrupting existing clients. No provider ports are opened.
+
+For IR, staging now also includes
+`candidate/panel/uopti_backhaul_standard.py`, the compiler module imported by
+the patched Panel NodeClient. KH stages only Node and Nginx candidates.
+The existing running services and configuration files are never rewritten by
+offline preparation.
 
 **This is not operational activation or live rollback.** No running Docker
 container, Nginx configuration, TLS certificate, firewall, Sanaei inbound or
