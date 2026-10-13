@@ -289,3 +289,139 @@ for path in ('/56053/www/', '/56053/www'):
  else:
   raise SystemExit('FAIL: isolated IR XHTTP location '+path)
 PY
+
+
+# Sidecar is independently owned. Stopping it must NOT stop either Nginx
+# process or synthetic legacy KH endpoint. The IR XHTTP data path is expected
+# to lose its KH responder, then return after only the client is restarted.
+docker stop -t 2 "$kh_bh" >/dev/null
+[[ "$(docker inspect -f '{{.State.Running}}' "$kh_bh")" == false ]]
+docker exec -i "$ir_bh" python3 - "$kh_ng" <<'PY'
+from urllib.request import urlopen
+import sys,time
+with urlopen('http://'+sys.argv[1]+':13081/legacy',timeout=3) as r:
+ assert r.status==200 and r.read()==b'kh-legacy-preserved'
+expected=b'uopti-tls-nginx-backhaul-ok'
+for attempt in range(12):
+ try:
+  with urlopen('http://127.0.0.1:56053/health',timeout=2) as r:
+   if r.status==200 and r.read()==expected:
+    time.sleep(.4)
+    continue
+ except Exception:
+  print('PASS: stopped ONLY KH Sidecar; legacy Nginx healthy, data tunnel offline')
+  break
+else:
+ raise SystemExit('FAIL: KH Sidecar stop did not remove mock data tunnel')
+PY
+docker start "$kh_bh" >/dev/null
+docker exec -d "$kh_bh" python3 /tmp/echo.py >/dev/null
+docker exec -i "$ir_bh" python3 - <<'PY'
+from urllib.request import urlopen
+import time
+for i in range(60):
+ try:
+  with urlopen('http://127.0.0.1:56053/health',timeout=2) as r:
+   if r.status==200 and r.read()==b'uopti-tls-nginx-backhaul-ok':
+    print('PASS: KH Sidecar independent restart restored real WS/TLS data tunnel')
+    break
+ except Exception:
+  pass
+ time.sleep(.5)
+else:
+ raise SystemExit('FAIL: KH independent Sidecar restart could not restore tunnel')
+PY
+
+# A bad candidate MUST be refused by nginx -t without changing active
+# Nginx workers. Only a synthetic config file is changed here.
+python3 - "$tmp/kh-good" <<'PY'
+from pathlib import Path
+import sys
+d=Path(sys.argv[1])
+candidate=(d/'bridge.candidate.conf').read_bytes()
+assert (d/'bridge.conf').read_bytes()==candidate
+with (d/'bridge.conf').open('ab') as f:
+ f.write(b'\nsynthetic_broken_nginx_directive;\n')
+PY
+if docker exec "$kh_ng" nginx -t >/dev/null 2>&1; then
+    echo "FAIL: KH Nginx accepted deliberately invalid bridge configuration" >&2
+    exit 1
+fi
+docker exec -i "$ir_bh" python3 - "$kh_ng" <<'PY'
+from urllib.request import urlopen
+from urllib.error import HTTPError
+import sys
+with urlopen('http://'+sys.argv[1]+':13081/legacy',timeout=2) as r:
+ assert r.status==200 and r.read()==b'kh-legacy-preserved'
+try:
+ urlopen('http://'+sys.argv[1]+':13080/channel',timeout=2)
+except HTTPError as e:
+ assert e.code==401, f'Unexpected bridge HTTP status: {e.code}'
+else:
+ raise SystemExit('FAIL: active Nginx bridge no longer requires Authorization')
+print('PASS: KH invalid config refused without reload; old worker/legacy intact')
+PY
+
+# Unknown modifications block rollback. We remove ONLY our own injected line,
+# then verify the exact candidate hash before replacing the synthetic KH bridge
+# with its previous absent state. Real hosts have no such override.
+python3 - "$tmp/kh-good" <<'PY'
+from pathlib import Path
+import hashlib,sys
+d=Path(sys.argv[1])
+current=(d/'bridge.conf').read_bytes()
+want=(d/'bridge.candidate.conf').read_bytes()
+if hashlib.sha256(current).digest()==hashlib.sha256(want).digest():
+ raise SystemExit('FAIL: synthetic tampering did not trigger rollback drift')
+assert current==want+b'\nsynthetic_broken_nginx_directive;\n'
+print('PASS: KH unknown file drift blocked before any rollback operation')
+PY
+python3 - "$tmp/kh-good" <<'PY'
+from pathlib import Path
+import os,sys,tempfile
+d=Path(sys.argv[1])
+active=(d/'bridge.candidate.conf').read_bytes()
+broken=(d/'bridge.conf').read_bytes()
+assert broken==active+b'\nsynthetic_broken_nginx_directive;\n'
+# Correct ONLY test-generated corruption. Do not auto-repair real-world drift.
+fd,p=tempfile.mkstemp(prefix='.uopti-kh-clean-',dir=d)
+with os.fdopen(fd,'wb') as f:
+ f.write(active);f.flush();os.fsync(f.fileno())
+os.replace(p,d/'bridge.conf')
+PY
+docker exec "$kh_ng" nginx -t >/dev/null 2>&1
+docker stop -t 2 "$kh_bh" >/dev/null
+python3 - "$tmp/kh-good" <<'PY'
+from pathlib import Path
+import hashlib,os,sys,tempfile
+d=Path(sys.argv[1])
+active=(d/'bridge.candidate.conf').read_bytes()
+assert hashlib.sha256((d/'bridge.conf').read_bytes()).digest()==hashlib.sha256(active).digest()
+baseline=b'# REVIEWED SYNTHETIC KH BRIDGE NOT ACTIVE\n'
+fd,p=tempfile.mkstemp(prefix='.uopti-kh-rollback-',dir=d)
+with os.fdopen(fd,'wb') as f:
+ f.write(baseline);f.flush();os.fsync(f.fileno())
+os.replace(p,d/'bridge.conf')
+assert (d/'bridge.conf').read_bytes()==baseline
+PY
+docker exec "$kh_ng" nginx -t >/dev/null 2>&1
+docker exec "$kh_ng" nginx -s reload >/dev/null 2>&1
+docker exec -i "$ir_bh" python3 - "$kh_ng" <<'PY'
+from urllib.request import urlopen
+from urllib.error import URLError
+import sys,time
+host=sys.argv[1]
+for attempt in range(20):
+ try:
+  with urlopen('http://'+host+':13081/legacy',timeout=2) as r:
+   assert r.status==200 and r.read()==b'kh-legacy-preserved'
+  urlopen('http://'+host+':13080/channel',timeout=2)
+ except (URLError,OSError):
+  print('PASS: KH Nginx real reload removed bridge; legacy restored and healthy')
+  break
+ time.sleep(.5)
+else:
+ raise SystemExit('FAIL: rolled-back KH bridge still accepts new control traffic')
+PY
+[[ "$(docker inspect -f '{{.State.Running}}' "$kh_bh")" == false ]]
+echo "PASS: KH only Sidecar stopped, KH Nginx baseline bytes and service restored"
