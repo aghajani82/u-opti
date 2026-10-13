@@ -293,3 +293,66 @@ read-only, secret-redacting live snapshot collector; request one command at
 a time on IR and KH; manually analyze real Nginx routing and process ownership;
 and only then design/review an actual transactional installer/rollback.
 No production changes or merge are authorized by this gate.
+
+## Stage 9 — Live-host metadata collector (NOT RUN ON HOSTS)
+
+`modules/smite-backhaul-sidecar-collect.py` is the separately drafted
+**read-only evidence collector** for each future host. It has been
+reviewed and tested exclusively with mocked inputs in GitHub Actions.
+**It has NOT been executed on production IR or KH.** No deployment,
+sidecar activation, service restart or production file creation occurred.
+
+The collector has a hardcoded subprocess allowlist:
+
+- `ss -H -l -n -t -p` (kernel TCP listener metadata only).
+- `docker inspect --type container --format ... smite-node` /
+  `smite-panel` (narrowly selected network mode, running status and mount
+  metadata only); `docker container ls --all --format '{{.Names}}'`.
+- `os.path.lexists` checks of only the known Sidecar-owned filenames,
+  and a **count** of `*.toml` names in the Docker-mounted Smite backhaul
+  config directory. It does **not** open or print TOML contents.
+
+The collector never executes `docker exec`, `docker run`, `nginx -t`,
+`nginx -T`, Certbot, `systemctl`, or SSH; it does not open a live network
+connection, modify permissions or install anything. Python bytecode cache
+creation is suppressed. The command is run with `python3 -B` when explicitly
+authorized later.
+
+Public/private nonloopback listener IPs are **masked** using constant
+documentation-range IPv4/IPv6 placeholders (the literal masked values are
+**not actual addresses**). All PIDs, unfamiliar process names and
+container names other than own-sidecar collision status are withheld.
+Exact loopback and wildcard binding classes are retained because those
+matter for port safety. No tokens, passwords, config text, private keys,
+certificates, domains from config, or file mount sources are printed.
+
+**Fail-closed by design:** The collector produces the exact snapshot
+shape understood by `smite-backhaul-sidecar-preflight.py`, but every
+unverified fact stays `null`: runtime versions, TLS validity, SNI/Canary
+continuity, Nginx config syntax, legacy tunnel continuity and certificate
+state cannot be inferred from only ports/metadata. Consequently the strict
+preflight reviewer will **reject a collector-only snapshot** until
+additional separately reviewed read-only evidence is obtained. No boolean
+is invented merely to make the snapshot pass. A reported `true` only
+reflects a narrow observed item, not live deployment readiness.
+
+When and **only when the user separately agrees** to the future
+read-only host inspection, the reviewed script will be delivered by a
+trusted pinned code path and executed **one host at a time**, clearly
+labeled IR or KH. No `curl | bash` install and no execution of an unreviewed
+PR module on production. The exact delivery/run method must be reviewed
+before use.
+
+The safety regression tests exercise fake `ss`, fake Docker metadata,
+anonymization, legacy-config count without file-content reads, missing
+process names, port collisions, incomplete evidence and rejection of
+disallowed commands. Run on a development machine:
+
+```bash
+python3 tests/test-smite-backhaul-sidecar-collect.py
+```
+
+**Next blockers before an IR/KH action:** exact code version verification,
+manual Nginx vhost/stream ownership review, production-grade atomic
+install and real rollback with a fail-closed recovery plan, and explicit
+separate user approval. CI success alone is insufficient.
