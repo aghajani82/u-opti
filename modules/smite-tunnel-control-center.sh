@@ -267,8 +267,8 @@ twcc_menu() {
 
 # Allows a pretty preview without ever touching the host:
 # bash modules/smite-tunnel-control-center.sh --demo ir
-if [[ "$0" == *smite-tunnel-control-center.sh ]]; then
-    if [ "$1" = --demo ] && { [ "$2" = ir ] || [ "$2" = kh ]; }; then
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    if [ "${1:-}" = --demo ] && { [ "${2:-}" = ir ] || [ "${2:-}" = kh ]; }; then
         twcc_dashboard "$2" demo
     else
         printf '%s\n' 'Usage: smite-tunnel-control-center.sh --demo ir|kh' >&2
