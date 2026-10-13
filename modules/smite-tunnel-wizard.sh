@@ -182,7 +182,7 @@ smite_tw_backhaul_steps() {
 }
 
 smite_tw_backhaul_prepare() {
-    local role="$1" choice module token
+    local role="$1" choice module token ir_domain kh_host
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar.py"
     token="/etc/u-opti/backhaul-sidecar/shared.token"
     echo "===== Private Backhaul candidate / PREPARE ONLY ====="
@@ -196,8 +196,14 @@ smite_tw_backhaul_prepare() {
     fi
     read -rp "Create private OFFLINE candidate for $role? Type PREPARE: " choice || return 1
     [ "$choice" = PREPARE ] || { echo "Cancelled; nothing written."; return 0; }
+    read -rp "IR HTTPS domain (required): " ir_domain || return 1
+    read -rp "KH upstream/Xray Host domain (required): " kh_host || return 1
+    if [ -z "$ir_domain" ] || [ -z "$kh_host" ]; then
+        echo "ERROR: Both hostnames are required. Nothing generated."
+        return 1
+    fi
     python3 "$module" --role "$role" --token-file "$token" \
-        --ir-domain ir.kolbe1.ir --kh-host kh.kolbe1.ir
+        --ir-domain "$ir_domain" --kh-host "$kh_host"
 }
 
 smite_tw_backhaul_client() {
