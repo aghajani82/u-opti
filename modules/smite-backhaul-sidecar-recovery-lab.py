@@ -53,6 +53,25 @@ def exclusive(root: Path):
         os.close(fd)
 
 
+def _sync_dir(directory: Path) -> None:
+    """Fsync the synthetic parent after rename/unlink. Not proof of a real outage."""
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _persist(target: Path, data: bytes) -> None:
+    sandbox.atomic_write(target, data)
+    _sync_dir(target.parent)
+
+
+def _remove(target: Path) -> None:
+    target.unlink()
+    _sync_dir(target.parent)
+
+
 def _regular_private(root: Path, name: str) -> Path:
     dest = root / name
     info = dest.lstat()
@@ -120,14 +139,21 @@ def _observed(root: Path, document: dict) -> dict[str, str]:
     return states
 
 
-def _verify_original(root: Path, document: dict) -> bytes | None:
+def _verify_original(
+    root: Path, document: dict, states: dict[str, str]
+) -> bytes | None:
     if document["role"] == "kh":
         if (root / ORIGINAL).exists() or (root / ORIGINAL).is_symlink():
             raise RecoveryRefused("Unexpected KH original backup")
         return None
+    # After every resource is restored, recovery may have been interrupted
+    # immediately after removing the backup but before removing the journal.
+    # In that final-only state the backup is no longer needed.
     try:
         backup = _regular_private(root, ORIGINAL).read_bytes()
     except FileNotFoundError as exc:
+        if all(value == "original" for value in states.values()):
+            return None
         raise RecoveryRefused("Original synthetic backend backup missing") from exc
     edits = [r for r in document["resources"] if r["operation"] == "edit"]
     if len(edits) != 1 or sandbox.digest(backup) != edits[0]["before_sha256"]:
@@ -139,7 +165,7 @@ def _validate_locked(root: Path) -> tuple[dict, dict[str, str], bytes | None]:
     document = _journal(root)
     # Complete validation happens BEFORE touching ANY resource.
     states = _observed(root, document)
-    backup = _verify_original(root, document)
+    backup = _verify_original(root, document, states)
     return document, states, backup
 
 
@@ -180,8 +206,8 @@ def begin_synthetic_transaction(
         # Original mock backend and hashes are persisted before the first edit.
         for _, (_, op, before, _) in targets.items():
             if op == "edit":
-                sandbox.atomic_write(safe / ORIGINAL, before)
-        sandbox.atomic_write(
+                _persist(safe / ORIGINAL, before)
+        _persist(
             safe / JOURNAL, json.dumps(journal, sort_keys=True).encode()
         )
         _validate_locked(safe)
@@ -189,7 +215,7 @@ def begin_synthetic_transaction(
             raise SimulatedPowerLoss("Injected synthetic crash after journal")
         for index, (path, (target, _, _, data)) in enumerate(targets.items(), 1):
             sandbox.check_path(safe, path, create_parents=True)
-            sandbox.atomic_write(target, data)
+            _persist(target, data)
             if crash_after == index:
                 raise SimulatedPowerLoss("Injected synthetic crash after file replacement")
         # Treat the fully written state as *unactivated*; journal is retained
@@ -211,7 +237,8 @@ def inspect_synthetic_recovery(root: Path) -> dict:
 
 
 def recover_synthetic_transaction(
-    root: Path, crash_after_restored: int | None = None
+    root: Path, crash_after_restored: int | None = None,
+    *, crash_during_finalization: bool = False
 ) -> list[str]:
     """Recover after interruption. Prevalidates all resources, then undoes.
 
@@ -234,9 +261,9 @@ def recover_synthetic_transaction(
             if observed[path] == "applied":
                 target = sandbox.check_path(safe, path)
                 if row["operation"] == "create":
-                    target.unlink()
+                    _remove(target)
                 else:
-                    sandbox.atomic_write(target, original)
+                    _persist(target, original)
                 restored += 1
                 if restored == crash_after_restored:
                     raise SimulatedPowerLoss("Injected crash while reversing files")
@@ -244,9 +271,14 @@ def recover_synthetic_transaction(
         _, states, _ = _validate_locked(safe)
         if any(s != "original" for s in states.values()):
             raise RecoveryRefused("Not all mock resources restored")
-        (safe / JOURNAL).unlink()
-        if document["role"] == "ir":
-            (safe / ORIGINAL).unlink()
+        # Backup must be removed FIRST and journal LAST. A second crash after
+        # backup removal leaves a fully-restored state plus valid journal;
+        # the next recovery pass can safely finalize without a backup.
+        if document["role"] == "ir" and (safe / ORIGINAL).exists():
+            _remove(safe / ORIGINAL)
+        if crash_during_finalization:
+            raise SimulatedPowerLoss("Injected crash just before journal deletion")
+        _remove(safe / JOURNAL)
         return [
             "RECOVERED ONLY SYNTHETIC /tmp SANDBOX FILES",
             "Journal and verified backup were removed after restoration",
