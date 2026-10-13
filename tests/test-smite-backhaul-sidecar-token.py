@@ -54,9 +54,8 @@ class PairingTests(unittest.TestCase):
             path.chmod(0o644)
             self.assertFalse(token.inspect(path))
             path.chmod(0o600)
-            with patch.object(token, "secure_dir", return_value=True), \
-                 patch.object(token.Path, "lstat", wraps=Path.lstat):
-                # The file is owned by the runner, so verification must refuse.
+            with patch.object(token, "secure_dir", return_value=True):
+                # The file belongs to the non-root CI runner.
                 self.assertFalse(token.inspect(path))
 
 
