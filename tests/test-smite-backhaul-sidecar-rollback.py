@@ -44,7 +44,7 @@ class RollbackModelTests(unittest.TestCase):
             manifest, observed = fixtures(role)
             plan = rollback.plan_reversal(manifest, observed)
             self.assertTrue(all(x.startswith(("PLAN ONLY:", "NOT EXECUTED")) for x in plan))
-            self.assertIn(rollback.CONTAINER[role], plan[0] if False else manifest["container_name"])
+            self.assertIn(rollback.CONTAINER[role], plan[0])
             self.assertFalse(any("smite-node" in step or "frps" in step for step in plan))
             self.assertTrue(any("nginx -t" in step for step in plan))
 
