@@ -52,6 +52,9 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual(ir_toml["server"]["token"], kh_toml["client"]["token"])
         self.assertEqual(ir_toml["server"]["transport"], "ws")
         self.assertEqual(kh_toml["client"]["transport"], "ws")
+        # Never let Sidecar tune host sysctl values under host networking.
+        self.assertIs(ir_toml["server"]["skip_optz"], True)
+        self.assertIs(kh_toml["client"]["skip_optz"], True)
         self.assertEqual(ir_toml["server"]["web_port"], 0)
         self.assertEqual(kh_toml["client"]["web_port"], 0)
         ir_control = (ir / "ir-control.inc").read_text()
