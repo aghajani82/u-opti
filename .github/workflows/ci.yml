@@ -110,6 +110,12 @@ jobs:
           python3 -m py_compile modules/smite-backhaul-sidecar-sandbox.py
           python3 tests/test-smite-backhaul-sidecar-sandbox.py
 
+      - name: Simulate crash-resumable Sidecar file journal and rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-recovery-lab.py
+          python3 tests/test-smite-backhaul-sidecar-recovery-lab.py
+
       - name: Validate candidate Backhaul node adapter patch
         shell: bash
         run: |
