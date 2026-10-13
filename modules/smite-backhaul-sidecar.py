@@ -98,12 +98,17 @@ def compose_candidate(role: str) -> str:
         f"    container_name: uopti-backhaul-sidecar-{role}\n"
         "    network_mode: host\n"
         '    restart: "no"\n'
-        "    entrypoint: [backhaul, -c, /run/backhaul/config.toml]\n"
+        "    entrypoint: [/usr/local/bin/backhaul, -c, /run/backhaul/config.toml]\n"
         "    read_only: true\n"
         "    cap_drop: [ALL]\n"
         "    security_opt: [no-new-privileges:true]\n"
         "    volumes:\n"
-        f"      - /etc/u-opti/backhaul-sidecar/{role}.toml:/run/backhaul/config.toml:ro\n"
+        "      - type: bind\n"
+        f"        source: /etc/u-opti/backhaul-sidecar/{role}.toml\n"
+        "        target: /run/backhaul/config.toml\n"
+        "        read_only: true\n"
+        "        bind:\n"
+        "          create_host_path: false\n"
     )
 
 
