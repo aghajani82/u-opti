@@ -187,6 +187,63 @@ class PairedInstallTests(unittest.TestCase):
             engine.recover(root)
         self.assertEqual(current, (root / vhost.lstrip("/")).read_bytes())
 
+    def test_edit_preserves_mode_owner_group_before_and_after_rollback(self):
+        for role, mode in (("ir", 0o644), ("kh", 0o640)):
+            with self.subTest(role=role, permissions=oct(mode)):
+                root, stage, ng, vhost, original = self.fixture(role)
+                target = root / vhost.lstrip("/")
+                target.chmod(mode)
+                before = target.stat()
+                engine.install_mock(root, stage, ng, role)
+                installed = target.stat()
+                self.assertEqual(installed.st_mode & 0o777, mode)
+                self.assertEqual((installed.st_uid, installed.st_gid),
+                                 (before.st_uid, before.st_gid))
+                journal = engine._json_file(root / engine.JOURNAL)
+                edit = next(row for row in journal["resources"]
+                            if row["operation"] == "edit")
+                self.assertEqual(edit["mode"], mode)
+                self.assertEqual(edit["uid"], before.st_uid)
+                self.assertEqual(edit["gid"], before.st_gid)
+                engine.recover(root)
+                restored = target.stat()
+                self.assertEqual(restored.st_mode & 0o777, mode)
+                self.assertEqual((restored.st_uid, restored.st_gid),
+                                 (before.st_uid, before.st_gid))
+                self.assertEqual(target.read_bytes(), original)
+
+    def test_file_permission_drift_blocks_entire_rollback(self):
+        for role in ("ir", "kh"):
+            root, stage, ng, vhost, _ = self.fixture(role)
+            engine.install_mock(root, stage, ng, role)
+            victim = root / vhost.lstrip("/")
+            victim.chmod(0o644)
+            before_runtime = (root / engine.RUNTIME).read_bytes()
+            with self.subTest(role=role), self.assertRaises(engine.TransactionRefused):
+                engine.recover(root)
+            self.assertEqual((root / engine.RUNTIME).read_bytes(), before_runtime)
+            self.assertTrue((root / engine.JOURNAL).exists())
+
+    def test_unsafe_original_permissions_refused_before_journal(self):
+        for role in ("ir", "kh"):
+            root, stage, ng, vhost, _ = self.fixture(role)
+            (root / vhost.lstrip("/")).chmod(0o666)
+            with self.subTest(role=role), self.assertRaises(engine.TransactionRefused):
+                engine.install_mock(root, stage, ng, role)
+            self.assertFalse((root / engine.JOURNAL).exists())
+
+    def test_tampered_journal_metadata_blocks_recovery(self):
+        for role in ("ir", "kh"):
+            root, stage, ng, _, _ = self.fixture(role)
+            engine.install_mock(root, stage, ng, role)
+            journal = engine._json_file(root / engine.JOURNAL)
+            journal["resources"][0]["uid"] = -1
+            engine._save(root, engine.JOURNAL, journal)
+            before_runtime = (root / engine.RUNTIME).read_bytes()
+            with self.subTest(role=role), self.assertRaises(engine.TransactionRefused):
+                engine.recover(root)
+            self.assertEqual(before_runtime, (root / engine.RUNTIME).read_bytes())
+
     def test_tampered_nginx_plan_blocked_before_transaction(self):
         for role in ("ir", "kh"):
             root, stage, ng, vhost, _ = self.fixture(role)
