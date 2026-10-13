@@ -264,6 +264,56 @@ smite_tw_backhaul_admission() {
         --sidecar-dir "$sidecar_stage" --nginx-dir "$nginx_stage"
 }
 
+smite_tw_backhaul_live_trial() {
+    local role="$1" module choice confirm stage_sidecar stage_nginx gate
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-live-trial.py"
+    if [ ! -s "$module" ]; then
+        echo "Experimental trial module missing. Update the test branch first."
+        return 1
+    fi
+    while true; do
+        echo "===== BACKHAUL REBUILT-TEST-HOST TRIAL ONLY ====="
+        echo "WARNING: Not approved for a live production server."
+        echo "1) Show trial journal status (read-only)"
+        echo "2) Install test Sidecar (modifies THIS test server)"
+        echo "3) Roll back only this trial (modifies THIS test server)"
+        echo "0) Back"
+        read -rp "Choose [0-3]: " choice || return
+        case "$choice" in
+            1) python3 -B "$module" --role "$role" --status; smite_tw_pause ;;
+            2)
+                if [ "$(id -u)" -ne 0 ]; then
+                    echo "Root required on REBUILT test server."; smite_tw_pause; continue
+                fi
+                echo "CAUTION: This changes Nginx and Docker on THIS SERVER."
+                echo "Do not use the successful current IR/KH installation."
+                echo "Verify Hetzner snapshot+console and actual server role first."
+                read -rp "Type REBUILT-TEST-VPS to continue: " gate || return
+                if [ "$gate" != REBUILT-TEST-VPS ]; then echo "Cancelled."; smite_tw_pause; continue; fi
+                read -rp "Private Sidecar candidate directory: " stage_sidecar || return
+                read -rp "Private Nginx proposal directory: " stage_nginx || return
+                confirm="INSTALL-${role^^}"
+                read -rp "Type $confirm to explicitly authorize this installation: " gate || return
+                if [ "$gate" != "$confirm" ]; then echo "Cancelled."; smite_tw_pause; continue; fi
+                UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
+                    --role "$role" --install-test --sidecar-dir "$stage_sidecar" \
+                    --nginx-dir "$stage_nginx" --confirm "$confirm" || :
+                smite_tw_pause ;;
+            3)
+                echo "CAUTION: Restore only installer-owned trial files/Sidecar."
+                echo "Do NOT touch this option if foreign changes occurred."
+                confirm="ROLLBACK-${role^^}"
+                read -rp "Type $confirm to explicitly authorize rollback: " gate || return
+                if [ "$gate" != "$confirm" ]; then echo "Cancelled."; smite_tw_pause; continue; fi
+                UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
+                    --role "$role" --rollback-test --confirm "$confirm" || :
+                smite_tw_pause ;;
+            0) return ;;
+            *) echo "Invalid selection."; smite_tw_pause ;;
+        esac
+    done
+}
+
 smite_tw_backhaul_client() {
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
@@ -290,8 +340,9 @@ smite_tw_backhaul_menu() {
         echo "7) Check NEW host before installation (read-only)"
         echo "8) Prepare Nginx merge/rollback file plan (OFFLINE ONLY)"
         echo "9) Check BOTH candidate bundles against fresh host (READ ONLY)"
+        echo "10) Rebuilt test VPS: trial install / own rollback (EXPERIMENTAL)"
         echo "0) Back"
-        read -rp "Choose [0-9]: " choice || return
+        read -rp "Choose [0-10]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
@@ -302,6 +353,7 @@ smite_tw_backhaul_menu() {
             7) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
             8) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
             9) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
+            10) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
