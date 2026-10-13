@@ -454,3 +454,43 @@ This tool does not inspect the live Nginx stream SNI exceptions or install
 anything on IR/KH, and does not implement an executable production rollback.
 All such work requires future independently reviewed evidence, a genuine
 transactional installer and explicit approval for any host mutation.
+
+## Stage 12 — actual Nginx reload and rollback in disposable Docker network
+
+CI job `sidecar-service-reload-rollback` runs
+`tests/test-smite-backhaul-sidecar-service-rollback.sh` on a
+**GitHub-hosted pull-request runner only**. It creates a private Docker
+network, starts a real Nginx container and pinned Backhaul v0.7.2
+server, and exposes **no host ports**. All fixture files live in a temporary
+synthetic directory. It mounts no production configuration, uses no host
+networking, and does not contact the real IR/KH domains or servers.
+
+Using the generated independent IR Sidecar routes, the test changes
+only a fabricated HTTP Nginx server on port 8080. It validates:
+
+- Baseline `GET /legacy` is HTTP 200; `GET /channel` is initially HTTP 404.
+- After a syntax-validated Nginx reload with Sidecar WebSocket locations,
+  `/legacy` still returns 200 and unauthenticated `/channel` reaches the
+  Backhaul v0.7.2 service and returns HTTP 401.
+- Deliberately broken Nginx include fails `nginx -t`; **no reload is
+  performed** while the candidate is invalid, and the live old workers
+  continue serving `/legacy` 200 and `/channel` 401.
+- Unexpected fixture-file content drift fails the SHA256 ownership gate;
+  the rollback must not overwrite an unknown change.
+- After separately clearing only the **test's own injected drift**, an
+  atomic synthetic baseline restoration passes `nginx -t`, real Nginx
+  reload returns `/legacy` to 200 and `/channel` to 404, and the final
+  Nginx bytes compare equal to the original synthetic baseline.
+
+Verified run: https://github.com/aghajani82/u-opti/actions/runs/38379121145
+
+**Scope limitation:** This proves a real but strictly private Nginx
+configuration activation/rollback in a disposable fixture. It is *not*
+a production installer, live host rollback, live stream-SNI/Canary test,
+full KH bridge installation, or an automatic rollback executor. The
+Backhaul server remains running during the synthetic Nginx rollback and
+is removed only by test cleanup. The real IR/KH topology, service
+continuity, production certificate and operational restore paths have
+not been tested. Before host activity, complete an independently reviewed
+installer, recovery journal/restore integration, live preflight and
+separately granted user authorization.
