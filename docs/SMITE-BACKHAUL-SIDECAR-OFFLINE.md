@@ -200,3 +200,39 @@ https://github.com/aghajani82/u-opti/actions/runs/38369512541
 Next blockers: reproduce the final two-Nginx verified-TLS WS bridge entirely
 in a sandbox; implement and separately review a true production-safe install
 and rollback. Require explicit user approval before any host action.
+
+## Stage 8: real Nginx + verified TLS + Backhaul WS data (CI only)
+
+CI job `sidecar-tls-bridge` uses `tests/test-smite-backhaul-sidecar-tls.sh`
+on a GitHub-hosted pull-request runner. The test creates **no published
+Docker ports** and connects **no production IR/KH servers or public domain
+endpoints**: every container runs on a disposable `docker network --internal`.
+
+- Generates a short-lived test-only root CA and a server certificate whose
+  DNS Subject Alternative Name is `ir.kolbe1.ir`. Certificates and the
+  token are local, ephemeral artifacts, not uploaded to the repository.
+- IR Nginx test vhost terminates HTTPS on Docker-private 443 and forwards
+  the generated `location = /channel` and `location ^~ /tunnel/` fragments
+  into the isolated Backhaul server (synthetic upstream hostname).
+- KH Nginx uses the generated HTTPS bridge fragment, with `proxy_ssl_verify on`,
+  `proxy_ssl_server_name on`, `proxy_ssl_name ir.kolbe1.ir`, and a test-specific
+  trusted-CA file. The production renderer and production CA bundle are
+  **not** altered.
+- Good CA with an unauthenticated `/channel` request produces **HTTP 401**
+  from the IR Backhaul process, proving the request crossed the TLS bridge.
+- Unrelated CA produces **HTTP 502** from KH Nginx, demonstrating a rejected
+  upstream TLS handshake instead of insecure fallback.
+- With authenticated actual Backhaul WS control and `/tunnel/<random-id>`
+  data connections, an HTTP request on IR Backhaul's private data listener
+  returns the exact payload from a private mock HTTP service on KH.
+
+CI PASS: https://github.com/aghajani82/u-opti/actions/runs/38371173231
+
+Important scope: test Nginx config includes **generated Backhaul route
+fragments**, but uses synthetic test vhosts, certificates and Docker-only
+address substitution. It does **not** exercise the live IR stream 443
+SNI/Canary routing, the actual backend 8443 include file, external network
+filters, Xray XHTTP protocol, or any production deployment and rollback.
+The Sidecar remains uninstalled on IR/KH. The next step is a reviewed
+production-safe install/rollback design and a strict read-only final host
+preflight **before separate explicit approval** for any production changes.
