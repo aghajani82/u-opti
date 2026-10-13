@@ -50,11 +50,26 @@ smite_bh_preflight() {
     mount="$(docker inspect smite-node --format '{{range .Mounts}}{{if eq .Destination "/app/app/core_adapters.py"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)" || return 1
     [ "$mount" = "$SMITE_BH_OVERLAYS/node/core_adapters.py" ] && [ -s "$mount" ] ||
         { echo "ERROR: Unexpected Node adapter mount" >&2; return 1; }
-    if pgrep -x backhaul >/dev/null 2>&1; then
-        echo "ERROR: Active Backhaul process" >&2; return 1
-    fi
-    if docker exec smite-node sh -c 'find /etc/smite-node/backhaul -maxdepth 1 -type f -name "*.toml" -print -quit 2>/dev/null' | grep -q .; then
-        echo "ERROR: Existing Backhaul TOML" >&2; return 1
+    # This preflight is PREPARE-ONLY. Active Smite Backhaul clients are
+    # compatible with staging copied files but NOT evidence that live
+    # activation is safe. Never stop or change the existing processes.
+    local active_processes existing_configs
+    active_processes="$(pgrep -xc backhaul 2>/dev/null)" || active_processes=0
+    [[ "$active_processes" =~ ^[0-9]+$ ]] || {
+        echo "ERROR: Cannot inspect Backhaul processes" >&2; return 1; }
+    existing_configs="$(docker exec smite-node sh -c '
+        if [ -d /etc/smite-node/backhaul ]; then
+            find /etc/smite-node/backhaul -maxdepth 1 -type f -name "*.toml" | wc -l
+        else
+            printf "0\n"
+        fi
+    ' 2>/dev/null)" || { echo "ERROR: Cannot inventory Backhaul TOMLs" >&2; return 1; }
+    existing_configs="$(printf "%s" "$existing_configs" | tr -d "[:space:]")"
+    [[ "$existing_configs" =~ ^[0-9]+$ ]] || {
+        echo "ERROR: Invalid Backhaul TOML inventory" >&2; return 1; }
+    if [ "$active_processes" -gt 0 ] || [ "$existing_configs" -gt 0 ]; then
+        echo "WARNING: Existing Backhaul processes=$active_processes, configs=$existing_configs."
+        echo "WARNING: Prepare-only allowed. Activation/rollback requires separate review."
     fi
     nginx -t >/dev/null 2>&1 || { echo "ERROR: Existing Nginx is not valid" >&2; return 1; }
     if [ "$role" = ir ]; then
@@ -79,7 +94,7 @@ smite_bh_preflight() {
     else
         echo "ERROR: Invalid role" >&2; return 1
     fi
-    echo "Preflight PASS ($role). No active services modified."
+    echo "Prepare-only preflight PASS ($role). No active services modified."
 }
 
 smite_bh_verify_stage() {
@@ -117,6 +132,9 @@ smite_bh_prepare() {
         done
         python3 "$SMITE_BH_DIR/smite-backhaul-panel-patch.py" "$stage/original/panel" \
             "$stage/candidate/panel" || { rm -rf -- "$stage"; return 1; }
+        cp -- "$SMITE_BH_DIR/smite-backhaul-spec.py" \
+            "$stage/candidate/panel/uopti_backhaul_standard.py" || \
+            { rm -rf -- "$stage"; return 1; }
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-control 3080 \
             > "$stage/candidate/nginx/ir-control.conf" || { rm -rf -- "$stage"; return 1; }
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-xhttp 56053 /56053/www kh.kolbe1.ir \
