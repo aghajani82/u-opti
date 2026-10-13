@@ -283,6 +283,54 @@ checks, and failure/reboot handling on two disposable servers.
 The PR remains draft; do **not** merge or execute the simulator
 against IR/KH.
 
+## Phase 6: Fresh-host admission and exact file-mode restoration
+
+The new `modules/smite-backhaul-sidecar-admission.py` is a
+**READ-ONLY** local installation gate. It is packaged with the
+experimental wizard as Backhaul option `9) Check BOTH candidate
+bundles against fresh host (READ ONLY)`.
+
+The operator first creates two private proposal folders:
+a Sidecar role candidate and a role-matched Nginx merge proposal.
+The admission gate then:
+
+- Re-renders and matches **every** proposed Sidecar and Nginx byte,
+  hash, domain and role from the two private folders; rejects tampering.
+- Verifies the original host Nginx vhost is a normal root-owned
+  file with safe mode (0600, 0640 or 0644) and identical contents
+  to the saved proposal, plus unchanged inode/metadata during reading.
+- Rejects any existing created target (including a symlink) and
+  refuses writable, symlinked or non-root ancestors under `/etc`.
+- Requires the independent fresh-host Nginx/Docker/listener
+  preflight. A running Sidecar, occupied port or incomplete Smite/
+  FRP baseline is a blocker rather than an overwrite opportunity.
+- Returns a **HOLD** instead of publishing private token or original
+  config data. It cannot authorize deployment by itself.
+
+In the marker-protected synthetic transaction laboratory, exact
+file mode, UID and GID are now recorded **before** replacement,
+installed atomically along with contents, rechecked during recovery
+and preserved when restoring the original Nginx vhost. External
+permission, ownership or SHA drift stops the entire rollback before
+modifying another resource. The laboratory deliberately supports
+only a small known-safe set of file modes and the current sandbox owner.
+
+Tests cover both IR and KH; original mode 0640/0644 preservation,
+world-writable source refusal, file-mode tampering, journal metadata
+tampering, target collision and unknown host state. The tests
+still run in isolated GitHub CI fixtures, **not** on live IR/KH.
+
+**Not yet an automatic installer:** a full production engine still
+needs trusted per-host durable backups of the entire relevant Nginx
+tree and certificate dependencies, race-safe file-descriptor based
+writes, real container lifecycle controls with ownership checking,
+rollback after an actual failed Nginx reload, operator recovery
+after power loss, and two fresh disposable VPS deployments.
+A `PASS` from read-only admission must NEVER trigger Docker,
+Nginx or firewall changes without a separate, audited installer
+and explicit operator confirmation. The existing production
+servers must not be used as test installations.
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
