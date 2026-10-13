@@ -92,6 +92,12 @@ jobs:
           python3 tests/test-smite-backhaul-sidecar-audit.py
           python3 tests/test-smite-backhaul-sidecar-rollback.py
 
+      - name: Review simulated final Sidecar host evidence with strict safety gate
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-preflight.py
+          python3 tests/test-smite-backhaul-sidecar-preflight.py
+
       - name: Simulate isolated Sidecar installation and exact rollback
         shell: bash
         run: |
