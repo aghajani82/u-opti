@@ -212,6 +212,25 @@ class PairedInstallTests(unittest.TestCase):
                                  (before.st_uid, before.st_gid))
                 self.assertEqual(target.read_bytes(), original)
 
+    def test_original_metadata_survives_power_failure_mid_install(self):
+        for role, mode in (("ir", 0o644), ("kh", 0o640)):
+            with self.subTest(role=role):
+                root, stage, ng, vhost, original = self.fixture(role)
+                target = root / vhost.lstrip("/")
+                target.chmod(mode)
+                before = target.stat()
+                with self.assertRaises(engine.SimulatedPowerLoss):
+                    engine.install_mock(
+                        root, stage, ng, role,
+                        crash_after_file=len(pair.LAYOUT[role]))
+                engine.recover(root)
+                after = target.stat()
+                self.assertEqual(target.read_bytes(), original)
+                self.assertEqual(after.st_mode & 0o777, mode)
+                self.assertEqual((after.st_uid, after.st_gid),
+                                 (before.st_uid, before.st_gid))
+                self.assertFalse((root / engine.JOURNAL).exists())
+
     def test_file_permission_drift_blocks_entire_rollback(self):
         for role in ("ir", "kh"):
             root, stage, ng, vhost, _ = self.fixture(role)
