@@ -6,6 +6,12 @@
 # Backhaul and Rathole remain explicit REVIEW/VERIFY workflows until audited
 # installers and rollback have been added and separately validated.
 
+# Optional local-only dashboard, separate from all live deployment flows.
+SMITE_TW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -s "$SMITE_TW_DIR/smite-tunnel-control-center.sh" ]; then
+    source "$SMITE_TW_DIR/smite-tunnel-control-center.sh"
+fi
+
 smite_tw_pause() { read -rp "Press Enter to continue..." _smite_tw_unused || :; }
 smite_tw_clear() { if [ -t 1 ] && command -v clear >/dev/null 2>&1; then clear; fi; }
 
@@ -364,8 +370,9 @@ smite_tw_menu() {
         echo "2) FRP — Standard Smite WSS wizard (IR + KH)"
         echo "3) Rathole — independent TCP planning (IR + KH)"
         echo "4) Backhaul read-only health snapshot"
+        echo "5) Tunnel Control Center — role dashboard + next steps"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
             2)
@@ -377,6 +384,12 @@ smite_tw_menu() {
                 fi ;;
             3) smite_tw_rathole_menu "$role" ;;
             4) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
+            5) if declare -F twcc_menu >/dev/null 2>&1; then
+                   twcc_menu "$role"
+               else
+                   echo "Tunnel Control Center missing; update the preview branch."
+                   smite_tw_pause
+               fi ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
