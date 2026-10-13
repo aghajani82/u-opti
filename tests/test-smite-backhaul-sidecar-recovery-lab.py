@@ -95,6 +95,26 @@ class RecoveryLabTests(unittest.TestCase):
                     lab.recover_synthetic_transaction(root)
                     self.assert_reverted(root, role, original)
 
+    def test_interruption_between_journal_and_original_backup(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, stage = self.fixture(role)
+                prior = (
+                    self.target(
+                        root, "/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
+                    ).read_bytes() if role == "ir" else None
+                )
+                with self.assertRaises(lab.SimulatedPowerLoss):
+                    lab.begin_synthetic_transaction(
+                        root, stage, role, crash_after_journal_only=True
+                    )
+                self.assertTrue((root / lab.JOURNAL).exists())
+                self.assertFalse((root / lab.ORIGINAL).exists())
+                info = lab.inspect_synthetic_recovery(root)
+                self.assertEqual(info["applied"], 0)
+                lab.recover_synthetic_transaction(root)
+                self.assert_reverted(root, role, prior)
+
     def test_interrupted_recovery_is_idempotently_resumable(self):
         for role in ("ir", "kh"):
             size = len(lab.sandbox.rollback.ALLOW[role])
