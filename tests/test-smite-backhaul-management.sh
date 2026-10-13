@@ -34,8 +34,8 @@ class NodeClient:
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Node).where(Node.id == node_id))
             node = result.scalar_one_or_none()
-            if not node:
-                return {"status": "error", "message": f"Node {node_id} not found"}
+            if not node:  	
+                return {"status": "error", "message": f"Node {node_id} not found"} 	
             return {"status": "success"}
     async def apply_tunnel(self, node_id, data):
         pass
