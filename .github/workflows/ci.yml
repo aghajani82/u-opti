@@ -254,3 +254,16 @@ jobs:
         run: |
           bash -n tests/test-smite-backhaul-sidecar-service-rollback.sh
           bash tests/test-smite-backhaul-sidecar-service-rollback.sh
+
+  sidecar-nginx-integration:
+    # Disposable Nginx containers without host ports; IR/KH never contacted.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate generated Nginx merge proposals with real Nginx
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
+          bash tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
