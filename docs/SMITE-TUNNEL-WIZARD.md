@@ -129,6 +129,50 @@ rollback action attached to it. A server with the successful manual
 Sidecar already present is expected to fail the "fresh install" plan
 rather than overwrite that installation.
 
+## Phase 4: Crash-safe transaction coordinator (synthetic laboratory)
+
+`modules/smite-backhaul-sidecar-transaction-lab.py` now coordinates
+the existing file recovery journal with a **fake, JSON-only service
+adapter**. This is deliberately **NOT an installer** and is NOT
+packaged in the production U-OPTI install/update manifest.
+
+The simulated sequence is:
+
+1. Acquire a private sandbox coordination lock; reject any already
+   installed/partially applied Sidecar or unknown file state.
+2. Write a durable intent record BEFORE invoking the separate
+   write-ahead file journal; never store a token or configuration
+   body in either journal.
+3. Simulate a Nginx validation checkpoint and the independent
+   Sidecar launch without running Docker or opening network sockets.
+4. Simulate a Nginx reload and health checkpoint while preserving
+   fake Smite, FRP and Xray states.
+5. On an ordinary failure, reverse only verified resources automatically.
+   If the process is interrupted, a separate recovery invocation
+   checks **all** owned files and mock services before touching anything.
+6. Restore the fake service state, recover the existing file journal,
+   and delete the coordination intent **LAST**, so an interrupted
+   recovery can resume without guessing.
+
+New hermetic tests inject failures and simulated power losses at every
+checkpoint and **every file write boundary**, as well as crashes
+before the first original-file backup, during both recovery phases,
+duplicate deploy attempts, symlinks, foreign file drift and foreign
+service-state drift. Divergent states refuse rollback.
+
+**Outstanding safety blockers before a live implementation:** the
+sandbox file allowlist must be reconciled with the newer role-specific
+Nginx plan, including the KH public /13080 forwarding guard. The
+production engine must verify the exact running container ownership,
+pin a Docker image and restart policy, preserve file ownership/modes,
+record restorable original backups (not only hashes), test Nginx
+against the **actual complete** configuration, coordinate container
+start/reload failure rollback, and handle operator recovery after a
+reboot or loss of SSH. End-to-end verified WSS/VLESS remains separate
+from HTTP GET probes and mock health state.
+
+**No live IR/KH changes are made by this transaction laboratory.**
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
