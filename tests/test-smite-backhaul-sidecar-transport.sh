@@ -108,6 +108,7 @@ created_network=1
 
 docker run -d --platform linux/amd64 --name "$server" \
     --network "$network" --read-only --cap-drop ALL \
+    --user "$(id -u):$(id -g)" \
     --security-opt no-new-privileges \
     --mount "type=bind,src=$tmp/ir.toml,dst=/tmp/sidecar.toml,readonly" \
     --entrypoint /usr/local/bin/backhaul \
@@ -116,6 +117,7 @@ created_server=1
 
 docker run -d --platform linux/amd64 --name "$client" \
     --network "$network" --read-only --cap-drop ALL \
+    --user "$(id -u):$(id -g)" \
     --security-opt no-new-privileges \
     --mount "type=bind,src=$tmp/kh.toml,dst=/tmp/sidecar.toml,readonly" \
     --mount "type=bind,src=$tmp/echo.py,dst=/tmp/echo.py,readonly" \
