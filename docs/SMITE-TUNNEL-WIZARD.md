@@ -8,6 +8,62 @@ This is an **additive preview** on `feature/smite-standard-backhaul`.
 It does not replace the existing 10-step Private Network Wizard, the current
 Standard FRP Setup Wizard, or the Backhaul candidate staging menu.
 
+## Tunnel Control Center — a friendly first screen
+
+The preview wizard now includes option `5) Tunnel Control Center`, built
+by `modules/smite-tunnel-control-center.sh`. It displays a compact
+role-specific topology, readable Backhaul/FRP/Rathole statuses, and a
+recommended next safe action, without exposing secrets or performing
+active configuration changes.
+
+Example of the **sample-only** IR screen:
+
+```text
+============================================================
+             U-OPTI  |  TUNNEL CONTROL CENTER
+============================================================
+  Machine role : ir
+  Mode         : LOCAL INSPECTION / NO AUTO-CHANGES
+------------------------------------------------------------
+  SAMPLE DISPLAY ONLY — no real service inspection
+
+  BACKHAUL  [LOCAL-READY]
+            Container + loopback listeners seen; audit still required
+  FRP       [IR-CONTROLLER-SEEN]
+            IR FRP controller port seen (local only)
+  RATHOLE   [PLAN-ONLY]
+            Design checklist only; no installer yet
+
+  CONNECTION MAP  (reference architecture, not a live route)
+  CLIENT --TLS:443--> IR Nginx --WS--> Backhaul --to KH--> Xray
+```
+
+Try a sample view on a disposable development checkout only:
+
+```bash
+bash modules/smite-tunnel-control-center.sh --demo ir
+bash modules/smite-tunnel-control-center.sh --demo kh
+```
+
+The demo **does not probe Docker, ports or remote services** and must not
+be interpreted as a report for a real host.
+
+On a real server, the dashboard reads Docker container state/restart policy
+and local loopback TCP listeners for the selected role. Unexpected binds
+result in `REVIEW-BINDING`; missing or ambiguous evidence is shown as
+`UNVERIFIED` or `NEEDS-REVIEW` rather than silently claiming health.
+The panel deliberately **does not infer** authenticated WebSocket
+transport, Xray traffic, remote KH/IR uptime, FRP tunnel connectivity,
+firewall correctness, certificate validity or successful reboot from
+these local signals. For that, operators must use the full read-only
+audit and actual client tests.
+
+The dashboard offers safe navigation into Backhaul review,
+the **existing** FRP wizard (which can offer explicitly chosen live
+setup actions), and Rathole planning. It never auto-launches an
+installation. Terminal colors are optional, disabled without a TTY or
+when `NO_COLOR` is set.
+
 ## Protocol support and truthful capabilities
 
 | Protocol | IR and KH role screens | Status checks | Installs live tunnel? |
