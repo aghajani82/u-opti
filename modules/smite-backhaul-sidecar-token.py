@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Root-only, opt-in IR token initialization; never print or transmit the token.
+
+For pairing KH, transfer /etc/u-opti/backhaul-sidecar/shared.token with an
+authenticated SFTP client, then verify permissions on KH. No passwords or
+tokens are passed as command-line arguments or written into history.
+"""
+from __future__ import annotations
+import argparse
+import os
+from pathlib import Path
+import secrets
+import stat
+
+TOKEN_DIR = Path("/etc/u-opti/backhaul-sidecar")
+TOKEN_FILE = TOKEN_DIR / "shared.token"
+
+
+class TokenRefused(ValueError):
+    pass
+
+
+def inspect(path: Path = TOKEN_FILE) -> bool:
+    try:
+        directory = path.parent.lstat()
+        item = path.lstat()
+        if (not stat.S_ISDIR(directory.st_mode)
+                or directory.st_uid != 0 or directory.st_gid != 0
+                or stat.S_IMODE(directory.st_mode) & 0o077
+                or not stat.S_ISREG(item.st_mode)
+                or item.st_uid != 0 or item.st_gid != 0
+                or stat.S_IMODE(item.st_mode) != 0o600
+                or not 25 <= item.st_size <= 130):
+            return False
+        value = path.read_bytes().strip()
+        return 24 <= len(value) <= 128 and all(
+            chr(c).isalnum() or c in b"_-"
+            for c in value)
+    except (OSError, ValueError):
+        return False
+
+
+def generate(directory: Path = TOKEN_DIR) -> None:
+    if os.geteuid() != 0:
+        raise TokenRefused("Root required")
+    if directory.is_symlink():
+        raise TokenRefused("Unsafe token directory")
+    if not directory.exists():
+        directory.mkdir(mode=0o700)
+    st = directory.lstat()
+    if (not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0
+            or stat.S_IMODE(st.st_mode) & 0o077):
+        raise TokenRefused("Existing private token directory has unsafe ownership/mode")
+    path = directory / "shared.token"
+    value = secrets.token_urlsafe(32).encode("ascii") + b"\n"
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600)
+    except FileExistsError as exc:
+        raise TokenRefused("Pairing token already exists; NO OVERWRITE") from exc
+    with os.fdopen(fd, "wb") as file:
+        os.fchmod(file.fileno(), 0o600)
+        file.write(value)
+        file.flush()
+        os.fsync(file.fileno())
+    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(parent)
+    finally:
+        os.close(parent)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--generate-ir", action="store_true")
+    group.add_argument("--verify", action="store_true")
+    parser.add_argument("--confirm", default="")
+    opts = parser.parse_args()
+    if opts.verify:
+        if inspect():
+            print("PRIVATE_PAIRING_TOKEN_PRESENT_AND_VALID")
+            return 0
+        print("HOLD: Pairing token missing or unsafe.")
+        return 2
+    if opts.confirm != "CREATE-IR-PAIRING-TOKEN":
+        print("HOLD: IR token creation requires exact confirmation.")
+        return 2
+    try:
+        generate()
+    except (OSError, TokenRefused):
+        print("HOLD: Token creation refused; no secret disclosed.")
+        return 2
+    print("IR pairing token created privately (no token shown).")
+    print("Transfer securely to KH using authenticated SFTP, never chat/logs.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
