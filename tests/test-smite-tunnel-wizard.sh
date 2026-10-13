@@ -6,6 +6,9 @@ cd "$(dirname "$0")/.."
 bash -n modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-tunnel-wizard.sh"' install.sh
 grep -Fq '"smite-tunnel-wizard.sh"' u-opti
+grep -Fq '"smite-backhaul-sidecar.py"' install.sh
+grep -Fq '"smite-backhaul-sidecar.py"' u-opti
+grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq '["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"' u-opti
 grep -Fq '["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"' u-opti
 grep -Fq 'smite_tw_menu()' modules/smite-tunnel-wizard.sh
