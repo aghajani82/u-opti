@@ -30,7 +30,6 @@ RUNTIME = (
     "smite-backhaul-sidecar-token.py",
     "smite-backhaul-sidecar-live-trial.py",
     "smite-backhaul-rebuild-gate.sh",
-    "smite-backhaul-sidecar-live-trial.py",
 )
 
 
