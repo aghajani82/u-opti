@@ -170,7 +170,8 @@ def _validate_locked(root: Path) -> tuple[dict, dict[str, str], bytes | None]:
 
 
 def begin_synthetic_transaction(
-    root: Path, stage: Path, role: str, crash_after: int | None = None
+    root: Path, stage: Path, role: str, crash_after: int | None = None,
+    *, crash_after_journal_only: bool = False
 ) -> dict:
     """Write durable simulated journal BEFORE creating/editing synthetic files.
 
@@ -203,13 +204,17 @@ def begin_synthetic_transaction(
             "container": sandbox.rollback.CONTAINER[role],
             "resources": rows,
         }
-        # Original mock backend and hashes are persisted before the first edit.
-        for _, (_, op, before, _) in targets.items():
-            if op == "edit":
-                _persist(safe / ORIGINAL, before)
+        # Journal FIRST: if interrupted before backup creation, no resource
+        # has yet changed and recovery may safely discard the journal.
+        # Backup SECOND: no target is changed until its original is persisted.
         _persist(
             safe / JOURNAL, json.dumps(journal, sort_keys=True).encode()
         )
+        if crash_after_journal_only:
+            raise SimulatedPowerLoss("Injected crash before original backup")
+        for _, (_, op, before, _) in targets.items():
+            if op == "edit":
+                _persist(safe / ORIGINAL, before)
         _validate_locked(safe)
         if crash_after == 0:
             raise SimulatedPowerLoss("Injected synthetic crash after journal")
