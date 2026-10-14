@@ -22,6 +22,7 @@ spec = importlib.util.spec_from_file_location("bh_live_trial_under_test", SOURCE
 trial = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(trial)
+ORIGINAL_DISPOSABLE_APPROVAL = trial.disposable_host_approved
 
 
 class TrialTests(unittest.TestCase):
@@ -234,15 +235,18 @@ class TrialTests(unittest.TestCase):
                 trial.rollback("ir")
         self.assertFalse(self.fake_container["exists"])
 
-    def test_unprivileged_or_incorrect_marker_never_approves(self):
-        # The real marker path is deliberately not created on a runner.
-        with patch.object(trial, "Path", wraps=Path) as paths:
-            original = trial.disposable_host_approved
-            from unittest.mock import Mock
-            fake_path = Mock()
-            paths.return_value = fake_path
-            fake_path.lstat.side_effect = FileNotFoundError()
-            self.assertFalse(original())
+    def test_unprivileged_or_missing_marker_never_approves(self):
+        # Call the captured REAL guard, not the mocked fixture approval.
+        from unittest.mock import Mock
+        fake_path = Mock()
+        fake_path.lstat.side_effect = FileNotFoundError()
+        with patch.object(trial, "Path", return_value=fake_path):
+            self.assertFalse(ORIGINAL_DISPOSABLE_APPROVAL())
+        fake_path.lstat.side_effect = None
+        fake_path.lstat.return_value.st_mode = stat.S_IFREG | 0o644
+        fake_path.lstat.return_value.st_uid = 0
+        with patch.object(trial, "Path", return_value=fake_path):
+            self.assertFalse(ORIGINAL_DISPOSABLE_APPROVAL())
 
     def test_without_operator_gate_no_install(self):
         os.environ.pop("UOPTI_BH_TEST_HOST", None)
