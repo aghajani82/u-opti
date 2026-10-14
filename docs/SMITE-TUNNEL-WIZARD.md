@@ -412,6 +412,44 @@ cross-VPS reachability, a persistent VPS restart service, actual
 user-triggered Backhaul container creation or a tested production
 recovery process. None of these gaps are represented as complete.
 
+## Phase 8: Harden experimental host activation before any VPS trial
+
+An audit of the **existing** (unreleased) experimental engines found
+that their process-command filters allowed a trusted executable name
+with insufficient argument checks. Both
+`smite-backhaul-sidecar-live-engine.py` and
+`smite-backhaul-sidecar-live-trial.py` now validate complete,
+role-specific Docker command arrays. Unexpected mounts, images,
+container names, injected arguments and unrelated Docker/systemctl
+operations are refused before spawning any subprocess.
+
+The first engine now treats a failed container inspection as
+**unverified**, not as proof the container is absent. A successful
+exact-name `docker ps -a` query is required before it can proceed
+with rollback; Docker daemon downtime or foreign labels leave
+the transaction untouched for operator review. Its test-fixture
+root also refuses a real host-command driver.
+
+The second, CLI-capable but **not packaged**, disposable-host trial
+requires both its existing explicit environment opt-in AND a
+separately created root-owned, 0600, exact-content rebuilt-test
+marker at `/root/.uopti-backhaul-rebuilt-test-host` for both
+installation and rollback. The trial cannot manufacture this
+marker itself. Marker possession does not establish that a machine
+really is disposable; that must be independently verified.
+
+CI includes negative tests for extra Docker privileges, changed
+mounts, unrelated Smite containers, rejected names, failed Docker
+inventory, foreign Sidecar labels and missing approval. These are
+mock/isolated checks, not a production sign-off.
+
+**Decision for future work:** do not expose both live engine implementations
+as customer-facing installation paths. Select one audited,
+production-specific transaction engine after the disposable-VPS
+tests; keep the other as a laboratory or retire it. Neither
+implementation is added to the released U-OPTI installer/updater
+or the beginner wizard by this phase.
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
