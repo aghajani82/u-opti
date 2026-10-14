@@ -333,7 +333,7 @@ smite_tw_backhaul_secure_pair() {
     echo "No password login, automatic host-key acceptance or SSH config changes."
     [ -s "$tool" ] || { echo "Pairing helper missing on this host."; return 1; }
     if [ "$role" = kh ]; then
-        python3 -B "${SMITE_BH_DIR}/smite-backhaul-sidecar-token.py" --verify
+        python3 -B "$(dirname "$tool")/smite-backhaul-sidecar-token.py" --verify
         return
     fi
     [ "$role" = ir ] || { echo "Unknown role; no pairing."; return 1; }
