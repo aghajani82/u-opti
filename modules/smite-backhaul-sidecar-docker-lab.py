@@ -56,7 +56,10 @@ def safe_environment() -> tuple[str, str]:
 
 
 def _lstat_regular(path: Path, *, max_bytes: int = 64_000) -> os.stat_result:
-    st = path.lstat()
+    try:
+        st = path.lstat()
+    except OSError as exc:
+        raise LabRefused("Required private fixture or backup missing") from exc
     if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
             or stat.S_IMODE(st.st_mode) != 0o600
             or not 0 < st.st_size <= max_bytes):
