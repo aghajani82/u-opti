@@ -325,7 +325,7 @@ smite_tw_backhaul_client() {
 }
 
 smite_tw_backhaul_paste_pair() {
-    local role="$1" tool confirm mode
+    local role="$1" tool confirm mode answer
     tool="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-paste-pair.py"
     echo "===== Backhaul two Bitvise terminals (FRESH TEST HOSTS) ====="
     echo "NO server-to-server SSH needed. Protect the pairing code as a secret."
