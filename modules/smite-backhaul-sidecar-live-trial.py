@@ -57,20 +57,58 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def allowed_command(argv: list[str]) -> bool:
+    """Exact argument contracts for the unreleased disposable-host trial.
+
+    No caller may add Docker mounts, change images, broaden target names or
+    inject extra systemctl flags; the argv list is NEVER executed as shell.
+    """
+    if argv in (
+        ["nginx", "-t"],
+        ["systemctl", "is-active", "nginx"],
+        ["systemctl", "reload", "nginx"],
+        ["docker", "pull", IMAGE],
+    ):
+        return True
+    fmt = '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}|{{.State.Running}}'
+    for role in sorted(ROLES):
+        name = "uopti-backhaul-sidecar-" + role
+        if argv in (
+            ["docker", "ps", "-a", "--filter", "name=^/" + name + "$",
+             "--format", "{{.Names}}"],
+            ["docker", "inspect", "-f", fmt, name],
+            ["docker", "rm", "-f", name],
+        ):
+            return True
+        if len(argv) != 23 or argv[:6] != [
+            "docker", "run", "-d", "--name", name, "--label"
+        ]:
+            continue
+        label = argv[6]
+        prefix = "uopti.backhaul.trial="
+        if not label.startswith(prefix):
+            return False
+        trial_id = label[len(prefix):]
+        if len(trial_id) != 24 or any(ch not in "0123456789abcdef" for ch in trial_id):
+            return False
+        expected = [
+            "docker", "run", "-d", "--name", name,
+            "--label", label, "--network", "host", "--restart",
+            "unless-stopped", "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--mount",
+            "type=bind,src=/etc/u-opti/backhaul-sidecar/"
+            + role + ".toml,dst=/tmp/bh.toml,readonly",
+            "--entrypoint", "/usr/local/bin/backhaul", IMAGE,
+            "-c", "/tmp/bh.toml",
+        ]
+        return argv == expected
+    return False
+
+
 def run(argv: list[str], *, capture: bool = False) -> str:
-    """Exactly enumerated external operations, no shell or inherited secrets."""
-    allowed = (
-        argv[:2] == ["nginx", "-t"],
-        argv[:3] == ["systemctl", "is-active", "nginx"],
-        argv[:3] == ["systemctl", "reload", "nginx"],
-        argv[:2] == ["docker", "pull"] and len(argv) == 3 and argv[2] == IMAGE,
-        argv[:2] == ["docker", "ps"] and len(argv) == 7,
-        argv[:2] == ["docker", "inspect"] and len(argv) >= 4,
-        argv[:2] == ["docker", "run"] and len(argv) >= 4,
-        argv[:3] == ["docker", "rm", "-f"] and len(argv) == 4,
-    )
-    if not any(allowed):
-        raise TrialRefused("Command not permitted in experimental trial")
+    """Execute only an exact role-scoped operation, never a shell command."""
+    if not allowed_command(argv):
+        raise TrialRefused("Command/arguments not permitted in experimental trial")
     try:
         result = subprocess.run(argv, capture_output=True, text=True,
                                 timeout=45, check=True)
