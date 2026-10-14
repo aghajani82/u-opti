@@ -95,11 +95,8 @@ grep -Fq 'NO INSTALL' <<< "$out"
 
 # Verify new primary and advanced routes without host inspection.
 smite_tw_backhaul_readiness() { echo "READINESS_CALLED:$1:$2"; }
-out="$(printf '1\n3\n2\n0\n0\n' | smite_tw_menu)"
-if ! grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"; then
-    printf 'DIAG_MENU_OUTPUT:\n%s\n' "$out" >&2
-    exit 1
-fi
+out="$(printf '1\n3\n2\n0\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"
 out="$(printf '1\n5\n1\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:new' <<< "$out"
 
