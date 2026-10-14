@@ -63,6 +63,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-guided-prep.py
 
+      - name: Test guided one-flow disposable-host activation (mocked hosts)
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-guided-trial.py
+
       - name: Verify install/update module closure and isolated import smoke
         shell: bash
         run: |
