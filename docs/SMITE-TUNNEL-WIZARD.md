@@ -364,6 +364,54 @@ Nginx or firewall changes without a separate, audited installer
 and explicit operator confirmation. The existing production
 servers must not be used as test installations.
 
+## Phase 7: Real but isolated Docker transaction controller
+
+The **new** `modules/smite-backhaul-sidecar-docker-lab.py` moves
+apply/rollback logic out of ad hoc test snippets into a restricted,
+reusable **Docker laboratory controller**. It is intentionally **not**
+packaged into the U-OPTI installer or updater, and cannot be run by
+the customer-facing Tunnel Wizard.
+
+What is exercised on GitHub-hosted, disposable PR runners:
+
+1. Generate a real Backhaul v0.7.2 server candidate with a synthetic
+   secret and place it in a private fixture directory.
+2. Start a real Backhaul process and Nginx instance in different
+   containers on a private **internal Docker network**. No ports are
+   published on the runner and no production file or host network
+   is mounted. Only the Nginx container's labeled, exact lab-owned
+   workspace mount can be changed.
+3. Keep Nginx's working baseline route `/legacy` while applying the
+   Sidecar routes. Actual network probes verify the /channel response
+   transitions from 404 to 401 and back to 404 on rollback. These
+   are control-path probes, **not authenticated end-to-end VLESS**.
+4. Record a private transaction journal and exact original bytes
+   before replacing `nginx.conf`. Apply and revert use fsynced,
+   mode-0600 atomic writes. Nginx syntax and reload operate only
+   through `docker exec` against the **verified lab container**.
+5. An invalid Nginx candidate triggers an attempted exact rollback.
+   A simulated process crash after journal creation or after file
+   replacement leaves a recoverable journal for another process.
+   Unknown third-party file drift, missing backup after an applied
+   change, unexpected Docker network/mount/label or duplicate
+   transactions fail closed instead of overwriting files.
+
+Hard safety gates require a **GitHub-hosted pull-request runner**, exact
+repository/run IDs, private direct-child
+`/tmp/uopti-bh-executor-*` workspace with marker, a matching
+`uopti-ng-executor-*` container label, an internal Docker network,
+one exact writable lab bind mount and **zero published ports**.
+The controller cannot start/stop/remove real containers or use host
+Nginx. A separate shell fixture starts and cleans up test containers
+and is also GitHub-hosted-runner-gated.
+
+The isolated executor is a useful **runtime rehearsal**, not a live
+IR/KH installation system. It does **not** cover real host filesystem
+owner/mode migrations, certificate renewals, full SNI/443 integration,
+cross-VPS reachability, a persistent VPS restart service, actual
+user-triggered Backhaul container creation or a tested production
+recovery process. None of these gaps are represented as complete.
+
 ## Next development milestones
 
 1. Convert the manual Backhaul pilot into a **transactional**, versioned,
