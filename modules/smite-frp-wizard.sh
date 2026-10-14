@@ -139,7 +139,7 @@ smite_frp_wizard_recovery() {
     smite_frp_wizard_pause
 }
 smite_frp_wizard_menu() {
-    local role="" mode="" choice=""
+    local role="${1:-}" detected="" mode="" choice=""
     mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
     if [ -n "$mode" ] && [ "$mode" != standard ]; then
         echo "ERROR: Existing Smite mode is $mode. FRP Wizard requires Standard."
@@ -147,7 +147,19 @@ smite_frp_wizard_menu() {
         smite_frp_wizard_pause
         return
     fi
-    role="$(smite_frp_wizard_role)"
+    detected="$(smite_frp_wizard_role)"
+    # The unified Tunnel Wizard has already chosen IR/KH. Never ask twice.
+    # A supplied role may not override a contradictory installed Smite state.
+    case "$role" in
+        ir|kh)
+            if [ "$detected" != unknown ] && [ "$detected" != "$role" ]; then
+                echo "ERROR: Selected host role conflicts with existing Smite role."
+                smite_frp_wizard_pause
+                return 2
+            fi ;;
+        "") role="$detected" ;;
+        *) echo "ERROR: Invalid host role."; return 2 ;;
+    esac
     if [ "$role" = unknown ]; then
         echo "==== Select logical host role ===="
         echo "1) IR: Panel + Iran Node"
