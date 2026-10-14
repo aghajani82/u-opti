@@ -41,7 +41,7 @@ class GuidedTrialTest(unittest.TestCase):
 
     def call(self, role="ir", approval="REBUILT-TEST-VPS", confirm=None):
         return flow.install_fresh(role, IR, KH, approval,
-                                  confirm or ("INSTALL-" + role.upper()))
+                                  confirm if confirm is not None else ("INSTALL-" + role.upper()))
 
     def test_ir_and_kh_use_private_pair_without_manual_directory_prompts(self):
         for role in ("ir", "kh"):
