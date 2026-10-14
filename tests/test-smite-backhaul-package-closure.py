@@ -26,6 +26,7 @@ RUNTIME = (
     "smite-backhaul-sidecar-readiness.py",
     "smite-backhaul-sidecar-nginx-plan.py",
     "smite-backhaul-sidecar-reconcile.py",
+    "smite-backhaul-sidecar-guided-prep.py",
     "smite-backhaul-sidecar-admission.py",
     "smite-backhaul-sidecar-token.py",
     "smite-backhaul-sidecar-live-trial.py",
@@ -73,6 +74,13 @@ class PackageClosureTest(unittest.TestCase):
             self.assertTrue(hasattr(module, "admission"))
             self.assertTrue(hasattr(module.paired, "reconcile"))
             self.assertTrue(hasattr(module.local, "inspect_local"))
+            guided_path = root / "smite-backhaul-sidecar-guided-prep.py"
+            guided_spec = importlib.util.spec_from_file_location(
+                "isolated_guided_prep", guided_path)
+            guided = importlib.util.module_from_spec(guided_spec)
+            assert guided_spec.loader is not None
+            guided_spec.loader.exec_module(guided)
+            self.assertTrue(hasattr(guided, "prepare_fresh_pair"))
             self.assertTrue((root / "smite-backhaul-standard.sh").is_file())
             trial_path = root / "smite-backhaul-sidecar-live-trial.py"
             trial_spec = importlib.util.spec_from_file_location("isolated_trial", trial_path)
