@@ -10,6 +10,11 @@ grep -Fq '"smite-tunnel-wizard.sh"' u-opti
 grep -Fq '"smite-backhaul-sidecar.py"' install.sh
 grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
+grep -Fq -- '--data-port "$data_port" --xhttp-path "$xhttp_path"' modules/smite-tunnel-wizard.sh
+grep -Fq 'Custom port/path are OFFLINE PREVIEW ONLY' modules/smite-tunnel-wizard.sh
+grep -Fq 'Step 1 - Pair IR/KH' modules/smite-tunnel-wizard.sh
+grep -Fq 'Step 2 - Install Backhaul Sidecar' modules/smite-tunnel-wizard.sh
+grep -Fq 'Step 3 - Check status and troubleshoot' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_guided_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_guided_trial_install()' modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-backhaul-sidecar-guided-trial.py"' install.sh
