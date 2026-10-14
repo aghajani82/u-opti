@@ -387,11 +387,32 @@ def _create_dirs(resources: list[dict]) -> None:
             raise TrialRefused("Unsafe directory during install")
 
 
+def disposable_host_approved() -> bool:
+    """Require a second, file-backed opt-in on a REBUILT disposable VPS.
+
+    An environment variable alone is too easy to copy to production. The
+    marker is operator-provisioned and cannot be created by this module.
+    """
+    marker = Path("/root/.uopti-backhaul-rebuilt-test-host")
+    try:
+        info = marker.lstat()
+        return (os.geteuid() == 0
+                and stat.S_ISREG(info.st_mode)
+                and info.st_uid == 0
+                and stat.S_IMODE(info.st_mode) == 0o600
+                and marker.read_text(encoding="utf-8").strip()
+                == "I APPROVE DISPOSABLE BACKHAUL TEST HOST")
+    except (OSError, UnicodeError):
+        return False
+
+
 def install(role: str, sidecar_dir: Path, nginx_dir: Path) -> str:
     if os.geteuid() != 0:
         raise TrialRefused("Root required")
     if os.environ.get("UOPTI_BH_TEST_HOST") != "I_ACCEPT_REBUILD_TEST_HOST":
         raise TrialRefused("Trial host activation not explicitly enabled")
+    if not disposable_host_approved():
+        raise TrialRefused("Rebuilt disposable-host approval marker missing")
     with mutex():
         root = _root(role)
         if root.exists() or root.is_symlink():
@@ -465,6 +486,8 @@ def rollback(role: str) -> str:
         raise TrialRefused("Root required")
     if os.environ.get("UOPTI_BH_TEST_HOST") != "I_ACCEPT_REBUILD_TEST_HOST":
         raise TrialRefused("Trial host rollback not explicitly enabled")
+    if not disposable_host_approved():
+        raise TrialRefused("Rebuilt disposable-host approval marker missing")
     with mutex():
         root = _root(role)
         if not root.is_dir():
