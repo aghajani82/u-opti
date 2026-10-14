@@ -88,6 +88,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-ssh-pair.py
 
+      - name: Verify Bitvise pairing confirmation and safe fresh-host refusal
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-bitvise-menu.py
+
       - name: Verify safe IR/KH rebuild readiness gate without real services
         shell: bash
         run: bash tests/test-smite-backhaul-rebuild-gate.sh
