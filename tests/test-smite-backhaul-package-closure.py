@@ -27,6 +27,7 @@ RUNTIME = (
     "smite-backhaul-sidecar-nginx-plan.py",
     "smite-backhaul-sidecar-reconcile.py",
     "smite-backhaul-sidecar-guided-prep.py",
+    "smite-backhaul-sidecar-ssh-pair.py",
     "smite-backhaul-sidecar-admission.py",
     "smite-backhaul-sidecar-token.py",
     "smite-backhaul-sidecar-live-trial.py",
@@ -81,6 +82,14 @@ class PackageClosureTest(unittest.TestCase):
             assert guided_spec.loader is not None
             guided_spec.loader.exec_module(guided)
             self.assertTrue(hasattr(guided, "prepare_fresh_pair"))
+            ssh_pair_path = root / "smite-backhaul-sidecar-ssh-pair.py"
+            ssh_pair_spec = importlib.util.spec_from_file_location(
+                "isolated_ssh_pair", ssh_pair_path)
+            ssh_pair_module = importlib.util.module_from_spec(ssh_pair_spec)
+            assert ssh_pair_spec.loader is not None
+            ssh_pair_spec.loader.exec_module(ssh_pair_module)
+            self.assertTrue(hasattr(ssh_pair_module, "send_ir"))
+            self.assertTrue(hasattr(ssh_pair_module, "receive_kh"))
             self.assertTrue((root / "smite-backhaul-standard.sh").is_file())
             trial_path = root / "smite-backhaul-sidecar-live-trial.py"
             trial_spec = importlib.util.spec_from_file_location("isolated_trial", trial_path)
