@@ -310,3 +310,17 @@ jobs:
         run: |
           bash -n tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
           bash tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
+
+  sidecar-real-transaction-executor:
+    # Disposable GitHub-hosted pull-request runner ONLY. Never VPS.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify restricted Docker lab controller and real recovery
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-docker-lab-unit.py
+          bash -n tests/test-smite-backhaul-sidecar-docker-executor.sh
+          bash tests/test-smite-backhaul-sidecar-docker-executor.sh
