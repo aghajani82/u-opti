@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Safe, hermetic shell tests: no live host actions and no Docker calls.
 set -euo pipefail
+trap 'echo "FAILED TUNNEL MENU TEST at line $LINENO" >&2' ERR
 cd "$(dirname "$0")/.."
 
 bash -n modules/smite-tunnel-wizard.sh
