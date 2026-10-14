@@ -92,6 +92,19 @@ class GuidedTrialTest(unittest.TestCase):
         self.values[6].assert_not_called()
         self.values[7].assert_called()
 
+    def test_cleanup_must_be_verified_before_success(self):
+        with patch.object(flow.os.path, "lexists", return_value=True):
+            with self.assertRaisesRegex(flow.GuidedTrialHold, "cleanup unverified"):
+                self.call()
+        self.values[6].assert_called_once()
+        self.assertEqual(self.values[7].call_count, 2)
+
+    def test_role_identity_mismatch_stops_before_preparation(self):
+        self.values[3].side_effect = ValueError("wrong Smite role")
+        with self.assertRaisesRegex(ValueError, "wrong Smite role"):
+            self.call()
+        self.values[5].assert_not_called()
+
     def test_cli_failure_sanitizes_sensitive_lower_layer_error(self):
         with patch.object(sys, "argv", ["oneflow", "--role", "ir",
                                          "--ir-domain", IR, "--kh-host", KH,
