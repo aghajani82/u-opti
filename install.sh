@@ -47,6 +47,7 @@ MODULES=(
     "smite-backhaul-sidecar.py"
     "smite-backhaul-sidecar-readiness.py"
     "smite-backhaul-sidecar-guided-prep.py"
+    "smite-backhaul-sidecar-guided-trial.py"
     "smite-backhaul-sidecar-ssh-pair.py"
     "smite-backhaul-sidecar-paste-pair.py"
     "smite-backhaul-sidecar-admission.py"
