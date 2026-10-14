@@ -27,6 +27,7 @@ class FakeDriver:
         self.calls = []
         self.running_id = None
         self.fail_next = None
+        self.fail_ps = False
 
     def call(self, argv, timeout=45):
         cmd = " ".join(argv[:2])
@@ -34,6 +35,10 @@ class FakeDriver:
         if self.fail_next == cmd:
             self.fail_next = None
             raise live.ActivationRefused("mock failure")
+        if argv[:2] == ["docker", "ps"]:
+            if self.fail_ps:
+                raise live.ActivationRefused("mock daemon unreachable")
+            return live.CONTAINER[self.role] if self.running_id is not None else ""
         if argv[:2] == ["docker", "inspect"]:
             if self.running_id is None:
                 raise live.ActivationRefused("not found")
@@ -158,6 +163,93 @@ class LiveEngineTests(unittest.TestCase):
         (root / ".uopti-live-engine-fixture").unlink()
         with self.assertRaises(live.ActivationRefused):
             engine.rollback("ir", "d" * 32)
+
+    def test_host_command_allowlist_rejects_argument_injection(self):
+        strict = live.SubprocessDriver
+        label = "uopti.tx=" + "a" * 32
+        image = live.IMAGE
+        name = live.CONTAINER["ir"]
+        allowed_run = [
+            "docker", "run", "-d", "--name", name,
+            "--label", label, "--network", "host", "--restart", "no",
+            "--read-only", "--cap-drop", "ALL", "--security-opt",
+            "no-new-privileges", "--mount",
+            "type=bind,src=/etc/u-opti/backhaul-sidecar/ir.toml,dst=/run/backhaul/config.toml,readonly",
+            "--entrypoint", "/usr/local/bin/backhaul", image, "-c",
+            "/run/backhaul/config.toml",
+        ]
+        self.assertTrue(strict.allowed(allowed_run))
+        self.assertTrue(strict.allowed(["docker", "ps", "-a", "--filter",
+                                       "name=^/" + name + "$", "--format",
+                                       "{{.Names}}"]))
+        self.assertTrue(strict.allowed(["docker", "inspect", "-f",
+                                       strict.LABEL_FMT, name]))
+        self.assertTrue(strict.allowed(["docker", "rm", "-f", name]))
+        self.assertTrue(strict.allowed(["docker", "update", "--restart",
+                                       "unless-stopped", name]))
+        self.assertTrue(strict.allowed(["nginx", "-t"]))
+        self.assertTrue(strict.allowed(["systemctl", "reload", "nginx"]))
+        dangerous = [
+            ["docker", "rm", "-f", "smite-node"],
+            ["docker", "system", "prune", "-af"],
+            ["systemctl", "stop", "nginx"],
+            ["nginx", "-s", "stop"],
+            ["docker", "inspect", name],
+            ["docker", "ps", "-a"],
+            allowed_run + ["--privileged"],
+            [x.replace("host", "bridge") for x in allowed_run],
+            [x.replace(image, "ubuntu:latest") for x in allowed_run],
+            [x.replace("/etc/u-opti/backhaul-sidecar/ir.toml",
+                       "/etc/shadow") for x in allowed_run],
+            [x.replace(label, "uopti.tx=nothex") for x in allowed_run],
+        ]
+        from unittest.mock import patch as local_patch
+        driver = strict()
+        with local_patch.object(live.subprocess, "run") as exec_mock:
+            for command in dangerous:
+                with self.subTest(command=command), self.assertRaises(live.ActivationRefused):
+                    driver.call(command)
+            exec_mock.assert_not_called()
+
+    def test_docker_daemon_failure_during_rollback_holds_everything(self):
+        root, rows, driver, engine, original = self.fixture("kh")
+        self.approve(engine, rows, "kh")
+        with self.mock_health():
+            engine.apply("kh", rows, txn_id="e" * 32)
+        before = {
+            row["path"]: (root / row["path"].lstrip("/")).read_bytes()
+            for row in rows
+        }
+        driver.running_id = "f" * 32  # foreign container label
+        driver.fail_ps = True
+        with self.assertRaises(live.ActivationRefused):
+            engine.rollback("kh", "e" * 32)
+        for row in rows:
+            self.assertEqual((root / row["path"].lstrip("/")).read_bytes(),
+                             before[row["path"]])
+        self.assertTrue((root / "var/lib/u-opti/backhaul-sidecar"
+                         / ("e" * 32) / "journal.json").exists())
+
+    def test_foreign_container_name_blocks_rollback_without_file_changes(self):
+        root, rows, driver, engine, _ = self.fixture("ir")
+        self.approve(engine, rows, "ir")
+        with self.mock_health():
+            engine.apply("ir", rows, txn_id="f" * 32)
+        driver.running_id = "e" * 32
+        before_calls = len(driver.calls)
+        with self.assertRaises(live.ActivationRefused):
+            engine.rollback("ir", "f" * 32)
+        self.assertEqual(
+            [(x[:2]) for x in driver.calls[before_calls:]],
+            [["docker", "inspect"], ["docker", "ps"]]
+        )
+        self.assertTrue((root / "var/lib/u-opti/backhaul-sidecar"
+                         / ("f" * 32) / "journal.json").exists())
+
+    def test_synthetic_root_refuses_nonmocked_real_host_driver(self):
+        root, rows, driver, _, _ = self.fixture("ir")
+        with self.assertRaises(live.ActivationRefused):
+            live.LiveEngine(root=root, driver=live.SubprocessDriver())
 
     def test_cli_is_off_and_code_not_packaged(self):
         import subprocess
