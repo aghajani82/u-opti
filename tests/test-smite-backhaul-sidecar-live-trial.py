@@ -179,6 +179,51 @@ class TrialTests(unittest.TestCase):
             self.install()
         self.assertTrue(self.fake_container["exists"])
 
+    def test_exact_docker_and_systemctl_allowlist(self):
+        name = "uopti-backhaul-sidecar-ir"
+        trial_id = "a" * 24
+        valid = [
+            ["nginx", "-t"],
+            ["systemctl", "is-active", "nginx"],
+            ["systemctl", "reload", "nginx"],
+            ["docker", "pull", trial.IMAGE],
+            ["docker", "ps", "-a", "--filter", "name=^/" + name + "$",
+             "--format", "{{.Names}}"],
+            ["docker", "inspect", "-f",
+             '{{.Id}}|{{.Config.Image}}|{{index .Config.Labels "uopti.backhaul.trial"}}|{{.State.Running}}',
+             name],
+            ["docker", "rm", "-f", name],
+            ["docker", "run", "-d", "--name", name,
+             "--label", "uopti.backhaul.trial=" + trial_id,
+             "--network", "host", "--restart", "unless-stopped",
+             "--read-only", "--cap-drop", "ALL",
+             "--security-opt", "no-new-privileges",
+             "--mount",
+             "type=bind,src=/etc/u-opti/backhaul-sidecar/ir.toml,dst=/tmp/bh.toml,readonly",
+             "--entrypoint", "/usr/local/bin/backhaul", trial.IMAGE,
+             "-c", "/tmp/bh.toml"],
+        ]
+        for row in valid:
+            with self.subTest(row=row):
+                self.assertTrue(trial.allowed_command(row))
+        unsafe = [
+            ["docker", "run", "--privileged", "ubuntu:latest"],
+            ["docker", "inspect", "smite-node"],
+            ["docker", "rm", "-f", "smite-node"],
+            ["docker", "ps", "-a"],
+            ["systemctl", "stop", "nginx"],
+            ["nginx", "-s", "stop"],
+            ["docker", "pull", "ubuntu:latest"],
+            valid[-1] + ["--privileged"],
+            [part.replace("host", "bridge") for part in valid[-1]],
+            [part.replace("ir.toml", "kh.toml") for part in valid[-1]],
+            [part.replace(trial.IMAGE, "alpine:latest") for part in valid[-1]],
+            [part.replace(trial_id, "not-a-valid-tx") for part in valid[-1]],
+        ]
+        for row in unsafe:
+            with self.subTest(row=row):
+                self.assertFalse(trial.allowed_command(row))
+
     def test_without_operator_gate_no_install(self):
         os.environ.pop("UOPTI_BH_TEST_HOST", None)
         with self.assertRaisesRegex(trial.TrialRefused, "not explicitly enabled"):
