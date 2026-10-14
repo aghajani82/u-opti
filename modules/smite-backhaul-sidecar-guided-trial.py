@@ -67,12 +67,16 @@ def install_fresh(role: str, ir_domain: str, kh_host: str,
         result = trial.install(role, sidecar, nginx)
         if result != "TRIAL_INSTALL_LOCAL_CHECKS_PASSED":
             raise GuidedTrialHold("Unexpected trial installer result")
-        return SUCCESS
     finally:
-        # Private offline candidates are disposable, NOT journal backups.
-        # trial.install saves its own durable Nginx recovery backup/journal.
+        # These two candidate directories are never recovery backups.
+        # The unchanged installer saves its own durable journal and Nginx copy.
         guided._cleanup_private_stage(nginx, "uopti-bh-nginx-plan-")
         guided._cleanup_private_stage(sidecar, "uopti-backhaul-sidecar-")
+    # A partial cleanup is not a clean success; stop for manual review
+    # rather than asserting the private token-bearing proposals were deleted.
+    if any(os.path.lexists(str(p)) for p in (sidecar, nginx)):
+        raise GuidedTrialHold("Private staging cleanup unverified; inspect journal")
+    return SUCCESS
 
 
 def main() -> int:
