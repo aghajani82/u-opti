@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# U-OPTI Tunnel Setup Wizard — non-destructive, role-aware entry point.
-# This file is sourced by smite-backhaul-management.sh. It never mutates the
-# active Smite, FRP, Xray, Nginx, Docker or Backhaul configuration.
-# Installation actions are delegated only to the existing FRP wizard.
-# Backhaul and Rathole remain explicit REVIEW/VERIFY workflows until audited
-# installers and rollback have been added and separately validated.
+# U-OPTI Tunnel Wizard — role-aware navigation; read-only by default.
+# The original FRP setup wizard and the separately gated TEST-VPS Backhaul
+# install/rollback are delegated unchanged. Other protocol tools are offline
+# or read-only. Production Backhaul deployment is NOT approved.
 
 # Optional local-only dashboard, separate from all live deployment flows.
 SMITE_TW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -326,34 +324,51 @@ smite_tw_backhaul_client() {
     echo "Host header is set by the IR XHTTP Nginx include to the KH upstream."
 }
 
+smite_tw_backhaul_expert_menu() {
+    local role="$1" choice
+    while true; do
+        smite_tw_header
+        printf 'Backhaul experimental tools | This machine: %s\n' "$role"
+        echo "Not approved for production. Preserve working Smite and FRP."
+        echo "1) Explain architecture"
+        echo "2) Installation safety checklist"
+        echo "3) Check NEW test host (read-only)"
+        echo "4) Prepare private Sidecar candidate (OFFLINE)"
+        echo "5) Prepare private Nginx proposal (OFFLINE)"
+        echo "6) Check both private candidates (read-only)"
+        echo "7) Test VPS install / guarded rollback (CHANGES SERVER)"
+        echo "0) Back"
+        read -rp "Choose [0-7]: " choice || return
+        case "$choice" in
+            1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
+            2) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
+            3) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
+            6) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
+            7) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            0) return ;;
+            *) echo "Invalid choice"; smite_tw_pause ;;
+        esac
+    done
+}
+
 smite_tw_backhaul_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
         printf 'Protocol: Backhaul | This machine: %s\n\n' "$role"
-        echo "1) How the IR/KH tunnel works"
-        echo "2) Diagnose installed Sidecar (read-only)"
-        echo "3) Guided safe installation checklist"
-        echo "4) Show v2rayN / Android profile fields"
-        echo "5) Prepare private offline candidate (NO activation)"
-        echo "6) Audit existing installation (read-only; fail-closed)"
-        echo "7) Check NEW host before installation (read-only)"
-        echo "8) Prepare Nginx merge/rollback file plan (OFFLINE ONLY)"
-        echo "9) Check BOTH candidate bundles against fresh host (READ ONLY)"
-        echo "10) Rebuilt test VPS: trial install / own rollback (EXPERIMENTAL)"
+        echo "1) Sidecar status & diagnostics (read-only)"
+        echo "2) Strict installed Sidecar audit (read-only)"
+        echo "3) v2rayN / Android client profile fields"
+        echo "4) Experimental setup & recovery tools"
         echo "0) Back"
-        read -rp "Choose [0-10]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
-            2) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
-            3) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
-            4) smite_tw_backhaul_client; smite_tw_pause ;;
-            5) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
-            6) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
-            7) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
-            8) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
-            9) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
-            10) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
+            2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_client; smite_tw_pause ;;
+            4) smite_tw_backhaul_expert_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
@@ -436,28 +451,26 @@ smite_tw_menu() {
     while true; do
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
-        echo "1) Backhaul — independent WSS/XHTTP (IR + KH)"
-        echo "2) FRP — Standard Smite WSS wizard (IR + KH)"
-        echo "3) Rathole — independent TCP planning (IR + KH)"
-        echo "4) Backhaul read-only health snapshot"
-        echo "5) Tunnel Control Center — role dashboard + next steps"
+        echo "1) Backhaul — independent Sidecar management"
+        echo "2) FRP — existing Standard Smite wizard"
+        echo "3) Rathole — safe plan only (no installer)"
+        echo "4) Tunnel Control Center — read-only status and routes"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
             2)
                 if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
                     smite_frp_wizard_menu
                 else
-                    echo "FRP wizard module missing. Update U-OPTI first."
+                    echo "FRP wizard missing; update U-OPTI first."
                     smite_tw_pause
                 fi ;;
             3) smite_tw_rathole_menu "$role" ;;
-            4) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
-            5) if declare -F twcc_menu >/dev/null 2>&1; then
+            4) if declare -F twcc_menu >/dev/null 2>&1; then
                    twcc_menu "$role"
                else
-                   echo "Tunnel Control Center missing; update the preview branch."
+                   echo "Tunnel Control Center missing; update the test branch."
                    smite_tw_pause
                fi ;;
             0) return ;;
