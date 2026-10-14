@@ -142,6 +142,16 @@ probe /legacy 200
 mv "$root/active.good" "$root/active.conf"
 
 set +e
+controller --action apply --simulate-crash-after-journal >/dev/null 2>&1
+rc=$?
+set -e
+test "$rc" = 89
+test "$(controller --action status)" = RECOVERY_JOURNAL_PRESENT
+test "$(controller --action rollback)" = ROLLED_BACK_UNCHANGED_BASELINE
+cmp -s "$root/baseline.conf" "$root/nginx.conf"
+probe /legacy 200
+
+set +e
 controller --action apply --simulate-crash-after-write >/dev/null 2>&1
 rc=$?
 set -e
