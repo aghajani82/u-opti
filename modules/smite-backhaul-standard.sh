@@ -72,9 +72,15 @@ uopti_bh_render_ir_xhttp() {
     [ -n "$host" ] || host="kh.kolbe1.ir"
     uopti_bh_valid_port "$p" || return 1
     uopti_bh_valid_domain "$host" || return 1
-    # Restrict to the forwarded port's URL namespace; reject Nginx injections,
-    # existing FRP locations and paths with a trailing slash here.
-    [[ "$path" =~ ^/$p/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || return 1
+    # The XHTTP URL is independent of the local port. Allow safe multi-part
+    # paths (e.g. /assets/v1/connect), but protect reserved Backhaul WS and
+    # Smite FRP URL namespaces. No trailing slash in the input; render one.
+    (( ${#path} <= 128 )) || return 1
+    [[ "$path" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || return 1
+    case "$path" in
+        /channel|/channel/*|/tunnel|/tunnel/*) return 1 ;;
+    esac
+    [[ ! "$path" =~ ^/[0-9]+/web(/|$) ]] || return 1
     echo "# IR: add only AFTER Backhaul data listener 127.0.0.1:$p is verified."
     echo "# KH Sanaei XHTTP path: $path/ | upstream Host: $host"
     for typ in exact prefix; do
