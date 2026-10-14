@@ -54,6 +54,16 @@ grep -Fq KH_GATEWAY_STEP <<< "$out"
 out="$(printf '4\n0\n' | smite_frp_wizard_menu)"
 grep -Fq SANAEI_STEP <<< "$out"
 
+# Unified Tunnel Wizard passes role once: FRP must honor it and fail if
+# it contradicts an already installed Smite role.
+out="$(printf '2\n0\n' | smite_frp_wizard_menu kh)"
+grep -Fq INSTALL_STEP_kh <<< "$out"
+if out="$(printf '2\n0\n' | smite_frp_wizard_menu ir)"; then
+    echo "ERROR: Conflicting selected role did not stop FRP wizard" >&2
+    exit 1
+fi
+grep -Fq 'conflicts with existing Smite role' <<< "$out"
+
 MODE=private
 out="$(printf '0\n' | smite_frp_wizard_menu)"
 grep -Fq 'FRP Wizard requires Standard' <<< "$out"
