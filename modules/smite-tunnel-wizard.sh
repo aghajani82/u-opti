@@ -414,25 +414,50 @@ smite_tw_backhaul_manual_menu() {
     done
 }
 
+smite_tw_backhaul_guided_trial_install() {
+    local role="$1" module ir_domain kh_host gate confirm
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
+    echo "===== ONE-FLOW BACKHAUL: FRESH REBUILT TEST VPS ONLY ====="
+    echo "REQUIRES: Smite/FRP/Nginx/Xray baseline, private token, snapshot+console."
+    echo "MUTATES THIS TEST VPS: Nginx files/reload and the owned Sidecar container."
+    echo "Does not install Smite, 3x-UI, certificates or Xray inbounds."
+    echo "Do NOT run on the already working IR/KH trial hosts."
+    echo "All journal, ownership, host approval and rollback gates stay enabled."
+    [ -s "$module" ] || { echo "Guided trial module missing; update test branch."; return 1; }
+    [ "$(id -u)" -eq 0 ] || { echo "Root required."; return 1; }
+    read -rp "IR HTTPS domain: " ir_domain || return 1
+    read -rp "KH upstream / Xray Host domain: " kh_host || return 1
+    read -rp "Type REBUILT-TEST-VPS if snapshot AND console are available: " gate || return 1
+    [ "$gate" = REBUILT-TEST-VPS ] || { echo "Cancelled; nothing installed."; return 0; }
+    confirm="INSTALL-${role^^}"
+    read -rp "Type $confirm to approve changes ONLY to this $role test host: " gate || return 1
+    [ "$gate" = "$confirm" ] || { echo "Cancelled; nothing installed."; return 0; }
+    UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
+        --role "$role" --ir-domain "$ir_domain" --kh-host "$kh_host" \
+        --install-test --test-host-approval REBUILT-TEST-VPS --confirm "$confirm"
+}
+
 smite_tw_backhaul_expert_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
         printf 'Backhaul test host tools | This machine: %s\n' "$role"
-        echo "PREVIEW ONLY. No production activation approved."
-        echo "1) Guided private OFFLINE preparation (fresh host)"
-        echo "2) Test VPS installer / guarded rollback (CHANGES SERVER)"
-        echo "3) Check NEW test host (read-only)"
-        echo "4) Trusted SSH pairing (OPTIONAL advanced method)"
-        echo "5) Advanced manual / legacy tools"
+        echo "TEST VPS ONLY. Never install on an already working Sidecar."
+        echo "1) Guided test install (NO manual /tmp paths; CHANGES SERVER)"
+        echo "2) Check NEW test host (read-only)"
+        echo "3) Prepare private OFFLINE plan only"
+        echo "4) Trial journal / guarded rollback / legacy install"
+        echo "5) Trusted SSH pairing (OPTIONAL advanced method)"
+        echo "6) Advanced manual / legacy tools"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-6]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
-            2) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
-            4) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
-            5) smite_tw_backhaul_manual_menu "$role" ;;
+            1) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
+            6) smite_tw_backhaul_manual_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
