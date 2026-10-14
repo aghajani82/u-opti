@@ -32,7 +32,7 @@ class SecurePairingTests(unittest.TestCase):
         self.assertIn("PreferredAuthentications=publickey", args)
         self.assertIn("ForwardAgent=no", args)
         self.assertIn("ClearAllForwardings=yes", args)
-        self.assertIn("/root/.ssh/known_hosts", args)
+        self.assertIn("UserKnownHostsFile=/root/.ssh/known_hosts", args)
         self.assertEqual("5055", args[args.index("-p") + 1])
         self.assertIn("root@kh.kolbe1.ir", args)
         self.assertNotIn(VALUE.decode().strip(), " ".join(args))
