@@ -337,7 +337,7 @@ smite_tw_backhaul_guided_prepare() {
     read -rp "KH upstream/Xray Host domain: " kh_host || return
     read -rp "Type PREPARE-PRIVATE-OFFLINE to generate BOTH private proposals: " confirm || return
     [ "$confirm" = PREPARE-PRIVATE-OFFLINE ] || { echo "Cancelled, nothing prepared."; return 0; }
-    python3 -B "$module" --role "$role" --ir-domain "$ir_domain" \\
+    python3 -B "$module" --role "$role" --ir-domain "$ir_domain" \
         --kh-host "$kh_host" --prepare-only --confirm PREPARE-PRIVATE-OFFLINE
 }
 
@@ -345,7 +345,7 @@ smite_tw_backhaul_manual_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
-        printf 'Backhaul legacy/manual tools | This machine: %s\\n' "$role"
+        printf 'Backhaul legacy/manual tools | This machine: %s\n' "$role"
         echo "1) Explain architecture"
         echo "2) Installation safety checklist"
         echo "3) Prepare only Sidecar candidate (OFFLINE)"
@@ -369,7 +369,7 @@ smite_tw_backhaul_expert_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
-        printf 'Backhaul test host tools | This machine: %s\\n' "$role"
+        printf 'Backhaul test host tools | This machine: %s\n' "$role"
         echo "PREVIEW ONLY. No production activation approved."
         echo "1) Guided one-step PRIVATE/OFFLINE prepare (fresh host)"
         echo "2) Test VPS installer / guarded rollback (CHANGES SERVER)"
