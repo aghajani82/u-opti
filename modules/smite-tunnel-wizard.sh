@@ -324,29 +324,64 @@ smite_tw_backhaul_client() {
     echo "Host header is set by the IR XHTTP Nginx include to the KH upstream."
 }
 
+smite_tw_backhaul_guided_prepare() {
+    local role="$1" module ir_domain kh_host confirm
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-prep.py"
+    echo "===== Guided PRIVATE/OFFLINE Backhaul preparation ====="
+    echo "FRESH TEST HOSTS ONLY. Existing Sidecar hosts will be REFUSED."
+    echo "Runs local preflight, prepares BOTH private bundles, then checks admission."
+    echo "Never installs, changes Nginx, starts Docker or touches FRP/Smite/Xray."
+    echo "Requires the existing, safely paired token on this host."
+    [ -s "$module" ] || { echo "Guided preparation module missing; update preview branch."; return 1; }
+    read -rp "IR HTTPS domain: " ir_domain || return
+    read -rp "KH upstream/Xray Host domain: " kh_host || return
+    read -rp "Type PREPARE-PRIVATE-OFFLINE to generate BOTH private proposals: " confirm || return
+    [ "$confirm" = PREPARE-PRIVATE-OFFLINE ] || { echo "Cancelled, nothing prepared."; return 0; }
+    python3 -B "$module" --role "$role" --ir-domain "$ir_domain" \\
+        --kh-host "$kh_host" --prepare-only --confirm PREPARE-PRIVATE-OFFLINE
+}
+
+smite_tw_backhaul_manual_menu() {
+    local role="$1" choice
+    while true; do
+        smite_tw_header
+        printf 'Backhaul legacy/manual tools | This machine: %s\\n' "$role"
+        echo "1) Explain architecture"
+        echo "2) Installation safety checklist"
+        echo "3) Prepare only Sidecar candidate (OFFLINE)"
+        echo "4) Prepare only Nginx proposal (OFFLINE)"
+        echo "5) Check two existing private candidates (read-only)"
+        echo "0) Back"
+        read -rp "Choose [0-5]: " choice || return
+        case "$choice" in
+            1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
+            2) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
+            3) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
+            0) return ;;
+            *) echo "Invalid choice"; smite_tw_pause ;;
+        esac
+    done
+}
+
 smite_tw_backhaul_expert_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
-        printf 'Backhaul experimental tools | This machine: %s\n' "$role"
-        echo "Not approved for production. Preserve working Smite and FRP."
-        echo "1) Explain architecture"
-        echo "2) Installation safety checklist"
+        printf 'Backhaul test host tools | This machine: %s\\n' "$role"
+        echo "PREVIEW ONLY. No production activation approved."
+        echo "1) Guided one-step PRIVATE/OFFLINE prepare (fresh host)"
+        echo "2) Test VPS installer / guarded rollback (CHANGES SERVER)"
         echo "3) Check NEW test host (read-only)"
-        echo "4) Prepare private Sidecar candidate (OFFLINE)"
-        echo "5) Prepare private Nginx proposal (OFFLINE)"
-        echo "6) Check both private candidates (read-only)"
-        echo "7) Test VPS install / guarded rollback (CHANGES SERVER)"
+        echo "4) Advanced manual / legacy tools"
         echo "0) Back"
-        read -rp "Choose [0-7]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
-            2) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
+            1) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
             3) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
-            4) smite_tw_backhaul_prepare "$role" || :; smite_tw_pause ;;
-            5) smite_tw_backhaul_nginx_plan "$role" || :; smite_tw_pause ;;
-            6) smite_tw_backhaul_admission "$role" || :; smite_tw_pause ;;
-            7) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_manual_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
