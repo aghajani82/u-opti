@@ -38,11 +38,13 @@ smite_tw_choose_role() {
         printf '%s\n' "$role"
         return
     fi
-    # The fallback is used for new hosts without a configured Smite state.
-    # Do not persist guessed roles or silently install anything.
-    printf '%s\n' "Smite role is not known. Choose this machine's role:" >&2
-    printf '%s\n' "1) IR — Iran entry / Nginx HTTPS" >&2
-    printf '%s\n' "2) KH — Foreign exit / Xray" >&2
+    # A new host chooses a role exactly once, BEFORE protocol options.
+    # This remains a session-only selection, not deployment authorization.
+    printf '%s\n' "============================================" >&2
+    printf '%s\n' "       STEP 0 - SELECT THIS SERVER" >&2
+    printf '%s\n' "============================================" >&2
+    printf '%s\n' "1) IR - Iran entry / HTTPS gateway" >&2
+    printf '%s\n' "2) KH - Foreign exit / service endpoint" >&2
     printf '%s\n' "0) Cancel" >&2
     read -rp "Choose [0-2]: " choice || return 1
     case "$choice" in
