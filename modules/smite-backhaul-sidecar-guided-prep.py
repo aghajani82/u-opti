@@ -102,7 +102,7 @@ def main() -> int:
         return 2
     try:
         sc, ng = prepare_fresh_pair(opts.role, opts.ir_domain, opts.kh_host)
-    except (GuidedHold, ValueError, OSError, RuntimeError, Exception):
+    except Exception:
         # Never include caught exception text: lower layers may contain
         # token-bearing paths or private Nginx source details.
         print("HOLD: Offline pair not verified; check fresh-host readiness, "
