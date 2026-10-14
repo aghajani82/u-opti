@@ -9,7 +9,7 @@ grep -Fq '"smite-tunnel-control-center.sh"' u-opti
 grep -Fq '["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"' u-opti
 grep -Fq '["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"' u-opti
 grep -Fq "source \"\$SMITE_TW_DIR/smite-tunnel-control-center.sh\"" modules/smite-tunnel-wizard.sh
-grep -Fq "5) Tunnel Control Center" modules/smite-tunnel-wizard.sh
+grep -Fq "4) Tunnel Control Center" modules/smite-tunnel-wizard.sh
 
 # Standalone demo must not need Docker, ss or root; never leak real status.
 preview="$(bash modules/smite-tunnel-control-center.sh --demo ir)"
