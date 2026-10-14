@@ -218,33 +218,60 @@ smite_bh_management_menu() {
     done
 }
 
-# Sourced after the original FRP wizard; keep choices 1-3 and their calls.
-docker_smite_management_menu() {
+# UI consolidation only: legacy installers are retained behind Advanced Tools.
+# No change to existing FRP/Backhaul installers, ownership or on-host state.
+docker_smite_advanced_menu() {
     local choice
+    while true; do
+        clear
+        echo "======================================"
+        echo "      Advanced & Legacy Tools"
+        echo "======================================"
+        echo "1) Standard FRP Test Guide (read-only)"
+        echo "2) Original FRP Setup Wizard"
+        echo "3) Legacy Backhaul offline preparation (NOT installer)"
+        echo "0) Back"
+        read -rp "Choose [0-3]: " choice || return
+        case "$choice" in
+            1) docker_smite_frp_standard_guide ;;
+            2) smite_frp_wizard_menu ;;
+            3) smite_bh_management_menu ;;
+            0) return ;;
+            *) echo "Invalid selection." ;;
+        esac
+    done
+}
+
+docker_smite_management_menu() {
+    local choice role
     while true; do
         clear
         echo "======================================"
         echo "          Smite Management"
         echo "======================================"
-        echo "1) Private Network Wizard (existing 10-step flow)"
-        echo "2) Standard FRP Test Guide (experimental)"
-        echo "3) Standard FRP Setup Wizard (IR/KH, experimental)"
-        echo "4) Standard Backhaul (preparation only)"
-        echo "5) Tunnel Setup Wizard (Backhaul / FRP / Rathole; reviewed steps)"
+        echo "1) Private Network Wizard"
+        echo "2) Tunnel Management (FRP / Backhaul / Rathole)"
+        echo "3) Status & Diagnostics"
+        echo "4) Advanced & Legacy Tools"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
-            2) docker_smite_frp_standard_guide ;;
-            3) smite_frp_wizard_menu ;;
-            4) smite_bh_management_menu ;;
-            5) if declare -F smite_tw_menu >/dev/null 2>&1; then
+            2) if declare -F smite_tw_menu >/dev/null 2>&1; then
                    smite_tw_menu
                else
                    echo "Tunnel Wizard missing; update the experimental branch first."
                fi ;;
+            3) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
+                  declare -F twcc_menu >/dev/null 2>&1; then
+                   role="$(smite_tw_choose_role)" || continue
+                   twcc_menu "$role"
+               else
+                   echo "Status module missing; update the experimental branch first."
+               fi ;;
+            4) docker_smite_advanced_menu ;;
             0) return ;;
-            *) echo "Invalid selection."; sleep 1 ;;
+            *) echo "Invalid selection." ;;
         esac
     done
 }
