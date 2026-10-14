@@ -146,8 +146,8 @@ for MODULE in "${MODULES[@]}"; do
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
-        smite-backhaul-management.sh) LABEL="Smite Standard Backhaul Preparation (no activation)" ;;
-        smite-tunnel-wizard.sh) LABEL="Smite Tunnel Setup Wizard (guided review)" ;;
+        smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
+        smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
         smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
