@@ -28,7 +28,7 @@ grep -Fq '["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"' u-opti
 grep -Fq 'smite_tw_menu()' modules/smite-tunnel-wizard.sh
 grep -Fq 'twcc_menu()' modules/smite-tunnel-control-center.sh
 grep -Fq 'source "$SMITE_BH_DIR/smite-tunnel-wizard.sh"' modules/smite-backhaul-management.sh
-grep -Fq '5) Tunnel Setup Wizard' modules/smite-backhaul-management.sh
+grep -Fq '2) Tunnel Management (FRP / Backhaul / Rathole)' modules/smite-backhaul-management.sh
 
 smite_bh_role() { echo ir; }
 source modules/smite-tunnel-wizard.sh
@@ -74,29 +74,33 @@ done
 smite_frp_wizard_menu() { echo FRP_DELEGATE_CALLED; }
 out="$(printf '2\n0\n' | smite_tw_menu)"
 grep -Fq FRP_DELEGATE_CALLED <<< "$out"
-out="$(printf '1\n1\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n1\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'Backhaul v0.7.2' <<< "$out"
 out="$(printf '3\n2\n23333\n45000\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'NO INSTALL' <<< "$out"
 
-# Unit-test the new menu routes without ever calling host inspection.
+# Verify new primary and advanced routes without host inspection.
 smite_tw_backhaul_readiness() { echo "READINESS_CALLED:$1:$2"; }
-out="$(printf '1\n6\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n2\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"
-out="$(printf '1\n7\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n3\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:new' <<< "$out"
 
-# New Control Center route preserves existing direct FRP and Backhaul options.
+# Simplified top-level Control Center route preserves FRP and Backhaul.
 twcc_menu() { echo "TUNNEL_CENTER_ROLE:$1"; }
-out="$(printf '5\n0\n' | smite_tw_menu)"
+out="$(printf '4\n0\n' | smite_tw_menu)"
 grep -Fq 'TUNNEL_CENTER_ROLE:ir' <<< "$out"
 
+# Confirm the everyday client-profile action needs no expert-menu navigation.
+out="$(printf '1\n3\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'Protocol: VLESS' <<< "$out"
+
 smite_tw_backhaul_admission() { echo "ADMISSION_CHECK_FOR:$1"; }
-out="$(printf '1\n9\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n6\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ADMISSION_CHECK_FOR:ir' <<< "$out"
 
 smite_tw_backhaul_live_trial() { echo "TRIAL_MENU_FOR:$1"; }
-out="$(printf '1\n10\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n7\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'TRIAL_MENU_FOR:ir' <<< "$out"
 
 # Role selection without Smite setup is explicit, never inferred from hostname/IP.
