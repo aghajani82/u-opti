@@ -50,14 +50,30 @@ def validated_domain(domain: str) -> str:
     return domain
 
 
-def backhaul_toml(role: str, token: str) -> str:
+def validated_profile(data_port: int, xhttp_path: str | None) -> tuple[int, str]:
+    if (not isinstance(data_port, int) or isinstance(data_port, bool)
+            or not 1024 <= data_port <= 65535
+            or data_port in (443, 7000, 8000, 8443, 8888, 18476)):
+        raise UnsafeCandidate("Invalid or reserved Backhaul data port")
+    path = xhttp_path if xhttp_path is not None else f"/{data_port}/www"
+    if (not isinstance(path, str) or not 2 <= len(path) <= 128
+            or not re.fullmatch(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", path)
+            or path == "/channel" or path.startswith("/channel/")
+            or path == "/tunnel" or path.startswith("/tunnel/")
+            or re.match(r"/[0-9]+/web(?:/|$)", path)):
+        raise UnsafeCandidate("Invalid or reserved XHTTP path")
+    return data_port, path
+
+
+def backhaul_toml(role: str, token: str, data_port: int = 56053) -> str:
+    data_port, _ = validated_profile(data_port, None)
     if role == "ir":
         return (
             '[server]\n'
             'bind_addr = "127.0.0.1:3080"\n'
             'transport = "ws"\n'
             f'token = "{token}"\n'
-            'ports = ["127.0.0.1:56053=127.0.0.1:56053"]\n'
+            f'ports = ["127.0.0.1:{data_port}=127.0.0.1:{data_port}"]\n'
             'channel_size = 2048\n'
             'keepalive_period = 75\n'
             'heartbeat = 40\n'
@@ -122,17 +138,20 @@ def nginx_candidate(*args: str) -> str:
     return result.stdout
 
 
-def candidate_files(role: str, token: str, domain: str, kh_host: str) -> dict[str, str]:
+def candidate_files(role: str, token: str, domain: str, kh_host: str,
+                    data_port: int = 56053,
+                    xhttp_path: str | None = None) -> dict[str, str]:
     validated_domain(domain)
     validated_domain(kh_host)
+    data_port, xhttp_path = validated_profile(data_port, xhttp_path)
     files = {
-        f"{role}.toml": backhaul_toml(role, token),
+        f"{role}.toml": backhaul_toml(role, token, data_port),
         "compose.candidate.yaml": compose_candidate(role),
     }
     if role == "ir":
         files["ir-control.inc"] = nginx_candidate("--render-ir-control", "3080")
         files["ir-xhttp.inc"] = nginx_candidate(
-            "--render-ir-xhttp", "56053", "/56053/www", kh_host
+            "--render-ir-xhttp", str(data_port), xhttp_path, kh_host
         )
     elif role == "kh":
         files["kh-bridge.conf"] = nginx_candidate(
@@ -151,9 +170,11 @@ def candidate_files(role: str, token: str, domain: str, kh_host: str) -> dict[st
     return files
 
 
-def prepare(role: str, token_file: Path, domain: str, kh_host: str) -> Path:
+def prepare(role: str, token_file: Path, domain: str, kh_host: str,
+            data_port: int = 56053, xhttp_path: str | None = None) -> Path:
     token = read_private_token(token_file)
-    files = candidate_files(role, token, domain, kh_host)
+    files = candidate_files(role, token, domain, kh_host,
+                            data_port=data_port, xhttp_path=xhttp_path)
     stage = Path(tempfile.mkdtemp(prefix="uopti-backhaul-sidecar-"))
     try:
         os.chmod(stage, 0o700)
@@ -176,10 +197,14 @@ def main() -> None:
     parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--ir-domain", default="ir.kolbe1.ir")
     parser.add_argument("--kh-host", default="kh.kolbe1.ir")
+    parser.add_argument("--data-port", type=int, default=56053)
+    parser.add_argument("--xhttp-path", default=None,
+                        help="Optional URI e.g. /assets/v1/connect (without trailing slash)")
     args = parser.parse_args()
     try:
         stage = prepare(
-            args.role, args.token_file, args.ir_domain, args.kh_host
+            args.role, args.token_file, args.ir_domain, args.kh_host,
+            data_port=args.data_port, xhttp_path=args.xhttp_path
         )
     except (UnsafeCandidate, OSError, subprocess.CalledProcessError) as exc:
         parser.error(f"Offline preparation refused: {type(exc).__name__}")
