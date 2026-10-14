@@ -98,6 +98,7 @@ class TrialTests(unittest.TestCase):
             patch.object(trial, "mutex", return_value=nullcontext()),
             patch.object(trial.os, "geteuid", return_value=0),
             patch.object(trial, "run", side_effect=fake_run),
+            patch.object(trial, "disposable_host_approved", return_value=True),
             patch.dict(os.environ, {"UOPTI_BH_TEST_HOST": "I_ACCEPT_REBUILD_TEST_HOST"}),
         ]
         for p in self.patches:
@@ -223,6 +224,25 @@ class TrialTests(unittest.TestCase):
         for row in unsafe:
             with self.subTest(row=row):
                 self.assertFalse(trial.allowed_command(row))
+
+    def test_disposable_host_marker_required_for_install_and_rollback(self):
+        with patch.object(trial, "disposable_host_approved", return_value=False):
+            with self.assertRaisesRegex(trial.TrialRefused, "approval marker missing"):
+                self.install()
+            self.assertFalse(self.state_dir.exists())
+            with self.assertRaisesRegex(trial.TrialRefused, "approval marker missing"):
+                trial.rollback("ir")
+        self.assertFalse(self.fake_container["exists"])
+
+    def test_unprivileged_or_incorrect_marker_never_approves(self):
+        # The real marker path is deliberately not created on a runner.
+        with patch.object(trial, "Path", wraps=Path) as paths:
+            original = trial.disposable_host_approved
+            from unittest.mock import Mock
+            fake_path = Mock()
+            paths.return_value = fake_path
+            fake_path.lstat.side_effect = FileNotFoundError()
+            self.assertFalse(original())
 
     def test_without_operator_gate_no_install(self):
         os.environ.pop("UOPTI_BH_TEST_HOST", None)
