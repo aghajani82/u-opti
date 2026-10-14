@@ -194,6 +194,15 @@ def rollback(root: Path, container: str, *, require_journal: bool = True) -> str
     if digest(current) not in (info["active_sha"], info["original_sha"]):
         raise LabRefused("Third-party config drift: NO automatic overwrite")
     backup = root / BACKUP
+    if not backup.exists() and not backup.is_symlink():
+        if digest(current) != info["original_sha"]:
+            raise LabRefused("Backup missing after file activation; HOLD")
+        # Crash after writing journal but BEFORE any config mutation:
+        # baseline remains unchanged, so there is nothing to restore.
+        nginx(container, "-t")
+        nginx(container, "-s")
+        (root / JOURNAL).unlink()
+        return "ROLLED_BACK_UNCHANGED_BASELINE"
     _lstat_regular(backup)
     if digest(backup.read_bytes()) != info["original_sha"]:
         raise LabRefused("Original backup mismatch")
@@ -209,7 +218,9 @@ def rollback(root: Path, container: str, *, require_journal: bool = True) -> str
     return "ROLLED_BACK_TO_EXACT_BASELINE"
 
 
-def apply(root: Path, container: str, *, simulate_crash: bool = False) -> str:
+def apply(root: Path, container: str, *,
+          simulate_crash: bool = False,
+          simulate_crash_after_journal: bool = False) -> str:
     if read_journal(root) is not None or (root / BACKUP).exists() or (root / BACKUP).is_symlink():
         raise LabRefused("Existing or incomplete transaction must be recovered first")
     original = (root / BASE).read_bytes()
@@ -223,6 +234,8 @@ def apply(root: Path, container: str, *, simulate_crash: bool = False) -> str:
         "original_sha": digest(original), "active_sha": digest(desired),
     }
     atomic_bytes(root / JOURNAL, json.dumps(journal, sort_keys=True).encode())
+    if simulate_crash_after_journal:
+        os._exit(89)  # No backup/file change yet; recover checks baseline SHA.
     try:
         atomic_bytes(root / BACKUP, original)
         atomic_bytes(root / CURRENT, desired)
@@ -246,12 +259,15 @@ def main() -> int:
     ap.add_argument("--container", required=True)
     ap.add_argument("--action", choices=("apply", "rollback", "status"), required=True)
     ap.add_argument("--simulate-crash-after-write", action="store_true")
+    ap.add_argument("--simulate-crash-after-journal", action="store_true")
     args = ap.parse_args()
     try:
         run_id, attempt = safe_environment()
         root = workspace(args.workspace)
-        if args.simulate_crash_after_write and args.action != "apply":
-            raise LabRefused("Fault injection is only supported during lab apply")
+        if (args.simulate_crash_after_write or args.simulate_crash_after_journal):
+            if args.action != "apply" or (
+                    args.simulate_crash_after_write and args.simulate_crash_after_journal):
+                raise LabRefused("Lab faults require one apply-only injection")
         container = validate_container(args.container, root, run_id, attempt)
         lockpath = root / LOCK
         fd = os.open(lockpath, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -260,7 +276,8 @@ def main() -> int:
             with os.fdopen(fd, "r+", closefd=True):
                 if args.action == "apply":
                     report = apply(root, container,
-                                   simulate_crash=args.simulate_crash_after_write)
+                                   simulate_crash=args.simulate_crash_after_write,
+                                   simulate_crash_after_journal=args.simulate_crash_after_journal)
                 elif args.action == "rollback":
                     report = rollback(root, container)
                 else:
