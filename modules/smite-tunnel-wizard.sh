@@ -324,6 +324,28 @@ smite_tw_backhaul_client() {
     echo "Host header is set by the IR XHTTP Nginx include to the KH upstream."
 }
 
+smite_tw_backhaul_secure_pair() {
+    local role="$1" tool kh_host ssh_port confirm
+    tool="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-ssh-pair.py"
+    echo "===== Private Backhaul pairing / trusted SSH ONLY ====="
+    echo "For FRESH TEST hosts only. Never prints or copies token into shell arguments."
+    echo "SSH public-key login + an already verified KH host key are required."
+    echo "No password login, automatic host-key acceptance or SSH config changes."
+    [ -s "$tool" ] || { echo "Pairing helper missing on this host."; return 1; }
+    if [ "$role" = kh ]; then
+        python3 -B "${SMITE_BH_DIR}/smite-backhaul-sidecar-token.py" --verify
+        return
+    fi
+    [ "$role" = ir ] || { echo "Unknown role; no pairing."; return 1; }
+    read -rp "KH SSH hostname (DNS; must already be trusted): " kh_host || return
+    read -rp "KH SSH port [22]: " ssh_port || return
+    ssh_port="${ssh_port:-22}"
+    read -rp "Type PAIR-KH-TEST-HOST to securely pair TEST servers: " confirm || return
+    [ "$confirm" = PAIR-KH-TEST-HOST ] || { echo "Cancelled; no pairing."; return 0; }
+    python3 -B "$tool" --send-ir --kh-host "$kh_host" \
+        --ssh-port "$ssh_port" --confirm PAIR-KH-TEST-HOST
+}
+
 smite_tw_backhaul_guided_prepare() {
     local role="$1" module ir_domain kh_host confirm
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-prep.py"
@@ -371,17 +393,19 @@ smite_tw_backhaul_expert_menu() {
         smite_tw_header
         printf 'Backhaul test host tools | This machine: %s\n' "$role"
         echo "PREVIEW ONLY. No production activation approved."
-        echo "1) Guided one-step PRIVATE/OFFLINE prepare (fresh host)"
-        echo "2) Test VPS installer / guarded rollback (CHANGES SERVER)"
-        echo "3) Check NEW test host (read-only)"
-        echo "4) Advanced manual / legacy tools"
+        echo "1) Pair IR/KH token over already trusted SSH (test hosts)"
+        echo "2) Guided private OFFLINE preparation (fresh host)"
+        echo "3) Test VPS installer / guarded rollback (CHANGES SERVER)"
+        echo "4) Check NEW test host (read-only)"
+        echo "5) Advanced manual / legacy tools"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
-            2) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
-            4) smite_tw_backhaul_manual_menu "$role" ;;
+            1) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_manual_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
