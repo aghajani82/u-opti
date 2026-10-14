@@ -79,6 +79,30 @@ class SidecarTests(unittest.TestCase):
         self.assertFalse((kh / "ir-control.inc").exists())
         self.assertFalse((ir / "kh-bridge.conf").exists())
 
+    def test_custom_data_port_and_independent_xhttp_path_offline(self) -> None:
+        files = sidecar.candidate_files(
+            "ir", self.secret, "ir.kolbe1.ir", "kh.kolbe1.ir",
+            data_port=45123, xhttp_path="/assets/v1/connect")
+        toml = tomllib.loads(files["ir.toml"])
+        self.assertEqual(toml["server"]["ports"],
+                         ["127.0.0.1:45123=127.0.0.1:45123"])
+        route = files["ir-xhttp.inc"]
+        self.assertIn("location = /assets/v1/connect {", route)
+        self.assertIn("location ^~ /assets/v1/connect/ {", route)
+        self.assertIn("proxy_pass http://127.0.0.1:45123;", route)
+        self.assertNotIn("/45123/www", route)
+        for path in ("/channel", "/tunnel/x", "/45123/web", "/assets/../x",
+                     "/assets/evil/", "/assets/x;include"):
+            with self.subTest(path=path), self.assertRaises(sidecar.UnsafeCandidate):
+                sidecar.candidate_files(
+                    "ir", self.secret, "ir.kolbe1.ir", "kh.kolbe1.ir",
+                    data_port=45123, xhttp_path=path)
+        for port in (0, 80, 443, 7000, 8443, 18476, 65536):
+            with self.subTest(port=port), self.assertRaises(sidecar.UnsafeCandidate):
+                sidecar.candidate_files(
+                    "ir", self.secret, "ir.kolbe1.ir", "kh.kolbe1.ir",
+                    data_port=port)
+
     def test_fail_closed_secret_and_input(self) -> None:
         self.token.chmod(0o644)
         with self.assertRaises(sidecar.UnsafeCandidate):
