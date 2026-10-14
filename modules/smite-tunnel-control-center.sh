@@ -225,9 +225,10 @@ twcc_open_backhaul() {
 }
 
 twcc_open_frp() {
+    local role="$1"
     if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
         printf '%s\n' 'Opening existing FRP wizard (may offer opt-in setup actions).'
-        smite_frp_wizard_menu
+        smite_frp_wizard_menu "$role"
     else
         printf '%s\n' 'FRP wizard unavailable; update the preview modules.'
     fi
@@ -248,15 +249,15 @@ twcc_menu() {
     while true; do
         if declare -F smite_tw_clear >/dev/null 2>&1; then smite_tw_clear; fi
         twcc_dashboard "$role" live
-        printf '\n%s\n' '  1) Backhaul — inspect, preflight or prepare OFFLINE plan'
-        printf '%s\n' '  2) FRP — open existing opt-in setup wizard'
+        printf '\n%s\n' '  1) Backhaul — pairing, install & read-only diagnostics'
+        printf '%s\n' '  2) FRP — guided Smite Standard setup'
         printf '%s\n' '  3) Rathole — safe topology/port planner'
         printf '%s\n' '  4) Refresh local snapshot'
         printf '%s\n' '  0) Back'
         read -rp '  Choose [0-4]: ' choice || return
         case "$choice" in
             1) twcc_open_backhaul "$role" ;;
-            2) twcc_open_frp ;;
+            2) twcc_open_frp "$role" ;;
             3) twcc_open_rathole "$role" ;;
             4) : ;;
             0) return ;;
