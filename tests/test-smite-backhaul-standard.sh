@@ -39,5 +39,16 @@ if uopti_bh_render_ir_xhttp 56053 /56053/web 'bad;host' >/dev/null; then exit 1;
 if uopti_bh_render_ir_xhttp 56053 /18476/web kh.kolbe1.ir >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 56053 /56053/www/ kh.kolbe1.ir >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 56053 '/56053/www;evil' kh.kolbe1.ir >/dev/null; then exit 1; fi
+# XHTTP path and data port are separate configuration choices. Render only.
+custom="$(uopti_bh_render_ir_xhttp 45123 /assets/v1/connect kh.kolbe1.ir)"
+grep -Fq 'location = /assets/v1/connect {' <<< "$custom"
+grep -Fq 'location ^~ /assets/v1/connect/ {' <<< "$custom"
+grep -Fq 'proxy_pass http://127.0.0.1:45123/assets/v1/connect/;' <<< "$custom"
+for unsafe in /channel /channel/foo /tunnel /tunnel/foo /45123/web /assets/../evil /assets/evil/ '/assets/v1;return'; do
+    if uopti_bh_render_ir_xhttp 45123 "$unsafe" kh.kolbe1.ir >/dev/null; then
+        echo "ERROR: Unsafe custom XHTTP path accepted" >&2
+        exit 1
+    fi
+done
 grep -Fq 'smite_frp_xhttp_sync()' modules/smite-frp-xhttp.sh
 echo 'Backhaul Standard render-only tests passed'
