@@ -58,6 +58,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-admission.py
 
+      - name: Test one-step private offline Backhaul preparation (mocked hosts)
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-guided-prep.py
+
       - name: Verify install/update module closure and isolated import smoke
         shell: bash
         run: |
