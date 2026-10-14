@@ -437,27 +437,49 @@ smite_tw_backhaul_guided_trial_install() {
         --install-test --test-host-approval REBUILT-TEST-VPS --confirm "$confirm"
 }
 
+# Everyday navigation follows the human workflow. All test-host mutation
+# remains behind the original explicit consent and journal gates.
+smite_tw_backhaul_diagnostics_menu() {
+    local role="$1" choice module
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-live-trial.py"
+    while true; do
+        smite_tw_header
+        printf 'Backhaul | Diagnostics | This machine: %s\n' "$role"
+        echo "1) Current Sidecar status (read-only)"
+        echo "2) Full installed Sidecar audit (read-only)"
+        echo "3) Trial journal status (read-only)"
+        echo "0) Back"
+        read -rp "Choose [0-3]: " choice || return
+        case "$choice" in
+            1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
+            2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
+            3) if [ -s "$module" ]; then python3 -B "$module" --role "$role" --status || :;
+               else echo "Trial module missing."; fi; smite_tw_pause ;;
+            0) return ;;
+            *) echo "Invalid choice"; smite_tw_pause ;;
+        esac
+    done
+}
+
 smite_tw_backhaul_expert_menu() {
     local role="$1" choice
     while true; do
         smite_tw_header
-        printf 'Backhaul test host tools | This machine: %s\n' "$role"
-        echo "TEST VPS ONLY. Never install on an already working Sidecar."
-        echo "1) Guided test install (NO manual /tmp paths; CHANGES SERVER)"
-        echo "2) Check NEW test host (read-only)"
-        echo "3) Prepare private OFFLINE plan only"
-        echo "4) Trial journal / guarded rollback / legacy install"
-        echo "5) Trusted SSH pairing (OPTIONAL advanced method)"
-        echo "6) Advanced manual / legacy tools"
+        printf 'Backhaul | Recovery & Advanced | This machine: %s\n' "$role"
+        echo "TEST VPS ONLY. Existing Sidecars must not be installed over."
+        echo "1) Check FRESH test host before installation (read-only)"
+        echo "2) Prepare private OFFLINE installation plan"
+        echo "3) Trial journal / guarded rollback / legacy install"
+        echo "4) Trusted SSH pairing (optional advanced method)"
+        echo "5) Manual planning / legacy tools"
         echo "0) Back"
-        read -rp "Choose [0-6]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
-            2) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
-            4) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
-            5) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
-            6) smite_tw_backhaul_manual_menu "$role" ;;
+            1) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_manual_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
@@ -469,18 +491,19 @@ smite_tw_backhaul_menu() {
     while true; do
         smite_tw_header
         printf 'Protocol: Backhaul | This machine: %s\n\n' "$role"
-        echo "1) Sidecar status & diagnostics (read-only)"
-        echo "2) Strict installed Sidecar audit (read-only)"
-        echo "3) v2rayN / Android client profile fields"
-        echo "4) Pair IR/KH with a copied code (two Bitvise terminals, TEST ONLY)"
-        echo "5) Experimental setup & recovery tools"
+        echo "Follow steps 1 -> 2 -> 3 for a fresh experimental VPS."
+        echo "1) Step 1 - Pair IR/KH (two Bitvise terminals)"
+        echo "2) Step 2 - Install Backhaul Sidecar (TEST VPS ONLY)"
+        echo "3) Step 3 - Check status and troubleshoot (read-only)"
+        echo "4) Client configuration (VLESS/XHTTP)"
+        echo "5) Recovery, preflight & advanced tools"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
-            2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_client; smite_tw_pause ;;
-            4) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
+            1) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_diagnostics_menu "$role" ;;
+            4) smite_tw_backhaul_client; smite_tw_pause ;;
             5) smite_tw_backhaul_expert_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
@@ -574,7 +597,7 @@ smite_tw_menu() {
             1) smite_tw_backhaul_menu "$role" ;;
             2)
                 if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
-                    smite_frp_wizard_menu
+                    smite_frp_wizard_menu "$role"
                 else
                     echo "FRP wizard missing; update U-OPTI first."
                     smite_tw_pause
