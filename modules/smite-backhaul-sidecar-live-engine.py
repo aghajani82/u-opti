@@ -46,11 +46,57 @@ class ActivationRefused(ValueError):
 
 
 class SubprocessDriver:
-    """Allowlisted commands. Never run arbitrary arguments from stage files."""
+    """Strict *argument-level* allowlist for the unreleased trial engine.
+
+    The historical executable-name-only check was insufficient: arbitrary
+    arguments to docker/systemctl would have passed. Stage-provided data
+    cannot add flags, change mounts, choose images, or pick container names.
+    """
+
+    LABEL_FMT = '{{index .Config.Labels "uopti.tx"}}|{{.Config.Image}}'
+    PS_FMT = "{{.Names}}"
+
+    @classmethod
+    def allowed(cls, argv: list[str]) -> bool:
+        if argv in (["nginx", "-t"], ["systemctl", "reload", "nginx"]):
+            return True
+        if not argv or argv[0] != "docker":
+            return False
+        for role, name in CONTAINER.items():
+            if argv in (
+                ["docker", "inspect", "-f", cls.LABEL_FMT, name],
+                ["docker", "ps", "-a", "--filter", "name=^/" + name + "$",
+                 "--format", cls.PS_FMT],
+                ["docker", "update", "--restart", "unless-stopped", name],
+                ["docker", "rm", "-f", name],
+            ):
+                return True
+            if len(argv) == 23 and argv[:6] == [
+                "docker", "run", "-d", "--name", name, "--label"
+            ]:
+                label = argv[6]
+                if not label.startswith("uopti.tx="):
+                    return False
+                txn_id = label[len("uopti.tx="):]
+                if len(txn_id) != 32 or any(ch not in "0123456789abcdef" for ch in txn_id):
+                    return False
+                expected = [
+                    "docker", "run", "-d", "--name", name,
+                    "--label", label, "--network", "host",
+                    "--restart", "no", "--read-only",
+                    "--cap-drop", "ALL", "--security-opt",
+                    "no-new-privileges", "--mount",
+                    "type=bind,src=/etc/u-opti/backhaul-sidecar/"
+                    + role + ".toml,dst=/run/backhaul/config.toml,readonly",
+                    "--entrypoint", "/usr/local/bin/backhaul",
+                    IMAGE, "-c", "/run/backhaul/config.toml",
+                ]
+                return argv == expected
+        return False
 
     def call(self, argv: list[str], timeout: int = 45) -> str:
-        if not argv or argv[0] not in ("docker", "nginx", "systemctl"):
-            raise ActivationRefused("Executable is not on the command allowlist")
+        if not self.allowed(argv) or type(timeout) is not int or not 1 <= timeout <= 90:
+            raise ActivationRefused("Command/arguments not on strict trial allowlist")
         try:
             output = subprocess.run(
                 argv, check=True, capture_output=True, text=True, timeout=timeout)
@@ -263,6 +309,10 @@ class LiveEngine:
     def __init__(self, *, root: Path, driver: SubprocessDriver):
         self.root = Path(root)
         self.driver = driver
+        # A fake-root fixture must NEVER be paired with an actual host driver:
+        # that combination would run host-network Docker against the real host.
+        if self.root != Path("/") and isinstance(driver, SubprocessDriver):
+            raise ActivationRefused("Real host driver forbidden in synthetic fixture")
         self._approved = None
 
     def _root_allowed(self) -> bool:
@@ -437,13 +487,14 @@ class LiveEngine:
         if self.docker_owned(role, txn_id):
             self.driver.call(["docker", "rm", "-f", CONTAINER[role]], timeout=30)
         else:
-            # Distinguish a genuinely absent container from a foreign one.
-            try:
-                self.driver.call(["docker", "inspect", CONTAINER[role]], timeout=10)
-            except ActivationRefused:
-                pass
-            else:
-                raise ActivationRefused("Unknown container owns the Sidecar name")
+            # A failed docker inspect can mean daemon downtime, NOT absence.
+            # docker ps returning successfully is required before any file edit.
+            listed = self.driver.call([
+                "docker", "ps", "-a", "--filter",
+                "name=^/" + CONTAINER[role] + "$", "--format", "{{.Names}}"
+            ], timeout=10)
+            if listed != "":
+                raise ActivationRefused("Foreign or unverified Sidecar container; HOLD")
         for entry, condition in reversed(list(zip(doc["resources"], states))):
             if condition != "applied":
                 continue
