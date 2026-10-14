@@ -130,6 +130,23 @@ class LabControllerTests(unittest.TestCase):
             self.assertEqual((self.root / "nginx.conf").read_bytes(),
                              b"outsider change")
 
+    def test_journal_only_crash_has_safe_idempotent_recovery(self):
+        # A power loss after journal durability but before touching Nginx.
+        old = (self.root / "nginx.conf").read_bytes()
+        data = {
+            "version": 1, "container": "lab-container",
+            "original_sha": lab.digest(old),
+            "active_sha": lab.digest((self.root / "active.conf").read_bytes()),
+        }
+        lab.atomic_bytes(self.root / lab.JOURNAL,
+                         json.dumps(data, sort_keys=True).encode())
+        with patch.object(lab, "nginx") as fake:
+            self.assertEqual(lab.rollback(self.root, "lab-container"),
+                             "ROLLED_BACK_UNCHANGED_BASELINE")
+            self.assertEqual(fake.call_count, 2)
+        self.assertFalse((self.root / lab.JOURNAL).exists())
+        self.assertEqual((self.root / "nginx.conf").read_bytes(), old)
+
     def test_missing_backup_blocks_applied_rollback(self):
         with patch.object(lab, "nginx"):
             lab.apply(self.root, "lab-container")
