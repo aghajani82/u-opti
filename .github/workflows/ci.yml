@@ -78,6 +78,11 @@ jobs:
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-token.py
 
+      - name: Verify strict SSH private token pairing on mocked IR/KH hosts
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-ssh-pair.py
+
       - name: Verify safe IR/KH rebuild readiness gate without real services
         shell: bash
         run: bash tests/test-smite-backhaul-rebuild-gate.sh
