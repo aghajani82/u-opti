@@ -324,6 +324,33 @@ smite_tw_backhaul_client() {
     echo "Host header is set by the IR XHTTP Nginx include to the KH upstream."
 }
 
+smite_tw_backhaul_paste_pair() {
+    local role="$1" tool confirm mode
+    tool="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-paste-pair.py"
+    echo "===== Backhaul two Bitvise terminals (FRESH TEST HOSTS) ====="
+    echo "NO server-to-server SSH needed. Protect the pairing code as a secret."
+    echo "NEVER use this for the already working IR/KH Sidecars."
+    [ -s "$tool" ] || { echo "Two-terminal pairing helper missing; update test branch."; return 1; }
+    case "$role" in
+        ir)
+            echo "IR: show the private Backhaul code and copy it DIRECTLY to KH."
+            echo "WARNING: It is a long-lived secret, not a temporary login OTP."
+            mode="--show-ir"
+            confirm="DISPLAY-IR-PRIVATE-CODE"
+            ;;
+        kh)
+            echo "KH: paste the IR code into a hidden (no-echo) terminal prompt."
+            echo "The file is created privately or matched without overwrite."
+            mode="--paste-kh"
+            confirm="PASTE-KH-PRIVATE-CODE"
+            ;;
+        *) echo "Unsupported role; cancelled."; return 1 ;;
+    esac
+    read -rp "Type $confirm to continue: " answer || return 1
+    [ "$answer" = "$confirm" ] || { echo "Cancelled. No pairing change."; return 0; }
+    python3 -B "$tool" "$mode" --confirm "$confirm"
+}
+
 smite_tw_backhaul_secure_pair() {
     local role="$1" tool kh_host ssh_port confirm
     tool="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-ssh-pair.py"
@@ -393,18 +420,18 @@ smite_tw_backhaul_expert_menu() {
         smite_tw_header
         printf 'Backhaul test host tools | This machine: %s\n' "$role"
         echo "PREVIEW ONLY. No production activation approved."
-        echo "1) Pair IR/KH token over already trusted SSH (test hosts)"
-        echo "2) Guided private OFFLINE preparation (fresh host)"
-        echo "3) Test VPS installer / guarded rollback (CHANGES SERVER)"
-        echo "4) Check NEW test host (read-only)"
+        echo "1) Guided private OFFLINE preparation (fresh host)"
+        echo "2) Test VPS installer / guarded rollback (CHANGES SERVER)"
+        echo "3) Check NEW test host (read-only)"
+        echo "4) Trusted SSH pairing (OPTIONAL advanced method)"
         echo "5) Advanced manual / legacy tools"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
-            2) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
-            4) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            1) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
+            3) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
+            4) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
             5) smite_tw_backhaul_manual_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
@@ -420,14 +447,16 @@ smite_tw_backhaul_menu() {
         echo "1) Sidecar status & diagnostics (read-only)"
         echo "2) Strict installed Sidecar audit (read-only)"
         echo "3) v2rayN / Android client profile fields"
-        echo "4) Experimental setup & recovery tools"
+        echo "4) Pair IR/KH with a copied code (two Bitvise terminals, TEST ONLY)"
+        echo "5) Experimental setup & recovery tools"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
             3) smite_tw_backhaul_client; smite_tw_pause ;;
-            4) smite_tw_backhaul_expert_menu "$role" ;;
+            4) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
+            5) smite_tw_backhaul_expert_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
