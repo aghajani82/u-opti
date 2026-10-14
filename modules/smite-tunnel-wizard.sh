@@ -188,13 +188,14 @@ smite_tw_backhaul_steps() {
 }
 
 smite_tw_backhaul_prepare() {
-    local role="$1" choice module token ir_domain kh_host
+    local role="$1" choice module token ir_domain kh_host data_port xhttp_path
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar.py"
     token="/etc/u-opti/backhaul-sidecar/shared.token"
     echo "===== Private Backhaul candidate / PREPARE ONLY ====="
     echo "This creates private 0600 files under a new /tmp directory."
     echo "No Nginx, Docker, Smite, firewall, restart, or port will change."
     echo "The candidate contains a token: NEVER share or publish the directory."
+    echo "Custom port/path are OFFLINE PREVIEW ONLY, not used by the current live installer."
     if [ "$(id -u)" -ne 0 ] || [ ! -f "$module" ] || [ ! -f "$token" ] || [ -L "$token" ]; then
         echo "NOT READY: root, candidate generator and existing private token required."
         echo "Prepare the secure token on IR first and transfer it to KH privately."
@@ -208,8 +209,13 @@ smite_tw_backhaul_prepare() {
         echo "ERROR: Both hostnames are required. Nothing generated."
         return 1
     fi
+    read -rp "KH XHTTP data port [56053] (OFFLINE ONLY): " data_port || return 1
+    data_port="${data_port:-56053}"
+    read -rp "XHTTP path [/$data_port/www] (OFFLINE ONLY): " xhttp_path || return 1
+    xhttp_path="${xhttp_path:-/$data_port/www}"
     python3 "$module" --role "$role" --token-file "$token" \
-        --ir-domain "$ir_domain" --kh-host "$kh_host"
+        --ir-domain "$ir_domain" --kh-host "$kh_host" \
+        --data-port "$data_port" --xhttp-path "$xhttp_path"
 }
 
 smite_tw_backhaul_readiness() {
@@ -399,7 +405,7 @@ smite_tw_backhaul_manual_menu() {
         printf 'Backhaul legacy/manual tools | This machine: %s\n' "$role"
         echo "1) Explain architecture"
         echo "2) Installation safety checklist"
-        echo "3) Prepare only Sidecar candidate (OFFLINE)"
+        echo "3) Preview custom data port & XHTTP path (OFFLINE; no install)"
         echo "4) Prepare only Nginx proposal (OFFLINE)"
         echo "5) Check two existing private candidates (read-only)"
         echo "0) Back"
