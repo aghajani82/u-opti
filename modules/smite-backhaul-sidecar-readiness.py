@@ -231,7 +231,9 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
         if container_exists or owned_files:
             failures.append("Existing/partial Sidecar detected; fresh install REFUSED")
         if role == "ir":
-            reserved = (3080, data_port)
+            # Pairing (before choosing a data port) only checks the fixed WS
+            # control listener. Install admission later checks the selected port.
+            reserved = (3080, data_port) if check_target else (3080,)
         else:
             reserved = (13080,)
         for port in reserved:
