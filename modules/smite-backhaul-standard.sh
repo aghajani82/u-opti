@@ -87,7 +87,8 @@ uopti_bh_render_ir_xhttp() {
         [ "${BASH_REMATCH[1]}" = "$p" ] || return 1
     fi
     echo "# IR: add only AFTER Backhaul data listener 127.0.0.1:$p is verified."
-    echo "# KH Sanaei XHTTP path: $path/ | upstream Host: $host"
+    echo "# KH Sanaei XHTTP configured BASE path: $path | upstream Host: $host"
+    echo "# Xray may send requests under $path/; Nginx matches both base and prefix."
     for typ in exact prefix; do
         if [ "$typ" = exact ]; then
             echo "    location = $path {"
