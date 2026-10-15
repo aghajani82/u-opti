@@ -44,7 +44,11 @@ custom="$(uopti_bh_render_ir_xhttp 45123 /assets/v1/connect kh.kolbe1.ir)"
 grep -Fq 'location = /assets/v1/connect {' <<< "$custom"
 grep -Fq 'location ^~ /assets/v1/connect/ {' <<< "$custom"
 grep -Fq 'proxy_pass http://127.0.0.1:45123/assets/v1/connect/;' <<< "$custom"
-for unsafe in /channel /channel/foo /tunnel /tunnel/foo /45123/web /assets/../evil /assets/evil/ '/assets/v1;return'; do
+numeric="$(uopti_bh_render_ir_xhttp 45561 /45561/web kh.kolbe1.ir)"
+grep -Fq 'location = /45561/web {' <<< "$numeric"
+grep -Fq 'location ^~ /45561/web/ {' <<< "$numeric"
+grep -Fq 'proxy_pass http://127.0.0.1:45561/45561/web/;' <<< "$numeric"
+for unsafe in /channel /channel/foo /tunnel /tunnel/foo /assets/../evil /assets/evil/ '/assets/v1;return'; do
     if uopti_bh_render_ir_xhttp 45123 "$unsafe" kh.kolbe1.ir >/dev/null; then
         echo "ERROR: Unsafe custom XHTTP path accepted" >&2
         exit 1
