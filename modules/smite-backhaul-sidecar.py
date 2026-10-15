@@ -60,8 +60,7 @@ def validated_profile(data_port: int, xhttp_path: str | None) -> tuple[int, str]
             or not re.fullmatch(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", path)
             or path == "/channel" or path.startswith("/channel/")
             or path == "/tunnel" or path.startswith("/tunnel/")
-            or path == "/~!frp" or path.startswith("/~!frp/")
-            or re.match(r"/0*[0-9]+/web(?:/|$)", path)):
+            or path == "/~!frp" or path.startswith("/~!frp/")):
         raise UnsafeCandidate("Invalid or reserved XHTTP path")
     return data_port, path
 
