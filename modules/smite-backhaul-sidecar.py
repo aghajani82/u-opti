@@ -53,23 +53,31 @@ def validated_domain(domain: str) -> str:
 def validated_profile(data_port: int, xhttp_path: str | None) -> tuple[int, str]:
     if (not isinstance(data_port, int) or isinstance(data_port, bool)
             or not 1024 <= data_port <= 65535
-            or data_port in (443, 7000, 8000, 8443, 8888, 18476)):
+            or data_port in (443, 3080, 7000, 8000, 8443, 8888, 13080, 18476)):
         raise UnsafeCandidate("Invalid or reserved Backhaul data port")
     path = xhttp_path if xhttp_path is not None else f"/{data_port}/www"
     if (not isinstance(path, str) or not 2 <= len(path) <= 128
             or not re.fullmatch(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", path)
             or path == "/channel" or path.startswith("/channel/")
             or path == "/tunnel" or path.startswith("/tunnel/")
-            or re.match(r"/[0-9]+/web(?:/|$)", path)):
+            or path == "/~!frp" or path.startswith("/~!frp/")
+            or re.match(r"/0*[0-9]+/web(?:/|$)", path)):
         raise UnsafeCandidate("Invalid or reserved XHTTP path")
     return data_port, path
 
 
-def backhaul_toml(role: str, token: str, data_port: int = 56053) -> str:
-    data_port, _ = validated_profile(data_port, None)
+def backhaul_toml(role: str, token: str, data_port: int = 56053,
+                  xhttp_path: str | None = None) -> str:
+    data_port, xhttp_path = validated_profile(data_port, xhttp_path)
+    # Both IR and KH retain the selected profile privately for local audit.
+    # Legacy defaults preserve previous exact TOML bytes for compatibility.
+    annotation = ("" if data_port == 56053 and xhttp_path == "/56053/www" else
+                  f"# UOPTI_PROFILE_DATA_PORT={data_port}\n"
+                  f"# UOPTI_PROFILE_XHTTP_PATH={xhttp_path}\n")
     if role == "ir":
         return (
-            '[server]\n'
+            annotation
+            + '[server]\n'
             'bind_addr = "127.0.0.1:3080"\n'
             'transport = "ws"\n'
             f'token = "{token}"\n'
@@ -85,7 +93,8 @@ def backhaul_toml(role: str, token: str, data_port: int = 56053) -> str:
         )
     if role == "kh":
         return (
-            '[client]\n'
+            annotation
+            + '[client]\n'
             'remote_addr = "127.0.0.1:13080"\n'
             'transport = "ws"\n'
             f'token = "{token}"\n'
@@ -145,7 +154,7 @@ def candidate_files(role: str, token: str, domain: str, kh_host: str,
     validated_domain(kh_host)
     data_port, xhttp_path = validated_profile(data_port, xhttp_path)
     files = {
-        f"{role}.toml": backhaul_toml(role, token, data_port),
+        f"{role}.toml": backhaul_toml(role, token, data_port, xhttp_path),
         "compose.candidate.yaml": compose_candidate(role),
     }
     if role == "ir":
