@@ -186,6 +186,9 @@ def main():
     c = cmd.add_parser("contains")
     c.add_argument("snapshot", type=Path)
     c.add_argument("port")
+    c = cmd.add_parser("check")
+    c.add_argument("port")
+    c.add_argument("path")
     c = cmd.add_parser("get")
     c.add_argument("port")
     c = cmd.add_parser("set")
@@ -198,6 +201,8 @@ def main():
         elif args.cmd == "contains":
             if valid_port(args.port) not in server_ports(args.snapshot):
                 raise RouteError("No applied IR FRP server tunnel for that port")
+        elif args.cmd == "check":
+            valid_path(args.path, valid_port(args.port))
         elif args.cmd == "get":
             port = valid_port(args.port)
             print(registry_read(DEFAULT_MAP).get(port, default_path(port)))
