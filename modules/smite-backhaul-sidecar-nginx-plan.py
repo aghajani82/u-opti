@@ -77,7 +77,7 @@ def original_bytes(source: Path) -> bytes:
     return data
 
 
-def _base_checks(text: str, *, domain: str) -> None:
+def _base_checks(text: str, *, domain: str, xhttp_path: str = "/56053/www") -> None:
     # Require a single named server rather than accidentally inserting into
     # a shared/default server. This is intentionally restrictive, not a parser.
     if len(re.findall(r"(?m)^\s*server\s*\{", text)) != 1:
@@ -91,21 +91,33 @@ def _base_checks(text: str, *, domain: str) -> None:
         raise PlanRefused("Existing Sidecar references found; never overwrite")
     # Existing locations for the same namespace are collision hazards, even
     # when declared in a different style or inside existing regex rules.
-    if re.search(r"(?m)^\s*location\b[^\n]*(?:/channel|/tunnel/|/56053/www)", text):
+    if (re.search(r"(?m)^\s*location\b[^\n]*(?:/channel|/tunnel/|/56053/www)", text)
+            or re.search(r"(?m)^\s*location\b[^\n]*"
+                         + re.escape(xhttp_path) + r"(?=/|\s|\{|$)", text)):
         raise PlanRefused("Existing Sidecar path location; refuse duplicate")
 
 
 def compile_nginx(role: str, original: bytes, ir_domain: str,
-                  kh_host: str) -> tuple[bytes, dict[str, bytes], str]:
+                  kh_host: str, data_port: int = 56053,
+                  xhttp_path: str | None = None) -> tuple[bytes, dict[str, bytes], str]:
     if role not in ("ir", "kh"):
         raise PlanRefused("Role must be IR or KH")
     domain_valid(ir_domain)
     domain_valid(kh_host)
+    # Import only the pure validator; never create a staged file here.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "nginx_plan_profile", HERE / "smite-backhaul-sidecar.py")
+    assert spec is not None and spec.loader is not None
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    data_port, xhttp_path = validator.validated_profile(data_port, xhttp_path)
     try:
         text = original.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise PlanRefused("Invalid UTF-8") from exc
-    _base_checks(text, domain=ir_domain if role == "ir" else kh_host)
+    _base_checks(text, domain=ir_domain if role == "ir" else kh_host,
+                 xhttp_path=xhttp_path)
     if role == "ir":
         if (len(re.findall(r"(?m)^\s*listen\s+127\.0\.0\.1:8443\s+ssl;", text)) != 1
                 or text.count(IR_ANCHOR) != 1
@@ -119,8 +131,8 @@ def compile_nginx(role: str, original: bytes, ir_domain: str,
         patched = text.replace(IR_ANCHOR, inserts + IR_ANCHOR, 1)
         additions = {
             IR_CONTROL: render("--render-ir-control", "3080"),
-            IR_XHTTP: render("--render-ir-xhttp", "56053",
-                             "/56053/www", kh_host),
+            IR_XHTTP: render("--render-ir-xhttp", str(data_port),
+                             xhttp_path, kh_host),
         }
         return patched.encode("utf-8"), additions, IR_PATH
     # KH must have its existing wildcard numeric forwarding rule and its
@@ -148,10 +160,13 @@ def private_write(directory: Path, name: str, contents: bytes) -> None:
         os.fsync(stream.fileno())
 
 
-def prepare(role: str, source: Path, ir_domain: str, kh_host: str) -> Path:
+def prepare(role: str, source: Path, ir_domain: str, kh_host: str,
+            data_port: int = 56053, xhttp_path: str | None = None) -> Path:
     contents = original_bytes(source)
     patched, additions, destination = compile_nginx(
-        role, contents, ir_domain, kh_host)
+        role, contents, ir_domain, kh_host, data_port, xhttp_path)
+    # Use canonical slash-free form throughout the private proposal.
+    xhttp_path = xhttp_path if xhttp_path is not None else f"/{data_port}/www"
     # File input must correspond to the role's actual vhost location to
     # ensure the manifest isn't accidentally used on a different file.
     if str(source) != destination:
@@ -188,6 +203,8 @@ def prepare(role: str, source: Path, ir_domain: str, kh_host: str) -> Path:
                 "Do not create a second Smite-managed Backhaul using the same local ports",
             ],
         }
+        if data_port != 56053 or xhttp_path != "/56053/www":
+            manifest["profile"] = {"data_port": data_port, "xhttp_path": xhttp_path}
         private_write(stage, "plan.json",
                       (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode())
         private_write(stage, "NOT-INSTALLED.txt", (
@@ -208,9 +225,12 @@ def main() -> int:
                         help="Read-only full path of current Nginx vhost")
     parser.add_argument("--ir-domain", required=True)
     parser.add_argument("--kh-host", required=True)
+    parser.add_argument("--data-port", type=int, default=56053)
+    parser.add_argument("--xhttp-path", default=None)
     args = parser.parse_args()
     try:
-        stage = prepare(args.role, args.input, args.ir_domain, args.kh_host)
+        stage = prepare(args.role, args.input, args.ir_domain, args.kh_host,
+                        args.data_port, args.xhttp_path)
     except (PlanRefused, OSError, subprocess.SubprocessError) as exc:
         print(f"REFUSED: {type(exc).__name__}: {exc if isinstance(exc, PlanRefused) else 'Read/renderer failed'}")
         return 2
