@@ -52,7 +52,8 @@ def authorized(role: str, approval: str, confirm: str) -> None:
 
 
 def install_fresh(role: str, ir_domain: str, kh_host: str,
-                  approval: str, confirm: str) -> str:
+                  approval: str, confirm: str,
+                  data_port: int = 56053, xhttp_path: str | None = None) -> str:
     authorized(role, approval, confirm)
     # A previously installed/partially applied trial must be manually reviewed.
     # This check does not trust a directory name or regenerate an active token.
@@ -61,7 +62,11 @@ def install_fresh(role: str, ir_domain: str, kh_host: str,
     sidecar: Path | None = None
     nginx: Path | None = None
     try:
-        sidecar, nginx = guided.prepare_fresh_pair(role, ir_domain, kh_host)
+        if data_port == 56053 and xhttp_path in (None, "/56053/www"):
+            sidecar, nginx = guided.prepare_fresh_pair(role, ir_domain, kh_host)
+        else:
+            sidecar, nginx = guided.prepare_fresh_pair(
+                role, ir_domain, kh_host, data_port, xhttp_path)
         # Underlying trial.install separately repeats all approvals, exact
         # reconciliation, admission, ownership checks, journaling and rollback.
         result = trial.install(role, sidecar, nginx)
@@ -84,6 +89,8 @@ def main() -> int:
     parser.add_argument("--role", required=True, choices=("ir", "kh"))
     parser.add_argument("--ir-domain", required=True)
     parser.add_argument("--kh-host", required=True)
+    parser.add_argument("--data-port", type=int, default=56053)
+    parser.add_argument("--xhttp-path", default=None)
     parser.add_argument("--install-test", action="store_true")
     parser.add_argument("--test-host-approval", default="")
     parser.add_argument("--confirm", default="")
@@ -93,7 +100,8 @@ def main() -> int:
         return 2
     try:
         result = install_fresh(args.role, args.ir_domain, args.kh_host,
-                               args.test_host_approval, args.confirm)
+                               args.test_host_approval, args.confirm,
+                               args.data_port, args.xhttp_path)
     except Exception:
         # Never print lower-layer exceptions: candidate or vhost contents can
         # be sensitive. An error may occur AFTER trial activation; NEVER
