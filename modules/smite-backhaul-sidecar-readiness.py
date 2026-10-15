@@ -8,6 +8,7 @@ Synthetic tests mock every host operation; CI never contacts IR/KH.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 from pathlib import Path
 import re
 import stat
@@ -49,8 +50,12 @@ def run_readonly(argv: tuple[str, ...]) -> str | None:
     return result.stdout.strip()
 
 
-def parse_listeners(raw: str) -> dict[int, list[tuple[str, str]]]:
+def parse_listeners(raw: str, requested_ports: set[int] | None = None
+                    ) -> dict[int, list[tuple[str, str]]]:
     ports: dict[int, list[tuple[str, str]]] = {}
+    wanted = {443, 7000, 8443, 3080, 56053, 13080}
+    if requested_ports:
+        wanted.update(requested_ports)
     for line in raw.splitlines():
         parts = line.split(maxsplit=6)
         if len(parts) < 5 or parts[0] != "LISTEN":
@@ -60,7 +65,7 @@ def parse_listeners(raw: str) -> dict[int, list[tuple[str, str]]]:
         if not sep or not port.isdecimal():
             raise ValueError("Unexpected listening address")
         n = int(port)
-        if n not in (443, 7000, 8443, 3080, 56053, 13080):
+        if n not in wanted:
             continue
         names = set(re.findall(r'\("([a-zA-Z0-9_.-]{1,80})",pid=', line))
         if len(names) != 1:
@@ -115,7 +120,8 @@ def private_files(role: str) -> bool:
         return False
 
 
-def nginx_routes(role: str) -> bool:
+def nginx_routes(role: str, data_port: int = 56053,
+                 xhttp_path: str = "/56053/www") -> bool:
     if role == "ir":
         panel = read_small(IR_PANEL) or ""
         control = read_small(IR_CONTROL) or ""
@@ -126,8 +132,8 @@ def nginx_routes(role: str) -> bool:
             and "location = /channel {" in control
             and "location ^~ /tunnel/ {" in control
             and "proxy_pass http://127.0.0.1:3080;" in control
-            and "location ^~ /56053/www/ {" in data
-            and "proxy_pass http://127.0.0.1:56053;" in data
+            and f"location ^~ {xhttp_path}/ {{" in data
+            and f"proxy_pass http://127.0.0.1:{data_port};" in data
         )
     bridge = read_small(KH_BRIDGE) or ""
     vhost = read_small(KH_VHOST) or ""
@@ -143,6 +149,31 @@ def nginx_routes(role: str) -> bool:
         and guard in vhost and forward in vhost
         and vhost.index(guard) < vhost.index(forward)
     )
+
+
+def installed_profile(role: str) -> tuple[int, str] | None:
+    """Discover a validated installed custom profile without printing tokens.
+
+    Old test hosts omit these comments and retain the legacy default.
+    """
+    raw = read_small(CONFIG_DIR / f"{role}.toml")
+    if raw is None:
+        return None
+    ports = re.findall(r"(?m)^# UOPTI_PROFILE_DATA_PORT=([^\n]+)$", raw)
+    paths = re.findall(r"(?m)^# UOPTI_PROFILE_XHTTP_PATH=([^\n]+)$", raw)
+    if not ports and not paths:
+        return 56053, "/56053/www"
+    if len(ports) != 1 or len(paths) != 1 or not ports[0].isdecimal():
+        return None
+    spec = importlib.util.spec_from_file_location(
+        "readiness_profile", Path(__file__).with_name("smite-backhaul-sidecar.py"))
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        return mod.validated_profile(int(ports[0]), paths[0])
+    except (ValueError, TypeError):
+        return None
 
 
 def sidecar_files_present(role: str) -> bool:
@@ -167,7 +198,8 @@ def docker_state(role: str) -> tuple[bool, bool]:
 
 def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
              nginx_ok: bool, container_exists: bool, container_ok: bool,
-             private_ok: bool, routes_ok: bool, owned_files: bool) -> list[str]:
+             private_ok: bool, routes_ok: bool, owned_files: bool,
+             data_port: int = 56053, check_target: bool = True) -> list[str]:
     failures: list[str] = []
     if not nginx_ok:
         failures.append("Existing Nginx configuration does not validate")
@@ -175,7 +207,9 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
         baseline = [(443, "public", "nginx"), (8443, "127.0.0.1", "nginx"),
                     (7000, "127.0.0.1", "frps")]
     else:
-        baseline = [(443, "public", "nginx"), (56053, "127.0.0.1", "xray")]
+        baseline = [(443, "public", "nginx")]
+        if check_target:
+            baseline.append((data_port, "127.0.0.1", "xray"))
     for port, addr, owner in baseline:
         if not is_expected(ports, port, addr, owner):
             failures.append(f"Expected {owner} listener on {addr}:{port} not verified")
@@ -187,7 +221,7 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
         if not routes_ok:
             failures.append("Exact Nginx Sidecar routes/bridge guard not verified")
         if role == "ir":
-            expected = [(3080, "backhaul"), (56053, "backhaul")]
+            expected = [(3080, "backhaul"), (data_port, "backhaul")]
         else:
             expected = [(13080, "nginx")]
         for port, owner in expected:
@@ -197,7 +231,7 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
         if container_exists or owned_files:
             failures.append("Existing/partial Sidecar detected; fresh install REFUSED")
         if role == "ir":
-            reserved = (3080, 56053)
+            reserved = (3080, data_port)
         else:
             reserved = (13080,)
         for port in reserved:
@@ -208,14 +242,23 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
     return failures
 
 
-def inspect_local(role: str, mode: str) -> list[str]:
+def inspect_local(role: str, mode: str, data_port: int = 56053,
+                  xhttp_path: str | None = None,
+                  *, check_target: bool = True) -> list[str]:
     if role not in CONTAINERS:
         raise ValueError("Unsupported role")
+    if mode == "existing":
+        profile = installed_profile(role)
+        if profile is None:
+            return ["Installed Sidecar profile missing or invalid"]
+        data_port, xhttp_path = profile
+    if xhttp_path is None:
+        xhttp_path = f"/{data_port}/www"
     raw = run_readonly(("ss", "-H", "-lntp"))
     if raw is None:
         return ["Listener ownership unavailable; refuse inference"]
     try:
-        ports = parse_listeners(raw)
+        ports = parse_listeners(raw, {data_port})
     except ValueError:
         return ["Listener ownership ambiguous; refuse inference"]
     exists, correct = docker_state(role)
@@ -223,8 +266,10 @@ def inspect_local(role: str, mode: str) -> list[str]:
         role, mode, ports=ports,
         nginx_ok=run_readonly(("nginx", "-t")) is not None,
         container_exists=exists, container_ok=correct,
-        private_ok=private_files(role), routes_ok=nginx_routes(role),
+        private_ok=private_files(role),
+        routes_ok=nginx_routes(role, data_port, xhttp_path),
         owned_files=sidecar_files_present(role),
+        data_port=data_port, check_target=check_target,
     )
 
 
@@ -232,8 +277,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", required=True, choices=("ir", "kh"))
     parser.add_argument("--mode", required=True, choices=("existing", "new"))
+    parser.add_argument("--data-port", type=int, default=56053)
+    parser.add_argument("--xhttp-path", default=None)
     args = parser.parse_args()
-    failures = inspect_local(args.role, args.mode)
+    failures = inspect_local(args.role, args.mode, args.data_port, args.xhttp_path)
     print(f"BACKHAUL READ-ONLY AUDIT | role={args.role} | check={args.mode}")
     if failures:
         for reason in failures:
