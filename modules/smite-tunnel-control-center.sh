@@ -52,7 +52,10 @@ twcc_listener() {
     # Return a CATEGORY, never a public/private address from the host.
     # Every matching binding must be an IPv4 loopback listener.
     local port="$1" record found=0 lines address
-    case "$port" in 7000|3080|56053|13080) ;; *) printf 'unknown\n'; return ;; esac
+    if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1024 || 10#$port > 65535 )); then
+        printf 'unknown\n'
+        return
+    fi
     if ! command -v ss >/dev/null 2>&1; then
         printf 'unknown\n'
         return
@@ -78,17 +81,24 @@ twcc_listener() {
 }
 
 twcc_backhaul() {
-    local role="$1" state first second
+    local role="$1" state first second data_port=56053 profile path
+    if declare -F smite_tw_backhaul_profile >/dev/null 2>&1; then
+        profile="$(smite_tw_backhaul_profile "$role")" || profile=""
+        read -r data_port path <<< "$profile"
+        if ! [[ "$data_port" =~ ^[0-9]{4,5}$ && "$path" == /*/ ]]; then
+            data_port=56053
+        fi
+    fi
     case "$role" in
         ir)
             state="$(twcc_container uopti-backhaul-sidecar-ir)"
             first="$(twcc_listener 3080)"
-            second="$(twcc_listener 56053)"
+            second="$(twcc_listener "$data_port")"
             ;;
         kh)
             state="$(twcc_container uopti-backhaul-sidecar-kh)"
             first="$(twcc_listener 13080)"
-            second="$(twcc_listener 56053)"
+            second="$(twcc_listener "$data_port")"
             ;;
         *) printf 'UNVERIFIED\n'; return ;;
     esac
