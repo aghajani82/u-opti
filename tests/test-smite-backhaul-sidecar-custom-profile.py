@@ -59,15 +59,15 @@ class CustomFullBundle(unittest.TestCase):
         self.token.write_text(SECRET + "\n")
         self.token.chmod(0o600)
 
-    def bundles(self, role):
+    def bundles(self, role, port=PORT, path=PATH):
         sc = sidecar.prepare(role, self.token, "ir.example.com", "kh.example.com",
-                             data_port=PORT, xhttp_path=PATH)
+                             data_port=port, xhttp_path=path)
         self.addCleanup(shutil.rmtree, sc)
         original = IR if role == "ir" else KH
         vhost = nginx.IR_PATH if role == "ir" else nginx.KH_PATH
         with patch.object(nginx, "original_bytes", return_value=original.encode()):
             ng = nginx.prepare(role, Path(vhost), "ir.example.com",
-                               "kh.example.com", PORT, PATH)
+                               "kh.example.com", port, path)
         self.addCleanup(shutil.rmtree, ng)
         return sc, ng
 
@@ -99,6 +99,21 @@ class CustomFullBundle(unittest.TestCase):
                      patch.object(gate.local, "inspect_local", return_value=[]) as inspected:
                     self.assertEqual([], gate.admission(role, sc, ng))
                 inspected.assert_called_with(role, "new", data_port=PORT, xhttp_path=PATH)
+
+    def test_numeric_port_web_base_keeps_exact_profile_and_suffix(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                side, proxy = self.bundles(role, port=45561, path="/45561/web")
+                self.assertEqual(len(paired.reconcile(role, side, proxy)),
+                                 len(paired.LAYOUT[role]))
+                self.assertEqual(audit.profile_from_text(
+                    (side / f"{role}.toml").read_text()), (45561, "/45561/web"))
+                if role == "ir":
+                    rendered = (proxy / "ir-xhttp.inc").read_text()
+                    self.assertIn("location = /45561/web {", rendered)
+                    self.assertIn("location ^~ /45561/web/ {", rendered)
+                    self.assertIn(
+                        "proxy_pass http://127.0.0.1:45561/45561/web/;", rendered)
 
     def test_tampered_custom_port_or_path_is_not_reconciled(self):
         for role in ("ir", "kh"):
