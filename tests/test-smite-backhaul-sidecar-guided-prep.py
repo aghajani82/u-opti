@@ -56,6 +56,27 @@ class GuidedPreparationTests(unittest.TestCase):
             admission.assert_called_once()
             clean.assert_not_called()
 
+    def test_custom_xray_port_path_are_checked_before_pairing(self):
+        role = "kh"
+        with patch.object(guided.os, "geteuid", return_value=0), \
+             patch.object(guided.token_tool, "inspect", return_value=True), \
+             patch.object(guided.readiness, "inspect_local", return_value=[]) as readiness, \
+             patch.object(guided.sidecar, "prepare", return_value=Path("/tmp/uopti-backhaul-sidecar-testfixture")) as side, \
+             patch.object(guided.nginx_plan, "prepare", return_value=Path("/tmp/uopti-bh-nginx-plan-testfixture")) as nginx, \
+             patch.object(guided.admission_gate, "admission", return_value=[]), \
+             patch.object(guided, "_cleanup_private_stage"):
+            guided.prepare_fresh_pair(role, "ir.kolbe1.ir", "kh.kolbe1.ir",
+                                      45123, "/assets/v1/connect")
+            readiness.assert_called_once_with(
+                role, "new", data_port=45123, xhttp_path="/assets/v1/connect")
+            side.assert_called_once_with(
+                role, guided.TOKEN_FILE, "ir.kolbe1.ir", "kh.kolbe1.ir",
+                data_port=45123, xhttp_path="/assets/v1/connect")
+            nginx.assert_called_once_with(
+                role, Path(guided.nginx_plan.KH_PATH),
+                "ir.kolbe1.ir", "kh.kolbe1.ir",
+                data_port=45123, xhttp_path="/assets/v1/connect")
+
     def test_existing_sidecar_is_a_hard_stop_before_staging(self):
         _, local, side, nginx, admission, _ = self.good(
             baseline=["Existing/partial Sidecar detected; fresh install REFUSED"])
