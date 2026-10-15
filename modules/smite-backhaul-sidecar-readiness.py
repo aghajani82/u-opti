@@ -151,14 +151,8 @@ def nginx_routes(role: str, data_port: int = 56053,
     )
 
 
-def installed_profile(role: str) -> tuple[int, str] | None:
-    """Discover a validated installed custom profile without printing tokens.
-
-    Old test hosts omit these comments and retain the legacy default.
-    """
-    raw = read_small(CONFIG_DIR / f"{role}.toml")
-    if raw is None:
-        return None
+def profile_from_text(raw: str) -> tuple[int, str] | None:
+    """Extract only non-secret validated profile metadata from a TOML proposal."""
     ports = re.findall(r"(?m)^# UOPTI_PROFILE_DATA_PORT=([^\n]+)$", raw)
     paths = re.findall(r"(?m)^# UOPTI_PROFILE_XHTTP_PATH=([^\n]+)$", raw)
     if not ports and not paths:
@@ -174,6 +168,12 @@ def installed_profile(role: str) -> tuple[int, str] | None:
         return mod.validated_profile(int(ports[0]), paths[0])
     except (ValueError, TypeError):
         return None
+
+
+def installed_profile(role: str) -> tuple[int, str] | None:
+    """Discover installed port/path without revealing the TOML token."""
+    raw = read_small(CONFIG_DIR / f"{role}.toml")
+    return profile_from_text(raw) if raw is not None else None
 
 
 def sidecar_files_present(role: str) -> bool:
