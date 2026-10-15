@@ -115,10 +115,25 @@ def admission(role: str, sidecar_dir: Path, nginx_dir: Path,
             if failure:
                 issues.append(failure)
 
+    # The verified private TOML also contains the exact non-secret profile
+    # metadata. Inspect the selected port, not the old fixed :56053.
+    config = next((r["after"] for r in rows
+                   if r["path"] == f"/etc/u-opti/backhaul-sidecar/{role}.toml"), None)
+    try:
+        profile = local.profile_from_text(config.decode("utf-8")) if config else None
+    except UnicodeError:
+        profile = None
+    if profile is None:
+        raise AdmissionRefused("Verified Sidecar data port/path unavailable")
+
     # The host baseline (process owner, reserved loopbacks, Docker and
     # nginx -t) is checked independently. This module never bypasses it.
     if observed_host:
-        issues.extend(local.inspect_local(role, "new"))
+        if profile == (56053, "/56053/www"):
+            issues.extend(local.inspect_local(role, "new"))
+        else:
+            issues.extend(local.inspect_local(
+                role, "new", data_port=profile[0], xhttp_path=profile[1]))
     return issues
 
 
