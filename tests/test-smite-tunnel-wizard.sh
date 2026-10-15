@@ -70,6 +70,17 @@ grep -Fq 'ALPN: http/1.1' <<< "$profile"
 grep -Fq 'xPaddingBytes' <<< "$profile"
 grep -Fq 'TLS: on' <<< "$profile"
 
+# When custom KH Xray settings have actually been installed, the client screen
+# must display THOSE values, never the old hard-coded /56053/www/ route.
+smite_tw_backhaul_profile() { printf '%s\n' '45123 /assets/v1/connect/'; }
+custom_profile="$(smite_tw_backhaul_client kh)"
+grep -Fq 'Installed KH Xray inbound port: 45123' <<< "$custom_profile"
+grep -Fq 'Path: /assets/v1/connect/' <<< "$custom_profile"
+if grep -Fq 'Legacy example ONLY' <<< "$custom_profile"; then
+    echo 'ERROR: Real custom profile mislabeled as a legacy example' >&2
+    exit 1
+fi
+
 steps="$(smite_tw_backhaul_steps ir)"
 grep -Fq 'REVIEW ONLY' <<< "$steps"
 grep -Fq 'NOT' <<< "$steps"
