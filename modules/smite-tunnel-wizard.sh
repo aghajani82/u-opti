@@ -105,8 +105,22 @@ smite_tw_http() {
     echo "HTTP $result"
 }
 
+smite_tw_backhaul_profile() {
+    local role="$1" module
+    case "$role" in ir|kh) ;; *) return 2 ;; esac
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-readiness.py"
+    [ -s "$module" ] || return 2
+    python3 -B "$module" --role "$role" --print-profile 2>/dev/null
+}
+
 smite_tw_backhaul_status() {
-    local role="$1"
+    local role="$1" profile port path
+    profile="$(smite_tw_backhaul_profile "$role")" || profile=""
+    read -r port path <<< "$profile"
+    if ! [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /*/ ]]; then
+        port=""
+        path=""
+    fi
     printf '\n%s\n' "===== Independent Backhaul / READ-ONLY ====="
     printf 'Detected role: %s\n' "$role"
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
@@ -117,7 +131,11 @@ smite_tw_backhaul_status() {
     if [ "$role" = ir ]; then
         echo "IR Sidecar: $(smite_tw_container_state uopti-backhaul-sidecar-ir)"
         echo "Control 3080: $(smite_tw_listener 3080)"
-        echo "Data 56053: $(smite_tw_listener 56053)"
+        if [ -n "$port" ]; then
+            echo "Data $port: $(smite_tw_listener "$port")"
+        else
+            echo "Sidecar XHTTP data listener: not installed / unverified"
+        fi
         if [ -f /etc/nginx/u-opti-backhaul-sidecar-control.inc ] &&
            [ -f /etc/nginx/u-opti-backhaul-sidecar-xhttp.inc ]; then
             echo "Nginx Sidecar files: present (contents not disclosed)"
@@ -125,11 +143,17 @@ smite_tw_backhaul_status() {
             echo "Nginx Sidecar files: incomplete"
         fi
         echo "Local channel: $(smite_tw_http http://127.0.0.1:3080/channel)"
-        echo "Local data XHTTP: $(smite_tw_http http://127.0.0.1:56053/56053/www/)"
+        if [ -n "$port" ]; then
+            echo "Local data XHTTP: $(smite_tw_http "http://127.0.0.1:$port$path")"
+        fi
     else
         echo "KH Sidecar: $(smite_tw_container_state uopti-backhaul-sidecar-kh)"
         echo "Nginx bridge 13080: $(smite_tw_listener 13080)"
-        echo "Xray 56053: $(smite_tw_listener 56053)"
+        if [ -n "$port" ]; then
+            echo "KH Xray $port: $(smite_tw_listener "$port")"
+        else
+            echo "KH Xray data port: not installed / unverified"
+        fi
         echo "Bridge channel: $(smite_tw_http http://127.0.0.1:13080/channel)"
         if command -v docker >/dev/null 2>&1; then
             local n
@@ -321,10 +345,20 @@ smite_tw_backhaul_live_trial() {
 }
 
 smite_tw_backhaul_client() {
+    local role="${1:-}" profile port path
+    profile="$(smite_tw_backhaul_profile "$role")" || profile=""
+    read -r port path <<< "$profile"
     echo "===== v2rayN / v2rayNG sample fields (not a credential) ====="
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
     echo "SNI: <your IR HTTPS domain> | Fingerprint: chrome"
-    echo "Protocol: VLESS | Network: XHTTP | Path: /56053/www/"
+    echo "Protocol: VLESS | Network: XHTTP"
+    if [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /*/ ]]; then
+        echo "Installed KH Xray inbound port: $port"
+        echo "Path: $path"
+    else
+        echo "Path: <your chosen KH inbound XHTTP path> (not yet verified)"
+        echo "Legacy example ONLY: /56053/www/"
+    fi
     echo "Mode: auto | ALPN: http/1.1 (tested IR gateway profile)"
     echo 'Extra: {"mode":"auto","xPaddingBytes":"100-1000"}'
     echo "Use the UUID/encryption parameters of the existing KH Xray inbound."
@@ -522,7 +556,7 @@ smite_tw_backhaul_menu() {
             1) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
             2) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
             3) smite_tw_backhaul_diagnostics_menu "$role" ;;
-            4) smite_tw_backhaul_client; smite_tw_pause ;;
+            4) smite_tw_backhaul_client "$role"; smite_tw_pause ;;
             5) smite_tw_backhaul_expert_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
