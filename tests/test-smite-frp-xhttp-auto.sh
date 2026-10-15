@@ -111,6 +111,16 @@ grep -Fq 'location ^~ /13914/shop/ {' "$SMITE_FRP_XHTTP_CONF"
 ! grep -Fq '/13914/web' "$SMITE_FRP_XHTTP_CONF"
 test "$(smite_frp_xhttp_get_path 13914)" = "/13914/shop"
 test "$(stat -c '%a' "$SMITE_FRP_XHTTP_PATHS")" = 600
+
+# Non-numeric custom namespaces work, too; /PORT/web is merely a default.
+smite_frp_xhttp_register_path 13914 /store/v1
+grep -Fq 'location = /store/v1 {' "$SMITE_FRP_XHTTP_CONF"
+grep -Fq 'location ^~ /store/v1/ {' "$SMITE_FRP_XHTTP_CONF"
+smite_frp_xhttp_register_path 13914 /13914/shop
+# Numeric namespaces of OTHER forwarded ports are not permitted.
+if smite_frp_xhttp_register_path 13914 /15432/shop; then
+    echo "ERROR: Cross-port numeric namespace accepted" >&2; exit 1
+fi
 grep -Fq 'proxy_pass http://127.0.0.1:13914;' "$SMITE_FRP_XHTTP_CONF"
 
 # Reject malformed path without clobbering the live route.
