@@ -61,38 +61,70 @@ smite_frp_wizard_status() {
     fi
     smite_frp_wizard_pause
 }
+# KH cannot read the IR route registry: ask for the same KH Sanaei Path.
+# On IR, always use the persisted gateway path, never guess /PORT/web.
+smite_frp_wizard_path() {
+    local role="$1" port="$2" path=""
+    if [ "$role" = ir ]; then
+        smite_frp_xhttp_get_path "$port"
+        return $?
+    fi
+    read -rp "KH Sanaei XHTTP base path [/$port/web]: " path || return 1
+    path="${path:-/$port/web}"
+    path="${path%/}"
+    python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" check "$port" "$path" >/dev/null || return 1
+    printf '%s\n' "$path"
+}
+
 smite_frp_wizard_tunnel() {
-    local role="$1" panel=""
+    local role="$1" panel="" answer="" port="" oldpath="" path=""
     panel="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
     echo "==== Create FRP Tunnel in Smite UI ===="
     echo "1. Visit https://${panel:-IR-PANEL-DOMAIN}:443"
-    echo "2. Ensure both logical IR and KH nodes are registered and online."
-    echo "3. Tunnels -> Create -> FRP -> TCP."
-    echo "4. IR node = server, KH node = client."
-    echo "5. Set FRPS bind port 7000 (LOOPBACK on IR; never publicly open)."
-    echo "6. Forwarded TCP port = KH Sanaei XHTTP inbound port."
-    echo "7. Keep Smite's generated FRP token private."
-    echo "8. Expected KH FRPC: serverAddr = IR Panel DOMAIN, port = 443, WSS."
-    echo "9. FRP 'applied' is NOT proof of login; verify FRPC proxy success."
-    echo "10. IR auto-sync creates /PORT/web routes. It must not rewrite URI."
-    echo
-    echo "KH Sanaei inbound: VLESS, XHTTP, listen 127.0.0.1,"
-    echo "port PORT, path /PORT/web, mode auto, security none."
+    echo "2. Ensure IR and KH Smite nodes are online."
+    echo "3. Smite UI: Tunnels -> Create -> FRP -> TCP."
+    echo "4. IR node = server, KH node = client; FRPS bind port = 7000."
+    echo "5. Forwarded TCP port = KH Sanaei VLESS/XHTTP inbound port."
+    echo "6. KH Xray must listen on 127.0.0.1; security none; mode auto."
+    echo "7. Choose ANY safe XHTTP base Path, e.g. /13914/shop."
+    echo "8. Configure IDENTICAL Path in KH Sanaei and IR FRP gateway."
+    echo "9. IR Nginx forwards the Path and XHTTP subpaths without rewriting."
+    echo "10. Keep FRP token private; KH connects to IR DNS:443 via WSS."
+    if [ "$role" = ir ]; then
+        echo
+        read -rp "Smite FRP TCP tunnel already created/applied? Register IR XHTTP Path now? [y/N]: " answer || answer=""
+        case "$answer" in y|Y|yes|YES) ;; *) smite_frp_wizard_pause; return ;; esac
+        port="$(smite_frp_wizard_port)" || { smite_frp_wizard_pause; return 1; }
+        oldpath="$(smite_frp_xhttp_get_path "$port")" || { smite_frp_wizard_pause; return 1; }
+        read -rp "IR XHTTP base path [$oldpath]: " path || { smite_frp_wizard_pause; return 1; }
+        path="${path:-$oldpath}"
+        path="${path%/}"
+        echo "Registering FRP port $port with XHTTP Path $path on IR ONLY."
+        smite_frp_xhttp_register_path "$port" "$path" || echo "NOT APPLIED: inspect FRP tunnel, path collision, and Nginx."
+    else
+        echo "KH: Set Sanaei Path to the SAME value registered on IR."
+        echo "KH does not modify the IR gateway registry."
+    fi
     smite_frp_wizard_pause
 }
+
 smite_frp_wizard_probe() {
-    local role="$1" port="" domain="" tmp="" url="" status=""
+    local role="$1" port="" path="" domain="" tmp="" url="" status=""
     port="$(smite_frp_wizard_port)" || { smite_frp_wizard_pause; return; }
+    path="$(smite_frp_wizard_path "$role" "$port")" || {
+        echo "HOLD: XHTTP base Path not available or invalid."
+        smite_frp_wizard_pause; return 1;
+    }
     tmp="$(mktemp)" || return
     if [ "$role" = ir ]; then
         domain="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
         if [ -z "$domain" ]; then echo "Missing IR Panel domain."; rm -f "$tmp"; smite_frp_wizard_pause; return; fi
-        url="https://$domain/$port/web/"
+        url="https://$domain$path/"
         status="$(curl -sS --noproxy '*' -m 10 --http1.1 \
             --resolve "$domain:443:127.0.0.1" -X OPTIONS \
             -D "$tmp" -o /dev/null -w '%{http_code}' "$url")" || status=network-error
     else
-        url="http://127.0.0.1:$port/$port/web/"
+        url="http://127.0.0.1:$port$path/"
         status="$(curl -sS --noproxy '*' -m 10 --http1.1 -X OPTIONS \
             -D "$tmp" -o /dev/null -w '%{http_code}' "$url")" || status=network-error
     fi
@@ -102,26 +134,32 @@ smite_frp_wizard_probe() {
         echo "PASS: XHTTP handler reached through this path."
         echo "NOTE: Only a real VLESS client confirms authenticated traffic."
     else
-        echo "NOT VERIFIED: check port, tunnel, path, listener, and gateway."
+        echo "NOT VERIFIED: check port, configured path, tunnel, and gateway."
     fi
     rm -f "$tmp"
     smite_frp_wizard_pause
 }
+
 smite_frp_wizard_client() {
-    local panel="" port=""
+    local role="" panel="" port="" path=""
+    role="$(smite_frp_wizard_role)"
     panel="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
     [ -n "$panel" ] || { echo "ERROR: Panel domain unavailable; install Smite first."; smite_frp_wizard_pause; return; }
     port="$(smite_frp_wizard_port)" || { smite_frp_wizard_pause; return; }
-    echo "==== Verified v2rayN / Xray client settings ===="
+    path="$(smite_frp_wizard_path "$role" "$port")" || {
+        echo "HOLD: XHTTP base Path not available or invalid."
+        smite_frp_wizard_pause; return 1;
+    }
+    echo "==== v2rayN / Xray client settings (verify with real traffic) ===="
     echo "Protocol: VLESS (client UUID comes from KH Sanaei)"
     echo "Address: $panel | Port: 443"
-    echo "Network: xhttp | Path: /$port/web | Mode: auto"
+    echo "Network: xhttp | Path: $path | Mode: auto"
     echo "TLS: tls | SNI: $panel | Fingerprint: chrome"
     echo "ALPN: http/1.1  (IMPORTANT: successful tested profile)"
     echo 'XHTTP Extra JSON: {"mode":"auto","xPaddingBytes":"100-1000"}'
     echo "Host: empty | Flow: empty"
     echo "KH Xray inbound security: none (TLS terminates at IR Nginx)"
-    echo "Note: Xray normalizes /PORT/web to /PORT/web/ internally."
+    echo "The configured XHTTP BASE Path has no trailing /; Xray sends / and subpaths."
     echo "Do not assume default/blank ALPN will work on this gateway."
     smite_frp_wizard_pause
 }
@@ -130,7 +168,7 @@ smite_frp_wizard_recovery() {
     echo "1. Check IR panel, KH control, both Smite nodes and Sanaei."
     echo "2. On IR: FRPS localhost:7000, XHTTP localhost:PORT, timer active."
     echo "3. On KH: FRPC reconnects to IR domain:443 using WSS."
-    echo "4. Confirm OPTIONS /PORT/web/ gets 200 plus X-Padding via IR."
+    echo "4. Confirm OPTIONS /CONFIGURED/PATH/ gets 200 plus X-Padding via IR."
     echo "5. Confirm actual authenticated VLESS traffic in v2rayN."
     echo "6. Reboot IR, verify. Then reboot KH, verify. Not simultaneously."
     echo "7. Preserve verified snapshots + separate off-server backups."
@@ -181,16 +219,16 @@ smite_frp_wizard_menu() {
             echo "2) Step 2: Install Smite Panel + Iran Node"
             echo "3) Step 3: Configure IR HTTPS/443 Gateway"
             echo "4) Step 4: Check FRPS WSS + automatic XHTTP routes"
-            echo "5) Step 5: Create FRP TCP tunnel in Smite UI"
+            echo "5) Step 5: Create FRP TCP tunnel + set custom XHTTP Path"
             echo "6) Step 6: Probe XHTTP via IR HTTPS/443"
         else
             echo "2) Step 2: Install Foreign Smite Node"
             echo "3) Step 3: Configure KH control HTTPS/443 Gateway"
             echo "4) Step 4: Install Docker Sanaei (existing management)"
-            echo "5) Step 5: Configure Sanaei inbound + FRP tunnel"
+            echo "5) Step 5: Configure Sanaei inbound + matching FRP Path"
             echo "6) Step 6: Probe KH loopback XHTTP"
         fi
-        echo "7) Step 7: Display verified v2rayN settings"
+        echo "7) Step 7: Display configured v2rayN settings"
         echo "8) Step 8: Reboot/Repair/Rebuild checklist"
         echo "0) Back"
         read -rp "Choose [0-8]: " choice
