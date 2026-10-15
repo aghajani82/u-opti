@@ -80,8 +80,12 @@ uopti_bh_render_ir_xhttp() {
     case "$path" in
         /channel|/channel/*|/tunnel|/tunnel/*) return 1 ;;
     esac
-    # /PORT/web is a legitimate XHTTP base path. A separate live admission
-    # gate refuses it only if an existing FRP route owns the same namespace.
+    # /PORT/web is a valid XHTTP base. Reject a DIFFERENT numeric namespace
+    # so this route cannot impersonate an unrelated FRP /OTHERPORT/web.
+    # The live admission also checks the actual FRP include for collisions.
+    if [[ "$path" =~ ^/([0-9]+)/web($|/) ]]; then
+        [ "${BASH_REMATCH[1]}" = "$p" ] || return 1
+    fi
     echo "# IR: add only AFTER Backhaul data listener 127.0.0.1:$p is verified."
     echo "# KH Sanaei XHTTP path: $path/ | upstream Host: $host"
     for typ in exact prefix; do
