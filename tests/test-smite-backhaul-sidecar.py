@@ -91,7 +91,12 @@ class SidecarTests(unittest.TestCase):
         self.assertIn("location ^~ /assets/v1/connect/ {", route)
         self.assertIn("proxy_pass http://127.0.0.1:45123;", route)
         self.assertNotIn("/45123/www", route)
-        for path in ("/channel", "/tunnel/x", "/45123/web", "/assets/../x",
+        numeric = sidecar.candidate_files(
+            "ir", self.secret, "ir.kolbe1.ir", "kh.kolbe1.ir",
+            data_port=45561, xhttp_path="/45561/web")
+        self.assertIn("location = /45561/web {", numeric["ir-xhttp.inc"])
+        self.assertIn("location ^~ /45561/web/ {", numeric["ir-xhttp.inc"])
+        for path in ("/channel", "/tunnel/x", "/assets/../x",
                      "/assets/evil/", "/assets/x;include"):
             with self.subTest(path=path), self.assertRaises(sidecar.UnsafeCandidate):
                 sidecar.candidate_files(
