@@ -38,6 +38,8 @@ def evaluate(role, mode, ports=None, **kwargs):
         private_ok=kwargs.get("private_ok", True),
         routes_ok=kwargs.get("routes_ok", True),
         owned_files=kwargs.get("owned_files", True),
+        data_port=kwargs.get("data_port", 56053),
+        check_target=kwargs.get("check_target", True),
     )
 
 
@@ -55,6 +57,27 @@ class ReadinessTests(unittest.TestCase):
                                       container_exists=False, owned_files=False))
         self.assertEqual([], evaluate("kh", "new", ports=kh,
                                       container_exists=False, owned_files=False))
+
+    def test_early_pairing_ignores_unused_legacy_data_port(self):
+        ir = ports_ir()
+        del ir[3080]
+        ir[56053] = [("127.0.0.1", "another-service")]
+        # IR may use another data port; pairing cannot demand legacy :56053.
+        self.assertEqual([], evaluate("ir", "new", ports=ir,
+                                      container_exists=False, owned_files=False,
+                                      check_target=False))
+        self.assertTrue(evaluate("ir", "new", ports=ir,
+                                 container_exists=False, owned_files=False,
+                                 check_target=True))
+        kh = ports_kh()
+        del kh[13080], kh[56053]
+        kh[45123] = [("127.0.0.1", "xray-linux-amd6")]
+        self.assertEqual([], evaluate("kh", "new", ports=kh,
+                                      container_exists=False, owned_files=False,
+                                      data_port=45123))
+        self.assertTrue(evaluate("kh", "new", ports=kh,
+                                 container_exists=False, owned_files=False,
+                                 data_port=56053))
 
     def test_existing_or_partial_does_not_get_overwritten(self):
         for role in ("ir", "kh"):
