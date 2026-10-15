@@ -60,7 +60,7 @@ test "$(smite_tw_result missing)" = "NOT FOUND"
 
 ir_out="$(smite_tw_backhaul_overview ir)"
 grep -Fq '127.0.0.1:3080' <<< "$ir_out"
-grep -Fq '/56053/www/' <<< "$ir_out"
+grep -Fq 'path=/56053/www.' <<< "$ir_out"
 kh_out="$(smite_tw_backhaul_overview kh)"
 grep -Fq '127.0.0.1:13080' <<< "$kh_out"
 grep -Fq 'BLOCKED' <<< "$kh_out"
@@ -72,10 +72,10 @@ grep -Fq 'TLS: on' <<< "$profile"
 
 # When custom KH Xray settings have actually been installed, the client screen
 # must display THOSE values, never the old hard-coded /56053/www/ route.
-smite_tw_backhaul_profile() { printf '%s\n' '45123 /assets/v1/connect/'; }
+smite_tw_backhaul_profile() { printf '%s\n' '45123 /assets/v1/connect'; }
 custom_profile="$(smite_tw_backhaul_client kh)"
 grep -Fq 'Installed KH Xray inbound port: 45123' <<< "$custom_profile"
-grep -Fq 'Path: /assets/v1/connect/' <<< "$custom_profile"
+grep -Fxq 'Path: /assets/v1/connect' <<< "$custom_profile"
 if grep -Fq 'Legacy example ONLY' <<< "$custom_profile"; then
     echo 'ERROR: Real custom profile mislabeled as a legacy example' >&2
     exit 1
