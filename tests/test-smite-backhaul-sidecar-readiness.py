@@ -132,9 +132,13 @@ class ReadinessTests(unittest.TestCase):
                 self.assertFalse(audit.nginx_routes("kh"))
 
     def test_readiness_does_not_print_secrets(self):
-        with patch.object(audit, "run_readonly", return_value=None):
+        with patch.object(audit, "run_readonly", return_value=None), \
+             patch.object(audit, "installed_profile", return_value=(56053, "/56053/www")):
             self.assertEqual(["Listener ownership unavailable; refuse inference"],
                              audit.inspect_local("ir", "existing"))
+        with patch.object(audit, "installed_profile", return_value=None):
+            self.assertEqual(["Installed Sidecar profile missing or invalid"],
+                             audit.inspect_local("kh", "existing"))
         # Refuse all other commands, including container starts and live mutation.
         with self.assertRaises(ValueError):
             audit.run_readonly(("docker", "run", "alpine"))
