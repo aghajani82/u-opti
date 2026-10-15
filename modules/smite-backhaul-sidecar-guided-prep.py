@@ -55,7 +55,8 @@ def _cleanup_private_stage(path: Path | None, prefix: str) -> None:
         pass
 
 
-def prepare_fresh_pair(role: str, ir_domain: str, kh_host: str
+def prepare_fresh_pair(role: str, ir_domain: str, kh_host: str,
+                       data_port: int = 56053, xhttp_path: str | None = None
                        ) -> tuple[Path, Path]:
     """Prepare and verify; success means staged only, NOT installed."""
     if os.geteuid() != 0:
@@ -66,9 +67,13 @@ def prepare_fresh_pair(role: str, ir_domain: str, kh_host: str
     # inside the unchanged compiler and admission gate.
     sidecar.validated_domain(ir_domain)
     sidecar.validated_domain(kh_host)
+    data_port, xhttp_path = sidecar.validated_profile(data_port, xhttp_path)
+    is_default = data_port == 56053 and xhttp_path == "/56053/www"
     if not token_tool.inspect(TOKEN_FILE):
         raise GuidedHold("Private pairing token missing or unsafe; verify it first")
-    existing = readiness.inspect_local(role, "new")
+    existing = (readiness.inspect_local(role, "new") if is_default else
+                readiness.inspect_local(role, "new", data_port=data_port,
+                                        xhttp_path=xhttp_path))
     if existing:
         raise GuidedHold("Fresh-host checks not passed: " + "; ".join(existing))
     vhost = Path(nginx_plan.IR_PATH if role == "ir" else nginx_plan.KH_PATH)
@@ -76,8 +81,14 @@ def prepare_fresh_pair(role: str, ir_domain: str, kh_host: str
     ng_stage: Path | None = None
     success = False
     try:
-        sc_stage = sidecar.prepare(role, TOKEN_FILE, ir_domain, kh_host)
-        ng_stage = nginx_plan.prepare(role, vhost, ir_domain, kh_host)
+        if is_default:
+            sc_stage = sidecar.prepare(role, TOKEN_FILE, ir_domain, kh_host)
+            ng_stage = nginx_plan.prepare(role, vhost, ir_domain, kh_host)
+        else:
+            sc_stage = sidecar.prepare(role, TOKEN_FILE, ir_domain, kh_host,
+                                       data_port=data_port, xhttp_path=xhttp_path)
+            ng_stage = nginx_plan.prepare(role, vhost, ir_domain, kh_host,
+                                          data_port=data_port, xhttp_path=xhttp_path)
         issues = admission_gate.admission(role, sc_stage, ng_stage)
         if issues:
             raise GuidedHold("Paired candidate admission HOLD: " + "; ".join(issues))
@@ -94,6 +105,8 @@ def main() -> int:
     parser.add_argument("--role", choices=("ir", "kh"), required=True)
     parser.add_argument("--ir-domain", required=True)
     parser.add_argument("--kh-host", required=True)
+    parser.add_argument("--data-port", type=int, default=56053)
+    parser.add_argument("--xhttp-path", default=None)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--confirm", default="")
     opts = parser.parse_args()
@@ -101,7 +114,8 @@ def main() -> int:
         print("HOLD: Explicit private OFFLINE preparation confirmation required.")
         return 2
     try:
-        sc, ng = prepare_fresh_pair(opts.role, opts.ir_domain, opts.kh_host)
+        sc, ng = prepare_fresh_pair(opts.role, opts.ir_domain, opts.kh_host,
+                                    opts.data_port, opts.xhttp_path)
     except Exception:
         # Never include caught exception text: lower layers may contain
         # token-bearing paths or private Nginx source details.
