@@ -92,6 +92,42 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(gate.AdmissionRefused):
             gate.admission("bogus", Path("/tmp/invalid"), Path("/tmp/invalid"))
 
+    def test_real_frp_collision_guard_for_numeric_xhttp(self):
+        import io
+        import stat as os_stat
+        from types import SimpleNamespace
+
+        frp = b"""# Managed FRP XHTTP
+    location = /45561/web {
+        proxy_pass http://127.0.0.1:45561;
+    }
+    location ^~ /45561/web/ {
+        proxy_pass http://127.0.0.1:45561;
+    }
+"""
+        baseline = SimpleNamespace(
+            st_mode=os_stat.S_IFREG | 0o644, st_uid=0, st_gid=0,
+            st_dev=1, st_ino=22, st_size=len(frp), st_mtime_ns=19
+        )
+
+        class PrivateFixture:
+            def lstat(self):
+                return baseline
+
+            def open(self, mode):
+                return io.BytesIO(frp)
+
+        with patch.object(gate, "FRP_XHTTP", PrivateFixture()):
+            source = ("server {\n"
+                      "include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n"
+                      "}").encode()
+            self.assertIn("existing FRP route",
+                          gate.existing_frp_route_collision(source, "/45561/web"))
+            self.assertIsNone(gate.existing_frp_route_collision(source, "/48123/web"))
+            self.assertIsNone(gate.existing_frp_route_collision(source, "/assets/ok"))
+            self.assertIsNone(gate.existing_frp_route_collision(
+                b"server { location / {} }", "/45561/web"))
+
     def test_fails_closed_on_world_writable_or_nonroot_source(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "original.conf"
