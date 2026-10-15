@@ -53,8 +53,10 @@ def run_readonly(argv: tuple[str, ...]) -> str | None:
 def parse_listeners(raw: str, requested_ports: set[int] | None = None
                     ) -> dict[int, list[tuple[str, str]]]:
     ports: dict[int, list[tuple[str, str]]] = {}
-    wanted = {443, 7000, 8443, 3080, 56053, 13080}
-    if requested_ports:
+    wanted = {443, 7000, 8443, 3080, 13080}
+    if requested_ports is None:
+        wanted.add(56053)  # backward-compatible direct audit utility
+    else:
         wanted.update(requested_ports)
     for line in raw.splitlines():
         parts = line.split(maxsplit=6)
@@ -260,7 +262,7 @@ def inspect_local(role: str, mode: str, data_port: int = 56053,
     if raw is None:
         return ["Listener ownership unavailable; refuse inference"]
     try:
-        ports = parse_listeners(raw, {data_port})
+        ports = parse_listeners(raw, {data_port} if check_target else set())
     except ValueError:
         return ["Listener ownership ambiguous; refuse inference"]
     exists, correct = docker_state(role)
