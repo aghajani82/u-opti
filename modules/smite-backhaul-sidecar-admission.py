@@ -13,6 +13,7 @@ import argparse
 import importlib.util
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -34,6 +35,46 @@ local = _load("admission_local", "smite-backhaul-sidecar-readiness.py")
 
 class AdmissionRefused(ValueError):
     pass
+
+
+FRP_XHTTP = Path("/etc/nginx/u-opti-smite-frp-xhttp.conf")
+FRP_INCLUDE = f"include {FRP_XHTTP};"
+
+
+def existing_frp_route_collision(original: bytes, xhttp_path: str) -> str | None:
+    """Refuse to steal an active FRP XHTTP namespace; no secret values logged.
+
+    FRP's timer may refresh this include. Both install-time admissions inspect
+    it; the generated Nginx exact + ^~ locations otherwise could override
+    a concurrent FRP tunnel configured at /PORT/web.
+    """
+    if FRP_INCLUDE.encode() not in original:
+        return None
+    try:
+        info = FRP_XHTTP.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != 0 or stat.S_IMODE(info.st_mode) & 0o022
+                or info.st_size > 128_000):
+            return "FRP XHTTP include cannot be safely verified"
+        with FRP_XHTTP.open("rb") as f:
+            raw = f.read(128_001)
+        after = FRP_XHTTP.lstat()
+        if (len(raw) != info.st_size or after.st_ino != info.st_ino
+                or after.st_dev != info.st_dev
+                or after.st_mtime_ns != info.st_mtime_ns):
+            return "FRP XHTTP routes changed while verifying"
+        lines = raw.decode("utf-8")
+    except (OSError, UnicodeError):
+        return "FRP XHTTP include missing or unreadable"
+    existing = re.findall(
+        r"(?m)^\s*location\s+(?:=|\^~)\s+(/[^\s{]+)", lines)
+    requested = xhttp_path.rstrip("/")
+    for path in existing:
+        active = path.rstrip("/")
+        if (active == requested or active.startswith(requested + "/")
+                or requested.startswith(active + "/")):
+            return "Selected XHTTP path already belongs to an existing FRP route"
+    return None
 
 
 def _existing_ancestors_safe(path: Path) -> bool:
@@ -125,6 +166,14 @@ def admission(role: str, sidecar_dir: Path, nginx_dir: Path,
         profile = None
     if profile is None:
         raise AdmissionRefused("Verified Sidecar data port/path unavailable")
+    if role == "ir":
+        original = next((r["before"] for r in rows
+                         if r["operation"] == "edit"), None)
+        if not isinstance(original, bytes):
+            raise AdmissionRefused("Reviewed original IR Nginx vhost unavailable")
+        overlap = existing_frp_route_collision(original, profile[1])
+        if overlap:
+            issues.append(overlap)
 
     # The host baseline (process owner, reserved loopbacks, Docker and
     # nginx -t) is checked independently. This module never bypasses it.
