@@ -276,10 +276,24 @@ def inspect_local(role: str, mode: str, data_port: int = 56053,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", required=True, choices=("ir", "kh"))
-    parser.add_argument("--mode", required=True, choices=("existing", "new"))
+    parser.add_argument("--mode", choices=("existing", "new"))
     parser.add_argument("--data-port", type=int, default=56053)
     parser.add_argument("--xhttp-path", default=None)
+    parser.add_argument("--print-profile", action="store_true",
+                        help="Print only non-secret installed Xray port and XHTTP path")
     args = parser.parse_args()
+    if args.print_profile:
+        if args.mode is not None or not private_files(args.role):
+            print("HOLD: Private installed Sidecar profile not verified")
+            return 2
+        installed = installed_profile(args.role)
+        if installed is None:
+            print("HOLD: Installed Sidecar port/path missing or invalid")
+            return 2
+        print(f"{installed[0]} {installed[1]}/")
+        return 0
+    if args.mode is None:
+        parser.error("--mode new|existing is required for an audit")
     failures = inspect_local(args.role, args.mode, args.data_port, args.xhttp_path)
     print(f"BACKHAUL READ-ONLY AUDIT | role={args.role} | check={args.mode}")
     if failures:
