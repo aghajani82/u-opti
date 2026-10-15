@@ -52,6 +52,15 @@ class GuidedTrialTest(unittest.TestCase):
                 self.values[6].assert_called_with(role, SC, NG)
                 self.assertEqual(self.values[7].call_count % 2, 0)
 
+    def test_custom_xray_port_and_path_reach_the_real_install_gate(self):
+        self.assertEqual(
+            flow.install_fresh("kh", IR, KH, "REBUILT-TEST-VPS",
+                               "INSTALL-KH", 45123, "/assets/v1/connect"),
+            flow.SUCCESS)
+        self.values[5].assert_called_once_with(
+            "kh", IR, KH, 45123, "/assets/v1/connect")
+        self.values[6].assert_called_once_with("kh", SC, NG)
+
     def test_missing_second_confirmation_never_prepares(self):
         self.values[5].reset_mock()
         for bad in ("wrong", ""):
