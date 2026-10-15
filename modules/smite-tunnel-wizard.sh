@@ -117,7 +117,7 @@ smite_tw_backhaul_status() {
     local role="$1" profile port path
     profile="$(smite_tw_backhaul_profile "$role")" || profile=""
     read -r port path <<< "$profile"
-    if ! [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /*/ ]]; then
+    if ! [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /* && "$path" != */ ]]; then
         port=""
         path=""
     fi
@@ -144,7 +144,7 @@ smite_tw_backhaul_status() {
         fi
         echo "Local channel: $(smite_tw_http http://127.0.0.1:3080/channel)"
         if [ -n "$port" ]; then
-            echo "Local data XHTTP: $(smite_tw_http "http://127.0.0.1:$port$path")"
+            echo "Local XHTTP request endpoint: $(smite_tw_http "http://127.0.0.1:$port$path/")"
         fi
     else
         echo "KH Sidecar: $(smite_tw_container_state uopti-backhaul-sidecar-kh)"
@@ -176,7 +176,7 @@ smite_tw_backhaul_overview() {
         echo "IR: Backhaul server bind 127.0.0.1:3080."
         echo "IR: Backhaul data port 127.0.0.1:56053."
         echo "IR: existing HTTPS backend is 127.0.0.1:8443."
-        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | path=/56053/www/."
+        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | legacy example path=/56053/www."
     else
         echo "KH: Backhaul client connects to 127.0.0.1:13080."
         echo "KH: Nginx bridge verifies TLS and SNI of IR domain."
@@ -352,17 +352,18 @@ smite_tw_backhaul_client() {
     echo "Address: <your IR HTTPS domain> | Port: 443 | TLS: on"
     echo "SNI: <your IR HTTPS domain> | Fingerprint: chrome"
     echo "Protocol: VLESS | Network: XHTTP"
-    if [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /*/ ]]; then
+    if [[ "$port" =~ ^[0-9]{4,5}$ && "$path" == /* && "$path" != */ ]]; then
         echo "Installed KH Xray inbound port: $port"
         echo "Path: $path"
     else
         echo "Path: <your chosen KH inbound XHTTP path> (not yet verified)"
-        echo "Legacy example ONLY: /56053/www/"
+        echo "Legacy example ONLY: /56053/www"
     fi
     echo "Mode: auto | ALPN: http/1.1 (tested IR gateway profile)"
     echo 'Extra: {"mode":"auto","xPaddingBytes":"100-1000"}'
     echo "Use the UUID/encryption parameters of the existing KH Xray inbound."
     echo "Do not copy secrets into the wizard or logs."
+    echo "Xray may append / and a session subpath in actual HTTP requests." \
     echo "Host header is set by the IR XHTTP Nginx include to the KH upstream."
 }
 
@@ -473,11 +474,11 @@ smite_tw_backhaul_guided_trial_install() {
     echo "KH Xray inbound must already exist on 127.0.0.1 at this port/path."
     read -rp "KH Xray inbound port [56053]: " data_port || return 1
     data_port="${data_port:-56053}"
-    read -rp "XHTTP path [/$data_port/www/] (e.g. /assets/v1/connect/): " xhttp_path || return 1
+    read -rp "XHTTP base path [/$data_port/www] (e.g. /45561/web): " xhttp_path || return 1
     xhttp_path="${xhttp_path:-/$data_port/www}"
     # Accept the common trailing-slash notation, normalize before safe validation.
     xhttp_path="${xhttp_path%/}"
-    echo "Selected KH Xray port: $data_port | XHTTP path: $xhttp_path/"
+    echo "Selected KH Xray port: $data_port | XHTTP base path: $xhttp_path"
     echo "Do not reuse FRP paths or a port already occupied on IR."
     read -rp "Type REBUILT-TEST-VPS if snapshot AND console are available: " gate || return 1
     [ "$gate" = REBUILT-TEST-VPS ] || { echo "Cancelled; nothing installed."; return 0; }
