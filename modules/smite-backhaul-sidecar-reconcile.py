@@ -91,16 +91,22 @@ def private_files(directory: Path, names: set[str], prefix: str) -> dict[str, by
 
 
 def _strict_plan(raw: bytes, role: str, ir_domain: str, kh_host: str,
-                 original: bytes, patched: bytes, additions: dict[str, bytes]) -> None:
+                 original: bytes, patched: bytes, additions: dict[str, bytes],
+                 data_port: int = 56053, xhttp_path: str = "/56053/www") -> None:
     try:
         meta = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
         raise ReconcileRefused("Nginx manifest cannot be decoded") from exc
-    if not isinstance(meta, dict) or set(meta) != {
-        "version", "role", "status", "domain", "kh_host",
-        "nginx_edit", "new_files", "notes"
-    }:
+    base_fields = {"version", "role", "status", "domain", "kh_host",
+                   "nginx_edit", "new_files", "notes"}
+    expected_fields = (base_fields if data_port == 56053 and
+                       xhttp_path == "/56053/www" else base_fields | {"profile"})
+    if not isinstance(meta, dict) or set(meta) != expected_fields:
         raise ReconcileRefused("Unexpected Nginx manifest schema")
+    if "profile" in meta and meta["profile"] != {
+        "data_port": data_port, "xhttp_path": xhttp_path
+    }:
+        raise ReconcileRefused("Custom XHTTP profile mismatch")
     if (meta["version"] != 1 or meta["role"] != role
             or meta["status"] != "REVIEW_ONLY_NO_DEPLOYMENT"
             or meta["domain"] != ir_domain or meta["kh_host"] != kh_host
@@ -155,9 +161,15 @@ def reconcile(role: str, sidecar_dir: Path, nginx_dir: Path) -> list[dict]:
         meta = json.loads(b["plan.json"].decode("utf-8"))
         ir_domain = meta["domain"]
         kh_host = meta["kh_host"]
-        expected_sidecar = sidecar.candidate_files(role, token, ir_domain, kh_host)
+        selected = meta.get("profile", {"data_port": 56053, "xhttp_path": "/56053/www"})
+        if not isinstance(selected, dict) or set(selected) != {"data_port", "xhttp_path"}:
+            raise ReconcileRefused("Invalid XHTTP profile schema")
+        data_port, xhttp_path = sidecar.validated_profile(
+            selected["data_port"], selected["xhttp_path"])
+        expected_sidecar = sidecar.candidate_files(
+            role, token, ir_domain, kh_host, data_port, xhttp_path)
         compiled, additions, vhost = nginx.compile_nginx(
-            role, b["original.conf"], ir_domain, kh_host)
+            role, b["original.conf"], ir_domain, kh_host, data_port, xhttp_path)
     except (UnicodeError, KeyError, TypeError, ValueError, IndexError) as exc:
         raise ReconcileRefused("Unable to verify paired candidate semantics") from exc
     if set(a) != set(expected_sidecar) or any(
@@ -177,7 +189,7 @@ def reconcile(role: str, sidecar_dir: Path, nginx_dir: Path) -> list[dict]:
     if vhost != (nginx.IR_PATH if role == "ir" else nginx.KH_PATH):
         raise ReconcileRefused("Unexpected Nginx edit destination")
     _strict_plan(b["plan.json"], role, ir_domain, kh_host,
-                 b["original.conf"], compiled, additions)
+                 b["original.conf"], compiled, additions, data_port, xhttp_path)
     resources = []
     for path, (action, name, source) in LAYOUT[role].items():
         payload = (a if source == "sidecar" else b)[name]
