@@ -294,7 +294,7 @@ def main() -> int:
         if installed is None:
             print("HOLD: Installed Sidecar port/path missing or invalid")
             return 2
-        print(f"{installed[0]} {installed[1]}/")
+        print(f"{installed[0]} {installed[1]}")
         return 0
     if args.mode is None:
         parser.error("--mode new|existing is required for an audit")
