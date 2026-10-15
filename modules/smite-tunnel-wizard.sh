@@ -423,7 +423,7 @@ smite_tw_backhaul_manual_menu() {
 }
 
 smite_tw_backhaul_guided_trial_install() {
-    local role="$1" module ir_domain kh_host gate confirm
+    local role="$1" module ir_domain kh_host data_port xhttp_path gate confirm
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
     echo "===== ONE-FLOW BACKHAUL: FRESH REBUILT TEST VPS ONLY ====="
     echo "REQUIRES: Smite/FRP/Nginx/Xray baseline, private token, snapshot+console."
@@ -435,6 +435,16 @@ smite_tw_backhaul_guided_trial_install() {
     [ "$(id -u)" -eq 0 ] || { echo "Root required."; return 1; }
     read -rp "IR HTTPS domain: " ir_domain || return 1
     read -rp "KH upstream / Xray Host domain: " kh_host || return 1
+    echo "Choose the SAME Xray port and XHTTP path on BOTH IR and KH."
+    echo "KH Xray inbound must already exist on 127.0.0.1 at this port/path."
+    read -rp "KH Xray inbound port [56053]: " data_port || return 1
+    data_port="${data_port:-56053}"
+    read -rp "XHTTP path [/$data_port/www/] (e.g. /assets/v1/connect/): " xhttp_path || return 1
+    xhttp_path="${xhttp_path:-/$data_port/www}"
+    # Accept the common trailing-slash notation, normalize before safe validation.
+    xhttp_path="${xhttp_path%/}"
+    echo "Selected KH Xray port: $data_port | XHTTP path: $xhttp_path/"
+    echo "Do not reuse FRP paths or a port already occupied on IR."
     read -rp "Type REBUILT-TEST-VPS if snapshot AND console are available: " gate || return 1
     [ "$gate" = REBUILT-TEST-VPS ] || { echo "Cancelled; nothing installed."; return 0; }
     confirm="INSTALL-${role^^}"
@@ -442,6 +452,7 @@ smite_tw_backhaul_guided_trial_install() {
     [ "$gate" = "$confirm" ] || { echo "Cancelled; nothing installed."; return 0; }
     UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
         --role "$role" --ir-domain "$ir_domain" --kh-host "$kh_host" \
+        --data-port "$data_port" --xhttp-path "$xhttp_path" \
         --install-test --test-host-approval REBUILT-TEST-VPS --confirm "$confirm"
 }
 
