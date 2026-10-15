@@ -68,10 +68,10 @@ def _trusted_role(role: str) -> None:
 
 
 def _fresh(role: str) -> None:
-    # Pairing happens BEFORE the user selects the KH Xray port. Do not
-    # require the legacy :56053 target merely to exchange a private token.
-    issues = (readiness.inspect_local(role, "new", check_target=False)
-              if role == "kh" else readiness.inspect_local(role, "new"))
+    # Pairing happens before selecting the data port on either host. Check
+    # role, occupied control/bridge listeners and baseline without reserving
+    # unused legacy :56053. Admission later checks the selected Xray port.
+    issues = readiness.inspect_local(role, "new", check_target=False)
     if issues:
         raise PairingHold("Fresh-host readiness HOLD; never change a running Sidecar")
 
