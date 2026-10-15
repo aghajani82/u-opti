@@ -60,31 +60,41 @@ source "$MODULES_PATH/docker.sh"
 u_opti_ensure_standard_frp_bundle() {
     local file marker tmp_dir stage_dir
     local complete=true
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
-        if [ ! -s "$MODULES_PATH/$file" ] || ! bash -n "$MODULES_PATH/$file" >/dev/null 2>&1; then
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
+        if [ ! -s "$MODULES_PATH/$file" ] || {
+            case "$file" in
+                *.py) ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$MODULES_PATH/$file" >/dev/null 2>&1 ;;
+                *) ! bash -n "$MODULES_PATH/$file" >/dev/null 2>&1 ;;
+            esac
+        }; then
             complete=false
             break
         fi
     done
     if [ "$complete" = true ] &&
        grep -Fq 'smite_frp_wizard_menu()' "$MODULES_PATH/smite-frp-wizard.sh" &&
-       grep -Fq 'smite_frp_xhttp_sync()' "$MODULES_PATH/smite-frp-xhttp.sh"; then
+       grep -Fq 'smite_frp_xhttp_sync()' "$MODULES_PATH/smite-frp-xhttp.sh" &&
+       grep -Fq 'def render(' "$MODULES_PATH/smite-frp-xhttp-paths.py"; then
         return 0
     fi
 
     command -v curl >/dev/null 2>&1 || return 1
     tmp_dir="$(mktemp -d)" || return 1
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! curl -fsSL --retry 3 \
                 "$BASE_URL/modules/$file?cb=$(date +%s%N)" -o "$tmp_dir/$file" ||
            [ ! -s "$tmp_dir/$file" ] ||
-           ! bash -n "$tmp_dir/$file" >/dev/null 2>&1; then
+           { case "$file" in
+                 *.py) ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$tmp_dir/$file" >/dev/null 2>&1 ;;
+                 *) ! bash -n "$tmp_dir/$file" >/dev/null 2>&1 ;;
+             esac; }; then
             rm -rf "$tmp_dir"
             return 1
         fi
     done
     if ! grep -Fq 'smite_frp_wizard_menu()' "$tmp_dir/smite-frp-wizard.sh" ||
-       ! grep -Fq 'smite_frp_xhttp_sync()' "$tmp_dir/smite-frp-xhttp.sh"; then
+       ! grep -Fq 'smite_frp_xhttp_sync()' "$tmp_dir/smite-frp-xhttp.sh" ||
+       ! grep -Fq 'def render(' "$tmp_dir/smite-frp-xhttp-paths.py"; then
         rm -rf "$tmp_dir"
         return 1
     fi
@@ -92,13 +102,13 @@ u_opti_ensure_standard_frp_bundle() {
         rm -rf "$tmp_dir"
         return 1
     }
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! install -m 0755 "$tmp_dir/$file" "$stage_dir/$file"; then
             rm -rf "$tmp_dir" "$stage_dir"
             return 1
         fi
     done
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! mv -f "$stage_dir/$file" "$MODULES_PATH/$file"; then
             rm -rf "$tmp_dir" "$stage_dir"
             return 1
@@ -418,6 +428,7 @@ while true; do
                 "smite-install.sh"
                 "smite-gateway.sh"
                 "smite-frp-xhttp.sh"
+                "smite-frp-xhttp-paths.py"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
                 "smite-tunnel-wizard.sh"
@@ -532,6 +543,7 @@ while true; do
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
                 ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
+                ["smite-frp-xhttp-paths.py"]="$BASE_URL/modules/smite-frp-xhttp-paths.py"
                 ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
                 ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
@@ -581,6 +593,7 @@ while true; do
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
                 ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
+                ["smite-frp-xhttp-paths.py"]="$TEMP_DIR/smite-frp-xhttp-paths.py"
                 ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
                 ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
@@ -697,6 +710,7 @@ while true; do
                ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
                ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
                ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
+               ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
                ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
                ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
                ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
@@ -809,6 +823,7 @@ while true; do
                 "smite-install.sh"
                 "smite-gateway.sh"
                 "smite-frp-xhttp.sh"
+                "smite-frp-xhttp-paths.py"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
                 "smite-tunnel-wizard.sh"
