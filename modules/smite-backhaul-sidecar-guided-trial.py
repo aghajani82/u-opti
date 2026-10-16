@@ -176,12 +176,15 @@ def main() -> int:
     parser.add_argument("--kh-host")
     parser.add_argument("--data-port", type=int, default=56053)
     parser.add_argument("--xhttp-path", default=None)
-    actions = parser.add_mutually_exclusive_group(required=True)
+    actions = parser.add_mutually_exclusive_group(required=False)
     actions.add_argument("--install-test", action="store_true")
     actions.add_argument("--diagnose", action="store_true")
     parser.add_argument("--test-host-approval", default="")
     parser.add_argument("--confirm", default="")
     args = parser.parse_args()
+    if not args.diagnose and not args.install_test:
+        print("HOLD: Select read-only --diagnose or explicit --install-test.")
+        return 2
     if args.diagnose:
         return diagnose(args.role, args.data_port, args.xhttp_path,
                         args.ir_domain, args.kh_host)
