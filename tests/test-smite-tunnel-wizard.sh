@@ -12,9 +12,9 @@ grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq -- '--data-port "$data_port" --xhttp-path "$xhttp_path"' modules/smite-tunnel-wizard.sh
 grep -Fq 'This is an OFFLINE PREVIEW' modules/smite-tunnel-wizard.sh
-grep -Fq 'Pair token only (do ON BOTH hosts; does NOT install)' modules/smite-tunnel-wizard.sh
-grep -Fq 'INSTALL Sidecar on THIS host' modules/smite-tunnel-wizard.sh
-grep -Fq 'VERIFY installation and diagnose (read-only)' modules/smite-tunnel-wizard.sh
+grep -Fq 'START HERE - Guided Pair + Install' modules/smite-tunnel-wizard.sh
+grep -Fq 'smite_tw_backhaul_quick_start()' modules/smite-tunnel-wizard.sh
+grep -Fq 'Check installation / troubleshoot (read-only)' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_guided_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_guided_trial_install()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_install_badge()' modules/smite-tunnel-wizard.sh
@@ -109,16 +109,16 @@ done
 smite_frp_wizard_menu() { echo "FRP_DELEGATE_CALLED_ROLE:$1"; }
 out="$(printf '2\n0\n' | smite_tw_menu)"
 grep -Fq 'FRP_DELEGATE_CALLED_ROLE:ir' <<< "$out"
-out="$(printf '1\n5\n5\n1\n0\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n5\n1\n0\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'Backhaul v0.7.2' <<< "$out"
 out="$(printf '3\n2\n23333\n45000\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'NO INSTALL' <<< "$out"
 
 # Verify new primary and advanced routes without host inspection.
 smite_tw_backhaul_readiness() { echo "READINESS_CALLED:$1:$2"; }
-out="$(printf '1\n3\n2\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n2\n2\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:existing' <<< "$out"
-out="$(printf '1\n5\n1\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n1\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'READINESS_CALLED:ir:new' <<< "$out"
 
 # Simplified top-level Control Center route preserves FRP and Backhaul.
@@ -127,36 +127,43 @@ out="$(printf '4\n0\n' | smite_tw_menu)"
 grep -Fq 'TUNNEL_CENTER_ROLE:ir' <<< "$out"
 
 # Confirm the everyday client-profile action needs no expert-menu navigation.
-out="$(printf '1\n4\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n3\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'Protocol: VLESS' <<< "$out"
 
 smite_tw_backhaul_admission() { echo "ADMISSION_CHECK_FOR:$1"; }
-out="$(printf '1\n5\n5\n5\n0\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n5\n5\n0\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ADMISSION_CHECK_FOR:ir' <<< "$out"
 
 smite_tw_backhaul_live_trial() { echo "TRIAL_MENU_FOR:$1"; }
-out="$(printf '1\n5\n3\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n3\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'TRIAL_MENU_FOR:ir' <<< "$out"
 
 # Guided path delegates to the new OFFLINE orchestrator, never the installer.
 smite_tw_backhaul_guided_prepare() { echo "GUIDED_PAIR_PREP:$1"; }
-out="$(printf '1\n5\n2\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n2\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'GUIDED_PAIR_PREP:ir' <<< "$out"
 
 # A trusted-SSH pairing entry is reachable from the test-host menu.
 smite_tw_backhaul_secure_pair() { echo "TRUSTED_SSH_PAIR_ROUTE:$1"; }
-out="$(printf '1\n5\n4\n0\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n4\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'TRUSTED_SSH_PAIR_ROUTE:ir' <<< "$out"
 
 # New guided trial route must exist without invoking real Nginx/Docker actions.
 smite_tw_backhaul_guided_trial_install() { echo "ONE_FLOW_TRIAL_FOR:$1"; }
-out="$(printf '1\n2\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n7\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ONE_FLOW_TRIAL_FOR:ir' <<< "$out"
 
 # Bitvise two-terminal pairing must be reachable without extra expert menus.
 smite_tw_backhaul_paste_pair() { echo "BITVISE_COPY_PASTE_PAIR:$1"; }
-out="$(printf '1\n1\n0\n0\n' | smite_tw_menu)"
+out="$(printf '1\n4\n6\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'BITVISE_COPY_PASTE_PAIR:ir' <<< "$out"
+
+
+# First-class beginner route delegates to one-flow setup, without calling
+# any real Docker/Nginx command in this hermetic test.
+smite_tw_backhaul_quick_start() { echo "QUICK_START_ROLE:$1"; }
+out="$(printf '1\n1\n0\n0\n' | smite_tw_menu)"
+grep -Fq 'QUICK_START_ROLE:ir' <<< "$out"
 
 # Role selection without Smite setup is explicit, never inferred from hostname/IP.
 smite_bh_role() { return 1; }
