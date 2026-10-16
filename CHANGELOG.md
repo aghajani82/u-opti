@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.3] - 2026-10-16
+
+### Fixed
+
+- Backhaul Sidecar KH guided install no longer assumes `3xui-kh.kolbe1.ir`. The exact KH Sanaei HTTPS vhost is derived from the validated foreign hostname (e.g. `01kh.kolbe1.ir`) across preflight, offline preparation, immutable resource reconciliation, deployment journal/rollback checks and installed read-only audits.
+- Journal replay/rollback is tied to the current verified local Smite foreign domain and refuses unknown, mismatched or unsafe Nginx destinations. Snapshot/test-host approvals and all existing FRP/Smite protections remain required.
+- Regression coverage includes custom KH hostnames, strict site-path rejection, trial journal verification and existing rollback checks. GitHub CI is synthetic; field connectivity and rollback on fresh VPSs still require separate verification.
+
 ## [0.16.2] - 2026-10-16
 
 ### Changed: ACTUAL FRP menu implementation

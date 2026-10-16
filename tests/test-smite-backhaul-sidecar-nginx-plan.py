@@ -68,7 +68,7 @@ class NginxPlanTests(unittest.TestCase):
 
     def test_kh_bridge_strict_tls_and_public_guard_order(self):
         patched, additional, destination = self.compile("kh")
-        self.assertEqual(destination, plan.KH_PATH)
+        self.assertEqual(destination, plan.kh_vhost_path("kh.example.com"))
         self.assertEqual(set(additional), {plan.KH_BRIDGE})
         text = patched.decode()
         self.assertIn("location ~ ^/0*13080(/|$)", text)
@@ -80,6 +80,20 @@ class NginxPlanTests(unittest.TestCase):
         self.assertIn(b"proxy_ssl_server_name on;", bridge)
         self.assertIn(b"proxy_pass https://ir.example.com:443;", bridge)
         self.assertIn(b"listen 127.0.0.1:13080", bridge)
+
+    def test_kh_custom_domain_resolves_exact_expected_vhost(self):
+        new_host = "01kh.kolbe1.ir"
+        source = KH.replace("kh.example.com", new_host)
+        patched, additional, destination = plan.compile_nginx(
+            "kh", source.encode(), "01ir.kolbe1.ir", new_host,
+            42809, "/42809/tu")
+        self.assertEqual(destination, "/etc/nginx/sites-available/3xui-01kh.kolbe1.ir")
+        self.assertIn(b"location ~ ^/0*13080(/|$)", patched)
+        self.assertIn(plan.KH_BRIDGE, additional)
+        with patch.object(plan, "original_bytes", return_value=source.encode()):
+            with self.assertRaises(plan.PlanRefused):
+                plan.prepare("kh", Path(plan.KH_PATH),
+                             "01ir.kolbe1.ir", new_host, 42809, "/42809/tu")
 
     def test_ir_refuses_duplicate_locations_and_layout(self):
         malformed = (
@@ -117,7 +131,7 @@ class NginxPlanTests(unittest.TestCase):
 
     def test_private_atomic_candidate_files_manifest_and_no_live_edit(self):
         for role, original, target in (
-            ("ir", IR, plan.IR_PATH), ("kh", KH, plan.KH_PATH)
+            ("ir", IR, plan.IR_PATH), ("kh", KH, plan.kh_vhost_path("kh.example.com"))
         ):
             with self.subTest(role=role), patch.object(plan, "original_bytes",
                                                        return_value=original.encode()):

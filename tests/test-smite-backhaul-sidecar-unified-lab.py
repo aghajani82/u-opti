@@ -45,7 +45,7 @@ IR = b"""server {
 """
 KH = b"""server {
     listen 443 ssl http2;
-    server_name kh.example.com;
+    server_name kh.kolbe1.ir;
     location / { return 404; }
     location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
         proxy_pass http://127.0.0.1:$fwdport$is_args$args;
@@ -72,11 +72,11 @@ class PairedInstallTests(unittest.TestCase):
         target = engine.sandbox.check_path(root, vhost, create_parents=True)
         engine.legacy._persist(target, original)
         engine.bootstrap(root, role)
-        stage = sidecar.prepare(role, self.token_path, "ir.example.com", "kh.example.com")
+        stage = sidecar.prepare(role, self.token_path, "ir.example.com", "kh.kolbe1.ir")
         self.addCleanup(lambda p=stage: shutil.rmtree(p))
         with patch.object(nginx, "original_bytes", return_value=original):
             nginx_stage = nginx.prepare(
-                role, Path(vhost), "ir.example.com", "kh.example.com"
+                role, Path(vhost), "ir.example.com", "kh.kolbe1.ir"
             )
         self.addCleanup(lambda p=nginx_stage: shutil.rmtree(p))
         return root, stage, nginx_stage, vhost, original

@@ -126,8 +126,12 @@ def diagnose(role: str, data_port: int = 56053,
     print("PRIVATE_PAIRING=" + ("READY" if token_ok else "MISSING_OR_INVALID"))
     print("TEST_HOST_APPROVAL=" + ("READY" if trial.disposable_host_approved()
                                     else "MISSING_OR_INVALID"))
-    vhost = Path(guided.nginx_plan.IR_PATH if role == "ir" else guided.nginx_plan.KH_PATH)
-    print("EXPECTED_NGINX_VHOST=" + ("FOUND" if vhost.is_file() and not vhost.is_symlink()
+    try:
+        vhost = (Path(guided.nginx_plan.IR_PATH) if role == "ir" else
+                 Path(guided.nginx_plan.kh_vhost_path(kh_host)) if kh_host else None)
+    except (TypeError, ValueError):
+        vhost = None
+    print("EXPECTED_NGINX_VHOST=" + ("FOUND" if vhost is not None and vhost.is_file() and not vhost.is_symlink()
                                        else "MISSING_OR_UNEXPECTED"))
     issues = guided.readiness.inspect_local(
         role, "new", data_port=port, xhttp_path=path)
@@ -160,13 +164,13 @@ def diagnose(role: str, data_port: int = 56053,
         print("NEXT=Backhaul Step 1 Pair IR/KH on the fresh hosts.")
     elif not trial.disposable_host_approved():
         print("NEXT=After snapshot and console, register test-host approval.")
-    elif issues or not layout_ok or not vhost.is_file():
+    elif issues or not layout_ok or vhost is None or not vhost.is_file():
         print("NEXT=Fix the local preflight condition; do not start installation.")
     else:
         print("NEXT=Backhaul Step 2 INSTALL Sidecar (separate on BOTH hosts).")
         print("Passing this check is NOT an install or proof of TLS/client traffic.")
     print("READ_ONLY_NO_FILES_CHANGED")
-    return 0 if token_ok and trial.disposable_host_approved() and not issues and layout_ok and vhost.is_file() else 2
+    return 0 if token_ok and trial.disposable_host_approved() and not issues and layout_ok and vhost is not None and vhost.is_file() else 2
 
 
 def main() -> int:

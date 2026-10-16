@@ -217,6 +217,25 @@ def _safe_file(path: Path, *, owner: int = 0,
     return path.read_bytes(), permissions
 
 
+def _expected_layout(role: str) -> dict:
+    """Bind KH trial writes and rollback to the trusted local Smite hostname.
+
+    The journal alone may not authorize replacing another site's Nginx file.
+    Refuse recovery if the verified KH role/domain state is unavailable or drifts.
+    """
+    if role not in ROLES:
+        raise TrialRefused("Unexpected trial role")
+    if role == "ir":
+        return paired.LAYOUT[role]
+    site = admission.local.installed_kh_vhost()
+    if site is None:
+        raise TrialRefused("Verified KH Smite vhost identity unavailable")
+    return {
+        (str(site) if path == paired.nginx.KH_PATH else path): spec
+        for path, spec in paired.LAYOUT["kh"].items()
+    }
+
+
 def _journal_read(root: Path) -> dict:
     contents, _ = _safe_file(root / JOURNAL, mode=0o600)
     try:
@@ -234,7 +253,7 @@ def _journal_read(root: Path) -> dict:
             len(doc["resources"]) != len(paired.LAYOUT[role])):
         raise TrialRefused("Trial journal identity invalid")
     for row, (expected, (operation, _, _)) in zip(
-            doc["resources"], paired.LAYOUT[role].items()):
+            doc["resources"], _expected_layout(role).items()):
         if not isinstance(row, dict) or set(row) != {
                 "path", "operation", "before", "after", "mode"}:
             raise TrialRefused("Resource journal schema invalid")
@@ -258,7 +277,7 @@ def _journal_store(root: Path, doc: dict) -> None:
 
 
 def _check_targets(resources: list[dict], role: str) -> list[dict]:
-    if [r["path"] for r in resources] != list(paired.LAYOUT[role]):
+    if [r["path"] for r in resources] != list(_expected_layout(role)):
         raise TrialRefused("Unrecognized resource paths")
     rows = []
     for r in resources:

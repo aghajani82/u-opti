@@ -26,7 +26,7 @@ DOMAINS = re.compile(
     r"(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\Z"
 )
 IR_PATH = "/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
-KH_PATH = "/etc/nginx/sites-available/3xui-kh.kolbe1.ir"
+KH_PATH = "/etc/nginx/sites-available/3xui-kh.kolbe1.ir"  # Legacy default only
 IR_CONTROL = "/etc/nginx/u-opti-backhaul-sidecar-control.inc"
 IR_XHTTP = "/etc/nginx/u-opti-backhaul-sidecar-xhttp.inc"
 KH_BRIDGE = "/etc/nginx/conf.d/u-opti-backhaul-sidecar-bridge.conf"
@@ -50,6 +50,12 @@ def domain_valid(raw: str) -> str:
     if not DOMAINS.fullmatch(raw):
         raise PlanRefused("Host must be a lowercase, fully qualified DNS name")
     return raw
+
+
+def kh_vhost_path(kh_host: str) -> str:
+    """Derive only the expected Sanaei-owned KH site from a validated hostname."""
+    domain_valid(kh_host)
+    return "/etc/nginx/sites-available/3xui-" + kh_host
 
 
 def render(*args: str) -> bytes:
@@ -145,7 +151,7 @@ def compile_nginx(role: str, original: bytes, ir_domain: str,
     additions = {
         KH_BRIDGE: render("--render-kh-bridge", ir_domain, "13080")
     }
-    return patched.encode("utf-8"), additions, KH_PATH
+    return patched.encode("utf-8"), additions, kh_vhost_path(kh_host)
 
 
 def private_write(directory: Path, name: str, contents: bytes) -> None:

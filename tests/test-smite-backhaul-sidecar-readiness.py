@@ -180,7 +180,8 @@ class ReadinessTests(unittest.TestCase):
                 "location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {}\n"
             )
             with patch.multiple(audit, IR_PANEL=panel, IR_CONTROL=control, IR_XHTTP=xhttp,
-                                KH_BRIDGE=bridge, KH_VHOST=vhost):
+                                KH_BRIDGE=bridge), \
+                 patch.object(audit, "installed_kh_vhost", return_value=vhost):
                 self.assertTrue(audit.nginx_routes("ir"))
                 self.assertTrue(audit.nginx_routes("kh"))
                 vhost.write_text(vhost.read_text().splitlines()[::-1][0] + "\n"

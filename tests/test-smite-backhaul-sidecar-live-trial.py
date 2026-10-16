@@ -262,5 +262,20 @@ class TrialTests(unittest.TestCase):
         self.assertFalse(self.state_dir.exists())
 
 
+class DynamicKhJournalLayoutTests(unittest.TestCase):
+    def test_kh_journal_and_install_use_verified_custom_site(self):
+        site = Path("/etc/nginx/sites-available/3xui-01kh.kolbe1.ir")
+        with patch.object(trial.admission.local, "installed_kh_vhost",
+                          return_value=site):
+            layout = trial._expected_layout("kh")
+            self.assertEqual(list(layout)[-1], str(site))
+            self.assertEqual(layout[str(site)][0], "edit")
+            self.assertNotIn(trial.paired.nginx.KH_PATH, layout)
+        with patch.object(trial.admission.local, "installed_kh_vhost",
+                          return_value=None):
+            with self.assertRaises(trial.TrialRefused):
+                trial._expected_layout("kh")
+
+
 if __name__ == "__main__":
     unittest.main()
