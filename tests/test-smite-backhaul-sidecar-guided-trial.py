@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 from pathlib import Path
+import tempfile
 import sys
 import unittest
 from unittest.mock import Mock, patch
@@ -126,6 +127,47 @@ class GuidedTrialTest(unittest.TestCase):
             self.assertEqual(flow.main(), 2)
             self.assertNotIn("confidential-data-fixture", output.getvalue())
             self.assertIn("READ-ONLY", output.getvalue())
+
+    def test_readonly_diagnostic_explicitly_distinguishes_pairing_from_install(self):
+        # A matched pairing token is NOT an installed Sidecar.
+        with tempfile.TemporaryDirectory() as root:
+            vhost = Path(root) / "ir.conf"
+            vhost.write_text("# harmless nginx fixture\n", encoding="utf-8")
+            with patch.object(flow.guided.nginx_plan, "IR_PATH", str(vhost)), \
+                 patch.object(flow.guided.token_tool, "inspect", return_value=True), \
+                 patch.object(flow.guided.readiness, "inspect_local", return_value=[]), \
+                 patch.object(flow.guided.nginx_plan, "original_bytes",
+                              return_value=b"fake nginx fixture"), \
+                 patch.object(flow.guided.nginx_plan, "compile_nginx") as compile_only, \
+                 patch.object(flow.guided, "prepare_fresh_pair") as prepare, \
+                 patch.object(flow.trial, "install") as activate, \
+                 redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(flow.diagnose("ir", 17991, "/17991/shop", IR, KH), 0)
+                screen = output.getvalue()
+                self.assertIn("INSTALL_JOURNAL=MISSING", screen)
+                self.assertIn("INSTALLATION=NOT VERIFIED", screen)
+                self.assertIn("NEXT=Backhaul Step 2 INSTALL", screen)
+                self.assertIn("REQUESTED_XRAY_PROFILE=17991 /17991/shop", screen)
+                compile_only.assert_called_once()
+                prepare.assert_not_called()
+                activate.assert_not_called()
+
+    def test_readonly_diagnostic_blocks_existing_trial_journal(self):
+        self.values[4].return_value.exists = lambda: True
+        with patch.object(flow.guided.token_tool, "inspect") as token_reader, \
+             patch.object(flow.trial, "install") as activate, \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(flow.diagnose("kh", 17991, "/17991/shop", IR, KH), 2)
+            self.assertIn("INSTALL_JOURNAL=PRESENT", output.getvalue())
+            token_reader.assert_not_called()
+            activate.assert_not_called()
+
+    def test_readonly_diagnostic_reports_role_mismatch_without_secret(self):
+        self.values[3].side_effect = ValueError("confidential-role-data")
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(flow.diagnose("ir"), 2)
+            self.assertIn("SMITE_ROLE_AND_MODE=HOLD", output.getvalue())
+            self.assertNotIn("confidential-role-data", output.getvalue())
 
     def test_missing_install_flag_does_not_prepare(self):
         with patch.object(sys, "argv", ["oneflow", "--role", "ir",
