@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.2] - 2026-10-16
+
+### Changed: ACTUAL FRP menu implementation
+
+- Replaced the 9-option primary Standard FRP Wizard with four functional beginner actions: **1 START HERE** (Smite Standard state-aware install and opt-in HTTPS/443 Gateway), **2 PORT + PATH** (user-provided safe forwarded port/XHTTP Path, KH checklist-only and IR Nginx publication only with explicit confirmation), **3 VERIFY** (read-only XHTTP and client recipe), and **4 Advanced** (original 9 individual actions retained).
+- Fresh-host FRP now displays **NOT INSTALLED (fresh host)** rather than a blank connection mode. It checks trusted Smite role and running containers, refuses partial installs and incompatible Private mode, and never silently reinstalls.
+- Tunnel Management now accurately labels FRP EASY SETUP and Backhaul guided Sidecar START HERE. Backhaul retains independent TEST-host installation, custom profiles, pairing and read-only diagnostics.
+
+### Validation and limits
+
+- Synthetic tests actually enter all three beginner actions, the advanced menu, test a custom IR Path and KH no-op, reject unsafe namespaces, check fresh-host consent, wrong-role/mode refusal, and reject HTTP 200 without X-Padding and unsafe saved IR hostnames.
+- The previous two-host field test passed authenticated VLESS for FRP and Backhaul with custom Path, good speeds, coexistence and sequential reboots. **A new v0.16.2 installation from main is NOT YET field tested.**
+- Sidecar remains a guarded disposable-test-host flow. Smite Standard, KH Sanaei inbounds, real Smite web UI FRP TCP tunnel and TLS/443 must be configured; the wizard guides but does not automatically create those web UI resources.
+- No non-Smite standalone Backhaul, safe in-place Sidecar Path reconfiguration, or certified crash rollback. Exact implemented menu: [v0.16.2 tunnel guide](docs/TUNNEL-QUICKSTART-0.16.2.md).
+
+
 ## [0.16.1] - 2026-10-16
 
 ### Added

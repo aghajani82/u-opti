@@ -1,94 +1,152 @@
 #!/usr/bin/env bash
+# Hermetic test of the ACTUAL beginner menu dispatch and the guarded actions.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-source_text="$(cat modules/smite-frp-wizard.sh)"
+bash -n modules/smite-frp-wizard.sh
 grep -Fq 'source "$MODULES_PATH/smite-frp-wizard.sh"' u-opti
 grep -Fq '"smite-frp-wizard.sh"' install.sh
-grep -Fq '"smite-frp-wizard.sh"' u-opti
-grep -Fq 'smite-frp-xhttp.sh' u-opti
-grep -Fq 'smite-frp-xhttp-paths.py' u-opti
-grep -Fq '9) Diagnose XHTTP response timing' modules/smite-frp-wizard.sh
-grep -Fq 'Choose [0-9]' modules/smite-frp-wizard.sh
+grep -Fq '1) START HERE - Install/check Smite + HTTPS Gateway' modules/smite-frp-wizard.sh
+grep -Fq '2) PORT + PATH - Match KH Sanaei and IR Nginx' modules/smite-frp-wizard.sh
+grep -Fq '3) VERIFY - XHTTP, client settings and real-traffic checklist' modules/smite-frp-wizard.sh
+grep -Fq 'Choose [0-4]' modules/smite-frp-wizard.sh
+grep -Fq 'FRP ADVANCED' modules/smite-frp-wizard.sh
 
-MODE=standard
-ROLE=panel-iran
+MODE=standard ROLE=panel-iran DOMAIN=ir.kolbe1.ir
 smite_frp_std_state() {
     case "$1" in
         SMITE_CONNECTION_MODE) printf '%s' "$MODE" ;;
         SMITE_ROLE) printf '%s' "$ROLE" ;;
-        SMITE_PANEL_DOMAIN) printf '%s' 'ir.kolbe1.ir' ;;
+        SMITE_PANEL_DOMAIN) printf '%s' "$DOMAIN" ;;
     esac
 }
 smite_frp_std_running() { return 0; }
 clear() { :; }
-smite_frp_wizard_pause() { :; }
-docker_smite_open_setup_wizard() { echo PRIVATE_WIZARD_CALLED; }
-docker_smite_frp_standard_guide() { echo OLD_FRP_GUIDE_CALLED; }
-smite_frp_std_install() { echo "INSTALL_STEP_$1"; }
+docker() {
+    if [ "$1" = compose ]; then echo "2.1.0"; return 0; fi
+    return 1  # No containers on a mock fresh host.
+}
+systemctl() { return 0; }
+smite_frp_std_install() {
+    echo "INSTALL_STEP_$1"
+    MODE=standard
+    if [ "$1" = ir ]; then ROLE=panel-iran; else ROLE=foreign; fi
+}
 smite_gateway_configure_panel() { echo "IR_GATEWAY_STEP"; }
 smite_foreign_gateway_configure() { echo "KH_GATEWAY_STEP"; }
 show_docker_3xui_menu() { echo "SANAEI_STEP"; }
+docker_smite_open_setup_wizard() { echo "PRIVATE_WIZARD"; }
+docker_smite_frp_standard_guide() { echo "LEGACY_GUIDE"; }
 smite_frp_wizard_port() { printf 13914; }
 SMITE_FRP_XHTTP_PATH_HELPER="$PWD/modules/smite-frp-xhttp-paths.py"
 FRP_TEST_PATH="/13914/web"
-smite_frp_xhttp_get_path() { printf "%s\n" "$FRP_TEST_PATH"; }
-smite_frp_xhttp_register_path() { echo "FRP XHTTP path ACTIVE on IR: $2"; }
+smite_frp_xhttp_get_path() { printf '%s\n' "$FRP_TEST_PATH"; }
+smite_frp_xhttp_register_path() { echo "FRP_PATH_APPLIED:$1:$2"; }
 smite_frp_xhttp_verify_path() { return 0; }
+curl() {
+    local arg="" prev=""
+    for arg in "$@"; do
+        if [ "$prev" = -D ]; then printf 'HTTP/1.1 200 OK\nX-Padding: test\n' > "$arg"; fi
+        prev="$arg"
+    done
+    printf '200'
+}
 
-# The original functions above must remain untouched when wizard is sourced.
 source modules/smite-frp-wizard.sh
 smite_frp_wizard_pause() { :; }
+# The module intentionally defines its own prompt; test supplies a fixed safe port.
 smite_frp_wizard_port() { printf 13914; }
+test "$(smite_frp_wizard_mode_label)" = standard
 test "$(smite_frp_wizard_role)" = ir
-smite_frp_wizard_client_out="$(smite_frp_wizard_client)"
-grep -Fq 'ALPN: http/1.1' <<< "$smite_frp_wizard_client_out"
-grep -Fq 'Path: /13914/web' <<< "$smite_frp_wizard_client_out"
-grep -Fq 'Address: ir.kolbe1.ir | Port: 443' <<< "$smite_frp_wizard_client_out"
-grep -Fq 'Smite' <<< "$(smite_frp_wizard_tunnel ir)"
-
-# Step 5 registers a chosen IR path; client settings must use the saved path.
-out="$(printf 'y\n/13914/shop\n' | smite_frp_wizard_tunnel ir)"
-grep -Fq 'FRP XHTTP path ACTIVE on IR: /13914/shop' <<< "$out"
-FRP_TEST_PATH="/13914/shop"
+test "$(smite_frp_wizard_client)" != ""
 out="$(smite_frp_wizard_client)"
-grep -Fq 'Path: /13914/shop | Mode: auto' <<< "$out"
-! grep -Fq 'Path: /13914/web' <<< "$out"
+grep -Fq 'ALPN: http/1.1' <<< "$out"
+grep -Fq 'Path: /13914/web' <<< "$out"
 
+# Real new profile selector uses custom user-provided path and rejects unsafe.
+out="$(printf '/13914/shop\ny\n' | smite_frp_wizard_easy_configure ir)"
+grep -Fq 'FRP_PATH_APPLIED:13914:/13914/shop' <<< "$out"
+grep -Fq 'IR_XHTTP_NGINX_PATH_VERIFIED=/13914/shop' <<< "$out"
+out="$(printf '/api/bad\n' | smite_frp_wizard_easy_configure ir)" && {
+    echo "ERROR: reserved FRP namespace was accepted" >&2; exit 1;
+}
+grep -Fq 'HOLD: Invalid/reserved' <<< "$out"
 
-out="$(printf '1\n0\n' | docker_smite_management_menu)"
-grep -Fq PRIVATE_WIZARD_CALLED <<< "$out"
-out="$(printf '2\n0\n' | docker_smite_management_menu)"
-grep -Fq OLD_FRP_GUIDE_CALLED <<< "$out"
-out="$(printf '2\n0\n' | smite_frp_wizard_menu)"
-grep -Fq INSTALL_STEP_ir <<< "$out"
-
+# KH never writes IR Nginx even when port/path chosen.
 ROLE=foreign
-test "$(smite_frp_wizard_role)" = kh
-# KH chooses the same path locally; no ability to overwrite the IR registry.
-out="$(printf '/13914/shop\n' | smite_frp_wizard_client)"
-grep -Fq 'Path: /13914/shop | Mode: auto' <<< "$out"
-out="$(printf '2\n0\n' | smite_frp_wizard_menu)"
-grep -Fq INSTALL_STEP_kh <<< "$out"
-out="$(printf '3\n0\n' | smite_frp_wizard_menu)"
-grep -Fq KH_GATEWAY_STEP <<< "$out"
-out="$(printf '4\n0\n' | smite_frp_wizard_menu)"
-grep -Fq SANAEI_STEP <<< "$out"
+out="$(printf '/13914/shop\n' | smite_frp_wizard_easy_configure kh)"
+grep -Fq 'KH GUIDE ONLY' <<< "$out"
+if grep -Fq 'FRP_PATH_APPLIED:' <<< "$out"; then
+    echo "ERROR: KH attempted to publish IR route" >&2; exit 1;
+fi
+out="$(printf '/13914/shop\n' | smite_frp_wizard_easy_verify kh)"
+grep -Fq 'XHTTP_HANDLER_REACHED=YES' <<< "$out"
+grep -Fq 'Path=/13914/shop' <<< "$out"
 
-# Unified Tunnel Wizard passes role once: FRP must honor it and fail if
-# it contradicts an already installed Smite role.
-out="$(printf '2\n0\n' | smite_frp_wizard_menu kh)"
-grep -Fq INSTALL_STEP_kh <<< "$out"
-if out="$(printf '2\n0\n' | smite_frp_wizard_menu ir)"; then
-    echo "ERROR: Conflicting selected role did not stop FRP wizard" >&2
+ROLE=panel-iran
+out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"
+grep -Fq 'XHTTP_HANDLER_REACHED=YES' <<< "$out"
+grep -Fq 'https://ir.kolbe1.ir/13914/web/' <<< "$out"
+
+# A naked HTTP 200 without the Xray X-Padding header is NOT a PASS.
+original_curl_mock="$(declare -f curl)"
+curl() {
+    local arg="" prev=""
+    for arg in "$@"; do
+        if [ "$prev" = -D ]; then printf 'HTTP/1.1 200 OK\n' > "$arg"; fi
+        prev="$arg"
+    done
+    printf 200
+}
+if out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"; then
+    echo "ERROR: HTTP 200 without X-Padding incorrectly counted as XHTTP PASS" >&2
     exit 1
 fi
-grep -Fq 'conflicts with existing Smite role' <<< "$out"
+grep -Fq 'XHTTP_HANDLER_REACHED=NO' <<< "$out"
+eval "$original_curl_mock"
+DOMAIN='bad/host'
+if out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"; then
+    echo "ERROR: Malformed HTTPS hostname accepted" >&2; exit 1
+fi
+grep -Fq 'unsafe' <<< "$out"
+DOMAIN=ir.kolbe1.ir
 
+# Fresh-host role mode is accurately labeled, and START HERE never silently
+# invokes installs or gateways without explicit confirmation.
+MODE="" ROLE=""
+test "$(smite_frp_wizard_mode_label)" = 'NOT INSTALLED (fresh host)'
+out="$(printf 'n\n' | smite_frp_wizard_start_here ir)"
+grep -Fq 'No changes.' <<< "$out"
+! grep -Fq 'INSTALL_STEP' <<< "$out"
+out="$(printf 'y\ny\n' | smite_frp_wizard_start_here ir)"
+grep -Fq 'INSTALL_STEP_ir' <<< "$out"
+grep -Fq 'IR_GATEWAY_STEP' <<< "$out"
 MODE=private
-out="$(printf '0\n' | smite_frp_wizard_menu)"
-grep -Fq 'FRP Wizard requires Standard' <<< "$out"
-if grep -Fq 'INSTALL_STEP_' <<< "$out"; then
-    echo "ERROR: Private mode executed Standard install step"
-    exit 1
+if out="$(printf '0\n' | smite_frp_wizard_menu ir)"; then
+    echo "ERROR: Private mode entered Standard wizard" >&2; exit 1
 fi
-echo 'PASS: Independent FRP Wizard, role routing, Private guard and tested ALPN recipe'
+grep -Fq 'not Standard' <<< "$out"
+
+MODE=standard ROLE=foreign
+if out="$(printf '0\n' | smite_frp_wizard_menu ir)"; then
+    echo "ERROR: Mismatched trusted role entered FRP wizard" >&2; exit 1
+fi
+grep -Fq 'conflicts' <<< "$out"
+
+# Exercise actual PRIMARY menu routing (not just grep text).
+MODE=standard ROLE=panel-iran
+smite_frp_wizard_start_here() { echo "PRIMARY_START_ROLE:$1"; }
+smite_frp_wizard_easy_configure() { echo "PRIMARY_CONFIGURE_ROLE:$1"; }
+smite_frp_wizard_easy_verify() { echo "PRIMARY_VERIFY_ROLE:$1"; }
+out="$(printf '1\n2\n3\n0\n' | smite_frp_wizard_menu ir)"
+grep -Fq 'PRIMARY_START_ROLE:ir' <<< "$out"
+grep -Fq 'PRIMARY_CONFIGURE_ROLE:ir' <<< "$out"
+grep -Fq 'PRIMARY_VERIFY_ROLE:ir' <<< "$out"
+# The original individual installer is reachable ONLY under Advanced.
+out="$(printf '4\n2\n0\n0\n' | smite_frp_wizard_menu ir)"
+grep -Fq 'INSTALL_STEP_ir' <<< "$out"
+# Role choice is a single explicit prompt if Smite not installed.
+MODE="" ROLE=""
+out="$(printf '2\n0\n' | smite_frp_wizard_menu)"
+grep -Fq 'This server: kh | Smite: NOT INSTALLED' <<< "$out"
+
+echo 'PASS: real 4-action FRP menu, guarded fresh install, custom Path, KH read-only, role guards and Advanced'

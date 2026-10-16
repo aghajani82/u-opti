@@ -219,85 +219,268 @@ smite_frp_wizard_recovery() {
     echo "This menu does NOT reboot, rebuild or alter your firewall."
     smite_frp_wizard_pause
 }
-smite_frp_wizard_menu() {
-    local role="${1:-}" detected="" mode="" choice=""
+
+# The actual beginner entry. Low-level procedures are retained under Advanced.
+smite_frp_wizard_mode_label() {
+    local mode=""
     mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
-    if [ -n "$mode" ] && [ "$mode" != standard ]; then
-        echo "ERROR: Existing Smite mode is $mode. FRP Wizard requires Standard."
-        echo "Private Network Wizard remains unchanged."
-        smite_frp_wizard_pause
-        return
-    fi
-    detected="$(smite_frp_wizard_role)"
-    # The unified Tunnel Wizard has already chosen IR/KH. Never ask twice.
-    # A supplied role may not override a contradictory installed Smite state.
-    case "$role" in
-        ir|kh)
-            if [ "$detected" != unknown ] && [ "$detected" != "$role" ]; then
-                echo "ERROR: Selected host role conflicts with existing Smite role."
-                smite_frp_wizard_pause
-                return 2
-            fi ;;
-        "") role="$detected" ;;
-        *) echo "ERROR: Invalid host role."; return 2 ;;
+    printf '%s' "${mode:-NOT INSTALLED (fresh host)}"
+}
+
+smite_frp_wizard_ready() {
+    local role="$1"
+    [ "$(smite_frp_std_state SMITE_CONNECTION_MODE)" = standard ] &&
+        [ "$(smite_frp_wizard_role)" = "$role" ] &&
+        smite_frp_std_running smite-node &&
+        { [ "$role" = kh ] || smite_frp_std_running smite-panel; } || {
+        echo "HOLD: Smite Standard role/containers not ready. Use START HERE or Status."
+        echo "Do not repeat installation if an existing container is broken."
+        return 2
+    }
+}
+
+smite_frp_wizard_start_here() {
+    local role="$1" mode="" answer=""
+    echo "===== FRP START HERE | THIS HOST: $role ====="
+    echo "Install/check Smite Standard, then explicitly offer HTTPS/443 gateway."
+    echo "This does NOT create a Smite UI tunnel or KH Sanaei Xray inbound."
+    mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
+    case "$mode" in
+        standard)
+            smite_frp_wizard_ready "$role" || {
+                smite_frp_wizard_pause; return 2;
+            }
+            echo "Smite already installed and running. NO REINSTALL."
+            ;;
+        "")
+            if command -v docker >/dev/null 2>&1 &&
+               { docker container inspect smite-node >/dev/null 2>&1 ||
+                 docker container inspect smite-panel >/dev/null 2>&1; }; then
+                echo "HOLD: Smite containers with missing state; use recovery, NOT reinstall."
+                smite_frp_wizard_pause; return 2
+            fi
+            if ! command -v docker >/dev/null 2>&1 ||
+               ! docker compose version >/dev/null 2>&1 ||
+               ! systemctl is-active --quiet docker; then
+                echo "HOLD: First install Docker Engine and Compose in Docker Management."
+                smite_frp_wizard_pause; return 2
+            fi
+            echo "Smite absent. Install this role using Standard mode."
+            read -rp "Open Smite installer on THIS host now? [y/N]: " answer || return
+            case "$answer" in y|Y|yes|YES) ;; *)
+                echo "No changes."; smite_frp_wizard_pause; return ;;
+            esac
+            smite_frp_std_install "$role" || {
+                echo "HOLD: Installer did not succeed."; smite_frp_wizard_pause; return 2;
+            }
+            smite_frp_wizard_ready "$role" || {
+                echo "HOLD: Install returned but trusted state/containers not ready."
+                echo "Do NOT install again without inspecting the state."
+                smite_frp_wizard_pause; return 2
+            }
+            ;;
+        *)
+            echo "HOLD: Existing Smite mode '$mode'; refusing to switch mode."
+            smite_frp_wizard_pause; return 2 ;;
     esac
-    if [ "$role" = unknown ]; then
-        echo "==== Select logical host role ===="
-        echo "1) IR: Panel + Iran Node"
-        echo "2) KH: Foreign Node"
-        echo "0) Back"
-        read -rp "Select [0-2]: " choice
-        case "$choice" in 1) role=ir ;; 2) role=kh ;; *) return ;; esac
+    echo "HTTPS/443 gateway is a separate existing Nginx/Certbot installer."
+    read -rp "Open gateway installer on THIS host now? [y/N]: " answer || return
+    case "$answer" in
+        y|Y|yes|YES)
+            if [ "$role" = ir ]; then
+                smite_gateway_configure_panel
+            else
+                smite_foreign_gateway_configure
+            fi
+            echo "Check gateway result, certificate and Nginx before proceeding."
+            ;;
+        *) echo "Gateway unchanged. Run START HERE again when ready." ;;
+    esac
+    echo "NEXT: Create/apply FRP TCP tunnel in Smite UI and KH Sanaei inbound."
+    echo "Then use 2) PORT + PATH. No Smite UI tunnel was created here."
+    smite_frp_wizard_pause
+}
+
+# One custom port+path input per action, without hidden legacy assumptions.
+smite_frp_wizard_choose_profile() {
+    local role="$1" port="" path="" default=""
+    port="$(smite_frp_wizard_port)" || return 2
+    if [ "$role" = ir ]; then
+        default="$(smite_frp_xhttp_get_path "$port")" || return 2
+    else
+        default="/$port/web"
     fi
+    read -rp "XHTTP base Path [$default], no trailing slash: " path || return 2
+    path="${path:-$default}"
+    path="${path%/}"
+    python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" check "$port" "$path" >/dev/null || {
+        echo "HOLD: Invalid/reserved/overlapping XHTTP profile."
+        return 2
+    }
+    SMITE_FRP_CHOSEN_PORT="$port"
+    SMITE_FRP_CHOSEN_PATH="$path"
+}
+
+smite_frp_wizard_easy_configure() {
+    local role="$1" answer=""
+    echo "===== FRP PORT + PATH | THIS HOST: $role ====="
+    smite_frp_wizard_ready "$role" || { smite_frp_wizard_pause; return 2; }
+    smite_frp_wizard_choose_profile "$role" || { smite_frp_wizard_pause; return 2; }
+    echo "YOUR PORT: $SMITE_FRP_CHOSEN_PORT | YOUR PATH: $SMITE_FRP_CHOSEN_PATH"
+    echo "KH Sanaei: VLESS/xhttp, 127.0.0.1:$SMITE_FRP_CHOSEN_PORT,"
+    echo "security none, mode auto, Path $SMITE_FRP_CHOSEN_PATH"
+    echo "Smite UI (MANUAL): Tunnels -> Create -> FRP -> TCP."
+    echo "IR=server; KH=client; FRPS control=7000;"
+    echo "Forwarded data port=$SMITE_FRP_CHOSEN_PORT (same as KH Sanaei)."
+    if [ "$role" = kh ]; then
+        echo "KH GUIDE ONLY: no inbound and no IR Nginx route was changed."
+        echo "On IR repeat PORT + PATH after applying Smite FRP TCP tunnel."
+        smite_frp_wizard_pause; return
+    fi
+    read -rp "Smite TCP tunnel APPLIED and KH inbound MATCHES? Publish IR Path? [y/N]: " answer || return
+    case "$answer" in y|Y|yes|YES) ;; *)
+        echo "No change. Finish Smite tunnel and KH Sanaei first."
+        smite_frp_wizard_pause; return ;;
+    esac
+    if ! smite_frp_xhttp_register_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH" ||
+       ! smite_frp_xhttp_verify_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH"; then
+        echo "HOLD: IR HTTPS exact/prefix Path NOT verified; do not use yet."
+        smite_frp_wizard_pause; return 2
+    fi
+    echo "IR_XHTTP_NGINX_PATH_VERIFIED=$SMITE_FRP_CHOSEN_PATH"
+    echo "NEXT: 3) VERIFY. This is Nginx publishing, NOT VLESS proof."
+    smite_frp_wizard_pause
+}
+
+smite_frp_wizard_easy_verify() {
+    local role="$1" domain="" url="" status="" headers="" args=()
+    echo "===== FRP VERIFY | THIS HOST: $role | READ-ONLY ====="
+    smite_frp_wizard_ready "$role" || { smite_frp_wizard_pause; return 2; }
+    smite_frp_wizard_choose_profile "$role" || { smite_frp_wizard_pause; return 2; }
+    domain="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
+    # Never construct a curl URL/--resolve from malformed installed state.
+    if [[ ! "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || [[ "$domain" != *.* ]]; then
+        echo "HOLD: Saved IR HTTPS hostname missing or unsafe."
+        smite_frp_wizard_pause; return 2
+    fi
+    if [ "$role" = ir ]; then
+        smite_frp_xhttp_verify_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH" || {
+            echo "HOLD: IR Nginx Path not published."
+            smite_frp_wizard_pause; return 2
+        }
+        [ -n "$domain" ] || {
+            echo "HOLD: Saved IR domain missing."; smite_frp_wizard_pause; return 2;
+        }
+        url="https://$domain$SMITE_FRP_CHOSEN_PATH/"
+        args=(--resolve "$domain:443:127.0.0.1")
+    else
+        url="http://127.0.0.1:$SMITE_FRP_CHOSEN_PORT$SMITE_FRP_CHOSEN_PATH/"
+    fi
+    headers="$(mktemp)" || return 2
+    status="$(curl --noproxy '*' -4 -sS --http1.1 --connect-timeout 5 \
+        --max-time 12 -X OPTIONS -D "$headers" -o /dev/null \
+        -w '%{http_code}' "${args[@]}" "$url")" || status="network-error"
+    echo "Endpoint: $url | HTTP: $status"
+    local handler_ok=0
+    if [ "$status" = 200 ] && grep -iq '^X-Padding:' "$headers"; then
+        handler_ok=1
+        echo "XHTTP_HANDLER_REACHED=YES"
+    else
+        echo "XHTTP_HANDLER_REACHED=NO (inspect Xray/FRP/Path/TLS)"
+    fi
+    rm -f -- "$headers"
+    echo "Client: VLESS from KH Sanaei; IR hostname:443; TLS SNI=IR hostname;"
+    echo "Network=xhttp; Path=$SMITE_FRP_CHOSEN_PATH; Mode=auto;"
+    echo "ALPN=http/1.1; Fingerprint=chrome; Host=blank;"
+    echo 'Extra: {"mode":"auto","xPaddingBytes":"100-1000"}'
+    echo "An OPTIONS probe is NOT authenticated VLESS or throughput."
+    echo "Test real v2rayN FRP + Backhaul traffic, then separate reboots."
+    smite_frp_wizard_pause
+    [ "$handler_ok" = 1 ]
+}
+
+smite_frp_wizard_advanced_menu() {
+    local role="$1" choice=""
     while true; do
         clear
-        echo "======================================"
-        echo "       Standard FRP Setup Wizard"
-        echo "======================================"
-        echo "Role: $role | Connection mode: $(smite_frp_std_state SMITE_CONNECTION_MODE)"
-        echo "Smite FRP tunnel and IR Nginx XHTTP Path are TWO different settings."
-        echo "KH Step 5 is a checklist; on IR Step 5 SAVES the matching path."
-        echo
-        echo "1) Step 1: Check prerequisites and current status"
-        if [ "$role" = ir ]; then
-            echo "2) Step 2: Install Smite Panel + Iran Node"
-            echo "3) Step 3: Configure IR HTTPS/443 Gateway"
-            echo "4) Step 4: Check FRPS WSS + automatic XHTTP routes"
-            echo "5) Step 5: Register IR Nginx XHTTP Path (after Smite FRP TCP tunnel)"
-            echo "6) Step 6: Probe XHTTP via IR HTTPS/443"
-        else
-            echo "2) Step 2: Install Foreign Smite Node"
-            echo "3) Step 3: Configure KH control HTTPS/443 Gateway"
-            echo "4) Step 4: Install Docker Sanaei (existing management)"
-            echo "5) Step 5: KH Sanaei Path checklist ONLY (no changes)"
-            echo "6) Step 6: Probe KH loopback XHTTP"
-        fi
-        echo "7) Step 7: Display configured v2rayN settings"
-        echo "8) Step 8: Reboot/Repair/Rebuild checklist"
-        echo "9) Diagnose XHTTP response timing (read-only, NOT download speed)"
+        echo "===== FRP ADVANCED | $role ====="
+        echo "1) Read-only status"
+        echo "2) Legacy Smite installer"
+        echo "3) Legacy HTTPS gateway installer"
+        echo "4) IR FRPS status / KH Docker Sanaei menu"
+        echo "5) Legacy FRP TCP + IR Path guide"
+        echo "6) Original XHTTP probe"
+        echo "7) v2rayN client settings"
+        echo "8) Repair and reboot checklist"
+        echo "9) Response timing (read-only)"
         echo "0) Back"
-        read -rp "Choose [0-9]: " choice
+        read -rp "Choose [0-9]: " choice || return
         case "$choice" in
-            1|4)
-                if [ "$choice" = 4 ] && [ "$role" = kh ]; then
-                    show_docker_3xui_menu
-                else
-                    smite_frp_wizard_status "$role"
-                fi
-                ;;
+            1) smite_frp_wizard_status "$role" ;;
             2) smite_frp_std_install "$role" ;;
             3)
                 if [ "$role" = ir ]; then
                     smite_gateway_configure_panel
                 else
                     smite_foreign_gateway_configure
-                fi
-                ;;
+                fi ;;
+            4)
+                if [ "$role" = kh ]; then
+                    show_docker_3xui_menu
+                else
+                    smite_frp_wizard_status "$role"
+                fi ;;
             5) smite_frp_wizard_tunnel "$role" ;;
             6) smite_frp_wizard_probe "$role" ;;
             7) smite_frp_wizard_client ;;
             8) smite_frp_wizard_recovery ;;
             9) smite_frp_wizard_timing "$role" ;;
+            0) return ;;
+            *) echo "Invalid selection."; sleep 1 ;;
+        esac
+    done
+}
+
+smite_frp_wizard_menu() {
+    local role="${1:-}" detected="" mode="" choice=""
+    mode="$(smite_frp_std_state SMITE_CONNECTION_MODE)"
+    if [ -n "$mode" ] && [ "$mode" != standard ]; then
+        echo "HOLD: Existing mode $mode is not Standard; no changes."
+        smite_frp_wizard_pause; return 2
+    fi
+    detected="$(smite_frp_wizard_role)"
+    case "$role" in
+        ir|kh)
+            if [ "$detected" != unknown ] && [ "$detected" != "$role" ]; then
+                echo "HOLD: Selected role conflicts with existing Smite role."
+                smite_frp_wizard_pause; return 2
+            fi ;;
+        "") role="$detected" ;;
+        *) echo "HOLD: Invalid logical IR/KH role."; return 2 ;;
+    esac
+    if [ "$role" = unknown ]; then
+        echo "===== Select logical host role (once per menu) ====="
+        echo "1) IR panel + Iran node | 2) KH foreign node | 0) Back"
+        read -rp "Choose [0-2]: " choice || return
+        case "$choice" in 1) role=ir ;; 2) role=kh ;; *) return ;; esac
+    fi
+    while true; do
+        clear
+        echo "======================================"
+        echo "      Standard FRP EASY SETUP"
+        echo "======================================"
+        echo "This server: $role | Smite: $(smite_frp_wizard_mode_label)"
+        echo "1) START HERE - Install/check Smite + HTTPS Gateway"
+        echo "2) PORT + PATH - Match KH Sanaei and IR Nginx"
+        echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"
+        echo "4) Advanced - Original detailed steps and recovery"
+        echo "0) Back"
+        read -rp "Choose [0-4]: " choice || return
+        case "$choice" in
+            1) smite_frp_wizard_start_here "$role" ;;
+            2) smite_frp_wizard_easy_configure "$role" ;;
+            3) smite_frp_wizard_easy_verify "$role" ;;
+            4) smite_frp_wizard_advanced_menu "$role" ;;
             0) return ;;
             *) echo "Invalid selection."; sleep 1 ;;
         esac

@@ -228,7 +228,7 @@ docker_smite_advanced_menu() {
         echo "      Advanced & Legacy Tools"
         echo "======================================"
         echo "1) Standard FRP Test Guide (read-only)"
-        echo "2) Original FRP Setup Wizard"
+        echo "2) FRP setup (beginner + Advanced)"
         echo "3) Legacy Backhaul offline preparation (NOT installer)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice || return
@@ -260,14 +260,14 @@ docker_smite_management_menu() {
             2) if declare -F smite_tw_menu >/dev/null 2>&1; then
                    smite_tw_menu
                else
-                   echo "Tunnel Wizard missing; update the experimental branch first."
+                   echo "Tunnel Wizard missing; update U-OPTI from main first."
                fi ;;
             3) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
                   declare -F twcc_menu >/dev/null 2>&1; then
                    role="$(smite_tw_choose_role)" || continue
                    twcc_menu "$role"
                else
-                   echo "Status module missing; update the experimental branch first."
+                   echo "Status module missing; update U-OPTI from main first."
                fi ;;
             4) docker_smite_advanced_menu ;;
             0) return ;;

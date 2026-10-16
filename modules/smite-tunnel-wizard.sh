@@ -751,8 +751,8 @@ smite_tw_menu() {
     while true; do
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
-        echo "1) Backhaul — independent Sidecar management"
-        echo "2) FRP — existing Standard Smite wizard"
+        echo "1) Backhaul — guided Sidecar START HERE"
+        echo "2) FRP — EASY SETUP (Standard IR/KH)"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "0) Back"
@@ -763,14 +763,14 @@ smite_tw_menu() {
                 if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
                     smite_frp_wizard_menu "$role"
                 else
-                    echo "FRP wizard missing; update U-OPTI first."
+                    echo "FRP wizard missing; update U-OPTI from main first."
                     smite_tw_pause
                 fi ;;
             3) smite_tw_rathole_menu "$role" ;;
             4) if declare -F twcc_menu >/dev/null 2>&1; then
                    twcc_menu "$role"
                else
-                   echo "Tunnel Control Center missing; update the test branch."
+                   echo "Tunnel Control Center missing; update U-OPTI from main."
                    smite_tw_pause
                fi ;;
             0) return ;;
