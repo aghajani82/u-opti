@@ -64,7 +64,7 @@ class CustomFullBundle(unittest.TestCase):
                              data_port=port, xhttp_path=path)
         self.addCleanup(shutil.rmtree, sc)
         original = IR if role == "ir" else KH
-        vhost = nginx.IR_PATH if role == "ir" else nginx.KH_PATH
+        vhost = nginx.IR_PATH if role == "ir" else nginx.kh_vhost_path("kh.example.com")
         with patch.object(nginx, "original_bytes", return_value=original.encode()):
             ng = nginx.prepare(role, Path(vhost), "ir.example.com",
                                "kh.example.com", port, path)
