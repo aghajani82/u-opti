@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.1] - 2026-10-16
+
+### Added
+
+- Unified Standard Tunnel Management for **FRP** and independent **Backhaul Sidecar**, with a beginner-oriented **START HERE** flow for Backhaul. The wizard checks private pairing status, asks for the user's own Xray port and XHTTP base Path, enforces disposable-host approval, and refuses to overwrite existing/partial installs.
+- Custom XHTTP base Path per FRP forwarded port, persisted on IR and reconciled into exact/prefix HTTPS Nginx gateway locations without rewriting the request path. KH's wizard is clearly marked as a checklist; IR publishes the Nginx Path.
+- Read-only Backhaul diagnostics for IR and KH including custom port/Path, local prerequisites, trial journal, installed profile and safe Nginx layout. Unauthenticated local checks never claim full end-to-end connectivity.
+- FRP menu entry for read-only endpoint response-timing comparison.
+
+### Fixed
+
+- Backhaul pre-peer health audits now distinguish a valid IR control listener **waiting for KH** from a connected data port, retaining nonzero incomplete status and failing closed on unexpected listeners.
+- Backhaul installer output now separates pairing, installation, and verification. Explicit status checks and backups remain required before and after a test-host install.
+- FRP no longer calls a persisted Path "active" unless the managed Nginx routes are verified; invalid or colliding paths are refused.
+
+### Field validation
+
+- Operator verified FRP and independent Backhaul VLESS/XHTTP simultaneously with custom KH inbounds and paths: FRP **23005 /23005/web**; Backhaul **21235 /21235/tt**.
+- Both Backhaul Sidecars installed with durable trial_active journals. KH then IR rebooted separately; Docker and Sidecar local readiness recovered on both hosts. Operator then confirmed working clients and good speeds.
+- GitHub CI checks packaging, Bash/Python logic, safe Nginx ownership, experimental installation, and rollback guards. CI is **not** a substitute for testing new VPSs.
+
+### Important limits
+
+- **Backhaul Sidecar remains a guarded experimental test-host workflow**, requiring pre-existing Smite Standard roles, HTTPS/Nginx, KH Xray inbound, operator-managed snapshots, provider console and an independent explicit approval marker.
+- Install separately on IR and KH. It does **not** create Sanaei inbounds, automate Smite UI FRP tunnel creation, offer standalone non-Smite Backhaul, or safely change an existing Backhaul Sidecar Path in place.
+- Live two-host rollback/reinstall and fresh installs from main remain unverified. No production-readiness claim. Existing servers do not automatically switch from a pinned INSTALL_REF.
+
+
 ## [0.16.0] - 2026-10-12
 
 ### Added
