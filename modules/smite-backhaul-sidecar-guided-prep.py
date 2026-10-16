@@ -76,7 +76,7 @@ def prepare_fresh_pair(role: str, ir_domain: str, kh_host: str,
                                         xhttp_path=xhttp_path))
     if existing:
         raise GuidedHold("Fresh-host checks not passed: " + "; ".join(existing))
-    vhost = Path(nginx_plan.IR_PATH if role == "ir" else nginx_plan.KH_PATH)
+    vhost = Path(nginx_plan.IR_PATH if role == "ir" else nginx_plan.kh_vhost_path(kh_host))
     sc_stage: Path | None = None
     ng_stage: Path | None = None
     success = False
