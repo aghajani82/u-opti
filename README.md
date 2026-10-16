@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.16.1**
+**v0.16.2**
 
 ## Main Menu
 
@@ -22,6 +22,14 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Highlights in v0.16.2 (real four-action FRP beginner wizard)
+
+- **Actual primary FRP menu**: 1 START HERE, 2 PORT + PATH, 3 VERIFY, 4 Advanced. Previous 9 individual steps are preserved ONLY in Advanced.
+- Fresh IR/KH hosts display NOT INSTALLED, not blank Smite mode. START HERE explicitly offers Smite Standard and HTTPS-gateway installation and verifies role/containers before continuing; no blind reinstall.
+- PORT + PATH requests a safe custom KH XHTTP profile, guides creation of Smite FRP TCP tunnel and KH Sanaei inbound, and only IR publishes the corresponding Nginx Path with explicit consent. VERIFY probes XHTTP (HTTP 200 plus X-Padding) and shows the client recipe; actual VLESS traffic still needs manual testing.
+- Backhaul keeps its independent guarded Sidecar START HERE and custom XHTTP port/Path on FRESH TEST hosts. [Exact v0.16.2 menus and quick-start](docs/TUNNEL-QUICKSTART-0.16.2.md).
+- **Not production-certified:** standalone Backhaul, automatic Smite UI tunnel/inbound creation, live Backhaul Path changes, and real rollback/reinstall remain unsupported or unverified.
 
 ## Highlights in v0.16.1 (guided tunnel TEST release)
 
