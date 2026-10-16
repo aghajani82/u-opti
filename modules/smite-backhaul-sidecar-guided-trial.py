@@ -126,8 +126,11 @@ def diagnose(role: str, data_port: int = 56053,
     print("PRIVATE_PAIRING=" + ("READY" if token_ok else "MISSING_OR_INVALID"))
     print("TEST_HOST_APPROVAL=" + ("READY" if trial.disposable_host_approved()
                                     else "MISSING_OR_INVALID"))
-    vhost = (Path(guided.nginx_plan.IR_PATH) if role == "ir" else
-             Path(guided.nginx_plan.kh_vhost_path(kh_host)) if kh_host else None)
+    try:
+        vhost = (Path(guided.nginx_plan.IR_PATH) if role == "ir" else
+                 Path(guided.nginx_plan.kh_vhost_path(kh_host)) if kh_host else None)
+    except (TypeError, ValueError):
+        vhost = None
     print("EXPECTED_NGINX_VHOST=" + ("FOUND" if vhost is not None and vhost.is_file() and not vhost.is_symlink()
                                        else "MISSING_OR_UNEXPECTED"))
     issues = guided.readiness.inspect_local(
