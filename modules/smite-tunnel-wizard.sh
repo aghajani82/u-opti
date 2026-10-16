@@ -205,9 +205,9 @@ smite_tw_backhaul_steps() {
     echo "Step 7: Enable Docker unless-stopped and reboot each host SEPARATELY."
     echo "Step 8: Confirm status, backups, rollback and legacy services unchanged."
     echo
-    echo "INSTALLATION STATUS: REVIEW ONLY in this wizard."
-    echo "Reason: existing Backhaul module generates offline candidates; it has"
-    echo "not been upgraded into an audited transactional live installer."
+    echo "INSTALLATION: Backhaul main menu -> 2) INSTALL Sidecar (TEST VPS ONLY)."
+    echo "The installer is journaled and separately confirmed, NOT production-approved."
+    echo "Pairing and offline preview are NOT installation."
     echo "Do NOT create a second Backhaul tunnel in Smite using these ports."
 }
 
@@ -219,7 +219,7 @@ smite_tw_backhaul_prepare() {
     echo "This creates private 0600 files under a new /tmp directory."
     echo "No Nginx, Docker, Smite, firewall, restart, or port will change."
     echo "The candidate contains a token: NEVER share or publish the directory."
-    echo "Custom port/path are OFFLINE PREVIEW ONLY, not used by the current live installer."
+    echo "This is an OFFLINE PREVIEW; custom port/path are supported in the SEPARATE live TEST installer."
     if [ "$(id -u)" -ne 0 ] || [ ! -f "$module" ] || [ ! -f "$token" ] || [ -L "$token" ]; then
         echo "NOT READY: root, candidate generator and existing private token required."
         echo "Prepare the secure token on IR first and transfer it to KH privately."
