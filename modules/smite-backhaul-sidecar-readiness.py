@@ -228,7 +228,21 @@ def evaluate(role: str, mode: str, *, ports: dict[int, list[tuple[str, str]]],
             expected = [(13080, "nginx")]
         for port, owner in expected:
             if not is_expected(ports, port, "127.0.0.1", owner):
-                failures.append(f"Expected isolated {owner} listener on 127.0.0.1:{port} absent")
+                if role == "ir" and port == data_port and port not in ports:
+                    # The Backhaul server's dynamic data listener is created
+                    # when the foreign client authenticates. A fresh IR-only
+                    # install may legitimately have no data listener yet.
+                    # Still fail closed; never mark the host fully healthy.
+                    failures.append(
+                        f"WAITING_FOR_KH_PEER: IR data port 127.0.0.1:{port} "
+                        "not listening yet. Install/check KH Sidecar, then "
+                        "re-run this read-only audit. Do NOT reinstall IR."
+                    )
+                else:
+                    failures.append(
+                        f"Expected isolated {owner} listener on "
+                        f"127.0.0.1:{port} absent or unexpected"
+                    )
     elif mode == "new":
         if container_exists or owned_files:
             failures.append("Existing/partial Sidecar detected; fresh install REFUSED")
@@ -301,9 +315,19 @@ def main() -> int:
     failures = inspect_local(args.role, args.mode, args.data_port, args.xhttp_path)
     print(f"BACKHAUL READ-ONLY AUDIT | role={args.role} | check={args.mode}")
     if failures:
-        for reason in failures:
-            print(f"HOLD: {reason}")
-        print("NO INSTALLATION OR SERVICE CHANGE. Manual review required.")
+        waiting_only = (args.mode == "existing" and args.role == "ir"
+                        and len(failures) == 1
+                        and failures[0].startswith("WAITING_FOR_KH_PEER:"))
+        if waiting_only:
+            print(failures[0])
+            print("LOCAL_CHECK_INCOMPLETE_PEER_NOT_CONNECTED")
+            print("This is NOT a healthy/connected result. Wait for KH;")
+            print("do NOT re-run the IR installer or rebuild either VPS.")
+        else:
+            for reason in failures:
+                print(f"HOLD: {reason}")
+            print("NO INSTALLATION OR SERVICE CHANGE. Manual review required.")
+        print("NO FILES WRITTEN; NO SERVICES MODIFIED.")
         return 2
     if args.mode == "existing":
         print("EXISTING_SIDECAR_LOCAL_CHECKS_PASSED")
