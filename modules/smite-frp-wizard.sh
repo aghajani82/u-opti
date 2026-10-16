@@ -79,7 +79,8 @@ smite_frp_wizard_path() {
 smite_frp_wizard_tunnel() {
     local role="$1" panel="" answer="" port="" oldpath="" path=""
     panel="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
-    echo "==== Create FRP Tunnel in Smite UI ===="
+    echo "==== FRP TCP tunnel and XHTTP gateway Path ===="
+    echo "This is a SEPARATE step from creating the FRP tunnel in Smite UI."
     echo "1. Visit https://${panel:-IR-PANEL-DOMAIN}:443"
     echo "2. Ensure IR and KH Smite nodes are online."
     echo "3. Smite UI: Tunnels -> Create -> FRP -> TCP."
@@ -100,10 +101,22 @@ smite_frp_wizard_tunnel() {
         path="${path:-$oldpath}"
         path="${path%/}"
         echo "Registering FRP port $port with XHTTP Path $path on IR ONLY."
-        smite_frp_xhttp_register_path "$port" "$path" || echo "NOT APPLIED: inspect FRP tunnel, path collision, and Nginx."
+        if smite_frp_xhttp_register_path "$port" "$path"; then
+            echo "IR GATEWAY PATH CHECK:"
+            smite_frp_xhttp_verify_path "$port" "$path" &&
+                echo "IR_XHTTP_NGINX_PATH_VERIFIED=$path" ||
+                echo "HOLD: Nginx route publication NOT verified."
+        else
+            echo "HOLD: Path NOT APPLIED. Inspect FRP tunnel, path collision, and Nginx."
+            smite_frp_wizard_pause
+            return 1
+        fi
     else
-        echo "KH: Set Sanaei Path to the SAME value registered on IR."
-        echo "KH does not modify the IR gateway registry."
+        echo "KH GUIDE ONLY: This menu has made NO changes on this server."
+        echo "KH: Set your Sanaei XHTTP inbound Path manually."
+        echo "IMPORTANT: Go to the IR server -> FRP Step 5 to register"
+        echo "the SAME custom Path in IR Nginx after applying the Smite FRP tunnel."
+        echo "KH cannot change or publish IR routes from this screen."
     fi
     smite_frp_wizard_pause
 }
@@ -212,20 +225,21 @@ smite_frp_wizard_menu() {
         echo "       Standard FRP Setup Wizard"
         echo "======================================"
         echo "Role: $role | Connection mode: $(smite_frp_std_state SMITE_CONNECTION_MODE)"
-        echo "Complete these steps IN ORDER; Standard only."
+        echo "Smite FRP tunnel and IR Nginx XHTTP Path are TWO different settings."
+        echo "Complete setup in order; KH Step 5 is ONLY an explanation."
         echo
         echo "1) Step 1: Check prerequisites and current status"
         if [ "$role" = ir ]; then
             echo "2) Step 2: Install Smite Panel + Iran Node"
             echo "3) Step 3: Configure IR HTTPS/443 Gateway"
             echo "4) Step 4: Check FRPS WSS + automatic XHTTP routes"
-            echo "5) Step 5: Create FRP TCP tunnel + set custom XHTTP Path"
+            echo "5) Step 5: Register IR Nginx XHTTP Path (after Smite FRP TCP tunnel)"
             echo "6) Step 6: Probe XHTTP via IR HTTPS/443"
         else
             echo "2) Step 2: Install Foreign Smite Node"
             echo "3) Step 3: Configure KH control HTTPS/443 Gateway"
             echo "4) Step 4: Install Docker Sanaei (existing management)"
-            echo "5) Step 5: Configure Sanaei inbound + matching FRP Path"
+            echo "5) Step 5: KH Sanaei Path checklist (GUIDE ONLY, not applied)"
             echo "6) Step 6: Probe KH loopback XHTTP"
         fi
         echo "7) Step 7: Display configured v2rayN settings"
