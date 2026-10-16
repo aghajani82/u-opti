@@ -84,30 +84,129 @@ def install_fresh(role: str, ir_domain: str, kh_host: str,
     return SUCCESS
 
 
+
+def diagnose(role: str, data_port: int = 56053,
+             xhttp_path: str | None = None, ir_domain: str | None = None,
+             kh_host: str | None = None) -> int:
+    """No mutation, no staging, no token or secret printing.
+
+    A missing journal is explicitly NOT an installation; this catches the
+    recurring operator confusion between Smite/FRP/Backhaul pairing and
+    independently activating the Sidecar.
+    """
+    print("BACKHAUL GUIDED STATUS | READ-ONLY | role=" + role)
+    print("Checks only THIS host. Does not contact the other VPS.")
+    try:
+        role_gate._trusted_role(role)
+        print("SMITE_ROLE_AND_MODE=VERIFIED")
+    except Exception:
+        print("SMITE_ROLE_AND_MODE=HOLD (expected Standard Smite role)")
+        print("NEXT=Correct the selected IR/KH server; do not install.")
+        return 2
+
+    try:
+        port, path = guided.sidecar.validated_profile(data_port, xhttp_path)
+        print(f"REQUESTED_XRAY_PROFILE={port} {path}")
+    except Exception:
+        print("XRAY_PROFILE=HOLD (unsafe/invalid port or XHTTP base Path)")
+        return 2
+
+    current = trial._root(role)
+    if current.exists() or current.is_symlink():
+        print("INSTALL_JOURNAL=PRESENT")
+        print("NEXT=Read trial journal and existing Sidecar health; never reinstall over it.")
+        return 2
+    print("INSTALL_JOURNAL=MISSING")
+    print("INSTALLATION=NOT VERIFIED; pairing is NOT Sidecar installation.")
+
+    try:
+        token_ok = guided.token_tool.inspect(guided.TOKEN_FILE)
+    except Exception:
+        token_ok = False
+    print("PRIVATE_PAIRING=" + ("READY" if token_ok else "MISSING_OR_INVALID"))
+    print("TEST_HOST_APPROVAL=" + ("READY" if trial.disposable_host_approved()
+                                    else "MISSING_OR_INVALID"))
+    vhost = Path(guided.nginx_plan.IR_PATH if role == "ir" else guided.nginx_plan.KH_PATH)
+    print("EXPECTED_NGINX_VHOST=" + ("FOUND" if vhost.is_file() and not vhost.is_symlink()
+                                       else "MISSING_OR_UNEXPECTED"))
+    issues = guided.readiness.inspect_local(
+        role, "new", data_port=port, xhttp_path=path)
+    if issues:
+        print("LOCAL_FRESH_READINESS=HOLD")
+        # Fixed internal audit strings contain no token-bearing file content.
+        for issue in issues:
+            print("LOCAL_HOLD: " + issue)
+    else:
+        print("LOCAL_FRESH_READINESS=PASSED")
+
+    layout_ok = True
+    if ir_domain is not None or kh_host is not None:
+        if not ir_domain or not kh_host:
+            layout_ok = False
+        else:
+            try:
+                source = guided.nginx_plan.original_bytes(vhost)
+                guided.nginx_plan.compile_nginx(
+                    role, source, ir_domain, kh_host, port, path)
+            except Exception:
+                layout_ok = False
+        print("SELECTED_NGINX_LAYOUT=" + ("SUPPORTED" if layout_ok else "HOLD"))
+        if not layout_ok:
+            print("NEXT=Verify domain, exact Nginx host and supported proxy layout.")
+    else:
+        print("SELECTED_NGINX_LAYOUT=NOT_CHECKED (supply both hostnames)")
+
+    if not token_ok:
+        print("NEXT=Backhaul Step 1 Pair IR/KH on the fresh hosts.")
+    elif not trial.disposable_host_approved():
+        print("NEXT=After snapshot and console, register test-host approval.")
+    elif issues or not layout_ok or not vhost.is_file():
+        print("NEXT=Fix the local preflight condition; do not start installation.")
+    else:
+        print("NEXT=Backhaul Step 2 INSTALL Sidecar (separate on BOTH hosts).")
+        print("Passing this check is NOT an install or proof of TLS/client traffic.")
+    print("READ_ONLY_NO_FILES_CHANGED")
+    return 0 if token_ok and trial.disposable_host_approved() and not issues and layout_ok and vhost.is_file() else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", required=True, choices=("ir", "kh"))
-    parser.add_argument("--ir-domain", required=True)
-    parser.add_argument("--kh-host", required=True)
+    parser.add_argument("--ir-domain")
+    parser.add_argument("--kh-host")
     parser.add_argument("--data-port", type=int, default=56053)
     parser.add_argument("--xhttp-path", default=None)
-    parser.add_argument("--install-test", action="store_true")
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument("--install-test", action="store_true")
+    actions.add_argument("--diagnose", action="store_true")
     parser.add_argument("--test-host-approval", default="")
     parser.add_argument("--confirm", default="")
     args = parser.parse_args()
-    if not args.install_test:
-        print("HOLD: Only a separately confirmed disposable TEST install is supported.")
+    if args.diagnose:
+        return diagnose(args.role, args.data_port, args.xhttp_path,
+                        args.ir_domain, args.kh_host)
+    if not args.ir_domain or not args.kh_host:
+        print("HOLD: Both IR and KH domains are required for installation.")
         return 2
     try:
         result = install_fresh(args.role, args.ir_domain, args.kh_host,
                                args.test_host_approval, args.confirm,
                                args.data_port, args.xhttp_path)
-    except Exception:
-        # Never print lower-layer exceptions: candidate or vhost contents can
-        # be sensitive. An error may occur AFTER trial activation; NEVER
-        # recommend an automatic retry, duplicate install or unsafe cleanup.
+    except Exception as exc:
+        # Fixed error categories only: never echo private token, vhost contents
+        # or uncontrolled lower-layer exception strings.
+        if isinstance(exc, GuidedTrialHold):
+            stage = "HOST_APPROVAL_OR_EXISTING_INSTALLATION"
+        elif isinstance(exc, guided.GuidedHold):
+            stage = "PREPARATION_OR_NGINX_ADMISSION"
+        elif isinstance(exc, trial.TrialRefused):
+            stage = "TRANSACTION_OR_POST_INSTALL_VERIFICATION"
+        else:
+            stage = "UNEXPECTED_REVIEW_REQUIRED"
+        print("HOLD_STAGE=" + stage)
         print("HOLD: Guided TEST installation incomplete or unverified.")
         print("Check the local trial journal/status READ-ONLY before retrying.")
+        print("NEXT=Run --diagnose with the SAME port, path and hostnames on THIS host.")
         print("Do not overwrite an existing Sidecar or force recovery.")
         return 2
     print(result)
