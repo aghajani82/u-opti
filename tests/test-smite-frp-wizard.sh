@@ -53,6 +53,8 @@ curl() {
 
 source modules/smite-frp-wizard.sh
 smite_frp_wizard_pause() { :; }
+# The module intentionally defines its own prompt; test supplies a fixed safe port.
+smite_frp_wizard_port() { printf 13914; }
 test "$(smite_frp_wizard_mode_label)" = standard
 test "$(smite_frp_wizard_role)" = ir
 test "$(smite_frp_wizard_client)" != ""
