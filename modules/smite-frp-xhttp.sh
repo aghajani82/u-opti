@@ -109,6 +109,16 @@ smite_frp_xhttp_get_path() {
     python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" get "$1"
 }
 
+# Read-only route visibility; registry state alone is not deployment proof.
+smite_frp_xhttp_verify_path() {
+    local port="$1" path="$2"
+    [ -f "$SMITE_FRP_XHTTP_CONF" ] || return 1
+    python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" check "$port" "$path" >/dev/null || return 1
+    grep -Fxq "    location = $path {" "$SMITE_FRP_XHTTP_CONF" &&
+    grep -Fxq "    location ^~ $path/ {" "$SMITE_FRP_XHTTP_CONF" &&
+    grep -Fq "    include $SMITE_FRP_XHTTP_CONF;" "$SMITE_FRP_XHTTP_BACKEND"
+}
+
 smite_frp_xhttp_register_path() {
     local port="$1" path="$2" old_path snapshot
     smite_frp_xhttp_enabled || { echo "HOLD: Smite Standard FRP is not prepared."; return 1; }
@@ -127,13 +137,23 @@ smite_frp_xhttp_register_path() {
     rm -f "$snapshot"
     old_path="$(smite_frp_xhttp_get_path "$port")" || return 1
     if [ "$old_path" = "$path" ]; then
-        echo "FRP XHTTP path unchanged: $path"
+        # A matching registry value alone is NOT a published Nginx route.
+        # Reconcile and verify the managed locations before reporting success.
+        if ! smite_frp_xhttp_sync; then
+            echo "HOLD: Saved FRP Path exists but Nginx sync failed." >&2
+            return 1
+        fi
+        if ! smite_frp_xhttp_verify_path "$port" "$path"; then
+            echo "HOLD: Saved FRP Path is NOT active in the Nginx include." >&2
+            return 1
+        fi
+        echo "FRP XHTTP path confirmed on IR: $path"
         return 0
     fi
     if ! python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" set "$port" "$path"; then
         return 1
     fi
-    if smite_frp_xhttp_sync; then
+    if smite_frp_xhttp_sync && smite_frp_xhttp_verify_path "$port" "$path"; then
         echo "FRP XHTTP path ACTIVE on IR: $path"
         return 0
     fi
