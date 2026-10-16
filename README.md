@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.16.0**
+**v0.16.1**
 
 ## Main Menu
 
@@ -22,6 +22,14 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Highlights in v0.16.1 (guided tunnel TEST release)
+
+- **Standard FRP + Backhaul** are available under Docker Management → Smite Management → Tunnel Management. Backhaul has one beginner entry, **START HERE**, which checks pairing and guides installation on **each** IR/KH host.
+- **Custom port and XHTTP Path** work for new Backhaul test installs. For FRP, register the selected Path on **IR** after creating/applying the Smite TCP tunnel; KH's Path screen is informational.
+- Backhaul diagnoses local readiness and peer-waiting instead of recommending repeat installs. FRP confirms paths only when published in Nginx, with optional response timing.
+- Field test: FRP port 23005 with /23005/web and Backhaul port 21235 with /21235/tt passed authenticated client traffic and sequential two-server reboots.
+- **Limits:** Existing Smite Standard, TLS/Nginx and KH Xray inbounds required. Sidecar installation is only for explicitly approved disposable TEST hosts. No standalone Backhaul, in-place active Path reconfiguration, or production/rollback qualification. See [Tunnel quick start](docs/TUNNEL-QUICKSTART-0.16.1.md).
 
 ## Highlights in v0.16.0
 
