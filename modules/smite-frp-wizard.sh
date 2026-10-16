@@ -176,6 +176,36 @@ smite_frp_wizard_client() {
     echo "Do not assume default/blank ALPN will work on this gateway."
     smite_frp_wizard_pause
 }
+# Read-only, non-secret endpoint timing. OPTIONS is NOT a bandwidth test.
+# KH tests the actual Xray loopback path; IR tests the complete local HTTPS
+# gateway, including the FRP TCP forward to KH if the tunnel is connected.
+smite_frp_wizard_timing() {
+    local role="$1" port="" path="" url="" domain="" result="" curl_args=()
+    port="$(smite_frp_wizard_port)" || { smite_frp_wizard_pause; return 1; }
+    path="$(smite_frp_wizard_path "$role" "$port")" || {
+        echo "HOLD: Need the selected XHTTP Path."; smite_frp_wizard_pause; return 1;
+    }
+    if [ "$role" = ir ]; then
+        domain="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
+        [ -n "$domain" ] || { echo "HOLD: IR panel hostname unavailable."; smite_frp_wizard_pause; return 1; }
+        url="https://$domain$path/"
+        curl_args=(--resolve "$domain:443:127.0.0.1")
+    else
+        url="http://127.0.0.1:$port$path/"
+    fi
+    echo "==== Standard FRP timing | READ-ONLY | role=$role ===="
+    echo "Target: $url"
+    echo "Uses one unauthenticated OPTIONS request. No credentials displayed."
+    if ! curl --noproxy '*' -4 -sS --connect-timeout 5 --max-time 12 \
+        --http1.1 -X OPTIONS -o /dev/null \
+        -w 'HTTP=%{http_code} CONNECT=%{time_connect}s TLS=%{time_appconnect}s FIRST_BYTE=%{time_starttransfer}s TOTAL=%{time_total}s\n' \
+        "${curl_args[@]}" "$url"; then
+        echo "NOT VERIFIED: check Xray listener, Path, FRP connectivity and SNI."
+    fi
+    echo "Timing is NOT throughput. Compare KH loopback vs IR gateway,"
+    echo "then measure actual VLESS client download and upload separately."
+    smite_frp_wizard_pause
+}
 smite_frp_wizard_recovery() {
     echo "==== FRP Repair / Reboot / Rebuild ===="
     echo "1. Check IR panel, KH control, both Smite nodes and Sanaei."
@@ -266,6 +296,7 @@ smite_frp_wizard_menu() {
             6) smite_frp_wizard_probe "$role" ;;
             7) smite_frp_wizard_client ;;
             8) smite_frp_wizard_recovery ;;
+            9) smite_frp_wizard_timing "$role" ;;
             0) return ;;
             *) echo "Invalid selection."; sleep 1 ;;
         esac
