@@ -7,6 +7,8 @@ grep -Fq '"smite-frp-wizard.sh"' install.sh
 grep -Fq '"smite-frp-wizard.sh"' u-opti
 grep -Fq 'smite-frp-xhttp.sh' u-opti
 grep -Fq 'smite-frp-xhttp-paths.py' u-opti
+grep -Fq '9) Diagnose XHTTP response timing' modules/smite-frp-wizard.sh
+grep -Fq 'Choose [0-9]' modules/smite-frp-wizard.sh
 
 MODE=standard
 ROLE=panel-iran
