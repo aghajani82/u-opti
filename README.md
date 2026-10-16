@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.16.2**
+**v0.16.3**
 
 ## Main Menu
 
@@ -22,6 +22,11 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Patch in v0.16.3 — Backhaul custom KH domains
+
+- Backhaul Sidecar now uses the verified KH Smite foreign hostname to select the exact Sanaei Nginx vhost during preflight, guarded install, journal/rollback and local audit. Custom hosts like `01kh.kolbe1.ir` no longer hit the old hard-coded `kh.kolbe1.ir` path.
+- This changes no existing IR Sidecar; KH still requires independent explicit disposable-host approval and a real end-to-end VLESS test. CI is synthetic and not live-host certification.
 
 ## Highlights in v0.16.2 (real four-action FRP beginner wizard)
 
