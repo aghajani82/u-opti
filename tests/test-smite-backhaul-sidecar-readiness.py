@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Hermetic readiness tests. NO access to production IR/KH hosts."""
 import importlib.util
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +50,43 @@ class ReadinessTests(unittest.TestCase):
     def test_existing_ir_kh_pilot(self):
         self.assertEqual([], evaluate("ir", "existing"))
         self.assertEqual([], evaluate("kh", "existing"))
+
+    def test_ir_dynamic_data_port_waits_for_kh_without_false_pass(self):
+        # Real field sequence: installing IR first starts :3080, but the
+        # dynamic :21235 listener appears only after KH connects.
+        ir = ports_ir()
+        ir.pop(56053)
+        reasons = evaluate("ir", "existing", ports=ir, data_port=21235)
+        self.assertEqual(len(reasons), 1)
+        self.assertTrue(reasons[0].startswith("WAITING_FOR_KH_PEER:"))
+        self.assertIn("21235", reasons[0])
+        ir[21235] = [("127.0.0.1", "backhaul")]
+        self.assertEqual([], evaluate("ir", "existing", ports=ir,
+                                      data_port=21235))
+
+    def test_ir_unexpected_data_port_owner_not_mislabeled_waiting(self):
+        ir = ports_ir()
+        ir.pop(56053)
+        ir[21235] = [("127.0.0.1", "other-process")]
+        reasons = evaluate("ir", "existing", ports=ir, data_port=21235)
+        self.assertEqual(len(reasons), 1)
+        self.assertNotIn("WAITING_FOR_KH_PEER", reasons[0])
+        self.assertIn("21235", reasons[0])
+        # Any unrelated failure also prevents the benign waiting-only case.
+        ir.pop(21235)
+        reasons = evaluate("ir", "existing", ports=ir, data_port=21235,
+                           routes_ok=False)
+        self.assertEqual(len(reasons), 2)
+
+    def test_waiting_cli_keeps_nonzero_exit_without_exposing_secrets(self):
+        waiting = "WAITING_FOR_KH_PEER: IR data port 127.0.0.1:21235 not listening yet."
+        with patch.object(audit, "inspect_local", return_value=[waiting]), \
+             patch.object(sys, "argv", ["audit", "--role", "ir", "--mode", "existing"]), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(audit.main(), 2)
+            self.assertIn("LOCAL_CHECK_INCOMPLETE_PEER_NOT_CONNECTED", output.getvalue())
+            self.assertIn("do NOT re-run", output.getvalue())
+            self.assertNotIn("EXISTING_SIDECAR_LOCAL_CHECKS_PASSED", output.getvalue())
 
     def test_fresh_on_empty_reserved_ports(self):
         ir = ports_ir()
