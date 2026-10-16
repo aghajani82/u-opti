@@ -18,7 +18,7 @@ If not reinstalling, use U-OPTI main menu option **8 Update U-OPTI**. Check INST
 
 1. **IR role**: Smite Standard Panel+Node, HTTPS domain with valid TLS certificate and Nginx TCP/443 entry.
 2. **KH role**: Smite Standard Foreign Node and Docker Sanaei 3x-UI with a separate VLESS/XHTTP inbound for each tunnel, listening on 127.0.0.1 (security none; TLS terminates on IR).
-3. Choose a new KH inbound TCP port (1024–65535 excluding reserved/colliding ports) and custom slashless XHTTP base Path, such as /21235/tt or /assets/connect. The Xray inbound and corresponding client must use the exact same Path. The OPTIONS request may append a trailing slash.
+3. Choose a new KH inbound TCP port (1024–65535 excluding reserved/colliding ports) and custom slashless XHTTP base Path, such as /21235/tt or /service/connect (avoid reserved HTTP namespaces). The Xray inbound and corresponding client must use the exact same Path. The OPTIONS request may append a trailing slash.
 4. Do not open public FRPS/Backhaul control or Xray data ports. Keep the existing FRP and production Nginx configuration intact.
 
 ## FRP — keep Smite TCP tunnel separate from its HTTPS Path
