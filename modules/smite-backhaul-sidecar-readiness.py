@@ -24,7 +24,37 @@ IR_PANEL = Path("/etc/nginx/conf.d/u-opti-smite-panel-backend.conf")
 IR_CONTROL = Path("/etc/nginx/u-opti-backhaul-sidecar-control.inc")
 IR_XHTTP = Path("/etc/nginx/u-opti-backhaul-sidecar-xhttp.inc")
 KH_BRIDGE = Path("/etc/nginx/conf.d/u-opti-backhaul-sidecar-bridge.conf")
-KH_VHOST = Path("/etc/nginx/sites-available/3xui-kh.kolbe1.ir")
+KH_STATE = Path("/etc/u-opti/smite/state.env")
+
+
+def installed_kh_vhost() -> Path | None:
+    """Find the exact KH Sanaei HTTPS site from verified local Smite state."""
+    try:
+        info = KH_STATE.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != 0 or info.st_size > 4096
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            return None
+        raw = KH_STATE.read_text(encoding="utf-8")
+        def value(name: str) -> str | None:
+            found = re.findall(r"(?m)^" + re.escape(name) + r"=([^\\n]+)$", raw)
+            return found[0].strip().strip('"').strip("'") if len(found) == 1 else None
+        if value("SMITE_ROLE") != "foreign" or value("SMITE_CONNECTION_MODE") != "standard":
+            return None
+        host = value("SMITE_FOREIGN_DOMAIN")
+        if not host:
+            return None
+        spec = importlib.util.spec_from_file_location(
+            "readiness_nginx_domain", Path(__file__).with_name(
+                "smite-backhaul-sidecar-nginx-plan.py"))
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return Path(mod.kh_vhost_path(host))
+    except (OSError, ValueError, UnicodeError):
+        return None
+
 CONFIG_DIR = Path("/etc/u-opti/backhaul-sidecar")
 
 
@@ -138,7 +168,9 @@ def nginx_routes(role: str, data_port: int = 56053,
             and f"proxy_pass http://127.0.0.1:{data_port};" in data
         )
     bridge = read_small(KH_BRIDGE) or ""
-    vhost = read_small(KH_VHOST) or ""
+    kh_site = installed_kh_vhost()
+    vhost = read_small(kh_site) if kh_site is not None else ""
+    vhost = vhost or ""
     guard = "location ~ ^/0*13080(/|$)"
     forward = "location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$"
     return (
