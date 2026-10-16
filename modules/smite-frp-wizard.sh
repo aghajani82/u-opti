@@ -256,7 +256,7 @@ smite_frp_wizard_menu() {
         echo "======================================"
         echo "Role: $role | Connection mode: $(smite_frp_std_state SMITE_CONNECTION_MODE)"
         echo "Smite FRP tunnel and IR Nginx XHTTP Path are TWO different settings."
-        echo "Complete setup in order; KH Step 5 is ONLY an explanation."
+        echo "KH Step 5 is a checklist; on IR Step 5 SAVES the matching path."
         echo
         echo "1) Step 1: Check prerequisites and current status"
         if [ "$role" = ir ]; then
@@ -269,13 +269,14 @@ smite_frp_wizard_menu() {
             echo "2) Step 2: Install Foreign Smite Node"
             echo "3) Step 3: Configure KH control HTTPS/443 Gateway"
             echo "4) Step 4: Install Docker Sanaei (existing management)"
-            echo "5) Step 5: KH Sanaei Path checklist (GUIDE ONLY, not applied)"
+            echo "5) Step 5: KH Sanaei Path checklist ONLY (no changes)"
             echo "6) Step 6: Probe KH loopback XHTTP"
         fi
         echo "7) Step 7: Display configured v2rayN settings"
         echo "8) Step 8: Reboot/Repair/Rebuild checklist"
+        echo "9) Diagnose XHTTP response timing (read-only, NOT download speed)"
         echo "0) Back"
-        read -rp "Choose [0-8]: " choice
+        read -rp "Choose [0-9]: " choice
         case "$choice" in
             1|4)
                 if [ "$choice" = 4 ] && [ "$role" = kh ]; then
