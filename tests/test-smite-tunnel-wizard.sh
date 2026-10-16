@@ -85,7 +85,7 @@ if grep -Fq 'Legacy example ONLY' <<< "$custom_profile"; then
 fi
 
 steps="$(smite_tw_backhaul_steps ir)"
-grep -Fq 'not production-approved' <<< "$steps"
+grep -Fq 'NOT production-approved' <<< "$steps"
 grep -Fq 'NOT' <<< "$steps"
 grep -Fq 'Rathole' modules/smite-tunnel-wizard.sh
 
