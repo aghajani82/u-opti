@@ -358,6 +358,11 @@ smite_frp_wizard_easy_verify() {
     smite_frp_wizard_ready "$role" || { smite_frp_wizard_pause; return 2; }
     smite_frp_wizard_choose_profile "$role" || { smite_frp_wizard_pause; return 2; }
     domain="$(smite_frp_std_state SMITE_PANEL_DOMAIN)"
+    # Never construct a curl URL/--resolve from malformed installed state.
+    if [[ ! "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || [[ "$domain" != *.* ]]; then
+        echo "HOLD: Saved IR HTTPS hostname missing or unsafe."
+        smite_frp_wizard_pause; return 2
+    fi
     if [ "$role" = ir ]; then
         smite_frp_xhttp_verify_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH" || {
             echo "HOLD: IR Nginx Path not published."
@@ -376,7 +381,9 @@ smite_frp_wizard_easy_verify() {
         --max-time 12 -X OPTIONS -D "$headers" -o /dev/null \
         -w '%{http_code}' "${args[@]}" "$url")" || status="network-error"
     echo "Endpoint: $url | HTTP: $status"
+    local handler_ok=0
     if [ "$status" = 200 ] && grep -iq '^X-Padding:' "$headers"; then
+        handler_ok=1
         echo "XHTTP_HANDLER_REACHED=YES"
     else
         echo "XHTTP_HANDLER_REACHED=NO (inspect Xray/FRP/Path/TLS)"
@@ -389,7 +396,7 @@ smite_frp_wizard_easy_verify() {
     echo "An OPTIONS probe is NOT authenticated VLESS or throughput."
     echo "Test real v2rayN FRP + Backhaul traffic, then separate reboots."
     smite_frp_wizard_pause
-    [ "$status" = 200 ]
+    [ "$handler_ok" = 1 ]
 }
 
 smite_frp_wizard_advanced_menu() {
