@@ -457,6 +457,20 @@ smite_tw_backhaul_manual_menu() {
     done
 }
 
+smite_tw_backhaul_install_badge() {
+    local role="$1" trialroot="/var/lib/u-opti/backhaul-trial/$1" container=""
+    container="uopti-backhaul-sidecar-$role"
+    if [ -e "$trialroot" ] || [ -L "$trialroot" ]; then
+        echo "Sidecar: TRIAL JOURNAL PRESENT - use Step 3. Do NOT reinstall."
+    elif docker container inspect "$container" >/dev/null 2>&1; then
+        echo "Sidecar: CONTAINER FOUND BUT NO JOURNAL - STOP, inspect Step 3."
+    elif [ -e "/etc/u-opti/backhaul-sidecar/$role.toml" ]; then
+        echo "Sidecar: PROFILE FOUND BUT NO JOURNAL - STOP, inspect Step 3."
+    else
+        echo "Sidecar: NOT INSTALLED (pairing alone does not install it)."
+    fi
+}
+
 smite_tw_backhaul_guided_trial_install() {
     local role="$1" module ir_domain kh_host data_port xhttp_path gate confirm
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
@@ -466,6 +480,8 @@ smite_tw_backhaul_guided_trial_install() {
     echo "Does not install Smite, 3x-UI, certificates or Xray inbounds."
     echo "Do NOT run on the already working IR/KH trial hosts."
     echo "All journal, ownership, host approval and rollback gates stay enabled."
+    echo "IMPORTANT: Pairing is ONLY a token exchange, NOT a Sidecar installation."
+    echo "This Step 2 MUST finish separately on BOTH IR and KH."
     [ -s "$module" ] || { echo "Guided trial module missing; update test branch."; return 1; }
     [ "$(id -u)" -eq 0 ] || { echo "Root required."; return 1; }
     read -rp "IR HTTPS domain: " ir_domain || return 1
@@ -480,15 +496,40 @@ smite_tw_backhaul_guided_trial_install() {
     xhttp_path="${xhttp_path%/}"
     echo "Selected KH Xray port: $data_port | XHTTP base path: $xhttp_path"
     echo "Do not reuse FRP paths or a port already occupied on IR."
+    echo
+    echo "===== PHASE A: READ-ONLY LOCAL PREFLIGHT ====="
+    if ! python3 -B "$module" --diagnose --role "$role" \
+         --ir-domain "$ir_domain" --kh-host "$kh_host" \
+         --data-port "$data_port" --xhttp-path "$xhttp_path"; then
+        echo "INSTALLATION NOT STARTED. Resolve the HOLD shown above."
+        echo "No automatic retries. Use Step 3 to check existing state."
+        return 1
+    fi
+    echo
+    echo "LOCAL CHECK PASSED; NOT YET INSTALLED."
+    echo "===== PHASE B: EXPLICIT TEST-HOST APPROVAL ====="
     read -rp "Type REBUILT-TEST-VPS if snapshot AND console are available: " gate || return 1
     [ "$gate" = REBUILT-TEST-VPS ] || { echo "Cancelled; nothing installed."; return 0; }
     confirm="INSTALL-${role^^}"
     read -rp "Type $confirm to approve changes ONLY to this $role test host: " gate || return 1
     [ "$gate" = "$confirm" ] || { echo "Cancelled; nothing installed."; return 0; }
-    UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
+    if UOPTI_BH_TEST_HOST=I_ACCEPT_REBUILD_TEST_HOST python3 -B "$module" \
         --role "$role" --ir-domain "$ir_domain" --kh-host "$kh_host" \
         --data-port "$data_port" --xhttp-path "$xhttp_path" \
-        --install-test --test-host-approval REBUILT-TEST-VPS --confirm "$confirm"
+        --install-test --test-host-approval REBUILT-TEST-VPS --confirm "$confirm"; then
+        echo
+        echo "===== PHASE C: CHECK LOCAL INSTALLATION ====="
+        python3 -B "$(dirname "$module")/smite-backhaul-sidecar-live-trial.py" \
+          --role "$role" --status || :
+        python3 -B "$(dirname "$module")/smite-backhaul-sidecar-readiness.py" \
+          --role "$role" --mode existing || :
+        echo "Next: Repeat Step 2 on OTHER host. Test authenticated VLESS AFTER both."
+    else
+        echo
+        echo "INSTALLATION NOT CONFIRMED. Do not rerun Step 2 blindly."
+        echo "Open Step 3 (read-only) and send non-secret output."
+        return 1
+    fi
 }
 
 # Everyday navigation follows the human workflow. All test-host mutation
@@ -500,15 +541,27 @@ smite_tw_backhaul_diagnostics_menu() {
         smite_tw_header
         printf 'Backhaul | Diagnostics | This machine: %s\n' "$role"
         echo "1) Current Sidecar status (read-only)"
-        echo "2) Full installed Sidecar audit (read-only)"
+        echo "2) Full installed Sidecar audit (read-only; fails if not installed)"
         echo "3) Trial journal status (read-only)"
+        echo "4) Diagnose fresh Sidecar installation (read-only)"
         echo "0) Back"
-        read -rp "Choose [0-3]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
             3) if [ -s "$module" ]; then python3 -B "$module" --role "$role" --status || :;
                else echo "Trial module missing."; fi; smite_tw_pause ;;
+            4)
+                local guided=""
+                guided="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
+                if [ -s "$guided" ]; then
+                    echo "Default 56053/www profile ONLY. For a CUSTOM port/path,"
+                    echo "use INSTALL option 2 and its exact read-only preflight."
+                    python3 -B "$guided" --role "$role" --diagnose || :
+                else
+                    echo "Guided diagnostics unavailable; update U-OPTI."
+                fi
+                smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
@@ -545,10 +598,12 @@ smite_tw_backhaul_menu() {
     while true; do
         smite_tw_header
         printf 'Protocol: Backhaul | This machine: %s\n\n' "$role"
-        echo "Follow steps 1 -> 2 -> 3 for a fresh experimental VPS."
-        echo "1) Step 1 - Pair IR/KH (two Bitvise terminals)"
-        echo "2) Step 2 - Install Backhaul Sidecar (TEST VPS ONLY)"
-        echo "3) Step 3 - Check status and troubleshoot (read-only)"
+        echo "Fresh TEST VPS: 1=PAIR TOKEN (not an install) -> 2=INSTALL -> 3=VERIFY."
+        smite_tw_backhaul_install_badge "$role"
+        echo
+        echo "1) Pair token only (do ON BOTH hosts; does NOT install)"
+        echo "2) INSTALL Sidecar on THIS host (fresh TEST VPS ONLY)"
+        echo "3) VERIFY installation and diagnose (read-only)"
         echo "4) Client configuration (VLESS/XHTTP)"
         echo "5) Recovery, preflight & advanced tools"
         echo "0) Back"
