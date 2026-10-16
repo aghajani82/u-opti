@@ -11,7 +11,7 @@ grep -Fq '"smite-backhaul-sidecar.py"' install.sh
 grep -Fq '"smite-backhaul-sidecar.py"' u-opti
 grep -Fq 'smite_tw_backhaul_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq -- '--data-port "$data_port" --xhttp-path "$xhttp_path"' modules/smite-tunnel-wizard.sh
-grep -Fq 'Custom port/path are OFFLINE PREVIEW ONLY' modules/smite-tunnel-wizard.sh
+grep -Fq 'This is an OFFLINE PREVIEW' modules/smite-tunnel-wizard.sh
 grep -Fq 'Pair token only (do ON BOTH hosts; does NOT install)' modules/smite-tunnel-wizard.sh
 grep -Fq 'INSTALL Sidecar on THIS host' modules/smite-tunnel-wizard.sh
 grep -Fq 'VERIFY installation and diagnose (read-only)' modules/smite-tunnel-wizard.sh
@@ -85,7 +85,7 @@ if grep -Fq 'Legacy example ONLY' <<< "$custom_profile"; then
 fi
 
 steps="$(smite_tw_backhaul_steps ir)"
-grep -Fq 'REVIEW ONLY' <<< "$steps"
+grep -Fq 'not production-approved' <<< "$steps"
 grep -Fq 'NOT' <<< "$steps"
 grep -Fq 'Rathole' modules/smite-tunnel-wizard.sh
 
