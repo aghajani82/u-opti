@@ -281,6 +281,9 @@ jobs:
           echo "Pinned image Backhaul version verified: $actual (isolated runner, no network)"
 
   sidecar-ws-transport:
+    # These destructive synthetic-container drills are explicitly PR-only.
+    # Their scripts intentionally refuse push/main execution.
+    if: github.event_name == 'pull_request'
     # Actual Backhaul traffic ONLY between ephemeral private-network containers.
     # No WAN access or live IR/KH access; container names only owned by this run.
     runs-on: ubuntu-latest
@@ -295,6 +298,9 @@ jobs:
           bash tests/test-smite-backhaul-sidecar-transport.sh
 
   sidecar-tls-bridge:
+    # These destructive synthetic-container drills are explicitly PR-only.
+    # Their scripts intentionally refuse push/main execution.
+    if: github.event_name == 'pull_request'
     # Only ephemeral GitHub runner containers on private Docker network.
     # No connection to live IR/KH or changes to production Nginx/FRP/Smite.
     runs-on: ubuntu-latest
@@ -309,6 +315,9 @@ jobs:
           bash tests/test-smite-backhaul-sidecar-tls.sh
 
   sidecar-service-reload-rollback:
+    # These destructive synthetic-container drills are explicitly PR-only.
+    # Their scripts intentionally refuse push/main execution.
+    if: github.event_name == 'pull_request'
     # Only on disposable GitHub-hosted runners in pull requests.
     # Private Docker network; no host ports or live server access.
     runs-on: ubuntu-latest
@@ -336,6 +345,9 @@ jobs:
           bash tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
 
   sidecar-real-transaction-executor:
+    # These destructive synthetic-container drills are explicitly PR-only.
+    # Their scripts intentionally refuse push/main execution.
+    if: github.event_name == 'pull_request'
     # Disposable GitHub-hosted pull-request runner ONLY. Never VPS.
     runs-on: ubuntu-latest
     steps:
