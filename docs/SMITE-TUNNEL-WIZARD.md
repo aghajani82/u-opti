@@ -1,0 +1,486 @@
+# Tunnel Setup Wizard — beginner-facing preview (Draft PR #18)
+
+## Where it appears
+
+`U-OPTI → Docker Management → Smite Management → 5) Tunnel Setup Wizard`
+
+This is an **additive preview** on `feature/smite-standard-backhaul`.
+It does not replace the existing 10-step Private Network Wizard, the current
+Standard FRP Setup Wizard, or the Backhaul candidate staging menu.
+
+## Tunnel Control Center — a friendly first screen
+
+The preview wizard now includes option `5) Tunnel Control Center`, built
+by `modules/smite-tunnel-control-center.sh`. It displays a compact
+role-specific topology, readable Backhaul/FRP/Rathole statuses, and a
+recommended next safe action, without exposing secrets or performing
+active configuration changes.
+
+Example of the **sample-only** IR screen:
+
+```text
+============================================================
+             U-OPTI  |  TUNNEL CONTROL CENTER
+============================================================
+  Machine role : ir
+  Mode         : LOCAL INSPECTION / NO AUTO-CHANGES
+------------------------------------------------------------
+  SAMPLE DISPLAY ONLY — no real service inspection
+
+  BACKHAUL  [LOCAL-READY]
+            Container + loopback listeners seen; audit still required
+  FRP       [IR-CONTROLLER-SEEN]
+            IR FRP controller port seen (local only)
+  RATHOLE   [PLAN-ONLY]
+            Design checklist only; no installer yet
+
+  CONNECTION MAP  (reference architecture, not a live route)
+  CLIENT --TLS:443--> IR Nginx --WS--> Backhaul --to KH--> Xray
+```
+
+Try a sample view on a disposable development checkout only:
+
+```bash
+bash modules/smite-tunnel-control-center.sh --demo ir
+bash modules/smite-tunnel-control-center.sh --demo kh
+```
+
+The demo **does not probe Docker, ports or remote services** and must not
+be interpreted as a report for a real host.
+
+On a real server, the dashboard reads Docker container state/restart policy
+and local loopback TCP listeners for the selected role. Unexpected binds
+result in `REVIEW-BINDING`; missing or ambiguous evidence is shown as
+`UNVERIFIED` or `NEEDS-REVIEW` rather than silently claiming health.
+The panel deliberately **does not infer** authenticated WebSocket
+transport, Xray traffic, remote KH/IR uptime, FRP tunnel connectivity,
+firewall correctness, certificate validity or successful reboot from
+these local signals. For that, operators must use the full read-only
+audit and actual client tests.
+
+The dashboard offers safe navigation into Backhaul review,
+the **existing** FRP wizard (which can offer explicitly chosen live
+setup actions), and Rathole planning. It never auto-launches an
+installation. Terminal colors are optional, disabled without a TTY or
+when `NO_COLOR` is set.
+
+## Rebuilt test VPS: explicitly gated live trial
+
+After manual Snapshot/console verification and an **intentional rebuild of
+the existing experimental IR/KH machines**, the Backhaul menu now exposes:
+
+`10) Rebuilt test VPS: trial install / own rollback (EXPERIMENTAL)`
+
+The experimental tool `smite-backhaul-sidecar-live-trial.py` is distributed
+only through the **draft feature branch** and refuses installation without
+all of: Linux root, complete private Sidecar/Nginx candidates, successful
+read-only paired admission and local prerequisites, an exact test-host
+environment acknowledgement and `INSTALL-IR` / `INSTALL-KH` confirmation.
+The wizard requires another typed `REBUILT-TEST-VPS` acknowledgement.
+Rollback requires `ROLLBACK-IR` or `ROLLBACK-KH` and verifies exact
+owned-file hashes plus a container transaction label before deletion.
+
+`smite-backhaul-sidecar-token.py` is a separate **root-only, non-overwriting**
+pairing-token helper: create the shared token privately on IR; copy to KH
+by trusted SFTP without printing it in chat or shell history. The token
+helper does not transfer credentials automatically.
+
+The operator may instead inspect a fresh/test host with:
+`bash modules/smite-backhaul-rebuild-gate.sh --role ir|kh --phase fresh-baseline`.
+This test remains **READ-ONLY**, and does not validate Hetzner snapshots.
+See [two-existing-VPS test plan](BACKHAUL-IR-KH-REBUILD-TEST.md).
+
+**NOT PRODUCTION READY:** CI uses mocked commands and disposable containers,
+not the rebuilt VPS. The tested fixed Nginx layout/ports must match the host.
+Server #3 is excluded. Neither a green CI run, a snapshot, nor an HTTP 401
+alone confirms end-to-end VPN operation. Do not merge into `main` until
+IR + KH clean install, actual VLESS traffic, single-host reboots and
+trial rollback have been validated.
+
+## Protocol support and truthful capabilities
+
+| Protocol | IR and KH role screens | Status checks | Installs live tunnel? |
+| --- | --- | --- | --- |
+| Independent Backhaul 0.7.2 | Yes | Read-only host readiness + explicit private offline candidate generation | **No** — setup checklist and secure candidate only |
+| Standard FRP | Yes, delegated to existing `smite-frp-wizard.sh` | Existing FRP diagnostics | Existing FRP wizard handles its opt-in setup steps |
+| Rathole | Yes | Validates dedicated ports; explains TCP and optional WSS feasibility | **No** — TCP planning only until pinned binary, auth, bind, TLS/Noise, backup and rollback are reviewed |
+
+Never present a staged candidate, a HTTP 400 from Xray, a HTTP 401 on
+Backhaul `/channel`, or an `ESTABLISHED` local Nginx connection as proof
+of a fully authenticated end-to-end VLESS tunnel.
+
+## Role identification
+
+When available, the wizard reads the user's existing Smite standard-mode
+role, `panel-iran` → `ir` and `foreign` → `kh`. On a new host with no
+Smite role it asks the operator to choose IR or KH. This fallback **does not
+write any role state** and never installs based on a guess.
+
+## Backhaul currently verified in an actual two-server manual pilot
+
+The operator previously verified a **manual**, separately controlled
+IR/KH build:
+
+- IR: Nginx HTTPS on :443 → internal :8443 → WebSocket `/channel` and
+  `/tunnel/` → independent Backhaul server on `127.0.0.1:3080`.
+- KH: independent Backhaul client → local Nginx :13080 → verified HTTPS
+  on IR. KH Nginx public `/13080/...` forwarding is explicitly denied.
+- IR: private Sidecar data listener `127.0.0.1:56053` →
+  KH Xray `127.0.0.1:56053`; HTTPS path `/56053/www/`.
+- Both named Sidecar containers use the pinned Smite Node image with Backhaul
+  v0.7.2, private tokens and restart policy `unless-stopped`.
+- Both machines were rebooted separately. The operator verified a working
+  real XHTTP client after each reboot. These are **user-observed manual
+  pilot results**, not automatically reproduced installer tests.
+
+This setup was successful with the user's particular existing Smite,
+Nginx, FRP and Xray topology. It **cannot be safely copied to a new
+host** without auditing its SNI maps, exposed proxy paths, ownership,
+port bindings, existing services, certificates and rollback.
+
+## Rathole is a different transport
+
+Rathole forwards TCP/UDP services and supports optional WebSocket transport
+in compatible builds (official Rathole v0.5.0 introduced WebSocket). It does
+**not** use Backhaul's `/channel` and `/tunnel/` endpoints. The first Rathole
+wizard stage validates distinct control/data ports and prints a **non-executable
+TCP plan**. The WSS/443 checklist is review-only: sharing IR 443 requires
+a reviewed Nginx route, verified WS handshake/path support for the pinned
+binary, and explicit protection of the existing site, FRP and Backhaul.
+Neither checklist is an installer.
+
+Before Rathole installation can be offered, the project needs:
+a pinned verifiable release/artifact, explicit protocol choice, authenticated
+service token without terminal/log exposure, TLS/Noise review, inbound port
+and firewall review, hostname and certificate controls where applicable,
+systemd or container lifecycle, fail-closed ownership checking, complete
+backups and a proved rollback on disposable hosts.
+
+## Phase 2: Local readiness checks (implemented in Draft PR)
+
+A read-only local auditor is now available as
+`modules/smite-backhaul-sidecar-readiness.py`. The beginner Backhaul
+submenu exposes two role-aware commands:
+
+- **Audit existing installation**: inspects the pinned Sidecar image,
+  host networking and auto-start policy, loopback port ownership, Nginx
+  syntax, private file modes, fixed Sidecar routes, TLS verify directive
+  and KH public-forwarding guard. Prints only safe status messages,
+  not tokens, config contents, IPs, PIDs or container mount paths.
+- **Preflight a fresh server**: refuses if a named Sidecar, pre-existing
+  Sidecar files, or conflicting reserved listeners are present; verifies
+  the expected FRP/Smite/Nginx/Xray baseline for the selected role.
+
+This is **not** a transactional installer and does not claim that
+certificates, external reachability, authenticated WSS, end-to-end
+XHTTP/VLESS, safe Nginx integration, backup provenance or tested
+rollback are complete. The chosen role is user-supplied if Smite
+state cannot identify it. Unexpected owners or missing inspection
+permissions produce HOLD, not success.
+
+Synthetic CI tests cover port collisions, incorrect ownership,
+unexpected public binds, non-verifying TLS bridge, swapped Nginx
+location order, partial installation, stale image/restart policy
+and absent inspection evidence. These are hermetic tests and do not
+connect to real IR/KH machines.
+
+## Phase 3: Nginx integration plan (offline, implemented)
+
+The beginner Backhaul wizard now offers **Prepare Nginx merge/rollback file
+plan**, using `modules/smite-backhaul-sidecar-nginx-plan.py`.
+
+- For IR, it refuses unknown HTTPS backend topology and only prepares
+  `/channel`, `/tunnel/`, and `/56053/www/` include candidates
+  within the existing single HTTPS backend, preserving FRP and the root
+  Smite upstream.
+- For KH, it checks the existing numeric port-forwarding expression and
+  proposes an explicit /0*13080 block before that expression, alongside
+  a separate loopback Nginx bridge verifying the IR certificate.
+- Exact original and prepared vhost **bytes** are staged privately with
+  SHA256 hashes and a manifest listing intended create/replace targets.
+  The folder mode is 0700; all staged files are 0600. Existing Nginx
+  vhosts are **never changed** by this planner.
+- Existing Backhaul locations, duplicate anchors, missing or unknown
+  server blocks, mismatched domain names and incompatible vhosts
+  result in **REFUSED**, not a guessed rewrite.
+- Both proposal layouts have Python fixture tests plus a separate
+  isolated real-Nginx-in-Docker syntax validation job. Those tests do
+  not operate on the user's live servers or prove production TLS,
+  wildcard routing, backup restorability or Xray connectivity.
+
+**Important:** Because the plan contains a copy of the original Nginx
+vhost, it may hold private information. Never upload or paste its
+`original.conf`, `patched.conf` or other staged files publicly.
+Unlike a transactional installer, this planner is **not executable
+deployment authorization**: there is still no live journal/backup
+activation, lifecycle reconciliation, cross-host trust check or proven
+rollback action attached to it. A server with the successful manual
+Sidecar already present is expected to fail the "fresh install" plan
+rather than overwrite that installation.
+
+## Phase 4: Crash-safe transaction coordinator (synthetic laboratory)
+
+`modules/smite-backhaul-sidecar-transaction-lab.py` now coordinates
+the existing file recovery journal with a **fake, JSON-only service
+adapter**. This is deliberately **NOT an installer** and is NOT
+packaged in the production U-OPTI install/update manifest.
+
+The simulated sequence is:
+
+1. Acquire a private sandbox coordination lock; reject any already
+   installed/partially applied Sidecar or unknown file state.
+2. Write a durable intent record BEFORE invoking the separate
+   write-ahead file journal; never store a token or configuration
+   body in either journal.
+3. Simulate a Nginx validation checkpoint and the independent
+   Sidecar launch without running Docker or opening network sockets.
+4. Simulate a Nginx reload and health checkpoint while preserving
+   fake Smite, FRP and Xray states.
+5. On an ordinary failure, reverse only verified resources automatically.
+   If the process is interrupted, a separate recovery invocation
+   checks **all** owned files and mock services before touching anything.
+6. Restore the fake service state, recover the existing file journal,
+   and delete the coordination intent **LAST**, so an interrupted
+   recovery can resume without guessing.
+
+New hermetic tests inject failures and simulated power losses at every
+checkpoint and **every file write boundary**, as well as crashes
+before the first original-file backup, during both recovery phases,
+duplicate deploy attempts, symlinks, foreign file drift and foreign
+service-state drift. Divergent states refuse rollback.
+
+**Outstanding safety blockers before a live implementation:** the
+sandbox file allowlist must be reconciled with the newer role-specific
+Nginx plan, including the KH public /13080 forwarding guard. The
+production engine must verify the exact running container ownership,
+pin a Docker image and restart policy, preserve file ownership/modes,
+record restorable original backups (not only hashes), test Nginx
+against the **actual complete** configuration, coordinate container
+start/reload failure rollback, and handle operator recovery after a
+reboot or loss of SSH. End-to-end verified WSS/VLESS remains separate
+from HTTP GET probes and mock health state.
+
+**No live IR/KH changes are made by this transaction laboratory.**
+
+## Phase 5: Unified IR/KH ownership and Nginx rollback lab
+
+The offline proposal and rollback logic now have a **common,
+fail-closed resource definition** in
+`modules/smite-backhaul-sidecar-reconcile.py`. The reconciler reads
+two independently private candidate folders, recomputes the output of
+both the pinned Sidecar candidate generator and the Nginx compiler,
+checks the hashes and exact target paths in `plan.json`, and blocks
+an incorrect token, domain, Nginx file, include, symlink, weak file
+permissions, unknown target or duplicate file. It does **not** print
+or put authentication material into a recovery journal.
+
+The reconciled synthetic transaction covers:
+
+| Role | Created resources | Existing Nginx file edited and backed up |
+| --- | --- | --- |
+| IR | Sidecar TOML, Compose candidate, Backhaul WS and XHTTP includes | Smite HTTPS backend on 127.0.0.1:8443 |
+| KH | Sidecar TOML, Compose candidate, TLS-validating loopback Bridge | KH HTTPS vhost containing the guarded numeric port-forwarding regex |
+
+**KH guard integrity is a prerequisite**: the edited KH vhost must deny
+`/13080/` and its leading-zero variants before the existing numeric
+forwarding regex. Both its exact original bytes and the patched version
+are included in the mock file journal, making its rollback scope
+symmetric with IR's backend edit.
+
+`modules/smite-backhaul-sidecar-unified-lab.py` is a marker-guarded,
+private `/tmp`-only simulator. It writes a durable intent before
+file changes, saves the original vhost, applies only recognized
+synthetic paths, exercises mock Sidecar start/Nginx reload, checks all
+file and mock-service states before recovery, and deletes its journal
+last. A simulated interruption during install, restoration, or
+journal finalization can be recovered by a separate invocation.
+Unknown Nginx drift, journal tampering, symlinks, absent backups and
+unexpected mock service mutations cause a HOLD without guessing.
+
+Hermetic CI tests cover IR and KH, each file write checkpoint,
+all service checkpoints, double installs, missing files, the KH
+public-forwarding guard, restorable original vhost bytes, and
+interrupted rollback. These tests **do not** change any real machine
+or perform a live container start, Nginx reload, TLS handshake or
+VLESS connection.
+
+**Still not a production installer:** the existing historical
+simulation modules retain an older sandbox allowlist and must not
+be treated as equivalent to this newer unified scope. Before live
+deployment we need an audited transition to a production journal,
+host file ownership/mode preservation, durable backup of actual
+Nginx/certificate dependencies, exact container provenance and
+lifecycle, full Nginx configuration validation on target machines,
+a public-forwarding bypass review, end-to-end authenticated network
+checks, and failure/reboot handling on two disposable servers.
+The PR remains draft; do **not** merge or execute the simulator
+against IR/KH.
+
+## Phase 6: Fresh-host admission and exact file-mode restoration
+
+The new `modules/smite-backhaul-sidecar-admission.py` is a
+**READ-ONLY** local installation gate. It is packaged with the
+experimental wizard as Backhaul option `9) Check BOTH candidate
+bundles against fresh host (READ ONLY)`.
+
+The operator first creates two private proposal folders:
+a Sidecar role candidate and a role-matched Nginx merge proposal.
+The admission gate then:
+
+- Re-renders and matches **every** proposed Sidecar and Nginx byte,
+  hash, domain and role from the two private folders; rejects tampering.
+- Verifies the original host Nginx vhost is a normal root-owned
+  file with safe mode (0600, 0640 or 0644) and identical contents
+  to the saved proposal, plus unchanged inode/metadata during reading.
+- Rejects any existing created target (including a symlink) and
+  refuses writable, symlinked or non-root ancestors under `/etc`.
+- Requires the independent fresh-host Nginx/Docker/listener
+  preflight. A running Sidecar, occupied port or incomplete Smite/
+  FRP baseline is a blocker rather than an overwrite opportunity.
+- Returns a **HOLD** instead of publishing private token or original
+  config data. It cannot authorize deployment by itself.
+
+In the marker-protected synthetic transaction laboratory, exact
+file mode, UID and GID are now recorded **before** replacement,
+installed atomically along with contents, rechecked during recovery
+and preserved when restoring the original Nginx vhost. External
+permission, ownership or SHA drift stops the entire rollback before
+modifying another resource. The laboratory deliberately supports
+only a small known-safe set of file modes and the current sandbox owner.
+
+Tests cover both IR and KH; original mode 0640/0644 preservation,
+world-writable source refusal, file-mode tampering, journal metadata
+tampering, target collision and unknown host state. The tests
+still run in isolated GitHub CI fixtures, **not** on live IR/KH.
+
+**Not yet an automatic installer:** a full production engine still
+needs trusted per-host durable backups of the entire relevant Nginx
+tree and certificate dependencies, race-safe file-descriptor based
+writes, real container lifecycle controls with ownership checking,
+rollback after an actual failed Nginx reload, operator recovery
+after power loss, and two fresh disposable VPS deployments.
+A `PASS` from read-only admission must NEVER trigger Docker,
+Nginx or firewall changes without a separate, audited installer
+and explicit operator confirmation. The existing production
+servers must not be used as test installations.
+
+## Phase 7: Real but isolated Docker transaction controller
+
+The **new** `modules/smite-backhaul-sidecar-docker-lab.py` moves
+apply/rollback logic out of ad hoc test snippets into a restricted,
+reusable **Docker laboratory controller**. It is intentionally **not**
+packaged into the U-OPTI installer or updater, and cannot be run by
+the customer-facing Tunnel Wizard.
+
+What is exercised on GitHub-hosted, disposable PR runners:
+
+1. Generate a real Backhaul v0.7.2 server candidate with a synthetic
+   secret and place it in a private fixture directory.
+2. Start a real Backhaul process and Nginx instance in different
+   containers on a private **internal Docker network**. No ports are
+   published on the runner and no production file or host network
+   is mounted. Only the Nginx container's labeled, exact lab-owned
+   workspace mount can be changed.
+3. Keep Nginx's working baseline route `/legacy` while applying the
+   Sidecar routes. Actual network probes verify the /channel response
+   transitions from 404 to 401 and back to 404 on rollback. These
+   are control-path probes, **not authenticated end-to-end VLESS**.
+4. Record a private transaction journal and exact original bytes
+   before replacing `nginx.conf`. Apply and revert use fsynced,
+   mode-0600 atomic writes. Nginx syntax and reload operate only
+   through `docker exec` against the **verified lab container**.
+5. An invalid Nginx candidate triggers an attempted exact rollback.
+   A simulated process crash after journal creation or after file
+   replacement leaves a recoverable journal for another process.
+   Unknown third-party file drift, missing backup after an applied
+   change, unexpected Docker network/mount/label or duplicate
+   transactions fail closed instead of overwriting files.
+
+Hard safety gates require a **GitHub-hosted pull-request runner**, exact
+repository/run IDs, private direct-child
+`/tmp/uopti-bh-executor-*` workspace with marker, a matching
+`uopti-ng-executor-*` container label, an internal Docker network,
+one exact writable lab bind mount and **zero published ports**.
+The controller cannot start/stop/remove real containers or use host
+Nginx. A separate shell fixture starts and cleans up test containers
+and is also GitHub-hosted-runner-gated.
+
+The isolated executor is a useful **runtime rehearsal**, not a live
+IR/KH installation system. It does **not** cover real host filesystem
+owner/mode migrations, certificate renewals, full SNI/443 integration,
+cross-VPS reachability, a persistent VPS restart service, actual
+user-triggered Backhaul container creation or a tested production
+recovery process. None of these gaps are represented as complete.
+
+## Phase 8: Harden experimental host activation before any VPS trial
+
+An audit of the **existing** (unreleased) experimental engines found
+that their process-command filters allowed a trusted executable name
+with insufficient argument checks. Both
+`smite-backhaul-sidecar-live-engine.py` and
+`smite-backhaul-sidecar-live-trial.py` now validate complete,
+role-specific Docker command arrays. Unexpected mounts, images,
+container names, injected arguments and unrelated Docker/systemctl
+operations are refused before spawning any subprocess.
+
+The first engine now treats a failed container inspection as
+**unverified**, not as proof the container is absent. A successful
+exact-name `docker ps -a` query is required before it can proceed
+with rollback; Docker daemon downtime or foreign labels leave
+the transaction untouched for operator review. Its test-fixture
+root also refuses a real host-command driver.
+
+The second, CLI-capable but **not packaged**, disposable-host trial
+requires both its existing explicit environment opt-in AND a
+separately created root-owned, 0600, exact-content rebuilt-test
+marker at `/root/.uopti-backhaul-rebuilt-test-host` for both
+installation and rollback. The trial cannot manufacture this
+marker itself. Marker possession does not establish that a machine
+really is disposable; that must be independently verified.
+
+CI includes negative tests for extra Docker privileges, changed
+mounts, unrelated Smite containers, rejected names, failed Docker
+inventory, foreign Sidecar labels and missing approval. These are
+mock/isolated checks, not a production sign-off.
+
+**Decision for future work:** do not expose both live engine implementations
+as customer-facing installation paths. Select one audited,
+production-specific transaction engine after the disposable-VPS
+tests; keep the other as a laboratory or retire it. Neither
+implementation is added to the released U-OPTI installer/updater
+or the beginner wizard by this phase.
+
+## Next development milestones
+
+1. Convert the manual Backhaul pilot into a **transactional**, versioned,
+   role-aware installer with checked immutable image/binary, listener
+   ownership, existing Nginx server context, host-both backup provenance
+   and tested rollback (not just a hash record). The wizard must visibly
+   warn and stop when preconditions do not hold.
+2. Add a non-secret pairing method so beginners do not paste shared
+   Backhaul or FRP tokens in a terminal, shell history or chat.
+3. Expand the current FRP wizard with beginner progress, a role-specific
+   preflight and reliable real-client verification, retaining existing
+   panel management and Private Network flow.
+4. Implement the Rathole transport as an isolated, independently reviewed
+   module with real tests. Do not reuse HTTP location code.
+5. Simulate first install, repeated install, failed upgrade, failed Nginx
+   test, power/reboot, token mismatch, public forwarding bypass and
+   rollback in independent Docker fixtures **before** allowing live
+   writes through the unified wizard.
+
+## Security boundary
+
+The new unified wizard itself has **no live deployment, stop,
+restart, reload, active Nginx/config write, firewall mutation,
+credential print or public port open** operation. Its only
+new write action is an explicitly confirmed, private, uninstalled
+candidate bundle under a fresh temporary directory; this contains
+credentials and must never be uploaded or posted. Only the existing FRP wizard is delegated to
+for its previously implemented actions. All commands behind Backhaul
+"Status" are bounded read-only local checks. Operators must still
+explicitly consent to any actual installation and have access to
+Hetzner console and restorable off-server backups.
+
+Do not merge this draft PR into `main` or run experimental installer
+code on IR/KH merely because a CI job is green.

@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Safe non-network regression checks for two-terminal wizard selection."""
+import importlib.util
+import io
+from contextlib import redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
+import sys
+import unittest
+
+file = Path(__file__).resolve().parents[1] / "modules/smite-backhaul-sidecar-paste-pair.py"
+spec = importlib.util.spec_from_file_location("pair_under_test", file)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+
+class PairingMenuTests(unittest.TestCase):
+    def test_noninteractive_session_refused(self):
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            with self.assertRaises(module.PasteHold):
+                module._interactive()
+
+    def test_ir_requires_explicit_confirmation(self):
+        with patch.object(sys, "argv", ["helper", "--show-ir"]), \
+             patch.object(module, "show_ir") as action, \
+             redirect_stdout(io.StringIO()) as screen:
+            self.assertEqual(module.main(), 2)
+            action.assert_not_called()
+            self.assertIn("HOLD", screen.getvalue())
+
+    def test_kh_requires_explicit_confirmation(self):
+        with patch.object(sys, "argv", ["helper", "--paste-kh"]), \
+             patch.object(module, "paste_kh") as action, \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(module.main(), 2)
+            action.assert_not_called()
+
+    def test_preflight_blocks_ir_before_read(self):
+        with patch.object(module, "_interactive"), \
+             patch.object(module.pair, "_trusted_role"), \
+             patch.object(module.pair, "_safe_parents"), \
+             patch.object(module.pair, "_fresh", side_effect=module.PasteHold("busy")), \
+             patch.object(module.pair.token_tool, "generate") as write:
+            with self.assertRaises(module.PasteHold):
+                module.show_ir()
+            write.assert_not_called()
+
+    def test_preflight_blocks_kh_before_prompt(self):
+        with patch.object(module, "_interactive"), \
+             patch.object(module.pair, "_trusted_role"), \
+             patch.object(module.pair, "_safe_parents"), \
+             patch.object(module.pair, "_fresh", side_effect=module.PasteHold("busy")), \
+             patch.object(module.getpass, "getpass") as prompt:
+            with self.assertRaises(module.PasteHold):
+                module.paste_kh()
+            prompt.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

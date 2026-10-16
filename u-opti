@@ -60,31 +60,41 @@ source "$MODULES_PATH/docker.sh"
 u_opti_ensure_standard_frp_bundle() {
     local file marker tmp_dir stage_dir
     local complete=true
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
-        if [ ! -s "$MODULES_PATH/$file" ] || ! bash -n "$MODULES_PATH/$file" >/dev/null 2>&1; then
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
+        if [ ! -s "$MODULES_PATH/$file" ] || {
+            case "$file" in
+                *.py) ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$MODULES_PATH/$file" >/dev/null 2>&1 ;;
+                *) ! bash -n "$MODULES_PATH/$file" >/dev/null 2>&1 ;;
+            esac
+        }; then
             complete=false
             break
         fi
     done
     if [ "$complete" = true ] &&
        grep -Fq 'smite_frp_wizard_menu()' "$MODULES_PATH/smite-frp-wizard.sh" &&
-       grep -Fq 'smite_frp_xhttp_sync()' "$MODULES_PATH/smite-frp-xhttp.sh"; then
+       grep -Fq 'smite_frp_xhttp_sync()' "$MODULES_PATH/smite-frp-xhttp.sh" &&
+       grep -Fq 'def render(' "$MODULES_PATH/smite-frp-xhttp-paths.py"; then
         return 0
     fi
 
     command -v curl >/dev/null 2>&1 || return 1
     tmp_dir="$(mktemp -d)" || return 1
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! curl -fsSL --retry 3 \
                 "$BASE_URL/modules/$file?cb=$(date +%s%N)" -o "$tmp_dir/$file" ||
            [ ! -s "$tmp_dir/$file" ] ||
-           ! bash -n "$tmp_dir/$file" >/dev/null 2>&1; then
+           { case "$file" in
+                 *.py) ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$tmp_dir/$file" >/dev/null 2>&1 ;;
+                 *) ! bash -n "$tmp_dir/$file" >/dev/null 2>&1 ;;
+             esac; }; then
             rm -rf "$tmp_dir"
             return 1
         fi
     done
     if ! grep -Fq 'smite_frp_wizard_menu()' "$tmp_dir/smite-frp-wizard.sh" ||
-       ! grep -Fq 'smite_frp_xhttp_sync()' "$tmp_dir/smite-frp-xhttp.sh"; then
+       ! grep -Fq 'smite_frp_xhttp_sync()' "$tmp_dir/smite-frp-xhttp.sh" ||
+       ! grep -Fq 'def render(' "$tmp_dir/smite-frp-xhttp-paths.py"; then
         rm -rf "$tmp_dir"
         return 1
     fi
@@ -92,13 +102,13 @@ u_opti_ensure_standard_frp_bundle() {
         rm -rf "$tmp_dir"
         return 1
     }
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! install -m 0755 "$tmp_dir/$file" "$stage_dir/$file"; then
             rm -rf "$tmp_dir" "$stage_dir"
             return 1
         fi
     done
-    for file in smite-frp-wizard.sh smite-frp-xhttp.sh; do
+    for file in smite-frp-wizard.sh smite-frp-xhttp.sh smite-frp-xhttp-paths.py; do
         if ! mv -f "$stage_dir/$file" "$MODULES_PATH/$file"; then
             rm -rf "$tmp_dir" "$stage_dir"
             return 1
@@ -116,6 +126,14 @@ fi
 # FRP Wizard extends the Smite submenu only; original Private Wizard stays untouched.
 if [ -f "$MODULES_PATH/smite-frp-wizard.sh" ]; then
     source "$MODULES_PATH/smite-frp-wizard.sh"
+fi
+# Additive Backhaul prepare-only menu, preserving original FRP/Private choices.
+if [ -s "$MODULES_PATH/smite-backhaul-management.sh" ] &&
+   [ -s "$MODULES_PATH/smite-backhaul-standard.sh" ] &&
+   [ -s "$MODULES_PATH/smite-backhaul-spec.py" ] &&
+   [ -s "$MODULES_PATH/smite-backhaul-node-patch.py" ] &&
+   [ -s "$MODULES_PATH/smite-backhaul-panel-patch.py" ]; then
+    source "$MODULES_PATH/smite-backhaul-management.sh"
 fi
 source "$MODULES_PATH/docker-3xui-instance.sh"
 source "$MODULES_PATH/docker-3xui-certificate-multi.sh"
@@ -410,7 +428,27 @@ while true; do
                 "smite-install.sh"
                 "smite-gateway.sh"
                 "smite-frp-xhttp.sh"
+                "smite-frp-xhttp-paths.py"
                 "smite-frp-wizard.sh"
+                "smite-backhaul-management.sh"
+                "smite-tunnel-wizard.sh"
+                "smite-tunnel-control-center.sh"
+                "smite-backhaul-sidecar.py"
+                "smite-backhaul-sidecar-readiness.py"
+                "smite-backhaul-sidecar-guided-prep.py"
+                "smite-backhaul-sidecar-guided-trial.py"
+                "smite-backhaul-sidecar-ssh-pair.py"
+                "smite-backhaul-sidecar-paste-pair.py"
+                "smite-backhaul-sidecar-admission.py"
+                "smite-backhaul-sidecar-token.py"
+                "smite-backhaul-sidecar-live-trial.py"
+                "smite-backhaul-sidecar-reconcile.py"
+                "smite-backhaul-rebuild-gate.sh"
+                "smite-backhaul-sidecar-nginx-plan.py"
+                "smite-backhaul-standard.sh"
+                "smite-backhaul-spec.py"
+                "smite-backhaul-node-patch.py"
+                "smite-backhaul-panel-patch.py"
                 "smite-foreign-gateway.sh"
                 "docker-3xui-instance.sh"
                 "docker-3xui-certificate-multi.sh"
@@ -505,7 +543,27 @@ while true; do
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
                 ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
+                ["smite-frp-xhttp-paths.py"]="$BASE_URL/modules/smite-frp-xhttp-paths.py"
                 ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
+                ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
+                ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
+                ["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"
+                ["smite-backhaul-sidecar.py"]="$BASE_URL/modules/smite-backhaul-sidecar.py"
+                ["smite-backhaul-sidecar-readiness.py"]="$BASE_URL/modules/smite-backhaul-sidecar-readiness.py"
+                ["smite-backhaul-sidecar-guided-prep.py"]="$BASE_URL/modules/smite-backhaul-sidecar-guided-prep.py"
+                ["smite-backhaul-sidecar-guided-trial.py"]="$BASE_URL/modules/smite-backhaul-sidecar-guided-trial.py"
+                ["smite-backhaul-sidecar-ssh-pair.py"]="$BASE_URL/modules/smite-backhaul-sidecar-ssh-pair.py"
+                ["smite-backhaul-sidecar-paste-pair.py"]="$BASE_URL/modules/smite-backhaul-sidecar-paste-pair.py"
+                ["smite-backhaul-sidecar-admission.py"]="$BASE_URL/modules/smite-backhaul-sidecar-admission.py"
+                ["smite-backhaul-sidecar-token.py"]="$BASE_URL/modules/smite-backhaul-sidecar-token.py"
+                ["smite-backhaul-sidecar-live-trial.py"]="$BASE_URL/modules/smite-backhaul-sidecar-live-trial.py"
+                ["smite-backhaul-sidecar-reconcile.py"]="$BASE_URL/modules/smite-backhaul-sidecar-reconcile.py"
+                ["smite-backhaul-rebuild-gate.sh"]="$BASE_URL/modules/smite-backhaul-rebuild-gate.sh"
+                ["smite-backhaul-sidecar-nginx-plan.py"]="$BASE_URL/modules/smite-backhaul-sidecar-nginx-plan.py"
+                ["smite-backhaul-standard.sh"]="$BASE_URL/modules/smite-backhaul-standard.sh"
+                ["smite-backhaul-spec.py"]="$BASE_URL/modules/smite-backhaul-spec.py"
+                ["smite-backhaul-node-patch.py"]="$BASE_URL/modules/smite-backhaul-node-patch.py"
+                ["smite-backhaul-panel-patch.py"]="$BASE_URL/modules/smite-backhaul-panel-patch.py"
                 ["smite-foreign-gateway.sh"]="$BASE_URL/modules/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$BASE_URL/modules/docker-3xui-instance.sh"
                 ["docker-3xui-certificate-multi.sh"]="$BASE_URL/modules/docker-3xui-certificate-multi.sh"
@@ -535,7 +593,27 @@ while true; do
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
                 ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
+                ["smite-frp-xhttp-paths.py"]="$TEMP_DIR/smite-frp-xhttp-paths.py"
                 ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
+                ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
+                ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
+                ["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"
+                ["smite-backhaul-sidecar.py"]="$TEMP_DIR/smite-backhaul-sidecar.py"
+                ["smite-backhaul-sidecar-readiness.py"]="$TEMP_DIR/smite-backhaul-sidecar-readiness.py"
+                ["smite-backhaul-sidecar-guided-prep.py"]="$TEMP_DIR/smite-backhaul-sidecar-guided-prep.py"
+                ["smite-backhaul-sidecar-guided-trial.py"]="$TEMP_DIR/smite-backhaul-sidecar-guided-trial.py"
+                ["smite-backhaul-sidecar-ssh-pair.py"]="$TEMP_DIR/smite-backhaul-sidecar-ssh-pair.py"
+                ["smite-backhaul-sidecar-paste-pair.py"]="$TEMP_DIR/smite-backhaul-sidecar-paste-pair.py"
+                ["smite-backhaul-sidecar-admission.py"]="$TEMP_DIR/smite-backhaul-sidecar-admission.py"
+                ["smite-backhaul-sidecar-token.py"]="$TEMP_DIR/smite-backhaul-sidecar-token.py"
+                ["smite-backhaul-sidecar-live-trial.py"]="$TEMP_DIR/smite-backhaul-sidecar-live-trial.py"
+                ["smite-backhaul-sidecar-reconcile.py"]="$TEMP_DIR/smite-backhaul-sidecar-reconcile.py"
+                ["smite-backhaul-rebuild-gate.sh"]="$TEMP_DIR/smite-backhaul-rebuild-gate.sh"
+                ["smite-backhaul-sidecar-nginx-plan.py"]="$TEMP_DIR/smite-backhaul-sidecar-nginx-plan.py"
+                ["smite-backhaul-standard.sh"]="$TEMP_DIR/smite-backhaul-standard.sh"
+                ["smite-backhaul-spec.py"]="$TEMP_DIR/smite-backhaul-spec.py"
+                ["smite-backhaul-node-patch.py"]="$TEMP_DIR/smite-backhaul-node-patch.py"
+                ["smite-backhaul-panel-patch.py"]="$TEMP_DIR/smite-backhaul-panel-patch.py"
                 ["smite-foreign-gateway.sh"]="$TEMP_DIR/smite-foreign-gateway.sh"
                 ["docker-3xui-instance.sh"]="$TEMP_DIR/docker-3xui-instance.sh"
                 ["docker-3xui-certificate-multi.sh"]="$TEMP_DIR/docker-3xui-certificate-multi.sh"
@@ -632,6 +710,10 @@ while true; do
                ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
                ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
                ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
+               ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
+               ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
+               ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
+               ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
                ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
                ! grep -q 'docker_3xui_multi_certificate_menu()' "$TEMP_DIR/docker-3xui-certificate-multi.sh"; then
                 echo
@@ -652,6 +734,14 @@ while true; do
             for FILE in "${REQUIRED_FILES[@]}"; do
                 case "$FILE" in
                     "$TEMP_DIR/VERSION")
+                        ;;
+                    "$TEMP_DIR/"*.py)
+                        if ! python3 -m py_compile "$FILE"; then
+                            echo "Python syntax check failed: $FILE"
+                            cleanup_update_temp
+                            read -rp "Press Enter to return..."
+                            continue 2
+                        fi
                         ;;
                     *)
                         if ! bash -n "$FILE"; then
@@ -732,6 +822,28 @@ while true; do
                 "smite.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
+                "smite-frp-xhttp.sh"
+                "smite-frp-xhttp-paths.py"
+                "smite-frp-wizard.sh"
+                "smite-backhaul-management.sh"
+                "smite-tunnel-wizard.sh"
+                "smite-tunnel-control-center.sh"
+                "smite-backhaul-sidecar.py"
+                "smite-backhaul-sidecar-readiness.py"
+                "smite-backhaul-sidecar-guided-prep.py"
+                "smite-backhaul-sidecar-guided-trial.py"
+                "smite-backhaul-sidecar-ssh-pair.py"
+                "smite-backhaul-sidecar-paste-pair.py"
+                "smite-backhaul-sidecar-admission.py"
+                "smite-backhaul-sidecar-token.py"
+                "smite-backhaul-sidecar-live-trial.py"
+                "smite-backhaul-sidecar-reconcile.py"
+                "smite-backhaul-rebuild-gate.sh"
+                "smite-backhaul-sidecar-nginx-plan.py"
+                "smite-backhaul-standard.sh"
+                "smite-backhaul-spec.py"
+                "smite-backhaul-node-patch.py"
+                "smite-backhaul-panel-patch.py"
                 "smite-foreign-gateway.sh"
                 "docker-3xui-instance.sh"
                 "docker-3xui-certificate-multi.sh"
@@ -767,7 +879,7 @@ while true; do
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
@@ -778,7 +890,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne 26 ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne "$((3 + ${#BACKUP_FILES[@]}))" ]; then
                 BACKUP_OK=false
             fi
 

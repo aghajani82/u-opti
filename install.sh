@@ -40,7 +40,27 @@ MODULES=(
     "smite-install.sh"
     "smite-gateway.sh"
     "smite-frp-xhttp.sh"
+    "smite-frp-xhttp-paths.py"
     "smite-frp-wizard.sh"
+    "smite-backhaul-management.sh"
+    "smite-tunnel-wizard.sh"
+    "smite-tunnel-control-center.sh"
+    "smite-backhaul-sidecar.py"
+    "smite-backhaul-sidecar-readiness.py"
+    "smite-backhaul-sidecar-guided-prep.py"
+    "smite-backhaul-sidecar-guided-trial.py"
+    "smite-backhaul-sidecar-ssh-pair.py"
+    "smite-backhaul-sidecar-paste-pair.py"
+    "smite-backhaul-sidecar-admission.py"
+    "smite-backhaul-sidecar-token.py"
+    "smite-backhaul-sidecar-live-trial.py"
+    "smite-backhaul-sidecar-reconcile.py"
+    "smite-backhaul-rebuild-gate.sh"
+    "smite-backhaul-sidecar-nginx-plan.py"
+    "smite-backhaul-standard.sh"
+    "smite-backhaul-spec.py"
+    "smite-backhaul-node-patch.py"
+    "smite-backhaul-panel-patch.py"
     "smite-foreign-gateway.sh"
     "smite-private-network.sh"
     "smite-easytier.sh"
@@ -127,6 +147,10 @@ for MODULE in "${MODULES[@]}"; do
         smite-install.sh) LABEL="Smite Installer / Lifecycle" ;;
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
+        smite-frp-xhttp-paths.py) LABEL="Smite FRP Custom XHTTP Path Registry" ;;
+        smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
+        smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
+        smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
         smite-private-network.sh) LABEL="Smite Private Network Entry Point" ;;
         smite-easytier.sh) LABEL="Smite EasyTier Private Network" ;;
@@ -169,6 +193,10 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_smite_install_menu()' "$TEMP_DIR/smite-install.sh" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
    ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
+   ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
+   ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
+   ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
+   ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
    ! grep -q 'show_smite_easytier_menu()' "$TEMP_DIR/smite-easytier.sh" || \
@@ -188,9 +216,12 @@ echo "Checking Bash syntax..."
 bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
 for MODULE in "${MODULES[@]}"; do
-    bash -n "$TEMP_DIR/$MODULE"
+    case "$MODULE" in
+        *.py) python3 -m py_compile "$TEMP_DIR/$MODULE" || exit 1 ;;
+        *) bash -n "$TEMP_DIR/$MODULE" || exit 1 ;;
+    esac
 done
-echo "Bash syntax check passed."
+echo "Bash/Python syntax checks passed."
 
 echo
 echo "Creating directories..."

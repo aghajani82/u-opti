@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.16.0**
+Current stable version: **v0.16.1**
 
 ## Core System Management
 

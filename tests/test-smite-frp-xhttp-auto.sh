@@ -8,6 +8,9 @@ export SMITE_FRP_XHTTP_CONF="$tmp/xhttp.conf"
 export SMITE_STATE_FILE="$tmp/state.env"
 export SMITE_OVERLAY_DIR="$tmp/overlay"
 export MOCK_FRP_TUNNELS="$tmp/tunnels.json"
+export SMITE_FRP_XHTTP_PATHS="$tmp/frp-paths.json"
+export SMITE_FRP_XHTTP_SIDECAR_INC="$tmp/sidecar-routes.conf"
+export UOPTI_FRP_TEST_MODE=1
 mkdir -p "$SMITE_OVERLAY_DIR/node"
 touch "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py"
 echo 'SMITE_CONNECTION_MODE=standard' > "$SMITE_STATE_FILE"
@@ -100,6 +103,53 @@ if grep -Fq '30000' "$SMITE_FRP_XHTTP_CONF" || grep -Fq '30001' "$SMITE_FRP_XHTT
     echo "ERROR: Non-server FRP ports were exposed"
     exit 1
 fi
+# A custom XHTTP base Path must be persisted and matched EXACTLY,
+# including prefix subpaths; the old /PORT/web path must be removed.
+smite_frp_xhttp_register_path 13914 /13914/shop
+grep -Fq 'location = /13914/shop {' "$SMITE_FRP_XHTTP_CONF"
+grep -Fq 'location ^~ /13914/shop/ {' "$SMITE_FRP_XHTTP_CONF"
+! grep -Fq '/13914/web' "$SMITE_FRP_XHTTP_CONF"
+test "$(smite_frp_xhttp_get_path 13914)" = "/13914/shop"
+test "$(stat -c '%a' "$SMITE_FRP_XHTTP_PATHS")" = 600
+
+# Non-numeric custom namespaces work, too; /PORT/web is merely a default.
+smite_frp_xhttp_register_path 13914 /store/v1
+grep -Fq 'location = /store/v1 {' "$SMITE_FRP_XHTTP_CONF"
+grep -Fq 'location ^~ /store/v1/ {' "$SMITE_FRP_XHTTP_CONF"
+smite_frp_xhttp_register_path 13914 /13914/shop
+# Numeric namespaces of OTHER forwarded ports are not permitted.
+if smite_frp_xhttp_register_path 13914 /15432/shop; then
+    echo "ERROR: Cross-port numeric namespace accepted" >&2; exit 1
+fi
+grep -Fq 'proxy_pass http://127.0.0.1:13914;' "$SMITE_FRP_XHTTP_CONF"
+
+# Reject malformed path without clobbering the live route.
+if smite_frp_xhttp_register_path 13914 /13914/shop/; then
+    echo "ERROR: Unsafe FRP Path accepted" >&2; exit 1
+fi
+test "$(smite_frp_xhttp_get_path 13914)" = "/13914/shop"
+grep -Fq 'location = /13914/shop {' "$SMITE_FRP_XHTTP_CONF"
+
+# Sidecar paths cannot be stolen by the FRP gateway; failed sync reverts
+# BOTH the intended registry path and the published Nginx routes.
+cat > "$SMITE_FRP_XHTTP_SIDECAR_INC" <<'SIDECAR'
+    location = /13914/overlap {
+    }
+    location ^~ /13914/overlap/ {
+    }
+SIDECAR
+if smite_frp_xhttp_register_path 13914 /13914/overlap; then
+    echo "ERROR: Sidecar / FRP collision accepted" >&2; exit 1
+fi
+test "$(smite_frp_xhttp_get_path 13914)" = "/13914/shop"
+grep -Fq 'location = /13914/shop {' "$SMITE_FRP_XHTTP_CONF"
+rm -f "$SMITE_FRP_XHTTP_SIDECAR_INC"
+
+# Restore original behavior, ensuring old FRP tunnels are backward-compatible.
+smite_frp_xhttp_register_path 13914 /13914/web
+test "$(smite_frp_xhttp_get_path 13914)" = "/13914/web"
+grep -Fq 'location = /13914/web {' "$SMITE_FRP_XHTTP_CONF"
+
 cp "$SMITE_FRP_XHTTP_CONF" "$tmp/expected"
 smite_frp_xhttp_sync
 cmp -s "$SMITE_FRP_XHTTP_CONF" "$tmp/expected"

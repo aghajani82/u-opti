@@ -3,13 +3,16 @@
 set -euo pipefail
 grep -Fq '"smite-frp-wizard.sh"' install.sh
 grep -Fq '"smite-frp-xhttp.sh"' install.sh
+grep -Fq '"smite-frp-xhttp-paths.py"' install.sh
 grep -Fq '"smite-frp-wizard.sh"' u-opti
 grep -Fq '"smite-frp-xhttp.sh"' u-opti
+grep -Fq '"smite-frp-xhttp-paths.py"' u-opti
 grep -Fq 'u_opti_ensure_standard_frp_bundle()' u-opti
 grep -Fq 'if ! u_opti_ensure_standard_frp_bundle; then' u-opti
 bash -n u-opti
 bash -n modules/smite-frp-wizard.sh
 bash -n modules/smite-frp-xhttp.sh
+python3 -B -c 'import ast; ast.parse(open("modules/smite-frp-xhttp-paths.py").read())'
 
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
@@ -31,7 +34,7 @@ dest='' url=''
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) dest="$2"; shift 2 ;;
-        *smite-frp-wizard.sh*|*smite-frp-xhttp.sh*) url="$1"; shift ;;
+        *smite-frp-wizard.sh*|*smite-frp-xhttp.sh*|*smite-frp-xhttp-paths.py*) url="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -49,8 +52,10 @@ BASE_URL="https://example.invalid"
 source "$test_root/bootstrap.sh"
 test -s "$MODULES_PATH/smite-frp-wizard.sh"
 test -s "$MODULES_PATH/smite-frp-xhttp.sh"
+test -s "$MODULES_PATH/smite-frp-xhttp-paths.py"
 cmp -s "$MODULES_PATH/smite-frp-wizard.sh" modules/smite-frp-wizard.sh
 cmp -s "$MODULES_PATH/smite-frp-xhttp.sh" modules/smite-frp-xhttp.sh
+cmp -s "$MODULES_PATH/smite-frp-xhttp-paths.py" modules/smite-frp-xhttp-paths.py
 # Idempotence: the complete bundle must work without contacting the network.
 cat > "$test_root/bin/curl" <<'MOCK'
 #!/usr/bin/env bash

@@ -40,6 +40,77 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-wizard.sh
 
+      - name: Verify safe unified Tunnel Setup Wizard and protocol navigation
+        shell: bash
+        run: bash tests/test-smite-tunnel-wizard.sh
+
+      - name: Verify Tunnel Control Center status, demo and navigation
+        shell: bash
+        run: bash tests/test-smite-tunnel-control-center.sh
+
+      - name: Fail-closed read-only existing/new Backhaul audit tests
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-readiness.py
+
+      - name: Verify custom Xray port/path exact private proposals and trial admission
+        shell: bash
+        run: python3 -B tests/test-smite-backhaul-sidecar-custom-profile.py
+
+      - name: Verify fresh-host candidate admission and filesystem safety gates
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-admission.py
+
+      - name: Test one-step private offline Backhaul preparation (mocked hosts)
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-guided-prep.py
+
+      - name: Test guided one-flow disposable-host activation (mocked hosts)
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-guided-trial.py
+
+      - name: Verify install/update module closure and isolated import smoke
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-package-closure.py
+
+      - name: Test explicitly gated experimental host activation and rollback
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-live-trial.py
+
+      - name: Validate safe IR token provisioning and no-overwrite policy
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-token.py
+
+      - name: Verify strict SSH private token pairing on mocked IR/KH hosts
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-ssh-pair.py
+
+      - name: Verify Bitvise pairing confirmation and safe fresh-host refusal
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-bitvise-menu.py
+
+      - name: Verify safe IR/KH rebuild readiness gate without real services
+        shell: bash
+        run: bash tests/test-smite-backhaul-rebuild-gate.sh
+
+      - name: Exercise experimental activation engine on synthetic filesystem only
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-live-engine.py
+
+      - name: Test private offline IR/KH Nginx integration and rollback manifests
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-nginx-plan.py
+
       - name: Verify automatic Standard FRP XHTTP routing and rollback
         shell: bash
         run: bash tests/test-smite-frp-xhttp-auto.sh
@@ -68,6 +139,89 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-release-upgrade.sh
 
+      - name: Test experimental Backhaul Standard renderer
+        shell: bash
+        run: |
+          bash -n modules/smite-backhaul-standard.sh
+          bash tests/test-smite-backhaul-standard.sh
+
+      - name: Test Standard Backhaul fail-closed spec compiler
+        shell: bash
+        run: python3 tests/test-smite-backhaul-spec.py
+
+      - name: Test independent Backhaul Sidecar offline candidates
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar.py
+          python3 tests/test-smite-backhaul-sidecar.py
+
+      - name: Verify Sidecar host-port inventory and rollback simulation
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-audit.py
+          python3 -m py_compile modules/smite-backhaul-sidecar-rollback.py
+          python3 tests/test-smite-backhaul-sidecar-audit.py
+          python3 tests/test-smite-backhaul-sidecar-rollback.py
+
+      - name: Review simulated final Sidecar host evidence with strict safety gate
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-preflight.py
+          python3 tests/test-smite-backhaul-sidecar-preflight.py
+
+      - name: Ensure Backhaul host evidence collection is read-only and redacted
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-collect.py
+          python3 tests/test-smite-backhaul-sidecar-collect.py
+
+      - name: Simulate isolated Sidecar installation and exact rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-sandbox.py
+          python3 tests/test-smite-backhaul-sidecar-sandbox.py
+
+      - name: Simulate crash-resumable Sidecar file journal and rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-recovery-lab.py
+          python3 tests/test-smite-backhaul-sidecar-recovery-lab.py
+
+      - name: Coordinate synthetic file and service transactions with resumable rollback
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-transaction-lab.py
+
+      - name: Verify unified staged IR/KH Nginx and Sidecar rollback scope
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-unified-lab.py
+
+      - name: Verify Sidecar no-execution installation blueprint and backup provenance
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-sidecar-activation-plan.py
+          python3 tests/test-smite-backhaul-sidecar-activation-plan.py
+
+      - name: Validate candidate Backhaul node adapter patch
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-node-patch.py
+          python3 tests/test-smite-backhaul-node-patch.py
+
+      - name: Validate Standard Backhaul panel candidate patch
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-backhaul-panel-patch.py
+          python3 tests/test-smite-backhaul-panel-patch.py
+
+      - name: Validate Standard Backhaul prepare-only packaging
+        shell: bash
+        run: |
+          bash -n modules/smite-backhaul-management.sh
+          bash tests/test-smite-backhaul-packaging.sh
+          bash tests/test-smite-backhaul-management.sh
+
       - name: Validate release metadata
         shell: bash
         run: |
@@ -87,3 +241,110 @@ jobs:
           grep -Fq 'show_smite_private_network_menu()' modules/smite-private-network.sh
           grep -Fq 'show_smite_easytier_menu()' modules/smite-easytier.sh
           grep -Fq 'docker_smite_ensure_private_network_modules()' modules/docker.sh
+
+  sidecar-image-smoke:
+    # Isolated GitHub-hosted runner only. No access to live IR/KH servers.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate isolated Compose candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          openssl rand -hex 32 > "$tmp/token"
+          for role in ir kh; do
+            output="$(python3 modules/smite-backhaul-sidecar.py \
+              --role "$role" --token-file "$tmp/token")"
+            stage="$(printf '%s\n' "$output" | sed -n "s/^PREPARED PRIVATE OFFLINE CANDIDATE: \(.*\) ($role)$/\1/p")"
+            test -n "$stage" && test -d "$stage"
+            docker compose -f "$stage/compose.candidate.yaml" config --quiet
+            echo "Offline $role Compose candidate: valid syntax"
+            rm -rf -- "$stage"
+          done
+
+      - name: Verify pinned Backhaul binary without starting a service
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+          docker pull --platform linux/amd64 "$image"
+          actual="$(docker run --rm --platform linux/amd64 \
+            --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --entrypoint /usr/local/bin/backhaul "$image" -v)"
+          test "$actual" = "v0.7.2"
+          echo "Pinned image Backhaul version verified: $actual (isolated runner, no network)"
+
+  sidecar-ws-transport:
+    # Actual Backhaul traffic ONLY between ephemeral private-network containers.
+    # No WAN access or live IR/KH access; container names only owned by this run.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Exercise Backhaul v0.7.2 WebSocket control and data channels
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-transport.sh
+          bash tests/test-smite-backhaul-sidecar-transport.sh
+
+  sidecar-tls-bridge:
+    # Only ephemeral GitHub runner containers on private Docker network.
+    # No connection to live IR/KH or changes to production Nginx/FRP/Smite.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify two Nginx proxies, SAN/TLS verification and Backhaul WS data
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-tls.sh
+          bash tests/test-smite-backhaul-sidecar-tls.sh
+
+  sidecar-service-reload-rollback:
+    # Only on disposable GitHub-hosted runners in pull requests.
+    # Private Docker network; no host ports or live server access.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test real isolated Nginx config activation and rollback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-service-rollback.sh
+          bash tests/test-smite-backhaul-sidecar-service-rollback.sh
+
+  sidecar-nginx-integration:
+    # Disposable Nginx containers without host ports; IR/KH never contacted.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate generated Nginx merge proposals with real Nginx
+        shell: bash
+        run: |
+          bash -n tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
+          bash tests/test-smite-backhaul-sidecar-nginx-plan-integration.sh
+
+  sidecar-real-transaction-executor:
+    # Disposable GitHub-hosted pull-request runner ONLY. Never VPS.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify restricted Docker lab controller and real recovery
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-backhaul-sidecar-docker-lab-unit.py
+          bash -n tests/test-smite-backhaul-sidecar-docker-executor.sh
+          bash tests/test-smite-backhaul-sidecar-docker-executor.sh
