@@ -87,6 +87,29 @@ out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"
 grep -Fq 'XHTTP_HANDLER_REACHED=YES' <<< "$out"
 grep -Fq 'https://ir.kolbe1.ir/13914/web/' <<< "$out"
 
+# A naked HTTP 200 without the Xray X-Padding header is NOT a PASS.
+original_curl_mock="$(declare -f curl)"
+curl() {
+    local arg="" prev=""
+    for arg in "$@"; do
+        if [ "$prev" = -D ]; then printf 'HTTP/1.1 200 OK\n' > "$arg"; fi
+        prev="$arg"
+    done
+    printf 200
+}
+if out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"; then
+    echo "ERROR: HTTP 200 without X-Padding incorrectly counted as XHTTP PASS" >&2
+    exit 1
+fi
+grep -Fq 'XHTTP_HANDLER_REACHED=NO' <<< "$out"
+eval "$original_curl_mock"
+DOMAIN='bad/host'
+if out="$(printf '/13914/web\n' | smite_frp_wizard_easy_verify ir)"; then
+    echo "ERROR: Malformed HTTPS hostname accepted" >&2; exit 1
+fi
+grep -Fq 'unsafe' <<< "$out"
+DOMAIN=ir.kolbe1.ir
+
 # Fresh-host role mode is accurately labeled, and START HERE never silently
 # invokes installs or gateways without explicit confirmation.
 MODE="" ROLE=""
