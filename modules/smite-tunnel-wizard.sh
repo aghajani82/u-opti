@@ -590,18 +590,63 @@ smite_tw_backhaul_expert_menu() {
         echo "3) Trial journal / guarded rollback / legacy install"
         echo "4) Trusted SSH pairing (optional advanced method)"
         echo "5) Manual planning / legacy tools"
+        echo "6) Pair token only (without installing)"
+        echo "7) Install only (pairing already done)"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-7]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
             2) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
             3) smite_tw_backhaul_live_trial "$role" || :; smite_tw_pause ;;
             4) smite_tw_backhaul_secure_pair "$role" || :; smite_tw_pause ;;
             5) smite_tw_backhaul_manual_menu "$role" ;;
+            6) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
+            7) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
     done
+}
+
+# Beginner's one-entry Backhaul setup; fail closed on any existing/partial trial.
+smite_tw_backhaul_quick_start() {
+    local role="$1" basedir="" token="" state=""
+    basedir="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    token="/etc/u-opti/backhaul-sidecar/shared.token"
+    state="/var/lib/u-opti/backhaul-trial/$role"
+    echo "===== BACKHAUL QUICK START | THIS HOST: $role ====="
+    echo "Run on BOTH hosts separately (IR then KH); no remote SSH required."
+    echo "FRP, Smite and Sanaei are preserved; no automatic rebuilds."
+    if [ -e "$state" ] || [ -L "$state" ] ||
+       [ -e "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
+       [ -L "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
+       docker container inspect "uopti-backhaul-sidecar-$role" >/dev/null 2>&1; then
+        echo "HOLD: Sidecar trial/partial state detected. DO NOT reinstall."
+        echo "Use Backhaul -> 2) Check installation (READ-ONLY)."
+        return 2
+    fi
+    if [ -e "$token" ] || [ -L "$token" ]; then
+        echo "Step 1/2: Verify private pairing token."
+        if ! python3 -B "$basedir/smite-backhaul-sidecar-token.py" --verify; then
+            echo "HOLD: Existing pairing token unsafe; never overwrite automatically."
+            return 2
+        fi
+    else
+        echo "Step 1/2: Pair two Bitvise terminals (secret must stay private)."
+        if ! smite_tw_backhaul_paste_pair "$role"; then
+            echo "HOLD: Pairing incomplete; install NOT attempted."
+            return 2
+        fi
+        if ! python3 -B "$basedir/smite-backhaul-sidecar-token.py" --verify; then
+            echo "HOLD: Pairing verification failed; install NOT attempted."
+            return 2
+        fi
+    fi
+    echo "Step 2/2: Enter the SAME custom port and XHTTP Path on BOTH hosts."
+    echo "KH Sanaei VLESS/XHTTP inbound must exist BEFORE installation."
+    echo "Snapshot + provider console + independent test-host marker REQUIRED."
+    echo "The installer will ask for irreversible-host confirmation explicitly."
+    smite_tw_backhaul_guided_trial_install "$role"
 }
 
 smite_tw_backhaul_menu() {
@@ -609,22 +654,21 @@ smite_tw_backhaul_menu() {
     while true; do
         smite_tw_header
         printf 'Protocol: Backhaul | This machine: %s\n\n' "$role"
-        echo "Fresh TEST VPS: 1=PAIR TOKEN (not an install) -> 2=INSTALL -> 3=VERIFY."
+        echo "BEGINNERS: Start option 1 on each rebuilt TEST VPS."
+        echo "Pair if needed, choose XHTTP port/Path, install THIS host."
         smite_tw_backhaul_install_badge "$role"
         echo
-        echo "1) Pair token only (do ON BOTH hosts; does NOT install)"
-        echo "2) INSTALL Sidecar on THIS host (fresh TEST VPS ONLY)"
-        echo "3) VERIFY installation and diagnose (read-only)"
-        echo "4) Client configuration (VLESS/XHTTP)"
-        echo "5) Recovery, preflight & advanced tools"
+        echo "1) START HERE - Guided Pair + Install (TEST VPS only)"
+        echo "2) Check installation / troubleshoot (read-only)"
+        echo "3) Show VLESS/XHTTP client settings"
+        echo "4) Advanced: manual steps and recovery"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         case "$choice" in
-            1) smite_tw_backhaul_paste_pair "$role" || :; smite_tw_pause ;;
-            2) smite_tw_backhaul_guided_trial_install "$role" || :; smite_tw_pause ;;
-            3) smite_tw_backhaul_diagnostics_menu "$role" ;;
-            4) smite_tw_backhaul_client "$role"; smite_tw_pause ;;
-            5) smite_tw_backhaul_expert_menu "$role" ;;
+            1) smite_tw_backhaul_quick_start "$role" || :; smite_tw_pause ;;
+            2) smite_tw_backhaul_diagnostics_menu "$role" ;;
+            3) smite_tw_backhaul_client "$role"; smite_tw_pause ;;
+            4) smite_tw_backhaul_expert_menu "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
