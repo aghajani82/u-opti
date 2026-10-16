@@ -31,6 +31,7 @@ SMITE_FRP_XHTTP_PATH_HELPER="$PWD/modules/smite-frp-xhttp-paths.py"
 FRP_TEST_PATH="/13914/web"
 smite_frp_xhttp_get_path() { printf "%s\n" "$FRP_TEST_PATH"; }
 smite_frp_xhttp_register_path() { echo "FRP XHTTP path ACTIVE on IR: $2"; }
+smite_frp_xhttp_verify_path() { return 0; }
 
 # The original functions above must remain untouched when wizard is sourced.
 source modules/smite-frp-wizard.sh
