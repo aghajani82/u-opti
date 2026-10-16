@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current main version: **v0.16.3** (Backhaul KH hostname hotfix; live field validation pending)
+Current stable version: **v0.16.3** (Backhaul Sidecar remains experimental; custom KH fix awaits live field validation)
 
 ## Core System Management
 
