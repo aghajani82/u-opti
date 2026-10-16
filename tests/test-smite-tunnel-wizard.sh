@@ -18,6 +18,8 @@ grep -Fq 'VERIFY installation and diagnose (read-only)' modules/smite-tunnel-wiz
 grep -Fq 'smite_tw_backhaul_guided_prepare()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_guided_trial_install()' modules/smite-tunnel-wizard.sh
 grep -Fq 'smite_tw_backhaul_install_badge()' modules/smite-tunnel-wizard.sh
+grep -Fq 'XHTTP base Path [/$port/www]' modules/smite-tunnel-wizard.sh
+grep -Fq -- '--data-port "$port" --xhttp-path "$path"' modules/smite-tunnel-wizard.sh
 grep -Fq -- '--diagnose --role "$role"' modules/smite-tunnel-wizard.sh
 grep -Fq 'INSTALLATION NOT STARTED' modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-backhaul-sidecar-guided-trial.py"' install.sh
