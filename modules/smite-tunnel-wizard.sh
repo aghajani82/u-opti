@@ -552,12 +552,23 @@ smite_tw_backhaul_diagnostics_menu() {
             3) if [ -s "$module" ]; then python3 -B "$module" --role "$role" --status || :;
                else echo "Trial module missing."; fi; smite_tw_pause ;;
             4)
-                local guided=""
+                local guided="" ir_domain="" kh_host="" port="" path=""
                 guided="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
                 if [ -s "$guided" ]; then
-                    echo "Default 56053/www profile ONLY. For a CUSTOM port/path,"
-                    echo "use INSTALL option 2 and its exact read-only preflight."
-                    python3 -B "$guided" --role "$role" --diagnose || :
+                    echo "===== BACKHAUL READ-ONLY DIAGNOSIS (custom XHTTP supported) ====="
+                    echo "Use the SAME domains, Xray port and XHTTP base Path"
+                    echo "that you selected on the two VPS hosts."
+                    read -rp "IR HTTPS domain: " ir_domain || return
+                    read -rp "KH upstream/Xray Host domain: " kh_host || return
+                    read -rp "KH Xray data port [56053]: " port || return
+                    port="${port:-56053}"
+                    read -rp "XHTTP base Path [/$port/www]: " path || return
+                    path="${path:-/$port/www}"
+                    path="${path%/}"
+                    python3 -B "$guided" --role "$role" --diagnose \
+                      --ir-domain "$ir_domain" --kh-host "$kh_host" \
+                      --data-port "$port" --xhttp-path "$path" || :
+                    echo "No configuration files or running services changed."
                 else
                     echo "Guided diagnostics unavailable; update U-OPTI."
                 fi
