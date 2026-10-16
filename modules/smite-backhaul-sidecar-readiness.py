@@ -37,7 +37,7 @@ def installed_kh_vhost() -> Path | None:
             return None
         raw = KH_STATE.read_text(encoding="utf-8")
         def value(name: str) -> str | None:
-            found = re.findall(r"(?m)^" + re.escape(name) + r"=([^\\n]+)$", raw)
+            found = re.findall(r"(?m)^" + re.escape(name) + r"=([^\n]+)$", raw)
             return found[0].strip().strip('"').strip("'") if len(found) == 1 else None
         if value("SMITE_ROLE") != "foreign" or value("SMITE_CONNECTION_MODE") != "standard":
             return None
