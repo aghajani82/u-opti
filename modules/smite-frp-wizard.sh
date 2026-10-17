@@ -312,7 +312,27 @@ smite_frp_wizard_start_here() {
 
 # One custom port+path input per action, without hidden legacy assumptions.
 smite_frp_wizard_choose_profile() {
-    local role="$1" port="" path="" default=""
+    local role="$1" port="" path="" default="" saved="" saved_port="" saved_path="" use_saved=""
+    local helper="/usr/local/lib/u-opti/modules/smite-profile-first.py"
+    if [ -s "$helper" ]; then
+        saved="$(python3 -B "$helper" --show 2>/dev/null)" || saved=""
+        if [ -n "$saved" ]; then
+            saved_port="$(printf '%s\n' "$saved" | awk -F= '$1=="FRP_PORT" {print $2}')"
+            saved_path="$(printf '%s\n' "$saved" | awk -F= '$1=="FRP_PATH" {print $2}')"
+            if [ -n "$saved_port" ] && [ -n "$saved_path" ]; then
+                echo "PROFILE FIRST: FRP port=$saved_port Path=$saved_path"
+                read -rp "Use saved FRP profile? [Y/n]: " use_saved || return 2
+                if [ "$use_saved" != n ] && [ "$use_saved" != N ]; then
+                    python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" check "$saved_port" "$saved_path" >/dev/null || {
+                        echo "HOLD: Saved FRP profile is invalid."; return 2;
+                    }
+                    SMITE_FRP_CHOSEN_PORT="$saved_port"
+                    SMITE_FRP_CHOSEN_PATH="$saved_path"
+                    return 0
+                fi
+            fi
+        fi
+    fi
     port="$(smite_frp_wizard_port)" || return 2
     if [ "$role" = ir ]; then
         default="$(smite_frp_xhttp_get_path "$port")" || return 2
