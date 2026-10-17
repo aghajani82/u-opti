@@ -175,6 +175,9 @@ def output(obj: dict) -> None:
     print(f"BACKHAUL_PATH={obj['backhaul']['path']}")
     print("Profiles contain NO token, UUID or credential.")
     print("No Xray inbound, FRP/Backhaul tunnel or Nginx route was created.")
+    print("IR FRP: Once the matching Smite TCP server tunnel is APPLIED,")
+    print("the guarded XHTTP sync timer publishes the planned FRP Path.")
+    print("Until then PROFILE FIRST is a saved plan, NOT a working client.")
 
 
 def main() -> int:
