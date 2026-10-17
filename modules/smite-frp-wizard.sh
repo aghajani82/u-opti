@@ -239,6 +239,41 @@ smite_frp_wizard_ready() {
     }
 }
 
+# Keep the beginner inside the FRP workflow after gateway configuration.
+# No Sanaei inbound or Smite UI tunnel is created automatically.
+smite_frp_wizard_continue_setup() {
+    local role="$1" answer=""
+    if [ "$role" = kh ]; then
+        echo "===== NEXT: KH XRAY / SANAEI + FRP PROFILE ====="
+        echo "Choose the KH Xray port and XHTTP path here; use them in Sanaei"
+        echo "and in the Smite FRP TCP tunnel, then publish the same path on IR."
+        read -rp "Configure FRP PORT + PATH now (KH checklist only)? [y/N]: " answer || return 0
+        case "$answer" in
+            y|Y|yes|YES) smite_frp_wizard_easy_configure kh || : ;;
+            *) echo "PORT + PATH skipped; return to FRP option 2 later." ;;
+        esac
+        read -rp "Open Docker 3x-UI/Sanaei Management on KH now? [y/N]: " answer || return 0
+        case "$answer" in
+            y|Y|yes|YES)
+                if declare -F show_docker_3xui_menu >/dev/null 2>&1; then
+                    show_docker_3xui_menu
+                else
+                    echo "HOLD: Docker Sanaei menu unavailable; no installation performed."
+                fi ;;
+            *) echo "Sanaei unchanged; open KH Docker 3x-UI Management later." ;;
+        esac
+        echo "KH: create the inbound in Sanaei manually using YOUR selected port/path."
+    else
+        echo "===== NEXT: IR FRP TCP TUNNEL + HTTPS XHTTP PATH ====="
+        echo "Apply the Smite UI FRP TCP tunnel and matching KH Sanaei inbound first."
+        read -rp "Smite TCP tunnel applied? Continue to IR PORT + PATH now? [y/N]: " answer || return 0
+        case "$answer" in
+            y|Y|yes|YES) smite_frp_wizard_easy_configure ir || : ;;
+            *) echo "IR path unchanged; return to FRP option 2 after Smite UI setup." ;;
+        esac
+    fi
+}
+
 smite_frp_wizard_start_here() {
     local role="$1" mode="" answer=""
     echo "===== FRP START HERE | THIS HOST: $role ====="
@@ -297,7 +332,8 @@ smite_frp_wizard_start_here() {
         *) echo "Gateway unchanged. Run START HERE again when ready." ;;
     esac
     echo "NEXT: Create/apply FRP TCP tunnel in Smite UI and KH Sanaei inbound."
-    echo "Then use 2) PORT + PATH. No Smite UI tunnel was created here."
+    echo "No Smite UI tunnel or Sanaei Xray inbound is auto-created."
+    smite_frp_wizard_continue_setup "$role"
     smite_frp_wizard_pause
 }
 
