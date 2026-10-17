@@ -213,6 +213,9 @@ out="$(printf 'I APPROVE DISPOSABLE BACKHAUL TEST HOST\n' | smite_tw_backhaul_en
 grep -Fq 'STEP 0: DISPOSABLE TEST HOST APPROVAL' <<< "$out"
 grep -Fq 'APPROVE_COMMAND_CALLED' <<< "$out"
 grep -Fq 'TEST_HOST_APPROVAL=READY' <<< "$out"
+# Command-substitution tests run in separate subshells: persist the expected
+# saved-marker condition explicitly in the parent fixture.
+APPROVAL_STATE=ready
 out="$(smite_tw_backhaul_ensure_test_host_approval ir)"
 ! grep -Fq 'STEP 0: DISPOSABLE TEST HOST APPROVAL' <<< "$out"
 unset -f python3 id
