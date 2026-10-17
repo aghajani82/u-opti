@@ -565,14 +565,31 @@ smite_tw_backhaul_guided_trial_install() {
     }
     read -rp "IR HTTPS domain: " ir_domain || return 1
     read -rp "KH upstream / Xray Host domain: " kh_host || return 1
-    echo "Choose the SAME Xray port and XHTTP path on BOTH IR and KH."
-    echo "KH Xray inbound must already exist on 127.0.0.1 at this port/path."
-    read -rp "KH Xray inbound port [56053]: " data_port || return 1
-    data_port="${data_port:-56053}"
-    read -rp "XHTTP base path [/$data_port/www] (e.g. /45561/web): " xhttp_path || return 1
-    xhttp_path="${xhttp_path:-/$data_port/www}"
-    # Accept the common trailing-slash notation, normalize before safe validation.
-    xhttp_path="${xhttp_path%/}"
+    echo "Use the SAME Xray port and XHTTP Path on BOTH IR and KH."
+    echo "KH Xray inbound must already exist at 127.0.0.1 on this port/Path."
+    local ph="/usr/local/lib/u-opti/modules/smite-profile-first.py" saved="" p="" v="" reply=""
+    if [ -s "$ph" ]; then
+        saved="$(python3 -B "$ph" --show 2>/dev/null)" || saved=""
+        if [ -n "$saved" ]; then
+            p="$(printf '%s\n' "$saved" | awk -F= '$1=="BACKHAUL_PORT" {print $2}')"
+            v="$(printf '%s\n' "$saved" | awk -F= '$1=="BACKHAUL_PATH" {print $2}')"
+            if [ -n "$p" ] && [ -n "$v" ]; then
+                echo "Saved Profile First Backhaul: $p / $v"
+                read -rp "Use saved Backhaul profile? [Y/n]: " reply || return 1
+                if [ "$reply" != n ] && [ "$reply" != N ]; then
+                    data_port="$p"
+                    xhttp_path="$v"
+                fi
+            fi
+        fi
+    fi
+    if [ -z "$data_port" ] || [ -z "$xhttp_path" ]; then
+        read -rp "KH Xray inbound port [56053]: " data_port || return 1
+        if [ -z "$data_port" ]; then data_port=56053; fi
+        read -rp "XHTTP base path (e.g. /45561/web): " xhttp_path || return 1
+        if [ -z "$xhttp_path" ]; then xhttp_path="/$data_port/www"; fi
+        xhttp_path="$(printf '%s' "$xhttp_path" | sed 's@/$@@')"
+    fi
     echo "Selected KH Xray port: $data_port | XHTTP base path: $xhttp_path"
     echo "Do not reuse FRP paths or a port already occupied on IR."
     echo
