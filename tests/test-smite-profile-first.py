@@ -66,6 +66,23 @@ class ProfileFirstTest(unittest.TestCase):
                         plan.store(path, updated, replace=True)
                 self.assertEqual(plan.load(path), doc)
 
+    def test_live_auto_published_route_prevents_profile_replacement(self):
+        doc = plan.validate("13914", "/13914/shop", "58408", "/58408/ooo")
+        updated = plan.validate("13914", "/13914/changed", "58408", "/58408/ooo")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            routes = root / "frp-routes.inc"
+            routes.write_text("# FRP Nginx\n    location = /13914/shop {\n")
+            path = root / "tunnels" / "profile-first.json"
+            with patch.object(plan, "FRP_NGINX_ROUTES", routes), \
+                 patch.object(plan.os, "geteuid", return_value=0), \
+                 patch.object(plan, "safe_dir"), patch.object(plan, "safe_file"):
+                self.assertEqual(plan.store(path, doc), "PROFILE_FIRST_SAVED_NO_SERVICES_CHANGED")
+                self.assertTrue(plan.active_traces())
+                with self.assertRaises(plan.ProfileHold):
+                    plan.store(path, updated, replace=True)
+                self.assertEqual(plan.load(path), doc)
+
     def test_missing_plan_and_symlink_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp) / "tunnels"
