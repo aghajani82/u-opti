@@ -37,6 +37,37 @@ class GuidedTrialHold(ValueError):
     pass
 
 
+TEST_HOST_MARKER = Path("/root/.uopti-backhaul-rebuilt-test-host")
+TEST_HOST_APPROVAL = "I APPROVE DISPOSABLE BACKHAUL TEST HOST"
+
+
+def register_test_host_approval(role: str, confirmation: str) -> str:
+    """Explicitly enroll a disposable host before pairing or profile prompts.
+
+    This deliberately does NOT bypass trial.authorized() or trial.install().
+    No unattended enrollment, replacing a marker, or changes to live services.
+    """
+    if confirmation != TEST_HOST_APPROVAL:
+        raise GuidedTrialHold("Exact disposable-host consent required")
+    role_gate._trusted_role(role)
+    if trial.disposable_host_approved():
+        return "TEST_HOST_APPROVAL=READY"
+    if TEST_HOST_MARKER.exists() or TEST_HOST_MARKER.is_symlink():
+        raise GuidedTrialHold("Invalid existing test-host approval marker; inspect manually")
+    # Prevent approving a host with existing/partial Sidecar installation.
+    role_gate._fresh(role)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(TEST_HOST_MARKER, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fp:
+        os.fchmod(fp.fileno(), 0o600)
+        fp.write(TEST_HOST_APPROVAL + "\n")
+        fp.flush()
+        os.fsync(fp.fileno())
+    if not trial.disposable_host_approved():
+        raise GuidedTrialHold("Test-host approval could not be verified")
+    return "TEST_HOST_APPROVAL=READY"
+
+
 def authorized(role: str, approval: str, confirm: str) -> None:
     """Validate approval BEFORE staging private data or attempting install."""
     if role not in ("ir", "kh") or os.geteuid() != 0:
@@ -183,9 +214,29 @@ def main() -> int:
     actions = parser.add_mutually_exclusive_group(required=False)
     actions.add_argument("--install-test", action="store_true")
     actions.add_argument("--diagnose", action="store_true")
+    actions.add_argument("--approval-status", action="store_true")
+    actions.add_argument("--approve-test-host", action="store_true")
     parser.add_argument("--test-host-approval", default="")
     parser.add_argument("--confirm", default="")
     args = parser.parse_args()
+    if args.approval_status:
+        try:
+            role_gate._trusted_role(args.role)
+        except Exception:
+            print("TEST_HOST_APPROVAL=HOLD (trusted Standard role required)")
+            return 2
+        if trial.disposable_host_approved():
+            print("TEST_HOST_APPROVAL=READY")
+            return 0
+        print("TEST_HOST_APPROVAL=MISSING_OR_INVALID")
+        return 2
+    if args.approve_test_host:
+        try:
+            print(register_test_host_approval(args.role, args.confirm))
+        except Exception:
+            print("HOLD: Test-host approval refused. No Sidecar installed or services changed.")
+            return 2
+        return 0
     if not args.diagnose and not args.install_test:
         print("HOLD: Select read-only --diagnose or explicit --install-test.")
         return 2
