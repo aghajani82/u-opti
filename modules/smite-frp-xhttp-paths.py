@@ -19,6 +19,8 @@ DEFAULT_MAP = Path(os.environ.get(
 SIDECAR_INCLUDE = Path(os.environ.get(
     "SMITE_FRP_XHTTP_SIDECAR_INC",
     "/etc/nginx/u-opti-backhaul-sidecar-xhttp.inc"))
+PROFILE_FIRST_PLAN = Path(os.environ.get(
+    "SMITE_PROFILE_FIRST_PLAN", "/etc/u-opti/tunnels/profile-first.json"))
 PORT_DENY = {443, 7000, 8000, 8443, 8888}
 PATH_RE = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\Z")
 RESERVED = {"api", "assets", "auth", "channel", "docs", "login",
@@ -155,10 +157,62 @@ def validate_path_set(paths):
                 raise RouteError("FRP XHTTP route overlaps an installed Backhaul Sidecar")
 
 
+def profile_first_frp():
+    """Read the trusted PRE-Smite plan; never publish a route for an absent tunnel.
+
+    The plan is non-secret, but its ownership/mode and structure are security
+    boundaries. An unsafe existing file blocks sync instead of falling back
+    silently to the legacy /PORT/web path.
+    """
+    path = PROFILE_FIRST_PLAN
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RouteError("Cannot inspect saved Profile First plan") from exc
+    try:
+        parent = path.parent.lstat()
+    except OSError as exc:
+        raise RouteError("Cannot inspect Profile First directory") from exc
+    uid = os.geteuid()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != uid
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or not stat.S_ISREG(st.st_mode) or st.st_uid != uid
+            or stat.S_IMODE(st.st_mode) != 0o600
+            or st.st_size > 2048):
+        raise RouteError("Unsafe saved Profile First plan ownership, type or mode")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(data, dict)
+                or set(data) != {"version", "frp", "backhaul"}
+                or type(data["version"]) is not int or data["version"] != 1):
+            raise RouteError("Malformed saved Profile First plan")
+        frp, backhaul = data["frp"], data["backhaul"]
+        if (not isinstance(frp, dict) or set(frp) != {"port", "path"}
+                or not isinstance(backhaul, dict)
+                or set(backhaul) != {"port", "path"}
+                or type(frp["port"]) is not int
+                or type(backhaul["port"]) is not int):
+            raise RouteError("Malformed saved Profile First entries")
+        fp = valid_port(frp["port"])
+        fx = valid_path(frp["path"], fp)
+        bp = valid_port(backhaul["port"])
+        bx = valid_path(backhaul["path"], bp)
+        if fp == bp or overlaps(fx, bx):
+            raise RouteError("Saved FRP and Backhaul profiles overlap")
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise RouteError("Invalid saved Profile First plan") from exc
+    return fp, fx
+
+
 def render(snapshot, destination, path_file):
     ports = server_ports(snapshot)
     registry = registry_read(path_file)
-    paths = {port: registry.get(port, default_path(port)) for port in ports}
+    planned = profile_first_frp()
+    paths = {port: (registry[port] if port in registry else
+                    planned[1] if planned is not None and port == planned[0] else
+                    default_path(port)) for port in ports}
     validate_path_set(paths)
     shared = (
         "        proxy_http_version 1.1;\n"
@@ -211,7 +265,10 @@ def main():
             valid_path(args.path, valid_port(args.port))
         elif args.cmd == "get":
             port = valid_port(args.port)
-            print(registry_read(DEFAULT_MAP).get(port, default_path(port)))
+            registry = registry_read(DEFAULT_MAP)
+            planned = profile_first_frp()
+            print(registry.get(port, planned[1] if planned and planned[0] == port
+                               else default_path(port)))
         else:
             if os.geteuid() != 0 and not os.environ.get("UOPTI_FRP_TEST_MODE"):
                 raise RouteError("Root required to save FRP XHTTP path")
