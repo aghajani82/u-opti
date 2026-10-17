@@ -45,11 +45,13 @@ def validate(fp: object, fx: object, bp: object, bx: object) -> dict:
         raise ProfileHold("Invalid FRP or Backhaul port / XHTTP Path") from exc
     if not isinstance(bp, (int, str)) or isinstance(bp, bool) or not str(bp).isascii() or not str(bp).isdecimal():
         raise ProfileHold("Invalid Backhaul port")
-    if str(bport) != str(bp) or fport == bport:
+    if str(fport) != str(fp) or str(bport) != str(bp) or fport == bport:
         raise ProfileHold("FRP and Backhaul must use distinct canonical ports")
     if bport in (56053,) and fport == bport:
         raise ProfileHold("Duplicate data ports")
     numeric = bpath.split("/")[1]
+    if numeric in {"api", "assets", "auth", "channel", "docs", "login", "static", "sub", "tunnel", "openapi.json"}:
+        raise ProfileHold("Backhaul Path overlaps a reserved gateway namespace")
     if numeric.isdecimal() and int(numeric) != bport:
         raise ProfileHold("Backhaul numeric Path prefix must equal Backhaul port")
     if frp.overlaps(fpath, bpath):
