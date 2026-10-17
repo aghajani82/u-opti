@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.16.5**
+**v0.16.6**
 
 ## Main Menu
 
@@ -22,6 +22,12 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## v0.16.6 — first-run tunnel wizard fixes
+
+- **Backhaul:** `START HERE` now checks and explicitly requests disposable-test-host approval in Step 0 before pairing/port/path prompts. On an approved clean test host the same menu visit proceeds through guided installation; no manual shell marker step or second START HERE is required. Never use on production.
+- **FRP:** Finish IR Smite Standard + HTTPS/443 gateway, then KH Smite Standard + gateway; install Docker Sanaei on KH and make the loopback XHTTP inbound. On **IR**, use FRP **Option 2** to save the chosen port/path *before* making the tunnel. Then create/apply matching FRP TCP in Smite UI. The 15-second auto-sync timer only activates IR Nginx XHTTP after that applied tunnel is present; run FRP **Option 3 VERIFY** and test authenticated VLESS afterwards. Pending is not active.
+- This release does not install Sanaei inbounds or create Smite UI tunnels automatically and does not change active FRP/Sidecar ports.
 
 ## Fix in v0.16.5 — IR Smite HTTPS/443 gateway
 
