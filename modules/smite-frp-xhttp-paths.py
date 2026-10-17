@@ -141,14 +141,11 @@ def sidecar_locations():
     return re.findall(r"(?m)^\s*location\s+(?:=|\^~)\s+(/[A-Za-z0-9_/-]+)\s*\{",
                       content)
 
-def render(snapshot, destination, path_file):
-    ports = server_ports(snapshot)
-    registry = registry_read(path_file)
-    paths = {port: registry.get(port, default_path(port)) for port in ports}
-    for port, path in paths.items():
-        valid_path(path, port)
+def validate_path_set(paths):
+    """Reject collisions for active routes and pending profile reservations."""
     occupied = []
     for port, path in sorted(paths.items()):
+        valid_path(path, port)
         if any(overlaps(path, other) for other in occupied):
             raise RouteError("Overlapping FRP XHTTP paths")
         occupied.append(path)
@@ -156,6 +153,13 @@ def render(snapshot, destination, path_file):
         for path in paths.values():
             if overlaps(path, external.rstrip("/")):
                 raise RouteError("FRP XHTTP route overlaps an installed Backhaul Sidecar")
+
+
+def render(snapshot, destination, path_file):
+    ports = server_ports(snapshot)
+    registry = registry_read(path_file)
+    paths = {port: registry.get(port, default_path(port)) for port in ports}
+    validate_path_set(paths)
     shared = (
         "        proxy_http_version 1.1;\n"
         "        proxy_set_header Host $host;\n"
@@ -194,6 +198,8 @@ def main():
     c = cmd.add_parser("set")
     c.add_argument("port")
     c.add_argument("path")
+    c.add_argument("--snapshot", type=Path, default=None,
+                   help="Trusted local Smite tunnel snapshot for pending-port collision checks")
     args = ap.parse_args()
     try:
         if args.cmd == "render":
@@ -218,6 +224,11 @@ def main():
                 mapping[port] = path
             if len(mapping) > 128:
                 raise RouteError("Too many stored FRP paths")
+            active_ports = server_ports(args.snapshot) if args.snapshot else set()
+            reserved_ports = set(mapping) | active_ports | {port}
+            if len(reserved_ports) > 128:
+                raise RouteError("Too many active or reserved FRP paths")
+            validate_path_set({p: mapping.get(p, default_path(p)) for p in reserved_ports})
             registry_write(DEFAULT_MAP, mapping)
             print("FRP_XHTTP_PATH_REGISTRY_SAVED")
     except (RouteError, OSError, OverflowError, TypeError) as exc:
