@@ -372,13 +372,19 @@ smite_tw_backhaul_paste_pair() {
     tool="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-paste-pair.py"
     echo "===== Backhaul two Bitvise terminals (FRESH TEST HOSTS) ====="
     echo "NO server-to-server SSH needed. Protect the pairing code as a secret."
-    echo "NEVER use this for the already working IR/KH Sidecars."
+    echo "IR may re-display its existing token after a VERIFIED local trial."
+    echo "KH never overwrites an existing or active Sidecar token."
     [ -s "$tool" ] || { echo "Two-terminal pairing helper missing; update test branch."; return 1; }
     case "$role" in
         ir)
             echo "IR: show the private Backhaul code and copy it DIRECTLY to KH."
             echo "WARNING: It is a long-lived secret, not a temporary login OTP."
-            mode="--show-ir"
+            if [ -e "/var/lib/u-opti/backhaul-trial/ir" ] ||
+               [ -L "/var/lib/u-opti/backhaul-trial/ir" ]; then
+                mode="--show-installed-ir"
+            else
+                mode="--show-ir"
+            fi
             confirm="DISPLAY-IR-PRIVATE-CODE"
             ;;
         kh)
@@ -392,6 +398,27 @@ smite_tw_backhaul_paste_pair() {
     read -rp "Type $confirm to continue: " answer || return 1
     [ "$answer" = "$confirm" ] || { echo "Cancelled. No pairing change."; return 0; }
     python3 -B "$tool" "$mode" --confirm "$confirm"
+}
+
+# Opt-in code display; never auto-print a long-lived secret into terminal logs.
+# The Python helper requires an interactive TTY, trusted IR identity and valid
+# fresh-host state OR a verified active IR trial journal.
+smite_tw_backhaul_offer_ir_code() {
+    local role="$1" phase="${2:-fresh}" response="" mode="" helper=""
+    [ "$role" = ir ] || return 0
+    helper="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-paste-pair.py"
+    [ -s "$helper" ] || { echo "HOLD: Private code helper missing."; return 1; }
+    case "$phase" in
+        fresh) mode="--show-ir" ;;
+        installed) mode="--show-installed-ir" ;;
+        *) return 2 ;;
+    esac
+    echo "===== IR BACKHAUL PRIVATE PAIRING CODE ====="
+    echo "The pairing code is LONG-LIVED. Copy it privately into KH; never paste it in chat."
+    echo "The code is NEVER regenerated when re-displayed."
+    read -rp "Type DISPLAY-IR-PRIVATE-CODE to show it on this terminal (Enter skips): " response || return 1
+    [ "$response" = DISPLAY-IR-PRIVATE-CODE ] || { echo "Private code hidden. Advanced -> Pair token only can show it later."; return 0; }
+    python3 -B "$helper" "$mode" --confirm DISPLAY-IR-PRIVATE-CODE
 }
 
 smite_tw_backhaul_secure_pair() {
@@ -523,6 +550,10 @@ smite_tw_backhaul_guided_trial_install() {
           --role "$role" --status || :
         python3 -B "$(dirname "$module")/smite-backhaul-sidecar-readiness.py" \
           --role "$role" --mode existing || :
+        if [ "$role" = ir ]; then
+            echo "===== PHASE D: TRANSFER EXISTING PAIRING CODE TO KH ====="
+            smite_tw_backhaul_offer_ir_code ir installed || :
+        fi
         echo "Next: Repeat Step 2 on OTHER host. Test authenticated VLESS AFTER both."
     else
         echo
@@ -610,7 +641,7 @@ smite_tw_backhaul_expert_menu() {
 
 # Beginner's one-entry Backhaul setup; fail closed on any existing/partial trial.
 smite_tw_backhaul_quick_start() {
-    local role="$1" basedir="" token="" state=""
+    local role="$1" basedir="" token="" state="" existing_pair=0
     basedir="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
     token="/etc/u-opti/backhaul-sidecar/shared.token"
     state="/var/lib/u-opti/backhaul-trial/$role"
@@ -626,6 +657,7 @@ smite_tw_backhaul_quick_start() {
         return 2
     fi
     if [ -e "$token" ] || [ -L "$token" ]; then
+        existing_pair=1
         echo "Step 1/2: Verify private pairing token."
         if ! python3 -B "$basedir/smite-backhaul-sidecar-token.py" --verify; then
             echo "HOLD: Existing pairing token unsafe; never overwrite automatically."
@@ -641,6 +673,11 @@ smite_tw_backhaul_quick_start() {
             echo "HOLD: Pairing verification failed; install NOT attempted."
             return 2
         fi
+    fi
+    # The fresh-code flow already displayed the token; on a rebuilt IR with
+    # an existing token, explicitly offer it BEFORE changing any services.
+    if [ "$role" = ir ] && [ "$existing_pair" = 1 ]; then
+        smite_tw_backhaul_offer_ir_code ir fresh || :
     fi
     echo "Step 2/2: Enter the SAME custom port and XHTTP Path on BOTH hosts."
     echo "KH Sanaei VLESS/XHTTP inbound must exist BEFORE installation."

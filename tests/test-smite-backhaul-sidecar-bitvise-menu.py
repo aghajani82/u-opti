@@ -35,6 +35,73 @@ class PairingMenuTests(unittest.TestCase):
             self.assertEqual(module.main(), 2)
             action.assert_not_called()
 
+    def test_installed_ir_requires_explicit_confirmation(self):
+        with patch.object(sys, "argv", ["helper", "--show-installed-ir"]), \
+             patch.object(module, "show_installed_ir") as action, \
+             redirect_stdout(io.StringIO()) as screen:
+            self.assertEqual(module.main(), 2)
+            action.assert_not_called()
+            self.assertNotIn("PAIRING CODE:", screen.getvalue())
+
+    def test_installed_ir_refuses_partial_journal_and_never_regenerates(self):
+        from types import SimpleNamespace
+        trial = SimpleNamespace(
+            _root=lambda role: Path("/synthetic/ir"),
+            _journal_read=lambda root: {"role": "ir", "phase": "files_installed"},
+        )
+        with patch.object(module, "_interactive"), \
+             patch.object(module.pair, "_trusted_role"), \
+             patch.object(module.pair, "_safe_parents"), \
+             patch.object(module, "_load", return_value=trial), \
+             patch.object(module.pair.token_tool, "generate") as generate:
+            with self.assertRaises(module.PasteHold):
+                module.show_installed_ir()
+            generate.assert_not_called()
+
+    def test_installed_ir_only_reads_verified_existing_token(self):
+        import tempfile
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as home:
+            secret = Path(home) / "shared.token"
+            secret.write_text("A" * 43 + "\n")
+            trial = SimpleNamespace(
+                _root=lambda role: Path("/synthetic/ir"),
+                _journal_read=lambda root: {"role": "ir", "phase": "trial_active"},
+                _safe_file=lambda path, mode=None: (
+                    ('[server]\ntoken = "' + "A" * 43 + '"\n').encode(), 0o600),
+            )
+            with patch.object(module, "TOKEN", secret), \
+                 patch.object(module, "_interactive"), \
+                 patch.object(module.pair, "_trusted_role"), \
+                 patch.object(module.pair, "_safe_parents"), \
+                 patch.object(module, "_load", return_value=trial), \
+                 patch.object(module.pair.token_tool, "inspect", return_value=True), \
+                 patch.object(module.pair.token_tool, "generate") as generate:
+                self.assertEqual(module.show_installed_ir(), "A" * 43)
+                self.assertEqual(secret.read_text(), "A" * 43 + "\n")
+                generate.assert_not_called()
+
+    def test_installed_ir_refuses_mismatched_deployed_token(self):
+        import tempfile
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as home:
+            secret = Path(home) / "shared.token"
+            secret.write_text("A" * 43 + "\n")
+            trial = SimpleNamespace(
+                _root=lambda role: Path("/synthetic/ir"),
+                _journal_read=lambda root: {"role": "ir", "phase": "trial_active"},
+                _safe_file=lambda path, mode=None: (
+                    ('[server]\ntoken = "' + "B" * 43 + '"\n').encode(), 0o600),
+            )
+            with patch.object(module, "TOKEN", secret), \
+                 patch.object(module, "_interactive"), \
+                 patch.object(module.pair, "_trusted_role"), \
+                 patch.object(module.pair, "_safe_parents"), \
+                 patch.object(module, "_load", return_value=trial), \
+                 patch.object(module.pair.token_tool, "inspect", return_value=True):
+                with self.assertRaises(module.PasteHold):
+                    module.show_installed_ir()
+
     def test_preflight_blocks_ir_before_read(self):
         with patch.object(module, "_interactive"), \
              patch.object(module.pair, "_trusted_role"), \
