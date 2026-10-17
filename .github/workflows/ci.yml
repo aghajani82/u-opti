@@ -44,6 +44,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-tunnel-wizard.sh
 
+      - name: Verify pre-Smite profile-first planning and safe non-secret persistence
+        shell: bash
+        run: python3 -B tests/test-smite-profile-first.py
+
       - name: Verify Tunnel Control Center status, demo and navigation
         shell: bash
         run: bash tests/test-smite-tunnel-control-center.sh
