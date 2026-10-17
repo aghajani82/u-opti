@@ -303,16 +303,39 @@ smite_frp_wizard_start_here() {
     else
         echo "KH FOUNDATION COMPLETE. NEXT: Install KH Docker Sanaei from Docker Management."
     fi
-    echo "After KH Sanaei inbound is ready, open FRP option 2 on IR to SAVE"
-    echo "your forwarded PORT + XHTTP PATH before creating the Smite UI tunnel."
-    echo "Then apply FRP TCP in Smite UI and use option 3 VERIFY on IR."
+    echo "If PROFILE FIRST was saved on IR: create/apply matching FRP TCP"
+    echo "server tunnel in Smite UI; the guarded timer automatically publishes"
+    echo "that saved XHTTP Path after Apply (NOT before)."
+    echo "Without PROFILE FIRST: use FRP option 2 to save PORT + PATH first."
+    echo "FRP option 2 also permits an explicitly confirmed manual override."
+    echo "Finally, use FRP option 3 VERIFY on IR."
     echo "No FRP tunnel, Xray inbound or XHTTP route was auto-created here."
     smite_frp_wizard_pause
 }
 
 # One custom port+path input per action, without hidden legacy assumptions.
 smite_frp_wizard_choose_profile() {
-    local role="$1" port="" path="" default=""
+    local role="$1" port="" path="" default="" saved="" saved_port="" saved_path="" use_saved=""
+    local helper="/usr/local/lib/u-opti/modules/smite-profile-first.py"
+    if [ -s "$helper" ]; then
+        saved="$(python3 -B "$helper" --show 2>/dev/null)" || saved=""
+        if [ -n "$saved" ]; then
+            saved_port="$(printf '%s\n' "$saved" | awk -F= '$1=="FRP_PORT" {print $2}')"
+            saved_path="$(printf '%s\n' "$saved" | awk -F= '$1=="FRP_PATH" {print $2}')"
+            if [ -n "$saved_port" ] && [ -n "$saved_path" ]; then
+                echo "PROFILE FIRST: FRP port=$saved_port Path=$saved_path"
+                read -rp "Use saved FRP profile? [Y/n]: " use_saved || return 2
+                if [ "$use_saved" != n ] && [ "$use_saved" != N ]; then
+                    python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" check "$saved_port" "$saved_path" >/dev/null || {
+                        echo "HOLD: Saved FRP profile is invalid."; return 2;
+                    }
+                    SMITE_FRP_CHOSEN_PORT="$saved_port"
+                    SMITE_FRP_CHOSEN_PATH="$saved_path"
+                    return 0
+                fi
+            fi
+        fi
+    fi
     port="$(smite_frp_wizard_port)" || return 2
     if [ "$role" = ir ]; then
         default="$(smite_frp_xhttp_get_path "$port")" || return 2
@@ -481,6 +504,8 @@ smite_frp_wizard_menu() {
         echo "      Standard FRP EASY SETUP"
         echo "======================================"
         echo "This server: $role | Smite: $(smite_frp_wizard_mode_label)"
+        echo "With saved PROFILE FIRST: Smite UI FRP TCP Apply triggers auto-route sync."
+        echo "Option 2 remains for explicit profile changes or recovery."
         echo "1) START HERE - Install/check Smite + HTTPS Gateway"
         echo "2) PORT + PATH - Save IR profile before Smite tunnel"
         echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"

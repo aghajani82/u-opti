@@ -396,18 +396,28 @@ smite_tw_backhaul_paste_pair() {
         *) echo "Unsupported role; cancelled."; return 1 ;;
     esac
     if [ "$role" = kh ]; then
-        echo "KH STEP 1/2: Enter the exact confirmation PHRASE below, NOT the secret."
-        echo "KH STEP 2/2: The next SEPARATE (hidden) prompt will request the IR pairing code."
-    fi
-    read -rp "STEP 1/2 — Type $confirm (NOT the pairing code): " answer || return 1
-    if [ "$answer" != "$confirm" ]; then
-        echo "HOLD: Wrong confirmation. No pairing code was accepted or saved."
-        echo "Choose pairing again; type the confirmation PHRASE first."
-        echo "Paste the actual secret ONLY when the separate hidden prompt appears."
-        return 2
-    fi
-    if [ "$role" = kh ]; then
-        echo "KH STEP 2/2: Enter the secret only at the HIDDEN input prompt now."
+        echo "KH STEP 1/2: Approve importing the IR private code by typing y."
+        echo "Do NOT paste the code yet. The next prompt will ask for it secretly."
+        # Hide this answer too: if a long-lived secret is pasted at the WRONG
+        # prompt it must not echo to terminal scrollback or captured transcripts.
+        read -rsp "KH STEP 1/2: Continue to hidden code input? Type y: " answer || return 1
+        echo
+        case "$answer" in
+            y|Y) ;;
+            *)
+                echo "HOLD: Confirmation was not y. No pairing code was accepted or saved."
+                echo "Choose pairing again; type y first (NOT the private code)."
+                echo "Paste the secret ONLY into the separate hidden STEP 2/2 prompt."
+                return 2
+                ;;
+        esac
+        echo "KH STEP 2/2: Paste the actual IR secret at the HIDDEN input prompt now."
+    else
+        read -rp "Type $confirm to display the existing IR code: " answer || return 1
+        if [ "$answer" != "$confirm" ]; then
+            echo "HOLD: IR code-display consent not confirmed. No pairing change."
+            return 2
+        fi
     fi
     python3 -B "$tool" "$mode" --confirm "$confirm"
 }
@@ -555,14 +565,31 @@ smite_tw_backhaul_guided_trial_install() {
     }
     read -rp "IR HTTPS domain: " ir_domain || return 1
     read -rp "KH upstream / Xray Host domain: " kh_host || return 1
-    echo "Choose the SAME Xray port and XHTTP path on BOTH IR and KH."
-    echo "KH Xray inbound must already exist on 127.0.0.1 at this port/path."
-    read -rp "KH Xray inbound port [56053]: " data_port || return 1
-    data_port="${data_port:-56053}"
-    read -rp "XHTTP base path [/$data_port/www] (e.g. /45561/web): " xhttp_path || return 1
-    xhttp_path="${xhttp_path:-/$data_port/www}"
-    # Accept the common trailing-slash notation, normalize before safe validation.
-    xhttp_path="${xhttp_path%/}"
+    echo "Use the SAME Xray port and XHTTP Path on BOTH IR and KH."
+    echo "KH Xray inbound must already exist at 127.0.0.1 on this port/Path."
+    local ph="/usr/local/lib/u-opti/modules/smite-profile-first.py" saved="" p="" v="" reply=""
+    if [ -s "$ph" ]; then
+        saved="$(python3 -B "$ph" --show 2>/dev/null)" || saved=""
+        if [ -n "$saved" ]; then
+            p="$(printf '%s\n' "$saved" | awk -F= '$1=="BACKHAUL_PORT" {print $2}')"
+            v="$(printf '%s\n' "$saved" | awk -F= '$1=="BACKHAUL_PATH" {print $2}')"
+            if [ -n "$p" ] && [ -n "$v" ]; then
+                echo "Saved Profile First Backhaul: $p / $v"
+                read -rp "Use saved Backhaul profile? [Y/n]: " reply || return 1
+                if [ "$reply" != n ] && [ "$reply" != N ]; then
+                    data_port="$p"
+                    xhttp_path="$v"
+                fi
+            fi
+        fi
+    fi
+    if [ -z "$data_port" ] || [ -z "$xhttp_path" ]; then
+        read -rp "KH Xray inbound port [56053]: " data_port || return 1
+        if [ -z "$data_port" ]; then data_port=56053; fi
+        read -rp "XHTTP base path (e.g. /45561/web): " xhttp_path || return 1
+        if [ -z "$xhttp_path" ]; then xhttp_path="/$data_port/www"; fi
+        xhttp_path="$(printf '%s' "$xhttp_path" | sed 's@/$@@')"
+    fi
     echo "Selected KH Xray port: $data_port | XHTTP base path: $xhttp_path"
     echo "Do not reuse FRP paths or a port already occupied on IR."
     echo
@@ -690,7 +717,7 @@ smite_tw_backhaul_quick_start() {
     echo "===== BACKHAUL QUICK START | THIS HOST: $role ====="
     echo "Run on BOTH hosts separately (IR then KH); no remote SSH required."
     echo "FRP, Smite and Sanaei are preserved; no automatic rebuilds."
-    if [ -e "$state" || [ -L "$state" ] ||
+    if [ -e "$state" ] || [ -L "$state" ] ||
        [ -e "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        [ -L "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        docker container inspect "uopti-backhaul-sidecar-$role" >/dev/null 2>&1; then
@@ -839,8 +866,9 @@ smite_tw_menu() {
         echo "2) FRP — EASY SETUP (Standard IR/KH)"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
+        echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
             2)
@@ -857,6 +885,7 @@ smite_tw_menu() {
                    echo "Tunnel Control Center missing; update U-OPTI from main."
                    smite_tw_pause
                fi ;;
+            5) bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-profile-first-menu.sh" "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac

@@ -153,17 +153,18 @@ smite_tw_backhaul_guided_trial_install() { echo "ONE_FLOW_TRIAL_FOR:$1"; }
 out="$(printf '1\n4\n7\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ONE_FLOW_TRIAL_FOR:ir' <<< "$out"
 
-# A long-lived pairing secret accidentally entered at the KH consent prompt
-# MUST NOT be processed as a token. The user should get a clear second-step
-# instruction; only the exact consent may invoke the hidden-input helper.
+# KH consent is a short hidden y/N step. Mistaken secret paste must neither
+# reach the pairing helper NOR be echoed to captured output. The second prompt
+# is owned by the Python getpass helper, never by the consent reader.
 python3() { printf 'PAIR_HELPER_MODE=%s\n' "$3"; }
 if out="$(printf 'A_SECRET_ENTERED_TOO_EARLY\n' | smite_tw_backhaul_paste_pair kh)"; then
-    echo "ERROR: KH accepted a non-consent phrase at the confirmation step" >&2; exit 1
+    echo "ERROR: KH accepted a secret at the consent step" >&2; exit 1
 fi
 grep -Fq 'KH STEP 1/2:' <<< "$out"
 grep -Fq 'No pairing code was accepted or saved' <<< "$out"
+! grep -Fq 'A_SECRET_ENTERED_TOO_EARLY' <<< "$out"
 ! grep -Fq 'PAIR_HELPER_MODE=' <<< "$out"
-out="$(printf 'PASTE-KH-PRIVATE-CODE\n' | smite_tw_backhaul_paste_pair kh)"
+out="$(printf 'y\n' | smite_tw_backhaul_paste_pair kh)"
 grep -Fq 'KH STEP 2/2:' <<< "$out"
 grep -Fq 'PAIR_HELPER_MODE=--paste-kh' <<< "$out"
 unset -f python3
@@ -240,5 +241,51 @@ if grep -Eq 'cat .*\.token|cat .*\.toml|docker (update|run|rm|stop)|systemctl (r
     echo "FAIL: live mutation or sensitive credential exposure in wizard" >&2
     exit 1
 fi
+
+# Runtime regression: bash -n misses malformed [ ... ] commands.
+# Exercise the real beginner quick-start with a synthetic existing journal,
+# partial profile or installed Sidecar; do not access a real test VPS.
+for scenario in journal journal_symlink profile container; do
+    rc=0
+    out="$(bash -c '
+        source modules/smite-tunnel-wizard.sh
+        SCENARIO="$1"
+        # Intercept only our synthetic ownership probe; use the real
+        # shell test builtin for every other check.
+        function [() {
+            if [[ "$#" == 3 && "$3" == "]" ]]; then
+                if [[ "$SCENARIO" == "journal" && "$1" == "-e" &&
+                      "$2" == "/var/lib/u-opti/backhaul-trial/kh" ]]; then
+                    return 0
+                fi
+                if [[ "$SCENARIO" == "journal_symlink" && "$1" == "-L" &&
+                      "$2" == "/var/lib/u-opti/backhaul-trial/kh" ]]; then
+                    return 0
+                fi
+                if [[ "$SCENARIO" == "profile" && "$1" == "-e" &&
+                      "$2" == "/etc/u-opti/backhaul-sidecar/kh.toml" ]]; then
+                    return 0
+                fi
+            fi
+            builtin [ "$@"
+        }
+        docker() {
+            if [[ "$SCENARIO" == container && "$1" == container &&
+                  "$2" == inspect && "$3" == uopti-backhaul-sidecar-kh ]]; then
+                return 0
+            fi
+            return 1
+        }
+        smite_tw_backhaul_ensure_test_host_approval() {
+            echo "BUG: existing host reached host approval"
+            return 2
+        }
+        smite_tw_backhaul_quick_start kh
+    ' bash "$scenario" 2>&1)" || rc=$?
+    test "$rc" -eq 2
+    grep -Fq 'HOLD: Sidecar trial/partial state detected' <<< "$out"
+    ! grep -Fq 'BUG:' <<< "$out"
+    ! grep -Fq 'missing ' <<< "$out"
+done
 
 echo 'PASS: Unified Tunnel Wizard roles, delegation, safe protocol guidance and packaging'
