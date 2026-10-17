@@ -37,6 +37,14 @@ class GuidedTrialHold(ValueError):
     pass
 
 
+class ExistingTrialHold(GuidedTrialHold):
+    """Existing or partial trial must be inspected instead of reinstalled."""
+
+
+class PostInstallCleanupHold(GuidedTrialHold):
+    """Trial may be active, but private temporary cleanup is not verified."""
+
+
 TEST_HOST_MARKER = Path("/root/.uopti-backhaul-rebuilt-test-host")
 TEST_HOST_APPROVAL = "I APPROVE DISPOSABLE BACKHAUL TEST HOST"
 
@@ -89,7 +97,7 @@ def install_fresh(role: str, ir_domain: str, kh_host: str,
     # A previously installed/partially applied trial must be manually reviewed.
     # This check does not trust a directory name or regenerate an active token.
     if trial._root(role).exists() or trial._root(role).is_symlink():
-        raise GuidedTrialHold("Trial journal exists; stop and inspect first")
+        raise ExistingTrialHold("Trial journal exists; stop and inspect first")
     sidecar: Path | None = None
     nginx: Path | None = None
     try:
@@ -111,7 +119,7 @@ def install_fresh(role: str, ir_domain: str, kh_host: str,
     # A partial cleanup is not a clean success; stop for manual review
     # rather than asserting the private token-bearing proposals were deleted.
     if any(os.path.lexists(str(p)) for p in (sidecar, nginx)):
-        raise GuidedTrialHold("Private staging cleanup unverified; inspect journal")
+        raise PostInstallCleanupHold("Private staging cleanup unverified; inspect journal")
     return SUCCESS
 
 
@@ -253,19 +261,32 @@ def main() -> int:
     except Exception as exc:
         # Fixed error categories only: never echo private token, vhost contents
         # or uncontrolled lower-layer exception strings.
-        if isinstance(exc, GuidedTrialHold):
-            stage = "HOST_APPROVAL_OR_EXISTING_INSTALLATION"
+        if isinstance(exc, ExistingTrialHold):
+            stage = "EXISTING_OR_PARTIAL_TRIAL"
+            hint = ("This call did NOT start an installation; an existing journal "
+                    "must be checked before any action.")
+        elif isinstance(exc, PostInstallCleanupHold):
+            stage = "POST_INSTALL_PRIVATE_CLEANUP_UNVERIFIED"
+            hint = ("Sidecar activation may already have succeeded, but temporary "
+                    "cleanup is unverified. Do NOT reinstall or manually delete files.")
+        elif isinstance(exc, GuidedTrialHold):
+            stage = "HOST_APPROVAL_REFUSED"
+            hint = "Host approval or explicit installation consent did not pass."
         elif isinstance(exc, guided.GuidedHold):
             stage = "PREPARATION_OR_NGINX_ADMISSION"
+            hint = "Private preparation or Nginx admission did not pass."
         elif isinstance(exc, trial.TrialRefused):
             stage = "TRANSACTION_OR_POST_INSTALL_VERIFICATION"
+            hint = "Trial transaction or post-install verification did not pass."
         else:
             stage = "UNEXPECTED_REVIEW_REQUIRED"
+            hint = "Unexpected failure; do not guess or rerun."
         print("HOLD_STAGE=" + stage)
-        print("HOLD: Guided TEST installation incomplete or unverified.")
-        print("Check the local trial journal/status READ-ONLY before retrying.")
-        print("NEXT=Run --diagnose with the SAME port, path and hostnames on THIS host.")
-        print("Do not overwrite an existing Sidecar or force recovery.")
+        print("HOLD: " + hint)
+        print("NEXT=Inspect THIS host using the following READ-ONLY checks:")
+        print("  smite-backhaul-sidecar-live-trial.py --role " + args.role + " --status")
+        print("  smite-backhaul-sidecar-readiness.py --role " + args.role + " --mode existing")
+        print("Never overwrite or retry a host with an existing/partial Sidecar.")
         return 2
     print(result)
     print("No manual temporary paths required; private staging was cleaned.")
