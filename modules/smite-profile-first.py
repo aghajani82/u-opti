@@ -99,15 +99,31 @@ def load(path: Path) -> dict | None:
         raise ProfileHold("Invalid profile content; manual review required") from exc
 
 
+FRP_NGINX_ROUTES = Path("/etc/nginx/u-opti-smite-frp-xhttp.conf")
+
+
 def active_traces() -> bool:
-    # Never replace plans after a Sidecar installation or FRP profile was saved.
-    return any(os.path.lexists(str(p)) for p in (
+    # Never replace a plan once a Sidecar, explicit FRP registry or
+    # auto-published FRP Nginx route is active. Missing registry does not
+    # imply inactive FRP once the Profile First fallback is supported.
+    if any(os.path.lexists(str(p)) for p in (
         Path("/var/lib/u-opti/backhaul-trial/ir"),
         Path("/var/lib/u-opti/backhaul-trial/kh"),
         Path("/etc/u-opti/backhaul-sidecar/ir.toml"),
         Path("/etc/u-opti/backhaul-sidecar/kh.toml"),
         Path("/etc/u-opti/smite/frp-xhttp-paths.json"),
-    ))
+    )):
+        return True
+    try:
+        if not FRP_NGINX_ROUTES.exists() and not FRP_NGINX_ROUTES.is_symlink():
+            return False
+        st = FRP_NGINX_ROUTES.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 65536:
+            return True
+        routes = FRP_NGINX_ROUTES.read_text(encoding="utf-8")
+        return bool(re.search(r"(?m)^\s*location\s+(?:=|\^~)\s+/", routes))
+    except (OSError, UnicodeError):
+        return True
 
 
 def store(path: Path, obj: dict, replace: bool = False) -> str:
