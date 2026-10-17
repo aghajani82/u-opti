@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.5] - 2026-10-17
+
+### Fixed
+
+- Smite Standard IR HTTPS/443 Gateway waits up to 15 bounded, local-only verification attempts after Nginx reload. A transient absence of the fresh TCP/443 listener no longer causes immediate rollback.
+- The probe forces local IPv4 via `--resolve` and ignores proxy environment settings, while keeping certificate verification enabled. After a sustained failure it emits a safe diagnostic distinguishing absent TCP/443 listener from TLS/upstream failures, then retains the existing rollback behavior.
+- Regression tests cover recovery after two refused attempts and a fail-closed result after 15 failures. This is a suspected reload race based on field logs; on-host retesting remains necessary.
+
 ## [0.16.4] - 2026-10-17
 
 ### Improved
