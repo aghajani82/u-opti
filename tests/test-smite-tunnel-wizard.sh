@@ -153,17 +153,18 @@ smite_tw_backhaul_guided_trial_install() { echo "ONE_FLOW_TRIAL_FOR:$1"; }
 out="$(printf '1\n4\n7\n0\n0\n0\n' | smite_tw_menu)"
 grep -Fq 'ONE_FLOW_TRIAL_FOR:ir' <<< "$out"
 
-# A long-lived pairing secret accidentally entered at the KH consent prompt
-# MUST NOT be processed as a token. The user should get a clear second-step
-# instruction; only the exact consent may invoke the hidden-input helper.
+# KH consent is a short hidden y/N step. Mistaken secret paste must neither
+# reach the pairing helper NOR be echoed to captured output. The second prompt
+# is owned by the Python getpass helper, never by the consent reader.
 python3() { printf 'PAIR_HELPER_MODE=%s\n' "$3"; }
 if out="$(printf 'A_SECRET_ENTERED_TOO_EARLY\n' | smite_tw_backhaul_paste_pair kh)"; then
-    echo "ERROR: KH accepted a non-consent phrase at the confirmation step" >&2; exit 1
+    echo "ERROR: KH accepted a secret at the consent step" >&2; exit 1
 fi
 grep -Fq 'KH STEP 1/2:' <<< "$out"
 grep -Fq 'No pairing code was accepted or saved' <<< "$out"
+! grep -Fq 'A_SECRET_ENTERED_TOO_EARLY' <<< "$out"
 ! grep -Fq 'PAIR_HELPER_MODE=' <<< "$out"
-out="$(printf 'PASTE-KH-PRIVATE-CODE\n' | smite_tw_backhaul_paste_pair kh)"
+out="$(printf 'y\n' | smite_tw_backhaul_paste_pair kh)"
 grep -Fq 'KH STEP 2/2:' <<< "$out"
 grep -Fq 'PAIR_HELPER_MODE=--paste-kh' <<< "$out"
 unset -f python3

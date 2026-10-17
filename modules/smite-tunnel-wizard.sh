@@ -396,18 +396,28 @@ smite_tw_backhaul_paste_pair() {
         *) echo "Unsupported role; cancelled."; return 1 ;;
     esac
     if [ "$role" = kh ]; then
-        echo "KH STEP 1/2: Enter the exact confirmation PHRASE below, NOT the secret."
-        echo "KH STEP 2/2: The next SEPARATE (hidden) prompt will request the IR pairing code."
-    fi
-    read -rp "STEP 1/2 — Type $confirm (NOT the pairing code): " answer || return 1
-    if [ "$answer" != "$confirm" ]; then
-        echo "HOLD: Wrong confirmation. No pairing code was accepted or saved."
-        echo "Choose pairing again; type the confirmation PHRASE first."
-        echo "Paste the actual secret ONLY when the separate hidden prompt appears."
-        return 2
-    fi
-    if [ "$role" = kh ]; then
-        echo "KH STEP 2/2: Enter the secret only at the HIDDEN input prompt now."
+        echo "KH STEP 1/2: Approve importing the IR private code by typing y."
+        echo "Do NOT paste the code yet. The next prompt will ask for it secretly."
+        # Hide this answer too: if a long-lived secret is pasted at the WRONG
+        # prompt it must not echo to terminal scrollback or captured transcripts.
+        read -rsp "KH STEP 1/2: Continue to hidden code input? Type y: " answer || return 1
+        echo
+        case "$answer" in
+            y|Y) ;;
+            *)
+                echo "HOLD: Confirmation was not y. No pairing code was accepted or saved."
+                echo "Choose pairing again; type y first (NOT the private code)."
+                echo "Paste the secret ONLY into the separate hidden STEP 2/2 prompt."
+                return 2
+                ;;
+        esac
+        echo "KH STEP 2/2: Paste the actual IR secret at the HIDDEN input prompt now."
+    else
+        read -rp "Type $confirm to display the existing IR code: " answer || return 1
+        if [ "$answer" != "$confirm" ]; then
+            echo "HOLD: IR code-display consent not confirmed. No pairing change."
+            return 2
+        fi
     fi
     python3 -B "$tool" "$mode" --confirm "$confirm"
 }
