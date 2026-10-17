@@ -303,9 +303,12 @@ smite_frp_wizard_start_here() {
     else
         echo "KH FOUNDATION COMPLETE. NEXT: Install KH Docker Sanaei from Docker Management."
     fi
-    echo "After KH Sanaei inbound is ready, open FRP option 2 on IR to SAVE"
-    echo "your forwarded PORT + XHTTP PATH before creating the Smite UI tunnel."
-    echo "Then apply FRP TCP in Smite UI and use option 3 VERIFY on IR."
+    echo "If PROFILE FIRST was saved on IR: create/apply matching FRP TCP"
+    echo "server tunnel in Smite UI; the guarded timer automatically publishes"
+    echo "that saved XHTTP Path after Apply (NOT before)."
+    echo "Without PROFILE FIRST: use FRP option 2 to save PORT + PATH first."
+    echo "FRP option 2 also permits an explicitly confirmed manual override."
+    echo "Finally, use FRP option 3 VERIFY on IR."
     echo "No FRP tunnel, Xray inbound or XHTTP route was auto-created here."
     smite_frp_wizard_pause
 }
@@ -501,6 +504,8 @@ smite_frp_wizard_menu() {
         echo "      Standard FRP EASY SETUP"
         echo "======================================"
         echo "This server: $role | Smite: $(smite_frp_wizard_mode_label)"
+        echo "With saved PROFILE FIRST: Smite UI FRP TCP Apply triggers auto-route sync."
+        echo "Option 2 remains for explicit profile changes or recovery."
         echo "1) START HERE - Install/check Smite + HTTPS Gateway"
         echo "2) PORT + PATH - Save IR profile before Smite tunnel"
         echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"
