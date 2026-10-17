@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.16.6** (single-visit gated Backhaul and staged FRP setup; Sidecar experimental)
+Current stable version: **v0.16.7** (single-visit gated Backhaul and staged FRP setup; Sidecar experimental)
 
 ## Core System Management
 
