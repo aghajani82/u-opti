@@ -150,4 +150,34 @@ cp "$SMITE_OVERLAY_DIR/node/core_adapters.py" "$tmp/adapter.expected"
 smite_patch_frp443_overlay
 cmp -s "$SMITE_OVERLAY_DIR/node/core_adapters.py" "$tmp/adapter.expected"
 
+# Nginx reload is asynchronous: the local HTTPS check must tolerate a
+# short ECONNREFUSED window without treating it as permanent gateway failure.
+probe_attempts=0
+curl() {
+    printf '%s\n' "$*" >> "$tmp/443-probe-arguments"
+    probe_attempts=$((probe_attempts + 1))
+    [ "$probe_attempts" -ge 3 ]
+}
+sleep() { :; }
+ss() { printf 'LISTEN 127.0.0.1:443\n'; }
+smite_gateway_verify_443 "ir.kolbe1.ir"
+test "$probe_attempts" -eq 3
+grep -Fq -- '--noproxy * -4' "$tmp/443-probe-arguments"
+grep -Fq -- '--resolve ir.kolbe1.ir:443:127.0.0.1' "$tmp/443-probe-arguments"
+if grep -Eq -- '--insecure|-k([[:space:]]|$)' "$tmp/443-probe-arguments"; then
+    echo "ERROR: TLS validation must never be disabled for gateway probe"; exit 1
+fi
+
+# Fifteen bounded failures must return nonzero and print a safe, useful
+# diagnostic; no Nginx reload/restart/rollback is performed by this probe.
+probe_attempts=0
+curl() { probe_attempts=$((probe_attempts + 1)); return 7; }
+ss() { :; }
+if smite_gateway_verify_443 "ir.kolbe1.ir" 2>"$tmp/443-diagnostic"; then
+    echo "ERROR: Repeated failed HTTPS probes were accepted"; exit 1
+fi
+test "$probe_attempts" -eq 15
+grep -Fq 'No TCP/443 listener' "$tmp/443-diagnostic"
+unset -f curl sleep ss
+
 echo "PASS: Smite FRP 443 routes, backend, and compatibility persist across repair"
