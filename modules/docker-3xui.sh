@@ -831,7 +831,7 @@ EOF
         echo "3x-UI installation completed, but public HTTPS access was not configured."
         echo
         echo "You can retry it later from:"
-        echo "3x-UI Docker Management > 11) Nginx / SSL Configuration"
+        echo "3x-UI Docker Management > 12) Nginx / SSL Configuration"
         echo
         read -rp "Press Enter to return..."
         return

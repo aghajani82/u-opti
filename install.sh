@@ -42,6 +42,8 @@ MODULES=(
     "smite-frp-xhttp.sh"
     "smite-frp-xhttp-paths.py"
     "smite-frp-wizard.sh"
+    "smite-profile-first.py"
+    "smite-profile-first-menu.sh"
     "smite-backhaul-management.sh"
     "smite-tunnel-wizard.sh"
     "smite-tunnel-control-center.sh"
@@ -196,6 +198,8 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
    ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
    ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
+   ! grep -q 'def validate(' "$TEMP_DIR/smite-profile-first.py" || \
+   ! grep -q 'PROFILE FIRST' "$TEMP_DIR/smite-profile-first-menu.sh" || \
    ! grep -q 'twcc_menu()' "$TEMP_DIR/smite-tunnel-control-center.sh" || \
    ! grep -q 'show_smite_foreign_gateway_menu()' "$TEMP_DIR/smite-foreign-gateway.sh" || \
    ! grep -q 'show_smite_private_network_menu()' "$TEMP_DIR/smite-private-network.sh" || \
