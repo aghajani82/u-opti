@@ -905,11 +905,30 @@ EOF_HOOK
 }
 
 smite_gateway_verify_443() {
-    local domain="$1"
+    local domain="$1" attempt
 
-    curl -fsS --max-time 10 \
-        --resolve "${domain}:443:127.0.0.1" \
-        "https://${domain}/api/status" >/dev/null
+    # systemctl reload nginx can return before new workers bind TCP/443.
+    # A single immediate curl may fail with ECONNREFUSED, triggering a
+    # rollback of an otherwise valid brand-new HTTPS gateway. Retry only
+    # the local loopback endpoint with strict TLS; never change Nginx state.
+    for attempt in {1..15}; do
+        if curl --noproxy '*' -4 -fsS --connect-timeout 2 --max-time 5 \
+            --resolve "${domain}:443:127.0.0.1" \
+            "https://${domain}/api/status" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$attempt" -lt 15 ]; then
+            sleep 1
+        fi
+    done
+
+    echo "ERROR: Local HTTPS verification failed after 15 attempts for ${domain}:443." >&2
+    if ss -H -lnt '( sport = :443 )' 2>/dev/null | grep -q .; then
+        echo "DIAG: TCP/443 is listening; check TLS/SNI, upstream 127.0.0.1:8443 and Nginx error log." >&2
+    else
+        echo "DIAG: No TCP/443 listener; check stream module, active Nginx configuration and error log." >&2
+    fi
+    return 1
 }
 
 smite_gateway_switch_local_node_to_443() {
