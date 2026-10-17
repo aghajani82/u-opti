@@ -172,7 +172,7 @@ grep -Fq 'host role: kh' <<< "$out"
 
 # Opt-in IR pairing re-display is available in the same beginner flow;
 # no code is emitted unless the operator types the exact consent phrase.
-python3() { printf 'SAFE_MOCK_DISPLAY_MODE:%s\n' "$2"; }
+python3() { printf 'SAFE_MOCK_DISPLAY_MODE:%s\n' "$3"; }
 out="$(printf '\n' | smite_tw_backhaul_offer_ir_code ir fresh)"
 grep -Fq 'Private code hidden.' <<< "$out"
 ! grep -Fq 'SAFE_MOCK_DISPLAY_MODE:' <<< "$out"
