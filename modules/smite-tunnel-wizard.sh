@@ -498,6 +498,32 @@ smite_tw_backhaul_install_badge() {
     fi
 }
 
+# Step 0 is an explicit operator enrollment, not an implicit safety bypass.
+# Run BEFORE asking for secrets/domains/port so a fresh TEST host proceeds
+# through all steps in one menu visit. The installer checks the marker again.
+smite_tw_backhaul_ensure_test_host_approval() {
+    local role="$1" module="" confirmation=""
+    module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
+    [ -s "$module" ] && [ "$(id -u)" -eq 0 ] || {
+        echo "HOLD: Guided Backhaul module/root required; no installation."
+        return 2
+    }
+    if python3 -B "$module" --role "$role" --approval-status; then
+        return 0
+    fi
+    echo "===== STEP 0: DISPOSABLE TEST HOST APPROVAL | $role ====="
+    echo "This is NOT for a production server. It is required ONLY after"
+    echo "a VPS snapshot and confirmed access to the provider rescue console."
+    echo "No Sidecar, pairing secret, Nginx route or FRP service changes here."
+    read -rp "Type I APPROVE DISPOSABLE BACKHAUL TEST HOST (Enter cancels): " confirmation || return 2
+    [ "$confirmation" = "I APPROVE DISPOSABLE BACKHAUL TEST HOST" ] || {
+        echo "CANCELLED: No approval; Backhaul installation NOT STARTED."
+        return 2
+    }
+    python3 -B "$module" --role "$role" --approve-test-host --confirm "$confirmation" || return 2
+    python3 -B "$module" --role "$role" --approval-status
+}
+
 smite_tw_backhaul_guided_trial_install() {
     local role="$1" module ir_domain kh_host data_port xhttp_path gate confirm
     module="${SMITE_BH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/smite-backhaul-sidecar-guided-trial.py"
@@ -511,6 +537,10 @@ smite_tw_backhaul_guided_trial_install() {
     echo "This Step 2 MUST finish separately on BOTH IR and KH."
     [ -s "$module" ] || { echo "Guided trial module missing; update test branch."; return 1; }
     [ "$(id -u)" -eq 0 ] || { echo "Root required."; return 1; }
+    smite_tw_backhaul_ensure_test_host_approval "$role" || {
+        echo "INSTALLATION NOT STARTED: Complete Step 0 approval first."
+        return 2
+    }
     read -rp "IR HTTPS domain: " ir_domain || return 1
     read -rp "KH upstream / Xray Host domain: " kh_host || return 1
     echo "Choose the SAME Xray port and XHTTP path on BOTH IR and KH."
@@ -648,7 +678,7 @@ smite_tw_backhaul_quick_start() {
     echo "===== BACKHAUL QUICK START | THIS HOST: $role ====="
     echo "Run on BOTH hosts separately (IR then KH); no remote SSH required."
     echo "FRP, Smite and Sanaei are preserved; no automatic rebuilds."
-    if [ -e "$state" ] || [ -L "$state" ] ||
+    if [ -e "$state" || [ -L "$state" ] ||
        [ -e "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        [ -L "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        docker container inspect "uopti-backhaul-sidecar-$role" >/dev/null 2>&1; then
@@ -656,6 +686,11 @@ smite_tw_backhaul_quick_start() {
         echo "Use Backhaul -> 2) Check installation (READ-ONLY)."
         return 2
     fi
+    # Do not ask for pairing secret or profile until independent host approval.
+    smite_tw_backhaul_ensure_test_host_approval "$role" || {
+        echo "HOLD: Step 0 approval incomplete. No pairing or installation attempted."
+        return 2
+    }
     if [ -e "$token" ] || [ -L "$token" ]; then
         existing_pair=1
         echo "Step 1/2: Verify private pairing token."

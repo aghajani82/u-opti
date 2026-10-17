@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.6] - 2026-10-17
+
+### Fixed
+
+- **Backhaul START HERE / IR and KH:** Disposable TEST VPS approval is now a clearly labeled **Step 0**, before token pairing and entering hostnames or XHTTP port/path. After an exact operator acknowledgement, the wizard registers the root-only 0600 marker using exclusive creation, verifies it, and resumes the **same** guided installation run. Unapproved, installed, or partial hosts still fail closed and cannot bypass the existing journal, trial, rollback and snapshot/console confirmations.
+- **FRP START HERE:** The IR and KH Smite Standard + HTTPS gateway installation flow now ends after its foundation is prepared. It no longer launches PORT+PATH or Sanaei configuration automatically during installation.
+- **FRP Option 2:** Once KH Sanaei is ready, IR can save a validated *pending* XHTTP port/path even before a Smite FRP TCP tunnel is created. The route is not published merely because a profile was saved: the existing timed reconciler publishes it after Smite applies the matching IR server tunnel. Existing applied routes still use the original guarded register-and-verify behavior. Validate with Option 3 after tunnel creation.
+- Reject overlapping pending FRP reservations and Sidecar XHTTP paths; synthetic tests cover staged activation and opt-in safety.
+
+### Scope
+
+- FRP, Smite, Gateway and existing active Backhaul Sidecars are not silently reinstalled or modified by menu navigation. Backhaul remains an experimental disposable-host-only installer. End-to-end fresh-host and actual authenticated VLESS traffic must still be validated on the user's two VPSs.
+
 ## [0.16.5] - 2026-10-17
 
 ### Fixed

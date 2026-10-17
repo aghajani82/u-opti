@@ -63,6 +63,30 @@ grep -Fxq '# Managed by U-OPTI - Standard FRP XHTTP' "$SMITE_FRP_XHTTP_CONF"
 ! grep -Eq '^[[:space:]]*location[[:space:]]' "$SMITE_FRP_XHTTP_CONF"
 cp "$SMITE_FRP_XHTTP_CONF" "$tmp/pristine.expected"
 
+# Stage IR port/Path BEFORE any Smite UI tunnel exists. This must not publish
+# an Nginx route until Smite has actually applied the server tunnel.
+smite_frp_xhttp_stage_path 45123 /45123/prepared
+test "$(smite_frp_xhttp_get_path 45123)" = "/45123/prepared"
+cmp -s "$SMITE_FRP_XHTTP_CONF" "$tmp/pristine.expected"
+if smite_frp_xhttp_stage_path 45124 /45123/prepared/child; then
+    echo "ERROR: overlapping pending FRP profile accepted"; exit 1
+fi
+cat > "$MOCK_FRP_TUNNELS" <<'JSON_PENDING'
+{
+  "pending-now-applied": {
+    "core": "frp",
+    "spec": {"mode": "server", "type": "tcp", "bind_port": 7000, "ports": [45123]}
+  }
+}
+JSON_PENDING
+smite_frp_xhttp_sync
+grep -Fq 'location = /45123/prepared {' "$SMITE_FRP_XHTTP_CONF"
+grep -Fq 'location ^~ /45123/prepared/ {' "$SMITE_FRP_XHTTP_CONF"
+printf '{}\n' > "$MOCK_FRP_TUNNELS"
+smite_frp_xhttp_sync
+! grep -Fq 'location = /45123/prepared' "$SMITE_FRP_XHTTP_CONF"
+rm -f "$MOCK_FRP_TUNNELS"
+
 # If the Smite node is unavailable, do not pretend this means zero tunnels.
 MOCK_DOCKER_UNAVAILABLE=1
 export MOCK_DOCKER_UNAVAILABLE

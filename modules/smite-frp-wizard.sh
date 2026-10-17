@@ -239,41 +239,8 @@ smite_frp_wizard_ready() {
     }
 }
 
-# Keep the beginner inside the FRP workflow after gateway configuration.
-# No Sanaei inbound or Smite UI tunnel is created automatically.
-smite_frp_wizard_continue_setup() {
-    local role="$1" answer=""
-    if [ "$role" = kh ]; then
-        echo "===== NEXT: KH XRAY / SANAEI + FRP PROFILE ====="
-        echo "Choose the KH Xray port and XHTTP path here; use them in Sanaei"
-        echo "and in the Smite FRP TCP tunnel, then publish the same path on IR."
-        read -rp "Configure FRP PORT + PATH now (KH checklist only)? [y/N]: " answer || return 0
-        case "$answer" in
-            y|Y|yes|YES) smite_frp_wizard_easy_configure kh || : ;;
-            *) echo "PORT + PATH skipped; return to FRP option 2 later." ;;
-        esac
-        read -rp "Open Docker 3x-UI/Sanaei Management on KH now? [y/N]: " answer || return 0
-        case "$answer" in
-            y|Y|yes|YES)
-                if declare -F show_docker_3xui_menu >/dev/null 2>&1; then
-                    show_docker_3xui_menu
-                else
-                    echo "HOLD: Docker Sanaei menu unavailable; no installation performed."
-                fi ;;
-            *) echo "Sanaei unchanged; open KH Docker 3x-UI Management later." ;;
-        esac
-        echo "KH: create the inbound in Sanaei manually using YOUR selected port/path."
-    else
-        echo "===== NEXT: IR FRP TCP TUNNEL + HTTPS XHTTP PATH ====="
-        echo "Apply the Smite UI FRP TCP tunnel and matching KH Sanaei inbound first."
-        read -rp "Smite TCP tunnel applied? Continue to IR PORT + PATH now? [y/N]: " answer || return 0
-        case "$answer" in
-            y|Y|yes|YES) smite_frp_wizard_easy_configure ir || : ;;
-            *) echo "IR path unchanged; return to FRP option 2 after Smite UI setup." ;;
-        esac
-    fi
-}
-
+# Beginner installation deliberately ends after Smite Standard and HTTPS Gateway.
+# Port/Path and Sanaei remain separate, explicitly selected later steps.
 smite_frp_wizard_start_here() {
     local role="$1" mode="" answer=""
     echo "===== FRP START HERE | THIS HOST: $role ====="
@@ -331,9 +298,15 @@ smite_frp_wizard_start_here() {
             ;;
         *) echo "Gateway unchanged. Run START HERE again when ready." ;;
     esac
-    echo "NEXT: Create/apply FRP TCP tunnel in Smite UI and KH Sanaei inbound."
-    echo "No Smite UI tunnel or Sanaei Xray inbound is auto-created."
-    smite_frp_wizard_continue_setup "$role"
+    if [ "$role" = ir ]; then
+        echo "IR FOUNDATION COMPLETE. NEXT: Finish KH Smite Standard/Gateway."
+    else
+        echo "KH FOUNDATION COMPLETE. NEXT: Install KH Docker Sanaei from Docker Management."
+    fi
+    echo "After KH Sanaei inbound is ready, open FRP option 2 on IR to SAVE"
+    echo "your forwarded PORT + XHTTP PATH before creating the Smite UI tunnel."
+    echo "Then apply FRP TCP in Smite UI and use option 3 VERIFY on IR."
+    echo "No FRP tunnel, Xray inbound or XHTTP route was auto-created here."
     smite_frp_wizard_pause
 }
 
@@ -365,26 +338,28 @@ smite_frp_wizard_easy_configure() {
     echo "YOUR PORT: $SMITE_FRP_CHOSEN_PORT | YOUR PATH: $SMITE_FRP_CHOSEN_PATH"
     echo "KH Sanaei: VLESS/xhttp, 127.0.0.1:$SMITE_FRP_CHOSEN_PORT,"
     echo "security none, mode auto, Path $SMITE_FRP_CHOSEN_PATH"
-    echo "Smite UI (MANUAL): Tunnels -> Create -> FRP -> TCP."
+    echo "Smite UI (AFTER saving this IR profile): Tunnels -> Create -> FRP -> TCP."
     echo "IR=server; KH=client; FRPS control=7000;"
     echo "Forwarded data port=$SMITE_FRP_CHOSEN_PORT (same as KH Sanaei)."
     if [ "$role" = kh ]; then
         echo "KH GUIDE ONLY: no inbound and no IR Nginx route was changed."
-        echo "On IR repeat PORT + PATH after applying Smite FRP TCP tunnel."
+        echo "After Sanaei is ready, enter PORT + PATH on IR, then create the Smite tunnel."
         smite_frp_wizard_pause; return
     fi
-    read -rp "Smite TCP tunnel APPLIED and KH inbound MATCHES? Publish IR Path? [y/N]: " answer || return
+    echo "IR can SAVE a safe pending profile before any Smite UI tunnel exists."
+    echo "The XHTTP Nginx route activates ONLY after the corresponding FRP"
+    echo "server tunnel is applied and the route sync timer publishes it."
+    read -rp "Save this IR port/path (or update an applied tunnel)? [y/N]: " answer || return
     case "$answer" in y|Y|yes|YES) ;; *)
-        echo "No change. Finish Smite tunnel and KH Sanaei first."
+        echo "No change. IR FRP profile not saved."
         smite_frp_wizard_pause; return ;;
     esac
-    if ! smite_frp_xhttp_register_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH" ||
-       ! smite_frp_xhttp_verify_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH"; then
-        echo "HOLD: IR HTTPS exact/prefix Path NOT verified; do not use yet."
+    if ! smite_frp_xhttp_stage_path "$SMITE_FRP_CHOSEN_PORT" "$SMITE_FRP_CHOSEN_PATH"; then
+        echo "HOLD: IR FRP profile not accepted or published. Check local status."
         smite_frp_wizard_pause; return 2
     fi
-    echo "IR_XHTTP_NGINX_PATH_VERIFIED=$SMITE_FRP_CHOSEN_PATH"
-    echo "NEXT: 3) VERIFY. This is Nginx publishing, NOT VLESS proof."
+    echo "NEXT: Apply FRP TCP in Smite UI, then option 3 VERIFY on IR."
+    echo "Saving a pending profile is NOT proof of HTTPS/VLESS connectivity."
     smite_frp_wizard_pause
 }
 
@@ -507,7 +482,7 @@ smite_frp_wizard_menu() {
         echo "======================================"
         echo "This server: $role | Smite: $(smite_frp_wizard_mode_label)"
         echo "1) START HERE - Install/check Smite + HTTPS Gateway"
-        echo "2) PORT + PATH - Match KH Sanaei and IR Nginx"
+        echo "2) PORT + PATH - Save IR profile before Smite tunnel"
         echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"
         echo "4) Advanced - Original detailed steps and recovery"
         echo "0) Back"

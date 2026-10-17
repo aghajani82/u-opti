@@ -44,6 +44,47 @@ class GuidedTrialTest(unittest.TestCase):
         return flow.install_fresh(role, IR, KH, approval,
                                   confirm if confirm is not None else ("INSTALL-" + role.upper()))
 
+    def test_first_run_approval_is_explicit_and_does_not_install(self):
+        # Only the operator's exact approval enrolls the disposable host.
+        # Never touch real /root: inject a synthetic marker.
+        import stat
+        with tempfile.TemporaryDirectory() as home:
+            marker = Path(home) / "test-host-approval"
+            with patch.object(flow, "TEST_HOST_MARKER", marker), \
+                 patch.object(flow.role_gate, "_fresh") as fresh:
+                self.values[2].side_effect = (
+                    lambda: marker.exists()
+                    and stat.S_IMODE(marker.stat().st_mode) == 0o600
+                    and marker.read_text().strip() == flow.TEST_HOST_APPROVAL
+                )
+                with self.assertRaises(flow.GuidedTrialHold):
+                    flow.register_test_host_approval("ir", "wrong")
+                self.assertFalse(marker.exists())
+                fresh.assert_not_called()
+                self.assertEqual(
+                    flow.register_test_host_approval("ir", flow.TEST_HOST_APPROVAL),
+                    "TEST_HOST_APPROVAL=READY")
+                self.assertEqual(marker.read_text().strip(), flow.TEST_HOST_APPROVAL)
+                self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+                self.assertEqual(
+                    flow.register_test_host_approval("ir", flow.TEST_HOST_APPROVAL),
+                    "TEST_HOST_APPROVAL=READY")
+                fresh.assert_called_once_with("ir")
+                self.values[5].assert_not_called()
+                self.values[6].assert_not_called()
+
+    def test_first_run_approval_does_not_replace_invalid_marker(self):
+        with tempfile.TemporaryDirectory() as home:
+            marker = Path(home) / "test-host-approval"
+            marker.write_text("unexpected existing data", encoding="utf-8")
+            self.values[2].return_value = False
+            with patch.object(flow, "TEST_HOST_MARKER", marker), \
+                 patch.object(flow.role_gate, "_fresh") as fresh:
+                with self.assertRaises(flow.GuidedTrialHold):
+                    flow.register_test_host_approval("kh", flow.TEST_HOST_APPROVAL)
+                self.assertEqual(marker.read_text(), "unexpected existing data")
+                fresh.assert_not_called()
+
     def test_ir_and_kh_use_private_pair_without_manual_directory_prompts(self):
         for role in ("ir", "kh"):
             with self.subTest(role=role):

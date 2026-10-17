@@ -6,7 +6,7 @@ bash -n modules/smite-frp-wizard.sh
 grep -Fq 'source "$MODULES_PATH/smite-frp-wizard.sh"' u-opti
 grep -Fq '"smite-frp-wizard.sh"' install.sh
 grep -Fq '1) START HERE - Install/check Smite + HTTPS Gateway' modules/smite-frp-wizard.sh
-grep -Fq '2) PORT + PATH - Match KH Sanaei and IR Nginx' modules/smite-frp-wizard.sh
+grep -Fq '2) PORT + PATH - Save IR profile before Smite tunnel' modules/smite-frp-wizard.sh
 grep -Fq '3) VERIFY - XHTTP, client settings and real-traffic checklist' modules/smite-frp-wizard.sh
 grep -Fq 'Choose [0-4]' modules/smite-frp-wizard.sh
 grep -Fq 'FRP ADVANCED' modules/smite-frp-wizard.sh
@@ -41,6 +41,7 @@ SMITE_FRP_XHTTP_PATH_HELPER="$PWD/modules/smite-frp-xhttp-paths.py"
 FRP_TEST_PATH="/13914/web"
 smite_frp_xhttp_get_path() { printf '%s\n' "$FRP_TEST_PATH"; }
 smite_frp_xhttp_register_path() { echo "FRP_PATH_APPLIED:$1:$2"; }
+smite_frp_xhttp_stage_path() { echo "FRP_XHTTP_PROFILE_SAVED_PENDING_TUNNEL=$1 $2"; }
 smite_frp_xhttp_verify_path() { return 0; }
 curl() {
     local arg="" prev=""
@@ -64,8 +65,13 @@ grep -Fq 'Path: /13914/web' <<< "$out"
 
 # Real new profile selector uses custom user-provided path and rejects unsafe.
 out="$(printf '/13914/shop\ny\n' | smite_frp_wizard_easy_configure ir)"
-grep -Fq 'FRP_PATH_APPLIED:13914:/13914/shop' <<< "$out"
-grep -Fq 'IR_XHTTP_NGINX_PATH_VERIFIED=/13914/shop' <<< "$out"
+grep -Fq 'FRP_XHTTP_PROFILE_SAVED_PENDING_TUNNEL=13914 /13914/shop' <<< "$out"
+if grep -Fq 'IR_XHTTP_NGINX_PATH_VERIFIED=' <<< "$out"; then
+    echo "ERROR: Pending FRP profile mislabeled as active"; exit 1
+fi
+out="$(printf '/13914/shop\nn\n' | smite_frp_wizard_easy_configure ir)"
+grep -Fq 'IR FRP profile not saved' <<< "$out"
+! grep -Fq 'FRP_XHTTP_PROFILE_SAVED_PENDING' <<< "$out"
 out="$(printf '/api/bad\n' | smite_frp_wizard_easy_configure ir)" && {
     echo "ERROR: reserved FRP namespace was accepted" >&2; exit 1;
 }
@@ -132,22 +138,18 @@ if out="$(printf '0\n' | smite_frp_wizard_menu ir)"; then
 fi
 grep -Fq 'conflicts' <<< "$out"
 
-# START HERE keeps KH Sanaei + user-chosen port/path in one guided flow.
-# These are opt-in navigation actions, never silent Xray or Nginx writes.
+# START HERE ends after IR/KH foundation; no premature port/path or
+# Sanaei step. Separate option 2 can stage an IR profile before Smite tunnel.
 MODE=standard ROLE=foreign
-original_configure="$(declare -f smite_frp_wizard_easy_configure)"
-smite_frp_wizard_easy_configure() { echo "CONTINUED_PROFILE:$1"; }
-out="$(printf 'n\ny\ny\n' | smite_frp_wizard_start_here kh)"
-grep -Fq 'CONTINUED_PROFILE:kh' <<< "$out"
-grep -Fq 'SANAEI_STEP' <<< "$out"
-grep -Fq 'KH: create the inbound' <<< "$out"
-out="$(printf 'n\nn\nn\n' | smite_frp_wizard_start_here kh)"
-! grep -Fq 'CONTINUED_PROFILE:' <<< "$out"
+smite_frp_wizard_easy_configure() { echo "UNEXPECTED_AUTOMATIC_PROFILE:$1"; }
+out="$(printf 'n\n' | smite_frp_wizard_start_here kh)"
+grep -Fq 'KH FOUNDATION COMPLETE' <<< "$out"
+! grep -Fq 'UNEXPECTED_AUTOMATIC_PROFILE:' <<< "$out"
 ! grep -Fq 'SANAEI_STEP' <<< "$out"
 MODE=standard ROLE=panel-iran
-out="$(printf 'n\ny\n' | smite_frp_wizard_start_here ir)"
-grep -Fq 'CONTINUED_PROFILE:ir' <<< "$out"
-eval "$original_configure"
+out="$(printf 'n\n' | smite_frp_wizard_start_here ir)"
+grep -Fq 'IR FOUNDATION COMPLETE' <<< "$out"
+! grep -Fq 'UNEXPECTED_AUTOMATIC_PROFILE:' <<< "$out"
 
 # Exercise actual PRIMARY menu routing (not just grep text).
 MODE=standard ROLE=panel-iran

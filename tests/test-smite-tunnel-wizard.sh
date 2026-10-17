@@ -184,6 +184,42 @@ out="$(smite_tw_backhaul_offer_ir_code kh fresh)"
 ! grep -Fq 'SAFE_MOCK_DISPLAY_MODE:' <<< "$out"
 unset -f python3
 
+# First-run Sidecar approval is a separately confirmed Step 0. The Python
+# helper enforces trusted role and exclusive marker creation; never auto-approve.
+id() { [ "${1:-}" = "-u" ] && printf '0\n'; }
+APPROVAL_STATE=missing
+python3() {
+    case " $* " in
+        *" --approval-status "*)
+            if [ "$APPROVAL_STATE" = ready ]; then
+                echo 'TEST_HOST_APPROVAL=READY'
+                return 0
+            fi
+            echo 'TEST_HOST_APPROVAL=MISSING_OR_INVALID'
+            return 2 ;;
+        *" --approve-test-host "*)
+            echo "APPROVE_COMMAND_CALLED"
+            APPROVAL_STATE=ready
+            return 0 ;;
+        *) return 3 ;;
+    esac
+}
+out="$(printf '\n' | smite_tw_backhaul_ensure_test_host_approval ir)" && {
+    echo "ERROR: missing consent allowed Step 0"; exit 1
+}
+grep -Fq 'CANCELLED: No approval' <<< "$out"
+! grep -Fq 'APPROVE_COMMAND_CALLED' <<< "$out"
+out="$(printf 'I APPROVE DISPOSABLE BACKHAUL TEST HOST\n' | smite_tw_backhaul_ensure_test_host_approval ir)"
+grep -Fq 'STEP 0: DISPOSABLE TEST HOST APPROVAL' <<< "$out"
+grep -Fq 'APPROVE_COMMAND_CALLED' <<< "$out"
+grep -Fq 'TEST_HOST_APPROVAL=READY' <<< "$out"
+# Command-substitution tests run in separate subshells: persist the expected
+# saved-marker condition explicitly in the parent fixture.
+APPROVAL_STATE=ready
+out="$(smite_tw_backhaul_ensure_test_host_approval ir)"
+! grep -Fq 'STEP 0: DISPOSABLE TEST HOST APPROVAL' <<< "$out"
+unset -f python3 id
+
 # Sensitive material must not be printed or requested in the non-mutating wizard.
 if grep -Eq 'cat .*\.token|cat .*\.toml|docker (update|run|rm|stop)|systemctl (reload|restart)|curl .*--insecure' modules/smite-tunnel-wizard.sh; then
     echo "FAIL: live mutation or sensitive credential exposure in wizard" >&2
