@@ -210,6 +210,50 @@ class GuidedTrialTest(unittest.TestCase):
             self.assertIn("SMITE_ROLE_AND_MODE=HOLD", output.getvalue())
             self.assertNotIn("confidential-role-data", output.getvalue())
 
+    def test_existing_trial_cli_distinguishes_no_install_from_approval(self):
+        self.values[4].return_value.exists = lambda: True
+        with patch.object(sys, "argv", ["oneflow", "--role", "kh",
+                                         "--ir-domain", IR, "--kh-host", KH,
+                                         "--install-test",
+                                         "--test-host-approval", "REBUILT-TEST-VPS",
+                                         "--confirm", "INSTALL-KH"]), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(flow.main(), 2)
+            screen = output.getvalue()
+            self.assertIn("HOLD_STAGE=EXISTING_OR_PARTIAL_TRIAL", screen)
+            self.assertIn("did NOT start an installation", screen)
+            self.assertIn("--role kh --status", screen)
+        self.values[5].assert_not_called()
+        self.values[6].assert_not_called()
+
+    def test_postinstall_cleanup_hold_is_not_misreported_as_approval(self):
+        with patch.object(sys, "argv", ["oneflow", "--role", "kh",
+                                         "--ir-domain", IR, "--kh-host", KH,
+                                         "--install-test",
+                                         "--test-host-approval", "REBUILT-TEST-VPS",
+                                         "--confirm", "INSTALL-KH"]), \
+             patch.object(flow.os.path, "lexists", return_value=True), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(flow.main(), 2)
+            screen = output.getvalue()
+            self.assertIn("HOLD_STAGE=POST_INSTALL_PRIVATE_CLEANUP_UNVERIFIED", screen)
+            self.assertIn("Do NOT reinstall", screen)
+        self.values[6].assert_called_once()
+        self.assertEqual(self.values[7].call_count, 2)
+
+    def test_approval_failure_stage_is_distinct_and_sanitized(self):
+        self.values[2].return_value = False
+        with patch.object(sys, "argv", ["oneflow", "--role", "kh",
+                                         "--ir-domain", IR, "--kh-host", KH,
+                                         "--install-test",
+                                         "--test-host-approval", "REBUILT-TEST-VPS",
+                                         "--confirm", "INSTALL-KH"]), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(flow.main(), 2)
+            self.assertIn("HOLD_STAGE=HOST_APPROVAL_REFUSED", output.getvalue())
+            self.assertNotIn("Trial journal exists", output.getvalue())
+        self.values[5].assert_not_called()
+
     def test_missing_install_flag_does_not_prepare(self):
         with patch.object(sys, "argv", ["oneflow", "--role", "ir",
                                          "--ir-domain", IR, "--kh-host", KH]), \
