@@ -63,7 +63,7 @@ class PairingMenuTests(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as home:
             secret = Path(home) / "shared.token"
-            secret.write_text("A" * 43 + "\\n")
+            secret.write_text("A" * 43 + "\n")
             trial = SimpleNamespace(
                 _root=lambda role: Path("/synthetic/ir"),
                 _journal_read=lambda root: {"role": "ir", "phase": "trial_active"},
@@ -76,7 +76,7 @@ class PairingMenuTests(unittest.TestCase):
                  patch.object(module.pair.token_tool, "inspect", return_value=True), \
                  patch.object(module.pair.token_tool, "generate") as generate:
                 self.assertEqual(module.show_installed_ir(), "A" * 43)
-                self.assertEqual(secret.read_text(), "A" * 43 + "\\n")
+                self.assertEqual(secret.read_text(), "A" * 43 + "\n")
                 generate.assert_not_called()
 
     def test_preflight_blocks_ir_before_read(self):
