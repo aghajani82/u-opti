@@ -717,7 +717,7 @@ smite_tw_backhaul_quick_start() {
     echo "===== BACKHAUL QUICK START | THIS HOST: $role ====="
     echo "Run on BOTH hosts separately (IR then KH); no remote SSH required."
     echo "FRP, Smite and Sanaei are preserved; no automatic rebuilds."
-    if [ -e "$state" || [ -L "$state" ] ||
+    if [ -e "$state" ] || [ -L "$state" ] ||
        [ -e "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        [ -L "/etc/u-opti/backhaul-sidecar/$role.toml" ] ||
        docker container inspect "uopti-backhaul-sidecar-$role" >/dev/null 2>&1; then
