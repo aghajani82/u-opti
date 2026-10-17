@@ -849,8 +849,9 @@ smite_tw_menu() {
         echo "2) FRP — EASY SETUP (Standard IR/KH)"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
+        echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
             2)
@@ -867,6 +868,7 @@ smite_tw_menu() {
                    echo "Tunnel Control Center missing; update U-OPTI from main."
                    smite_tw_pause
                fi ;;
+            5) bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-profile-first-menu.sh" "$role" ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
