@@ -6,7 +6,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.16.4**
+**v0.16.5**
 
 ## Main Menu
 
@@ -22,6 +22,11 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 9) Uninstall U-OPTI
 0) Exit
 ```
+
+## Fix in v0.16.5 — IR Smite HTTPS/443 gateway
+
+- Newly loaded Nginx stream listeners may take a moment to accept local TLS connections. The IR installer now retries only its local, pinned, TLS-verified panel health check up to 15 times before the existing guarded rollback. If it still fails, the installer reports whether TCP/443 was listening, helping locate the actual failure.
+- No changes to working FRP/Backhaul tunnels, certificates, ports or installed Sidecars. A successful CI test is not proof of on-host recovery: retest the IR gateway once after updating U-OPTI and collect the new diagnostic if it still fails.
 
 ## Improvements in v0.16.4 — smoother tunnel setup
 
