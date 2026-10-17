@@ -132,6 +132,23 @@ if out="$(printf '0\n' | smite_frp_wizard_menu ir)"; then
 fi
 grep -Fq 'conflicts' <<< "$out"
 
+# START HERE keeps KH Sanaei + user-chosen port/path in one guided flow.
+# These are opt-in navigation actions, never silent Xray or Nginx writes.
+MODE=standard ROLE=foreign
+original_configure="$(declare -f smite_frp_wizard_easy_configure)"
+smite_frp_wizard_easy_configure() { echo "CONTINUED_PROFILE:$1"; }
+out="$(printf 'n\ny\ny\n' | smite_frp_wizard_start_here kh)"
+grep -Fq 'CONTINUED_PROFILE:kh' <<< "$out"
+grep -Fq 'SANAEI_STEP' <<< "$out"
+grep -Fq 'KH: create the inbound' <<< "$out"
+out="$(printf 'n\nn\nn\n' | smite_frp_wizard_start_here kh)"
+! grep -Fq 'CONTINUED_PROFILE:' <<< "$out"
+! grep -Fq 'SANAEI_STEP' <<< "$out"
+MODE=standard ROLE=panel-iran
+out="$(printf 'n\ny\n' | smite_frp_wizard_start_here ir)"
+grep -Fq 'CONTINUED_PROFILE:ir' <<< "$out"
+eval "$original_configure"
+
 # Exercise actual PRIMARY menu routing (not just grep text).
 MODE=standard ROLE=panel-iran
 smite_frp_wizard_start_here() { echo "PRIMARY_START_ROLE:$1"; }
