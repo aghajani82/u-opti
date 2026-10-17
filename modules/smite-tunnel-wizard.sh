@@ -395,8 +395,20 @@ smite_tw_backhaul_paste_pair() {
             ;;
         *) echo "Unsupported role; cancelled."; return 1 ;;
     esac
-    read -rp "Type $confirm to continue: " answer || return 1
-    [ "$answer" = "$confirm" ] || { echo "Cancelled. No pairing change."; return 0; }
+    if [ "$role" = kh ]; then
+        echo "KH STEP 1/2: Enter the exact confirmation PHRASE below, NOT the secret."
+        echo "KH STEP 2/2: The next SEPARATE (hidden) prompt will request the IR pairing code."
+    fi
+    read -rp "STEP 1/2 — Type $confirm (NOT the pairing code): " answer || return 1
+    if [ "$answer" != "$confirm" ]; then
+        echo "HOLD: Wrong confirmation. No pairing code was accepted or saved."
+        echo "Choose pairing again; type the confirmation PHRASE first."
+        echo "Paste the actual secret ONLY when the separate hidden prompt appears."
+        return 2
+    fi
+    if [ "$role" = kh ]; then
+        echo "KH STEP 2/2: Enter the secret only at the HIDDEN input prompt now."
+    fi
     python3 -B "$tool" "$mode" --confirm "$confirm"
 }
 
