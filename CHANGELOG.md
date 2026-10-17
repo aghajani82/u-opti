@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.4] - 2026-10-17
+
+### Improved
+
+- Backhaul guided flow offers an opt-in, explicitly confirmed display of the *existing* IR pairing secret when reusing a token and again after a successful local IR trial installation. No token rotation or overwrite is performed. Installed-code re-display verifies an active, owned IR trial journal; interactive TTY is mandatory and output is never automatic.
+- Standard FRP `START HERE` can continue on KH to the port/XHTTP Path checklist and directly open Docker Sanaei 3x-UI Management, without leaving the tunnel workflow. On IR, after applying the Smite UI TCP tunnel and verifying the KH inbound, it can continue into the guarded IR `PORT + PATH` publisher with explicit consent.
+- Smite UI tunnel creation and Sanaei inbound creation remain manual; no silent Nginx, Docker or gateway changes were added to navigation.
+
+### Limits
+
+- Independent Backhaul Sidecar still requires the Smite Standard/HTTPS/FRP-control baseline and KH Xray. Standalone Backhaul without Smite is **NOT IMPLEMENTED** and needs a separate architecture/installer with its own TLS, pairing, validation and rollback gates.
+- CI tests are synthetic; live fresh-host installation, traffic and rollback still require on-VPS testing. Keep snapshots before any rebuild.
+
 ## [0.16.3] - 2026-10-16
 
 ### Fixed
