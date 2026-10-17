@@ -68,7 +68,7 @@ class PairingMenuTests(unittest.TestCase):
                 _root=lambda role: Path("/synthetic/ir"),
                 _journal_read=lambda root: {"role": "ir", "phase": "trial_active"},
                 _safe_file=lambda path, mode=None: (
-                    ('[server]\\ntoken = "' + "A" * 43 + '"\\n').encode(), 0o600),
+                    ('[server]\ntoken = "' + "A" * 43 + '"\n').encode(), 0o600),
             )
             with patch.object(module, "TOKEN", secret), \
                  patch.object(module, "_interactive"), \
@@ -86,18 +86,18 @@ class PairingMenuTests(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as home:
             secret = Path(home) / "shared.token"
-            secret.write_text("A" * 43 + "\\n")
+            secret.write_text("A" * 43 + "\n")
             trial = SimpleNamespace(
                 _root=lambda role: Path("/synthetic/ir"),
                 _journal_read=lambda root: {"role": "ir", "phase": "trial_active"},
                 _safe_file=lambda path, mode=None: (
-                    ('[server]\\ntoken = "' + "B" * 43 + '"\\n').encode(), 0o600),
+                    ('[server]\ntoken = "' + "B" * 43 + '"\n').encode(), 0o600),
             )
-            with patch.object(module, "TOKEN", secret), \\
-                 patch.object(module, "_interactive"), \\
-                 patch.object(module.pair, "_trusted_role"), \\
-                 patch.object(module.pair, "_safe_parents"), \\
-                 patch.object(module, "_load", return_value=trial), \\
+            with patch.object(module, "TOKEN", secret), \
+                 patch.object(module, "_interactive"), \
+                 patch.object(module.pair, "_trusted_role"), \
+                 patch.object(module.pair, "_safe_parents"), \
+                 patch.object(module, "_load", return_value=trial), \
                  patch.object(module.pair.token_tool, "inspect", return_value=True):
                 with self.assertRaises(module.PasteHold):
                     module.show_installed_ir()
