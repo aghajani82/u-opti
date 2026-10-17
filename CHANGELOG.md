@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.16.7] - 2026-10-17
+
+### Fixed
+
+- Backhaul KH guided pairing now displays explicit STEP 1/2 consent versus STEP 2/2 hidden-secret instructions. Accidentally entering the private code at the consent prompt fails with an actionable HOLD and does not invoke token import.
+- An invalid confirmation is no longer reported as a successful/cancelled pairing attempt. No existing token is overwritten, and installed FRP, Smite, Nginx and Sidecar are unchanged.
+- Added an isolated mock regression test for accidental early code paste and correct handoff.
+
 ## [0.16.6] - 2026-10-17
 
 ### Fixed
