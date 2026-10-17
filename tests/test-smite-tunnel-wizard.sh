@@ -242,4 +242,50 @@ if grep -Eq 'cat .*\.token|cat .*\.toml|docker (update|run|rm|stop)|systemctl (r
     exit 1
 fi
 
+# Runtime regression: bash -n misses malformed [ ... ] commands.
+# Exercise the real beginner quick-start with a synthetic existing journal,
+# partial profile or installed Sidecar; do not access a real test VPS.
+for scenario in journal journal_symlink profile container; do
+    rc=0
+    out="$(bash -c '
+        source modules/smite-tunnel-wizard.sh
+        SCENARIO="$1"
+        # Intercept only our synthetic ownership probe; use the real
+        # shell test builtin for every other check.
+        function [() {
+            if [[ "$#" == 3 && "$3" == "]" ]]; then
+                if [[ "$SCENARIO" == "journal" && "$1" == "-e" &&
+                      "$2" == "/var/lib/u-opti/backhaul-trial/kh" ]]; then
+                    return 0
+                fi
+                if [[ "$SCENARIO" == "journal_symlink" && "$1" == "-L" &&
+                      "$2" == "/var/lib/u-opti/backhaul-trial/kh" ]]; then
+                    return 0
+                fi
+                if [[ "$SCENARIO" == "profile" && "$1" == "-e" &&
+                      "$2" == "/etc/u-opti/backhaul-sidecar/kh.toml" ]]; then
+                    return 0
+                fi
+            fi
+            builtin [ "$@"
+        }
+        docker() {
+            if [[ "$SCENARIO" == container && "$1" == container &&
+                  "$2" == inspect && "$3" == uopti-backhaul-sidecar-kh ]]; then
+                return 0
+            fi
+            return 1
+        }
+        smite_tw_backhaul_ensure_test_host_approval() {
+            echo "BUG: existing host reached host approval"
+            return 2
+        }
+        smite_tw_backhaul_quick_start kh
+    ' bash "$scenario" 2>&1)" || rc=$?
+    test "$rc" -eq 2
+    grep -Fq 'HOLD: Sidecar trial/partial state detected' <<< "$out"
+    ! grep -Fq 'BUG:' <<< "$out"
+    ! grep -Fq 'missing ' <<< "$out"
+done
+
 echo 'PASS: Unified Tunnel Wizard roles, delegation, safe protocol guidance and packaging'
