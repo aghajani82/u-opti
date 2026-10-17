@@ -395,8 +395,16 @@ smite_tw_backhaul_paste_pair() {
             ;;
         *) echo "Unsupported role; cancelled."; return 1 ;;
     esac
-    read -rp "Type $confirm to continue: " answer || return 1
-    [ "$answer" = "$confirm" ] || { echo "Cancelled. No pairing change."; return 0; }
+    if [ "$role" = kh ]; then
+        echo "STEP 1/2 (KH): This prompt asks for a confirmation PHRASE, NOT the IR token."
+        echo "STEP 2/2 (KH): A SEPARATE HIDDEN prompt will then ask for the IR token."
+    fi
+    read -rp "STEP 1/2 — Type $confirm (NOT your pairing code): " answer || return 1
+    [ "$answer" = "$confirm" ] || {
+        echo "HOLD: Wrong confirmation. No pairing token was accepted or saved."
+        echo "Restart the pairing choice, enter the PHRASE first, and the secret only at the HIDDEN prompt."
+        return 2
+    }
     python3 -B "$tool" "$mode" --confirm "$confirm"
 }
 
@@ -669,6 +677,47 @@ smite_tw_backhaul_expert_menu() {
     done
 }
 
+# A disposable-host marker must exist BEFORE token, domain or port prompts.
+# This creates only the narrow, explicitly approved test-host opt-in marker;
+# actual installation still requires the independent per-role confirmation,
+# host preflight and transaction journal gates in the Python installer.
+smite_tw_backhaul_test_host_approval() {
+    local role="$1" marker="/root/.uopti-backhaul-rebuilt-test-host" phrase="" answer=""
+    phrase="I APPROVE DISPOSABLE BACKHAUL TEST HOST"
+    [ "$role" = ir ] || [ "$role" = kh ] || return 2
+    [ "$(id -u)" -eq 0 ] || { echo "HOLD: Root required for test-host approval."; return 2; }
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+        if [ -L "$marker" ] || [ ! -f "$marker" ] ||
+           [ "$(stat -c '%u:%a' "$marker" 2>/dev/null)" != "0:600" ] ||
+           [ "$(<"$marker")" != "$phrase" ]; then
+            echo "HOLD: Existing test-host marker is invalid. STOP; inspect manually."
+            return 2
+        fi
+        echo "TEST_HOST_APPROVAL=READY (existing; no change)"
+        return 0
+    fi
+    echo "===== BACKHAUL STEP 0: TEST-HOST APPROVAL | $role ====="
+    echo "This installer is EXPERIMENTAL: rebuilt/disposable TEST VPS ONLY."
+    echo "Before proceeding, confirm a recent snapshot AND provider rescue console access."
+    echo "No token, domain, port or path will be requested until this gate passes."
+    read -rp "Type APPROVE-DISPOSABLE-TEST-HOST only if BOTH safeguards are ready (Enter cancels): " answer || return 2
+    if [ "$answer" != APPROVE-DISPOSABLE-TEST-HOST ]; then
+        echo "HOLD: Test-host approval cancelled; no token generated or Sidecar installed."
+        return 2
+    fi
+    if ! (umask 077; set -C; printf '%s\n' "$phrase" > "$marker"); then
+        echo "HOLD: Approval marker could not be created; no install attempted."
+        return 2
+    fi
+    chmod 600 "$marker" || { echo "HOLD: Marker permission setup failed."; return 2; }
+    if [ -L "$marker" ] || [ "$(stat -c '%u:%a' "$marker" 2>/dev/null)" != "0:600" ] ||
+       [ "$(<"$marker")" != "$phrase" ]; then
+        echo "HOLD: Marker verification failed; no install attempted."
+        return 2
+    fi
+    echo "TEST_HOST_APPROVAL=READY (operator-approved disposable test host)"
+}
+
 # Beginner's one-entry Backhaul setup; fail closed on any existing/partial trial.
 smite_tw_backhaul_quick_start() {
     local role="$1" basedir="" token="" state="" existing_pair=0
@@ -691,6 +740,10 @@ smite_tw_backhaul_quick_start() {
         echo "HOLD: Step 0 approval incomplete. No pairing or installation attempted."
         return 2
     }
+    if ! smite_tw_backhaul_test_host_approval "$role"; then
+        echo "INSTALLATION NOT STARTED. Complete test-host approval first."
+        return 2
+    fi
     if [ -e "$token" ] || [ -L "$token" ]; then
         existing_pair=1
         echo "Step 1/2: Verify private pairing token."
