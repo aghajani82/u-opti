@@ -13,8 +13,10 @@ import argparse
 import getpass
 import importlib.util
 import os
+import secrets
 from pathlib import Path
 import sys
+import tomllib
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -73,7 +75,12 @@ def show_installed_ir() -> str:
         raise PasteHold("IR trial is not active")
     if not pair.token_tool.inspect(TOKEN):
         raise PasteHold("Existing private IR token is absent or invalid")
-    return pair._payload(TOKEN.read_bytes()).decode("ascii")
+    code = pair._payload(TOKEN.read_bytes()).decode("ascii")
+    config_bytes, _ = trial._safe_file(pair.PRIVATE_DIR / "ir.toml", mode=0o600)
+    installed = tomllib.loads(config_bytes.decode("utf-8"))["server"]["token"]
+    if not isinstance(installed, str) or not secrets.compare_digest(installed, code):
+        raise PasteHold("Installed Sidecar secret differs; no pairing code shown")
+    return code
 
 
 def paste_kh() -> str:
