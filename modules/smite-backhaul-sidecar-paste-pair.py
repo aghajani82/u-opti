@@ -59,6 +59,23 @@ def show_ir() -> str:
     return code
 
 
+def show_installed_ir() -> str:
+    """Re-display an existing code after verified IR trial activation only.
+
+    No token creation or overwrite; malformed/partial journals fail closed.
+    """
+    _interactive()
+    pair._trusted_role("ir")
+    pair._safe_parents()
+    trial = _load("paste_pair_trial", "smite-backhaul-sidecar-live-trial.py")
+    doc = trial._journal_read(trial._root("ir"))
+    if doc.get("role") != "ir" or doc.get("phase") != "trial_active":
+        raise PasteHold("IR trial is not active")
+    if not pair.token_tool.inspect(TOKEN):
+        raise PasteHold("Existing private IR token is absent or invalid")
+    return pair._payload(TOKEN.read_bytes()).decode("ascii")
+
+
 def paste_kh() -> str:
     _interactive()
     pair._trusted_role("kh")
@@ -84,18 +101,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--show-ir", action="store_true")
+    modes.add_argument("--show-installed-ir", action="store_true")
     modes.add_argument("--paste-kh", action="store_true")
     parser.add_argument("--confirm", default="")
     opts = parser.parse_args()
-    if opts.show_ir and opts.confirm != "DISPLAY-IR-PRIVATE-CODE":
+    if (opts.show_ir or opts.show_installed_ir) and opts.confirm != "DISPLAY-IR-PRIVATE-CODE":
         print("HOLD: Explicit IR code display confirmation required.")
         return 2
     if opts.paste_kh and opts.confirm != "PASTE-KH-PRIVATE-CODE":
         print("HOLD: Explicit KH private token import confirmation required.")
         return 2
     try:
-        if opts.show_ir:
-            code = show_ir()
+        if opts.show_ir or opts.show_installed_ir:
+            code = show_installed_ir() if opts.show_installed_ir else show_ir()
             print("PRIVATE BACKHAUL SECRET — do NOT share in chat/screenshots/logs.")
             print("Copy straight to the KH Bitvise terminal; avoid saving to Notepad.")
             print("This is NOT a one-time code; protect it until you rotate the token.")
