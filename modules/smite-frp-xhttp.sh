@@ -169,6 +169,49 @@ smite_frp_xhttp_register_path() {
     return 1
 }
 
+# IR: save a validated XHTTP profile BEFORE creating the Smite UI tunnel.
+# No Nginx route is published for unapplied ports. Existing applied tunnels
+# still use guarded register+sync. Timer publishes saved profile after Apply.
+smite_frp_xhttp_stage_path() {
+    local port="$1" path="$2" snapshot=""
+    smite_frp_xhttp_enabled || { echo "HOLD: Standard FRP gateway missing."; return 2; }
+    [ "$(id -u)" -eq 0 ] && [ -f "$SMITE_FRP_XHTTP_PATH_HELPER" ] || {
+        echo "HOLD: Root and trusted FRP XHTTP path helper required."; return 2;
+    }
+    snapshot="$(mktemp)" || return 2
+    chmod 0600 "$snapshot"
+    if docker exec smite-node test -f /var/lib/smite-node/tunnels.json >/dev/null 2>&1; then
+        if ! docker exec smite-node cat /var/lib/smite-node/tunnels.json > "$snapshot"; then
+            echo "HOLD: Cannot read applied Smite tunnel state; no profile saved."
+            rm -f "$snapshot"
+            return 2
+        fi
+    elif docker exec smite-node test -d /var/lib/smite-node >/dev/null 2>&1; then
+        printf '{}\n' > "$snapshot"
+    else
+        echo "HOLD: Smite node state unavailable; no profile saved."
+        rm -f "$snapshot"
+        return 2
+    fi
+    if python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" contains "$snapshot" "$port" >/dev/null 2>&1; then
+        rm -f "$snapshot"
+        smite_frp_xhttp_register_path "$port" "$path" || return 2
+        smite_frp_xhttp_verify_path "$port" "$path" || return 2
+        echo "FRP_XHTTP_PATH_ACTIVE=$path"
+        return 0
+    fi
+    if ! python3 -B "$SMITE_FRP_XHTTP_PATH_HELPER" set "$port" "$path" --snapshot "$snapshot"; then
+        rm -f "$snapshot"
+        echo "HOLD: Pending FRP profile rejected; no active route changed."
+        return 2
+    fi
+    rm -f "$snapshot"
+    echo "FRP_XHTTP_PROFILE_SAVED_PENDING_TUNNEL=$port $path"
+    echo "No Nginx forwarding was activated. Apply the FRP TCP server tunnel in"
+    echo "Smite UI, then let the FRP XHTTP sync timer publish the saved route."
+    echo "Run FRP option 3 VERIFY on IR afterwards; only then test a real client."
+}
+
 smite_frp_xhttp_install_timer() {
     smite_frp_xhttp_enabled || return 0
     [ "$(id -u)" = 0 ] || return 1
