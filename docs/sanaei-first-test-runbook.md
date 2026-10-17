@@ -26,10 +26,24 @@ Afterwards, `cat /usr/local/lib/u-opti/INSTALL_REF` must print the feature branc
 2. **KH:** U-OPTI > Docker Management > Smite Management > Tunnel Management > **5) PROFILE FIRST**. Set and save both ports+Paths. Confirm with option 2. Note/copy only the FOUR non-secret values.
 3. **IR:** Install Docker, then U-OPTI > Smite Management > Tunnel Management > FRP > **START HERE** to install Smite Panel and Iran Node **Standard** and configure IR HTTPS/443 gateway. On IR use PROFILE FIRST option 5 to save the SAME four values from KH.
 4. **KH:** Now Smite Foreign Node registration can reach IR Panel HTTPS. Use FRP START HERE (Standard Foreign + KH HTTPS control gateway). Existing Sanaei 3x-UI must be **preserved**, not reinstalled.
-5. **IR:** FRP option 2 offers the saved FRP profile. Stage it on IR, then create/apply FRP TCP tunnel in Smite UI (IR server/KH client), and run FRP option 3. A saved pending route is not published until tunnel apply and the guarded sync succeeds.
+5. **IR:** After PROFILE FIRST is saved, create/apply the matching FRP TCP tunnel in Smite UI (IR server/KH client). The guarded FRP sync timer reads the trusted plan and automatically publishes the correct path **only after Apply**; it must never fall back to `/PORT/web` for that planned port. Run FRP option 3 to verify the HTTPS route. FRP option 2 is still available for explicit overrides or recovery, but should not be required for a fresh profile-first install.
 6. **IR:** Backhaul START HERE; accept only on a disposable host after snapshots and console access. When asked, choose the **saved Backhaul** port+Path. Install independent IR Sidecar. Display IR pairing code only with local interactive consent, and copy it privately.
 7. **KH:** Backhaul START HERE; KH Step 1 is only a hidden `y` consent, Step 2 is a distinct **hidden code entry**. Choose saved Backhaul profile; install KH Sidecar. Never type the long-lived secret at Step 1.
 8. **Both:** Run read-only Backhaul audits; verify FRP route independently, test two **real** VLESS clients, and reboot IR and KH **one at a time**, checking persistence after each reboot.
+
+## Regression confirmed in fresh VPS trial
+
+Previously, saving FRP port `42175` and XHTTP Path `/42175/windows64`
+in PROFILE FIRST left Nginx at legacy `/42175/web` after Smite FRP TCP
+Apply, even though the loopback FRP tunnel already reached Xray on KH.
+Only a separate FRP option 2 invocation fixed the route.
+The fixed Nginx renderer now checks the trusted local Profile First plan
+as a fallback for the **matching applied FRP server port**. Explicit FRP
+path registry entries continue to take priority and users without a
+Profile First plan retain legacy `/PORT/web` defaults. The renderer
+rejects unsafe plan files, overlapping Sidecar routes and unsafe path
+prefixes; existing Nginx rollback protects the active gateway on error.
+A saved plan itself must never create a tunnel or route.
 
 ## Acceptance criteria before main merge
 
