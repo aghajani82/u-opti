@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "kind": "smite_uopti_integrated_stage14_review",
+  "release": {
+    "proposed_version": "2.0.0-rc.0",
+    "published": false,
+    "production_ready": false,
+    "release_tag": null,
+    "oci_images_published": false
+  },
+  "sources": {
+    "smite": {
+      "repository": "aghajani82/Smite",
+      "ref": "feature/smite-stage14-release-candidate-review-20261018",
+      "commit": "567d2ba06a9fdb0cfe058468369ec74d3cdb0023",
+      "latest_stacked_pr_before_stage14": 12
+    },
+    "uopti_stacked_base": {
+      "repository": "aghajani82/u-opti",
+      "ref": "feature/smite-stage13-dual-host-admission-20261018",
+      "commit": "c3d2000055f9d95041fc59b8b648133f0ed9e70a",
+      "latest_stacked_pr_before_stage14": 35
+    },
+    "uopti_admin_overlay": {
+      "origin_draft_pr": 27,
+      "origin_commit": "e887c3824768e3d19223852442e48ae644a2aa11",
+      "integrated_into_stage14_branch": true
+    }
+  },
+  "cross_repo_contract": {
+    "hmac_version": "smite-node-hmac-v1",
+    "node_gateway_target": "/api/node-control/gateway-check",
+    "node_registration_target": "/api/node-control/register",
+    "signed_agent_apply_target": "/api/agent/tunnels/apply",
+    "jwt_overlay_helper": "modules/smite-panel-auth-overlay.py"
+  },
+  "unverified_requirements": [
+    "Stage14 GitHub CI is a source contract, not live deployment or 443 proof",
+    "Old active Panel/Node Docker mounts may still shadow current security code",
+    "Smite 0.1.7 installer image pins are incompatible with assumed staged security images",
+    "No GHCR immutable production image digests have been released or attested",
+    "Trusted Pairing ingress header injection is not deployed",
+    "Panel replay schema/Fernet master/Node secret mount need host-backed preflight",
+    "Snapshots and rollback require two-host provider verification and rehearsal",
+    "FRP Backhaul XHTTP real traffic and reboot acceptance pending"
+  ],
+  "automatic_merge": false,
+  "automatic_deployment": false,
+  "activation_allowed": false
+}
