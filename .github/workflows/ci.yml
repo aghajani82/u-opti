@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 567d2ba06a9fdb0cfe058468369ec74d3cdb0023
+          ref: 631df78551e097dbded3b934ed6ea4987c554869
           path: .stage14-smite-src
           persist-credentials: false
 
