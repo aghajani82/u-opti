@@ -71,6 +71,14 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage22 signed registration transaction guard:** Smite's
+  authentic signed Node check-in no longer marks a reserved KH active
+  before Panel FRP return-configuration admission completes. An invalid
+  or incomplete FRP host/token/port must return HTTP 503 while preserving
+  `pending` / `reserved_for_pairing`; only after the FRP settings
+  pass may a new HMAC-signed, nonce-fresh check-in mark KH active.
+  Unit and real Nginx/TLS integration tests are tied to exact reviewed
+  Smite source SHA `5e7dc25be8109e3260ab078466b508d827abfe94`. No live server activated.
 - **Stage21 isolated Node-to-Panel HMAC transition:** Reuses
   the real Stage20 Nginx SNI/TLS and authentic Smite Panel pairing API.
   Adds the real reviewed `Smite/node/app/node_auth.py` signer with signed

@@ -423,7 +423,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: eabd198c04f520ad682076bc778b92c779b3535b
+          ref: 5e7dc25be8109e3260ab078466b508d827abfe94
           path: .stage20-smite-src
           persist-credentials: false
       - name: Install isolated Nginx and pinned pairing runtime

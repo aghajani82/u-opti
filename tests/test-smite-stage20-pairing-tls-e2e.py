@@ -237,6 +237,25 @@ http {{
             check(signed_request(reg, timestamp=int(time.time())-300)[0] == 401,
                   "Stale HMAC was accepted")
 
+            # An unavailable/invalid FRP setup must NOT mark KH connected,
+            # even when the inbound signature is authentic and fresh.
+            with sqlite3.connect(root/"data"/"smite.db") as database:
+                database.execute(
+                    "INSERT INTO settings (id,key,value) VALUES (?,?,?)",
+                    ("stage22-invalid-frp", "frp",
+                     json.dumps({"enabled":True,"port":0,"token":"dummy"})),
+                )
+            failure_code, _, _ = signed_request(reg)
+            check(failure_code == 503,
+                  "Invalid FRP settings did not reject signed check-in")
+            fail_status, fail_metadata = get_node_record()
+            check(fail_status == "pending" and
+                  fail_metadata["provisioning"] == "reserved_for_pairing",
+                  "Failed signed FRP admission incorrectly marked KH active")
+            with sqlite3.connect(root/"data"/"smite.db") as database:
+                database.execute("DELETE FROM settings WHERE key='frp'")
+            print("STAGE22_FAIL_CLOSED_FRP_NO_PREMATURE_ACTIVE=PASS")
+
             wire = json.dumps(reg).encode()
             hmac_header = signer.sign_request(
                 secret=hmac_secret, node_id=identity, method="POST",
