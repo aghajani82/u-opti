@@ -71,6 +71,19 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage21 isolated Node-to-Panel HMAC transition:** Reuses
+  the real Stage20 Nginx SNI/TLS and authentic Smite Panel pairing API.
+  Adds the real reviewed `Smite/node/app/node_auth.py` signer with signed
+  registration routed unchanged through Nginx to the real
+  `Smite/panel/app/routers/signed_nodes.py` and persisted replay store.
+  The pending KH record must stay pending after OTP redemption; only the
+  signed valid Node check-in can mark it active. Unsigned, forged-key,
+  modified-body, stale timestamp, wrong role, replayed nonce and
+  unexpected request-target probes must fail closed. The signed mode is
+  **only switched on in ephemeral CI process environment**, never on
+  IR/KH or the operator's Compose files. This does NOT demonstrate
+  in-container identity mount, 3x-UI, FRP/Backhaul or real two-server
+  readiness.
 - **Stage20 real isolated pair gateway lab:** Draft PR CI checks out
   a pinned reviewed Smite commit and exercises the REAL JWT-admin and
   pairing FastAPI routers through REAL ephemeral Nginx stream/SNI/TLS,

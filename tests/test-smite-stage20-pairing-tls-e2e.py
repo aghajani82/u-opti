@@ -8,6 +8,7 @@ import http.client
 import importlib.util
 import json
 import os
+import sqlite3
 from pathlib import Path
 import socket
 import ssl
@@ -85,6 +86,7 @@ def main():
                 k,v=row.split("=",1);envvars[k]=v
         check(envvars["SMITE_NODE_PAIRING_PREVIEW_ENABLED"]=="false","Preview accidentally enabled")
         envvars["SMITE_NODE_PAIRING_PREVIEW_ENABLED"]="true" # CI process only
+        envvars["SMITE_NODE_REGISTRATION_MODE"]="signed"  # CI process only, legacy closed
         env=dict(os.environ)
         env.update(envvars)
         env.update({"PYTHONPATH":str(SMITE/"panel")+os.pathsep+str(ROOT/"tests"/"fixtures"),
@@ -189,6 +191,73 @@ http {{
             except (OSError,ssl.SSLError): pass
             else: raise AssertionError("Wrong TLS SNI was accepted")
             print("STAGE20_ADMIN_AND_ONE_TIME_INGRESS_SECURITY=PASS")
+
+            # Stage21: real Smite Node HMAC signer over unchanged Nginx TLS
+            # bytes to the real Smite signed inbound route. This does not
+            # enable any IR/KH host or replace a paused container.
+            node_file = SMITE/"node"/"app"/"node_auth.py"
+            signer_spec = importlib.util.spec_from_file_location(
+                "stage21_real_smite_node_signer", node_file)
+            signer = importlib.util.module_from_spec(signer_spec)
+            signer_spec.loader.exec_module(signer)
+            register_path = "/api/node-control/register"
+            identity = node["node_id"]
+            key = credential["node_secret"]
+            reg = {"node_id": identity, "role": "foreign"}
+
+            def get_node_record():
+                with sqlite3.connect(root/"data"/"smite.db") as db:
+                    row = db.execute(
+                        "SELECT status, metadata FROM nodes WHERE id = ?", (identity,)
+                    ).fetchone()
+                    return row[0], json.loads(row[1])
+
+            initial_status, initial_meta = get_node_record()
+            check(initial_status == "pending"
+                  and initial_meta["provisioning"] == "reserved_for_pairing",
+                  "Pairing alone should not mark the Node connected")
+            check(request("POST", register_path, ctx, reg)[0] == 401,
+                  "Unsigned Node registration succeeded")
+
+            def signed_request(data, *, key_used=key, target=register_path,
+                               signed_body=None, timestamp=None):
+                canonical = json.dumps(data if signed_body is None else signed_body).encode()
+                sig = signer.sign_request(
+                    secret=key_used, node_id=identity, method="POST",
+                    target=target, body=canonical, timestamp=timestamp)
+                return request("POST", target, ctx, data, headers=sig)
+
+            check(signed_request(reg, key_used="f"*64)[0] == 401,
+                  "Forged HMAC signature was accepted")
+            check(signed_request({"node_id":identity,"role":"iran"})[0] == 403,
+                  "Wrong Node role was accepted")
+            check(signed_request(reg, signed_body={"node_id":identity,
+                  "role":"iran"})[0] == 401,
+                  "Modified signed payload was accepted")
+            check(signed_request(reg, timestamp=int(time.time())-300)[0] == 401,
+                  "Stale HMAC was accepted")
+
+            wire = json.dumps(reg).encode()
+            hmac_header = signer.sign_request(
+                secret=key, node_id=identity, method="POST",
+                target=register_path, body=wire)
+            code, signed_answer, head = request(
+                "POST", register_path, ctx, reg, headers=hmac_header)
+            check(code == 200 and signed_answer["id"] == identity,
+                  "Signed Node check-in was not accepted")
+            check(head.get("cache-control") == "no-store",
+                  "Signed reply must not be cached")
+            status_after, meta_after = get_node_record()
+            check(status_after == "active"
+                  and meta_after["provisioning"] == "signed_checkin",
+                  "Signed HMAC check-in did not update pending Node")
+            check(request("POST", register_path, ctx, reg,
+                  headers=hmac_header)[0] == 401, "Replayed signed request worked")
+            check(signed_request(reg, target=register_path+"?changed=1")[0] == 404,
+                  "Unapproved signed HTTP target was accepted")
+            print("STAGE21_ACTUAL_NODE_HMAC_AND_SIGNED_PANEL=PASS")
+            print("STAGE21_PENDING_ONLY_TO_AUTHENTICATED_CHECKIN=PASS")
+            print("STAGE21_FORGERY_BODY_ROLE_TIME_REPLAY=BLOCKED")
             conf.write_text(base+"\ninvalid_stage20_test_directive;\n")
             check(nginx("-t",ok=False).returncode!=0,"Invalid configuration passed preflight")
             check(request("GET","/api/status",ctx)[0]==200,"Invalid draft harmed active lab")
