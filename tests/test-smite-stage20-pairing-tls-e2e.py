@@ -202,7 +202,7 @@ http {{
             signer_spec.loader.exec_module(signer)
             register_path = "/api/node-control/register"
             identity = node["node_id"]
-            key = credential["node_secret"]
+            hmac_secret = credential["node_secret"]
             reg = {"node_id": identity, "role": "foreign"}
 
             def get_node_record():
@@ -219,7 +219,7 @@ http {{
             check(request("POST", register_path, ctx, reg)[0] == 401,
                   "Unsigned Node registration succeeded")
 
-            def signed_request(data, *, key_used=key, target=register_path,
+            def signed_request(data, *, key_used=hmac_secret, target=register_path,
                                signed_body=None, timestamp=None):
                 canonical = json.dumps(data if signed_body is None else signed_body).encode()
                 sig = signer.sign_request(
@@ -239,7 +239,7 @@ http {{
 
             wire = json.dumps(reg).encode()
             hmac_header = signer.sign_request(
-                secret=key, node_id=identity, method="POST",
+                secret=hmac_secret, node_id=identity, method="POST",
                 target=register_path, body=wire)
             code, signed_answer, head = request(
                 "POST", register_path, ctx, reg, headers=hmac_header)
