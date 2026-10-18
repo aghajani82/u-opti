@@ -885,6 +885,35 @@ print("Node compose mounts: OK")
 PY
     fi
 
+    # Existing Standard installations: retain the loopback bind when
+    # regenerating compatibility mounts or recreating the node container.
+    # Fresh installs are protected by smite_install_node_files before startup.
+    if [ -f "$SMITE_NODE_COMPOSE" ]; then
+        local bind_state_file="${SMITE_STATE_FILE:-/etc/u-opti/smite/state.env}"
+        local bind_mode=""
+        if [ -r "$bind_state_file" ]; then
+            bind_mode="$(sed -n 's/^SMITE_CONNECTION_MODE=//p' "$bind_state_file" | head -n1)"
+        fi
+        case "$bind_mode" in
+            standard)
+                local bind_helper_dir
+                bind_helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+                python3 -B "$bind_helper_dir/smite-node-local-bind.py" \
+                    "$SMITE_NODE_COMPOSE" --mode standard || return 1
+                ;;
+            private)
+                echo "Private Network bind unchanged; direct private access must remain available."
+                ;;
+            "")
+                echo "Smite Node bind migration deferred: installation state not yet saved."
+                ;;
+            *)
+                echo "HOLD: Unrecognized Smite connection mode in state file." >&2
+                return 1
+                ;;
+        esac
+    fi
+
     if [ -f "$SMITE_PANEL_COMPOSE" ]; then
         docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
             echo "ERROR: Panel compose validation failed. Restore the generated .bak file before continuing."

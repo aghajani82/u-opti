@@ -28,6 +28,10 @@ jobs:
             bash -n "$file"
           done < <(find modules -type f -name '*.sh' -print0 | sort -z)
 
+      - name: Verify secure Smite Node localhost/443 endpoint and update packaging
+        shell: bash
+        run: python3 -B tests/test-smite-node-local-bind.py
+
       - name: Verify isolated Smite FRP Compose override
         shell: bash
         run: bash tests/test-smite-frp-compose.sh

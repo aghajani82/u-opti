@@ -431,6 +431,7 @@ smite_install_node_files() {
     local ca_source="$4"
     local control_address="${5:-}"
     local backhaul_address="${6:-}"
+    local connection_mode="${7:-standard}"
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || return 1
 
@@ -446,6 +447,16 @@ smite_install_node_files() {
 
     smite_frp_prepare_binaries || return 1
     smite_frp_mount_compose "$SMITE_NODE_COMPOSE" smite-node || return 1
+
+    if [ "$connection_mode" = standard ]; then
+        python3 -B "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-node-local-bind.py" \
+            "$SMITE_NODE_COMPOSE" --mode standard || return 1
+    elif [ "$connection_mode" = private ]; then
+        echo "Private Network node API bind unchanged; requires separate private transport migration."
+    else
+        echo "HOLD: Unknown node connection mode: $connection_mode" >&2
+        return 1
+    fi
 
     if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
         cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
@@ -739,7 +750,8 @@ smite_install_panel_iran() {
         "127.0.0.1:8000" \
         "$SMITE_NODE_DIR/certs/ca.crt" \
         "" \
-        "$panel_private_ip"; then
+        "$panel_private_ip" \
+        "$connection_mode"; then
         smite_install_pause
         return
     fi
@@ -1013,7 +1025,8 @@ smite_install_foreign_node() {
         "$panel_address" \
         "$temp_ca" \
         "$control_address" \
-        ""; then
+        "" \
+        "$connection_mode"; then
 
         rm -f "$temp_ca"
         smite_install_pause
