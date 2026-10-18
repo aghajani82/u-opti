@@ -35,7 +35,7 @@ def command_line(host: str) -> str:
     return (
         '    command: ["uvicorn", "main:app", "--host", "'
         + host
-        + '", "--port", "8888", "--log-level", "info", "--access-log"]\\n'
+        + '", "--port", "8888", "--log-level", "info", "--access-log"]\n'
     )
 
 
