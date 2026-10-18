@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Verify inert Smite Node security Compose staging and rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-node-auth-candidate.py tests/test-smite-node-auth-candidate.py
+          python3 -B tests/test-smite-node-auth-candidate.py -v
+
       - name: Verify paired-only Foreign Smite gateway readiness
         shell: bash
         run: |
