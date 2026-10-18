@@ -164,6 +164,18 @@ if [ "${1:-}" = "--menu" ] && [ -n "${2:-}" ]; then
     esac
 fi
 
+# Opt-in standalone preview. No existing Docker/Smite wizard is replaced.
+if [ "${1:-}" = "--smite-pairing" ]; then
+    pairing_wizard="$MODULES_PATH/smite-node-pairing-wizard.sh"
+    if [ ! -s "$pairing_wizard" ] || ! bash -n "$pairing_wizard"; then
+        echo "HOLD: Smite pairing preview helper is not available." >&2
+        exit 2
+    fi
+    source "$pairing_wizard"
+    smite_node_pairing_menu
+    exit $?
+fi
+
 while true; do
     clear
 
@@ -426,6 +438,8 @@ while true; do
                 "docker.sh"
                 "smite.sh"
                 "smite-node-local-bind.py"
+                "smite-node-pairing.py"
+                "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
                 "smite-frp-xhttp.sh"
@@ -544,6 +558,8 @@ while true; do
                 ["docker.sh"]="$BASE_URL/modules/docker.sh"
                 ["smite.sh"]="$BASE_URL/modules/smite.sh"
                 ["smite-node-local-bind.py"]="$BASE_URL/modules/smite-node-local-bind.py"
+                ["smite-node-pairing.py"]="$BASE_URL/modules/smite-node-pairing.py"
+                ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
                 ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
@@ -597,6 +613,8 @@ while true; do
                 ["docker.sh"]="$TEMP_DIR/docker.sh"
                 ["smite.sh"]="$TEMP_DIR/smite.sh"
                 ["smite-node-local-bind.py"]="$TEMP_DIR/smite-node-local-bind.py"
+                ["smite-node-pairing.py"]="$TEMP_DIR/smite-node-pairing.py"
+                ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
                 ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
                 ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
@@ -830,6 +848,8 @@ while true; do
                 "docker.sh"
                 "smite.sh"
                 "smite-node-local-bind.py"
+                "smite-node-pairing.py"
+                "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
                 "smite-gateway.sh"
                 "smite-frp-xhttp.sh"
