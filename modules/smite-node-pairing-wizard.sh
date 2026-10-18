@@ -2,13 +2,14 @@
 # U-OPTI Smite Node Pairing Preview.
 # No tunnel apply/remove, no service restart, no FRP/Backhaul/Nginx changes.
 smite_node_pairing_menu() {
-    local here helper candidate_helper audit_helper review_helper stage13_helper answer choice panel_image_root node_image_root review_output role
+    local here helper candidate_helper audit_helper review_helper stage13_helper stage15_helper answer choice panel_image_root node_image_root review_output role bundle_dir expected_source expected_manifest
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     helper="$here/smite-node-pairing.py"
     candidate_helper="$here/smite-node-auth-candidate.py"
     audit_helper="$here/smite-auth-image-overlay-audit.py"
     review_helper="$here/smite-stage11-overlay-review.py"
     stage13_helper="$here/smite-stage13-preflight.py"
+    stage15_helper="$here/smite-stage15-bundle-verify.py"
     if [ ! -f "$helper" ]; then
         echo "HOLD: Pairing helper not installed"
         return 2
@@ -27,9 +28,10 @@ smite_node_pairing_menu() {
         echo "7) Audit image sources vs host overlays (read-only, offline)"
         echo "8) Prepare offline security/FRP/Backhaul overlay review bundle"
         echo "9) Final IR/KH Stage13 read-only deployment admission (always blocks activation)"
+        echo "10) Verify paired offline Panel + Node archives (read-only, no installation)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-9]: " choice || return 0
+        read -rp "Choose [0-10]: " choice || return 0
         case "$choice" in
             1)
                 python3 -B "$helper" --status || :
@@ -120,6 +122,22 @@ smite_node_pairing_menu() {
                 fi
                 python3 -B "$stage13_helper" --role "$role" || :
                 echo "NOTE: Verify cloud snapshots, Docker runtime, ingress and real client traffic separately."
+                ;;
+            10)
+                echo "Verify downloaded Stage15 image archives against GitHub run values."
+                echo "This never loads images or changes running containers."
+                [ -f "$stage15_helper" ] || { echo "HOLD: Stage15 verifier unavailable"; continue; }
+                read -rp "Extracted GitHub artifact directory (absolute): " bundle_dir || return 2
+                read -rp "Trusted 40-character Smite Git source SHA: " expected_source || return 2
+                read -rp "Trusted 64-character GitHub manifest SHA256: " expected_manifest || return 2
+                if [[ "$bundle_dir" != /* ]]; then
+                    echo "HOLD: Bundle folder must be an absolute path"
+                    continue
+                fi
+                python3 -B "$stage15_helper" --folder "$bundle_dir" \
+                    --source-sha "$expected_source" \
+                    --manifest-sha256 "$expected_manifest" || :
+                echo "NOTE: Artifact verification is NOT permission to install images."
                 ;;
             0) return 0 ;;
             *) echo "Invalid selection" ;;
