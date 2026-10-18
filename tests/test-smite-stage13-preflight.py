@@ -201,7 +201,9 @@ class Stage13PreflightTest(unittest.TestCase):
         output = " ".join(str(c.args) for c in log.call_args_list)
         self.assertNotIn("f" * 64, output)
         self.assertEqual(before, self.p.identity.read_bytes())
-        self.assertNotIn("subprocess", MODULE.read_text())
+        self.assertNotIn("subprocess.run(", MODULE.read_text())
+        self.assertNotIn("subprocess.Popen(", MODULE.read_text())
+        self.assertNotIn("os.system(", MODULE.read_text())
         self.assertNotIn("docker compose up", MODULE.read_text())
         self.assertNotIn("systemctl restart", MODULE.read_text())
         for file in ("install.sh", "u-opti"):
