@@ -47,13 +47,19 @@ smite_node_pairing_menu() {
                 fi
                 ;;
             3)
-                echo "1. Admin verifies existing node identity out-of-band."
-                echo "2. Panel prepares a short-lived code (JWT-admin only)."
-                echo "3. Node validates HTTPS/443 certificate before redemption."
-                echo "4. Node stores its secret privately; never displays it."
-                echo "5. Signed Panel <-> Node traffic activated ONLY after both"
-                echo "   services, U-OPTI overlays and gateway are tested."
-                echo "6. Existing FRP/Backhaul client traffic validated again."
+                echo "1. Install IR Panel + IR Node, then KH Node (paused)."
+                echo "2. On IR, admin selects Foreign Servers -> Add Server."
+                echo "   In secure preview, enter only KH Node name to reserve."
+                echo "   Status: Waiting for pairing (NOT Connected)."
+                echo "3. Admin confirms the reserved KH Node UUID/role."
+                echo "4. Admin creates one short-lived pairing code."
+                echo "5. KH validates HTTPS/443 certificate and stores key."
+                echo "   No legacy HTTP/8000 registration is permitted."
+                echo "6. Prepare strict Node candidate; activation is BLOCKED."
+                echo "7. Signed traffic only after Panel 443, identity mounts,"
+                echo "   HMAC/replay and two-host rollout are verified."
+                echo "8. Check FRP/Backhaul/XHTTP traffic and rollback."
+
                 echo
                 echo "CURRENT STATUS: pairing redemption and machine auth"
                 echo "are NOT enabled by this U-OPTI preview menu."

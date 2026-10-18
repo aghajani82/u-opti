@@ -71,6 +71,15 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage18 secure pre-registration bridge:** In Smite's disabled-by-default
+  pairing preview, an authenticated admin can reserve a **pending**
+  Foreign Node from the Servers page using just a name. The Panel issues
+  a Node UUID without insecure Node HTTP registration, and its existing
+  one-use Pair action can issue a code scoped to this UUID. On KH, the
+  installed Node stays paused until separate TLS/443 pairing and signed
+  activation. A genuine HMAC-signed check-in (not reserving or issuing a
+  code) is required before the Panel can clear "Waiting for pairing".
+  This path has offline API/CI tests; it has NOT been activated on IR/KH.
 - The earlier Nginx security and FRP/Backhaul compatibility stages
   contain pending changes; they are not all activated automatically by
   this clean RC bootstrap.
