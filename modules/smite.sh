@@ -807,6 +807,14 @@ smite_prepare_overlays() {
             "$SMITE_OVERLAY_DIR/panel/nodes.py" \
             "$SMITE_OVERLAY_DIR/panel/tunnel_reapply_manager.py" \
             "$SMITE_OVERLAY_DIR/panel/core_health.py"
+        # Port the missing security PR #27 into this stacked Stage14 branch:
+        # when the legacy U-OPTI host main.py bind mount is copied, preserve
+        # admin JWT guards; for already-secured Smite v2, verify idempotently.
+        # Unexpected upstream structure must HOLD rather than run unguarded.
+        local auth_helper_dir
+        auth_helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+        python3 -B "$auth_helper_dir/smite-panel-auth-overlay.py" \
+            "$SMITE_OVERLAY_DIR/panel/main.py" || return 1
     fi
 
     if smite_container_exists smite-node; then
