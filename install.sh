@@ -39,6 +39,7 @@ MODULES=(
     "smite-node-local-bind.py"
     "smite-node-pairing.py"
     "smite-node-auth-candidate.py"
+    "smite-auth-image-overlay-audit.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
     "smite-digest-migrate.sh"
