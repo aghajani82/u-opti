@@ -2,7 +2,8 @@
 # Existing non-Smite wizard/Private Network sources stay pinned. The user
 # explicitly selected fresh IR/KH rebuilds over legacy migration, so the
 # Smite installer now has one reviewed, default-OFF clean-rc addition.
-# The pinned installer also auto-selects Standard *only* in clean-rc mode.\n# Stable image pull/overlay isolation is checked separately by
+# The pinned installer also auto-selects Standard *only* in clean-rc mode.
+# Stable image pull/overlay isolation is checked separately by
 # tests/test-smite-clean-install.sh; its new Git blob SHA is pinned here.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,7 +24,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 f71a00a9f465e5beb9ac5eedd86f175caaeeb80d modules/docker.sh
-fa169972fc1a69b8891c4a88722129d0ecd583f9 modules/smite-install.sh
+0ffd233fc1cac637c9c151c56f93ddaefb129585 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh

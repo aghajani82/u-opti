@@ -695,7 +695,12 @@ smite_install_panel_iran() {
     echo "     Install Smite Panel + Iran"
     echo "======================================"
     echo
-    echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        echo "Not a production release; no live tunneling is configured here."
+    else
+        echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
+    fi
     echo "Panel API bind address depends on the selected connection mode."
     echo "The Iran node always bootstraps against the local panel endpoint."
     echo "TCP/443 gateway configuration is handled as a separate step."
@@ -795,7 +800,11 @@ smite_install_panel_iran() {
     if [ "$connection_mode" = "private" ]; then
         echo "Private IP   : $panel_private_ip"
     fi
-    echo "Smite version: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Smite profile: clean-rc (unpublished preview)"
+    else
+        echo "Smite version: $SMITE_UPSTREAM_VERSION"
+    fi
     echo
     read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
     case "$confirm" in
@@ -989,7 +998,12 @@ smite_install_foreign_node() {
     echo "       Install Foreign Smite Node"
     echo "======================================"
     echo
-    echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        echo "Set the real 3x-UI inbound and tunnel only after both servers install."
+    else
+        echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
+    fi
     echo "Choose Standard HTTPS or Private Network transport."
     echo
 

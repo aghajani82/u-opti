@@ -119,10 +119,13 @@ printf 'ir.example.com\nnode-ir\ny\n' |
     smite_install_panel_iran >"$TMP/ir-selection.log" 2>&1
 grep -qx 'panel-iran:standard' "$TMP/mode-preflight.log"
 grep -q 'Connection mode: Standard (automatic for clean install)' "$TMP/ir-selection.log"
+grep -q 'Smite profile: clean-rc (unpublished preview)' "$TMP/ir-selection.log"
+grep -q 'PREVIEW ONLY:' "$TMP/ir-selection.log"
 printf 'ir.example.com\nkh.example.com\nnode-kh\ny\n' |
     smite_install_foreign_node >"$TMP/kh-selection.log" 2>&1
 grep -qx 'foreign:standard' "$TMP/mode-preflight.log"
 grep -q 'Connection mode: Standard / HTTPS (automatic for clean install)' "$TMP/kh-selection.log"
+grep -q 'PREVIEW ONLY:' "$TMP/kh-selection.log"
 [ "$(wc -l < "$TMP/mode-preflight.log")" = 2 ]
 
 # Stable profile retains the explicit mode selection. Abort on an invalid

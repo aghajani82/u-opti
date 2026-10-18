@@ -34,7 +34,11 @@ The clean RC mode:
    under test. Even on a fresh host, the RC starts in the security
    flags' default legacy settings until coordinated Pairing/443
    admission is complete.
-7. Keeps installation order deliberate: **IR Smite Panel+Node first;
+7. Automatically selects Standard (HTTPS where appropriate) on the
+   clean RC path, without prompting for unavailable Private Network mode.
+   Summaries distinguish skipped overlays from the unchanged Stable path,
+   and clearly mark the RC preview instead of mislabeling it as v0.1.7.
+8. Keeps installation order deliberate: **IR Smite Panel+Node first;
    KH Smite Node second; 3x-UI afterward; only then dynamic inbound
    path/port configuration and FRP/Backhaul tunnel creation**.
    This PR does not prematurely ask the installer to build any tunnel.
@@ -73,6 +77,10 @@ real SHA verifier and a **mock Docker function**. It asserts:
 - No old state or Private mode can trigger a clean install
 - No legacy host Python overlays or second Docker recreation
 - No v0.1.7 network pull in clean RC mode
+- Interactive IR/KH clean setup automatically selects Standard with no
+  unsupported Private choice; Stable still presents its historic choice
+  and fails closed on invalid input; no Docker/network calls occur in
+  these input-flow tests.
 - The original stable image pull + overlay path is still intact
 
 `tests/test-smite-clean-image-pair.py` checks manifest integrity,
