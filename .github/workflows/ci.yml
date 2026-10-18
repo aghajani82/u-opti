@@ -28,6 +28,10 @@ jobs:
             bash -n "$file"
           done < <(find modules -type f -name '*.sh' -print0 | sort -z)
 
+      - name: Verify Smite mounted admin API auth overlay and install/update packaging
+        shell: bash
+        run: python3 -B tests/test-smite-panel-auth-overlay.py
+
       - name: Verify isolated Smite FRP Compose override
         shell: bash
         run: bash tests/test-smite-frp-compose.sh
