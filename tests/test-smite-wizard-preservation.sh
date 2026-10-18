@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # User constraint: the existing guided IR/KH and Private Network flow must
 # remain unchanged while developing experimental FRP / shared-domain support.
-# These are the Git blob SHAs on feature/smite-frp-upgrade before this PR.
+# All originally pinned wizard files remain unchanged except the explicitly
+# reviewed Smite Node local-only API bind addition to smite-install.sh.
+# This SHA pins that intentional Standard-mode change; other baselines stay fixed.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -21,7 +23,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 f71a00a9f465e5beb9ac5eedd86f175caaeeb80d modules/docker.sh
-6d3b64a66c2b3696bb703e81681244a588dc5b80 modules/smite-install.sh
+200f513b91eed567e4fe45c9fbb3e34565177b50 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
