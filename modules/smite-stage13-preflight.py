@@ -290,7 +290,9 @@ def main() -> int:
     hold = any(status == "HOLD" for _, status in rows)
     print("STAGE13_LOCAL_CHECKS=" + ("HOLD" if hold else "PASS_INCOMPLETE"))
     print("STAGE13_DEPLOYMENT_AUTHORIZED=NO")
-    return 2 if hold else 0
+    # Stage 13 is advisory, never deployment admission. Always exit nonzero
+    # so shell automation cannot mistake local source checks for authorization.
+    return 2
 
 
 if __name__ == "__main__":
