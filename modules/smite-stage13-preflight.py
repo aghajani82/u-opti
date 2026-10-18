@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -31,7 +32,7 @@ class Paths:
     replay_dir: Path = Path("/var/lib/u-opti/smite-node-security/replay")
     image_lock: Path = Path("/etc/u-opti/smite/security-image-lock.json")
     snapshot_receipt: Path = Path("/etc/u-opti/smite/snapshot-receipt.json")
-    panel_compose: Path = Path("/opt/u-opti-smite/panel/docker-compose.yml")
+    panel_compose: Path = Path("/opt/smite/docker-compose.yml")
     approved_origins: Path = Path("/etc/smite-panel/trusted-nodes/approved-origins.json")
     nginx_vhost: Path = Path("/etc/nginx/sites-enabled/smite-secure-gateway")
     panel_app: Path = Path("/var/lib/u-opti/smite-stage13/panel-app")
@@ -204,6 +205,43 @@ def _ok_approved_origins(role: str, p: Paths) -> None:
         raise AuditHold("no_approved_foreign_node")
 
 
+def _ok_overlay_parity(p: Paths) -> None:
+    """Reuse Stage10's real source-vs-host shadow auditor, fail closed.
+
+    Requires independently extracted reviewed Panel+Node /app trees.
+    Status is still only local byte parity, not a Docker image attestation.
+    """
+    path = Path(__file__).with_name("smite-auth-image-overlay-audit.py")
+    spec = importlib.util.spec_from_file_location("smite_stage10_source_audit", path)
+    if spec is None or spec.loader is None:
+        raise AuditHold("source_auditor_missing")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rows = module.assess(
+        panel_root=p.panel_app, node_root=p.node_app,
+        overlay_root=p.overlays, panel_compose=p.panel_compose,
+        node_compose=p.node_compose,
+    )
+    result = dict(rows)
+    if (
+        any(value.startswith("HOLD_") for _, value in rows)
+        or not all(
+            result.get(f"IMAGE/{service}/{filename}") == "SOURCE_PRESENT"
+            for service, filenames in module.REQUIRED_MODULES.items()
+            for filename in filenames
+        )
+        or result.get("COMPOSE/panel") != "SOURCE_PRESENT"
+        or result.get("COMPOSE/node") != "SOURCE_PRESENT"
+        or any(
+            result.get(f"OVERLAY/{role}/{name}") not in (
+                "BYTE_IDENTICAL_SHADOW", "NO_HOST_SHADOW"
+            )
+            for role, name in module.SHADOWS
+        )
+    ):
+        raise AuditHold("security_image_overlay_parity_missing")
+
+
 def audit(role: str, p: Paths) -> list[tuple[str, str]]:
     if role not in ("ir", "kh"):
         raise ValueError("IR or KH role required")
@@ -213,6 +251,7 @@ def audit(role: str, p: Paths) -> list[tuple[str, str]]:
         ("NODE_COMPOSE_AND_INERT_CANDIDATE", lambda: _ok_compose(p)),
         ("PERSISTENT_REPLAY_PERMISSIONS", lambda: _ok_replay(p)),
         ("IMAGE_DIGEST_DECLARATION", lambda: _ok_image_lock(p)),
+        ("SECURITY_IMAGE_OVERLAY_SOURCE_PARITY", lambda: _ok_overlay_parity(p)),
         ("TWO_HOST_SNAPSHOT_RECEIPT", lambda: _ok_snapshot_receipt(p)),
         ("SIGNED_443_NGINX_SOURCE", lambda: _ok_nginx(role, p)),
         ("APPROVED_NODE_ORIGINS", lambda: _ok_approved_origins(role, p)),
