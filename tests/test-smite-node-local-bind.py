@@ -35,8 +35,7 @@ class SecureNodeBindTests(unittest.TestCase):
     def test_standard_compose_loopback_and_idempotence(self):
         new, changed = module.transform(COMPOSE, "127.0.0.1")
         self.assertTrue(changed)
-        self.assertIn("--host 127.0.0.1", new)
-        self.assertIn('$${NODE_API_PORT:-8888}', new)
+        self.assertIn('    command: ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"', new)
         self.assertNotIn("--host 0.0.0.0", new)
         again, changed = module.transform(new, "127.0.0.1")
         self.assertFalse(changed)
@@ -53,9 +52,7 @@ class SecureNodeBindTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 command = json.loads(result.stdout)["services"]["smite-node"]["command"]
-                self.assertEqual(command[:2], ["/bin/sh", "-c"])
-                self.assertIn("--host 127.0.0.1", command[2])
-                self.assertIn('"${NODE_API_PORT:-8888}"', command[2])
+                self.assertEqual(command, ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888", "--log-level", "info", "--access-log"])
 
     def test_private_mode_is_not_accidentally_migrated(self):
         for ip in ("", "10.77.10.20"):
