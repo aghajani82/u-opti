@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Verify paired-only Foreign Smite gateway readiness
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-foreign-gateway-signed-check.py tests/test-smite-foreign-gateway-signed-check.py
+          python3 -B tests/test-smite-foreign-gateway-signed-check.py -v
+
       - name: Verify secure Smite Node localhost/443 endpoint and update packaging
         shell: bash
         run: python3 -B tests/test-smite-node-local-bind.py
