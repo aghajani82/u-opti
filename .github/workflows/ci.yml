@@ -45,6 +45,12 @@ jobs:
           python3 -B tests/test-smite-clean-image-pair.py -v
           bash tests/test-smite-clean-install.sh
 
+      - name: Verify clean RC foreign node paused pairing boot without HTTP 8000 fallback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-foreign-paused-boot.sh
+          bash tests/test-smite-foreign-paused-boot.sh
+
       - name: Stage15 verify archive delivery with tampering and no-install regressions
         shell: bash
         run: |

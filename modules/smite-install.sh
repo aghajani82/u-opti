@@ -501,7 +501,7 @@ PANEL_DOMAIN=$panel_domain
 SMITE_HTTP_PORT=80
 SMITE_HTTPS_PORT=443
 SMITE_SSL_DOMAIN=$panel_domain
-DOCS_ENABLED=true
+DOCS_ENABLED=$([ "$SMITE_INSTALL_PROFILE" = clean-rc ] && echo false || echo true)
 SMITE_VERSION=$SMITE_UPSTREAM_VERSION
 
 DB_TYPE=sqlite
@@ -517,6 +517,33 @@ EOF_ENV
     }
 
     return 0
+}
+
+
+# A fresh Foreign Node is intentionally started without any Panel
+# registration until per-Node HMAC identity + TLS/443 gateway are admitted.
+# This prevents legacy mode from silently using HTTP/8000 over the Internet.
+smite_install_clean_rc_pause_foreign_compose() {
+    local compose_file="$1"
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || return 1
+    python3 - "$compose_file" <<'PY_RC_PAUSE'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if path.is_symlink() or not path.is_file():
+    raise SystemExit("HOLD: Unsafe Foreign Compose path")
+text = path.read_text()
+if text.count("  smite-node:\n") != 1 or text.count("    healthcheck:\n") != 1:
+    raise SystemExit("HOLD: Unexpected Node Compose healthcheck layout")
+old = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://localhost:${NODE_API_PORT:-8888}/api/agent/status\')"]'
+new = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8888/\', timeout=5)"]'
+if text.count(old) != 1:
+    raise SystemExit("HOLD: Unknown Node healthcheck; cannot safely stage pending pairing")
+path.write_text(text.replace(old, new, 1))
+print("FOREIGN_RC_HEALTHCHECK=UNAUTHENTICATED_LOCAL_LIVENESS_ONLY")
+print("FOREIGN_RC_AGENT_AUTH=STRICT_UNTIL_PAIRED")
+PY_RC_PAUSE
 }
 
 smite_install_node_files() {
@@ -553,10 +580,17 @@ smite_install_node_files() {
         return 1
     fi
 
-    if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
-        cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && [ "$node_role" = foreign ]; then
+        # Signed mode uses the system TLS trust store, not legacy Panel CA.
+        # No unauthenticated CA download or unpaired registration on KH.
+        smite_install_clean_rc_pause_foreign_compose "$SMITE_NODE_COMPOSE" || return 1
+        echo "FOREIGN_RC_CA_DOWNLOAD=DEFERRED_UNTIL_SECURE_ADMISSION"
+    else
+        if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
+            cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+        fi
+        chmod 0644 "$SMITE_NODE_DIR/certs/ca.crt" || return 1
     fi
-    chmod 0644 "$SMITE_NODE_DIR/certs/ca.crt" || return 1
 
     cat > "$SMITE_NODE_DIR/.env" <<EOF_ENV
 NODE_API_PORT=8888
@@ -568,6 +602,16 @@ PANEL_CA_PATH=/etc/smite-node/certs/ca.crt
 PANEL_ADDRESS=$panel_address
 PANEL_API_PORT=8000
 EOF_ENV
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && [ "$node_role" = foreign ]; then
+        # The runtime enforces these modes. Their absence must NOT silently
+        # downgrade a public Foreign Node to HTTP/8000 registration.
+        cat >> "$SMITE_NODE_DIR/.env" <<'EOF_RC_AUTH'
+SMITE_NODE_PANEL_AUTH_MODE=paused
+SMITE_AGENT_AUTH_MODE=strict
+EOF_RC_AUTH
+        echo "FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+    fi
 
     if [ -n "$control_address" ]; then
         printf 'SMITE_CONTROL_ADDRESS=%s\n' "$control_address" >> "$SMITE_NODE_DIR/.env"
@@ -1156,10 +1200,16 @@ smite_install_foreign_node() {
         return
     }
 
-    temp_ca="$(mktemp)"
+    temp_ca="$(mktemp)" || {
+        echo "ERROR: Failed to create temporary CA file."
+        smite_install_pause
+        return
+    }
 
-    echo "Downloading the Foreign-node CA certificate from $ca_url ..."
-    if ! curl -fsS --retry 5 \
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Foreign RC: HTTPS/443 CA download deferred; Node will boot paused."
+        echo "Pairing and gateway setup happen after IR and KH core installation."
+    elif ! curl -fsS --retry 5 \
         "$ca_url" \
         -o "$temp_ca"; then
 
@@ -1180,7 +1230,7 @@ smite_install_foreign_node() {
         return
     fi
 
-    if ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
+    if [ "$SMITE_INSTALL_PROFILE" != clean-rc ] && ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
         rm -f "$temp_ca"
         echo "ERROR: The panel returned an invalid Foreign-node CA certificate."
         smite_install_pause
@@ -1238,12 +1288,18 @@ smite_install_foreign_node() {
         return
     fi
 
-    sleep 3
-    if ! docker logs --since 2m smite-node 2>&1 | grep -q 'Node registered successfully'; then
-        echo "WARNING: Node registration success was not found in the recent logs."
-        echo "Check: docker logs smite-node"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Foreign node: installed and running locally; pairing is still REQUIRED."
+        echo "FOREIGN_RC_CONNECTED=NO"
+        echo "FOREIGN_RC_REINSTALL_REQUIRED=NO"
     else
-        echo "Foreign node registration: OK"
+        sleep 3
+        if ! docker logs --since 2m smite-node 2>&1 | grep -q 'Node registered successfully'; then
+            echo "WARNING: Node registration success was not found in the recent logs."
+            echo "Check: docker logs smite-node"
+        else
+            echo "Foreign node registration: OK"
+        fi
     fi
 
     smite_write_state \
@@ -1263,6 +1319,9 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     echo "Node          : $node_name"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Status        : Installed / Waiting for secure pairing"
+    fi
     echo "Panel domain  : $panel_domain"
     echo "Foreign domain: $foreign_domain"
     echo "Connection    : $connection_mode"
@@ -1287,6 +1346,10 @@ smite_install_foreign_node() {
         echo "Private Network mode is active."
         echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
         echo "Machine-to-machine control traffic uses the private network."
+    elif [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "NEXT: Pair this installed node over verified HTTPS/443 and enable signed mode."
+        echo "DO NOT enable legacy Panel registration or open port 8000/8888."
+        echo "No second Smite installation should be required."
     else
         echo "IMPORTANT: Panel -> Foreign Node control over 443 is configured in the gateway step."
         echo "Keep public port 8888 blocked at the firewall/provider level."

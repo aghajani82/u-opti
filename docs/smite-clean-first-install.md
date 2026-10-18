@@ -42,6 +42,16 @@ The clean RC mode:
    KH Smite Node second; 3x-UI afterward; only then dynamic inbound
    path/port configuration and FRP/Backhaul tunnel creation**.
    This PR does not prematurely ask the installer to build any tunnel.
+9. New clean-RC KH boots in **Waiting for secure pairing** state:
+   `SMITE_NODE_PANEL_AUTH_MODE=paused` avoids the old unauthenticated
+   Node registration that would silently target HTTP/8000 instead of
+   HTTPS/443. `SMITE_AGENT_AUTH_MODE=strict` rejects Node Agent
+   requests without a paired private identity; the Compose healthcheck
+   uses only localhost liveness to avoid false failure of an unpaired
+   node. It does NOT fetch a CA or require the IR 443 gateway *during*
+   KH installation. Provisioning/restarting signed mode is a separate
+   future gate, not a second installation. Stable behavior is unchanged.
+10. Clean RC disables public API docs on the IR Panel by default.
 
 `modules/smite-clean-image-pair.py` checks paired archive inputs without
 Docker, writing files, executing scripts or network access. The
@@ -54,7 +64,10 @@ operator-selected trial installation.
   artifacts. Their manifest/Commit hashes provide byte integrity but
   do **not** independently attest build provenance.
 - Fresh Panel and Node image container startup using the legacy pinned
-  Compose template remains untested on disposable IR/KH.
+  Compose template remains untested on disposable IR/KH. Smite's separate
+  isolated CI first-boot gate passed, but it cannot prove host Compose,
+  gateway, volume permissions or two-host integration. KH's paused mode
+  **must never be presented as Connected** before secure pairing.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
@@ -76,7 +89,8 @@ real SHA verifier and a **mock Docker function**. It asserts:
 - Correct image IDs must match manifest; a mismatched digest HOLDS
 - No old state or Private mode can trigger a clean install
 - No legacy host Python overlays or second Docker recreation
-- No v0.1.7 network pull in clean RC mode
+- No v0.1.7 image pull in clean RC mode (legacy CLI and Compose
+  templates are still downloaded, and pinned FRP binaries prepared)
 - Interactive IR/KH clean setup automatically selects Standard with no
   unsupported Private choice; Stable still presents its historic choice
   and fails closed on invalid input; no Docker/network calls occur in
