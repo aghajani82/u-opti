@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Stage13 IR KH deployment admission never greenlights live auth
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage13-preflight.py tests/test-smite-stage13-preflight.py
+          python3 -B tests/test-smite-stage13-preflight.py -v
+
       - name: Stage12 signed Agent HTTPS 443 Nginx candidate never rewrites HMAC path
         shell: bash
         run: |
