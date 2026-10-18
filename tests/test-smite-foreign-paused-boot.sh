@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/fresh/node" "$TMP/fresh/node/certs" "$TMP/fresh/node/config"
 export SMITE_INSTALL_PROFILE=clean-rc
 source "$ROOT/modules/smite-install.sh"
+SMITE_NODE_IMAGE="smite-node:stage15-local"
 SMITE_NODE_DIR="$TMP/fresh/node"
 SMITE_NODE_COMPOSE="$SMITE_NODE_DIR/docker-compose.yml"
 
@@ -55,6 +56,7 @@ grep -q "HOLD: Unknown Node healthcheck" "$TMP/changed.log"
 
 # Stable source path retains its old CA and registration behavior.
 export SMITE_INSTALL_PROFILE=stable
+SMITE_NODE_IMAGE="$SMITE_NODE_REPO@$SMITE_NODE_DIGEST"
 cp "$SMITE_NODE_COMPOSE" "$TMP/rc-result.yml"
 cat > "$TMP/node-upstream.yml" <<'EOF_COMPOSE'
 # CI fixture: exact essential v0.1.7 service fields, not a runtime Compose image.
