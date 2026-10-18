@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Verify Stage11 secure FRP and Backhaul overlay migration review bundles
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage11-overlay-review.py tests/test-smite-stage11-overlay-review.py
+          python3 -B tests/test-smite-stage11-overlay-review.py -v
+
       - name: Verify Smite auth image shadow compatibility source audit
         shell: bash
         run: |
