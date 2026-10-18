@@ -3,14 +3,13 @@
 
 Smite's pinned node image starts Uvicorn with --host 0.0.0.0; setting an env
 variable does not fix it. This overrides the CMD in the existing Compose.
-Standard (HTTPS/443) binds to loopback; Private Network binds to its explicitly
-configured private IPv4, preserving private-mode connectivity.
+Standard (HTTPS/443) binds to loopback. Private Network is explicitly HOLD:
+it still relies on direct private-interface access and needs separate migration.
 """
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
-import ipaddress
 import os
 from pathlib import Path
 import re
@@ -26,12 +25,7 @@ def bind_host(mode: str, private_ip: str) -> str:
             raise ValueError("Standard mode does not use a private Node API IPv4")
         return "127.0.0.1"
     if mode == "private":
-        if not private_ip:
-            raise ValueError("Private mode needs its already-configured private IPv4")
-        address = ipaddress.ip_address(private_ip)
-        if address.version != 4 or address.is_unspecified or address.is_loopback or address.is_multicast:
-            raise ValueError("Private mode requires a real private-network IPv4")
-        return str(address)
+        raise ValueError("Private Network mode requires separate transport and healthcheck migration; no change made")
     raise ValueError("Unknown connection mode")
 
 
@@ -58,7 +52,7 @@ def transform(original: str, host: str) -> tuple[str, bool]:
     target = command_line(host)
     commands = re.findall(r"^    command:.*$", block, re.M)
     if commands:
-        if len(commands) == 1 and commands[0] == target.strip():
+        if len(commands) == 1 and commands[0].rstrip() == target.rstrip():
             return original, False
         raise ValueError("Existing Smite Node command conflicts with safe bind")
     if re.search(r"^    entrypoint:", block, re.M):
