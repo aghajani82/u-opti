@@ -37,6 +37,8 @@ MODULES=(
     "docker.sh"
     "smite.sh"
     "smite-node-local-bind.py"
+    "smite-node-pairing.py"
+    "smite-node-pairing-wizard.sh"
     "smite-digest-migrate.sh"
     "smite-install.sh"
     "smite-gateway.sh"
