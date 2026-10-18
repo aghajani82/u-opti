@@ -2,12 +2,13 @@
 # U-OPTI Smite Node Pairing Preview.
 # No tunnel apply/remove, no service restart, no FRP/Backhaul/Nginx changes.
 smite_node_pairing_menu() {
-    local here helper candidate_helper audit_helper review_helper answer choice panel_image_root node_image_root review_output
+    local here helper candidate_helper audit_helper review_helper stage13_helper answer choice panel_image_root node_image_root review_output role
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     helper="$here/smite-node-pairing.py"
     candidate_helper="$here/smite-node-auth-candidate.py"
     audit_helper="$here/smite-auth-image-overlay-audit.py"
     review_helper="$here/smite-stage11-overlay-review.py"
+    stage13_helper="$here/smite-stage13-preflight.py"
     if [ ! -f "$helper" ]; then
         echo "HOLD: Pairing helper not installed"
         return 2
@@ -25,9 +26,10 @@ smite_node_pairing_menu() {
         echo "6) Discard only the unactivated Compose candidate"
         echo "7) Audit image sources vs host overlays (read-only, offline)"
         echo "8) Prepare offline security/FRP/Backhaul overlay review bundle"
+        echo "9) Final IR/KH Stage13 read-only deployment admission (always blocks activation)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-8]: " choice || return 0
+        read -rp "Choose [0-9]: " choice || return 0
         case "$choice" in
             1)
                 python3 -B "$helper" --status || :
@@ -106,6 +108,18 @@ smite_node_pairing_menu() {
                     --node-image-app "$node_image_root" \
                     --output "$review_output" || :
                 echo "NOTE: The review bundle is NEVER ready to activate by itself."
+                ;;
+            9)
+                echo "STAGE13 IS READ-ONLY. Missing evidence returns HOLD."
+                echo "Even fully passing local checks do NOT authorize real activation."
+                [ -f "$stage13_helper" ] || { echo "HOLD: Stage13 checker not installed"; continue; }
+                read -rp "Select actual server role (ir/kh): " role || return 2
+                if [ "$role" != "ir" ] && [ "$role" != "kh" ]; then
+                    echo "HOLD: Role must be ir or kh"
+                    continue
+                fi
+                python3 -B "$stage13_helper" --role "$role" || :
+                echo "NOTE: Verify cloud snapshots, Docker runtime, ingress and real client traffic separately."
                 ;;
             0) return 0 ;;
             *) echo "Invalid selection" ;;
