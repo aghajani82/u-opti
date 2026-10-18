@@ -42,6 +42,7 @@ MODULES=(
     "smite-auth-image-overlay-audit.py"
     "smite-stage11-overlay-review.py"
     "smite-stage12-nginx-hmac-plan.py"
+    "smite-stage13-preflight.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
     "smite-digest-migrate.sh"
