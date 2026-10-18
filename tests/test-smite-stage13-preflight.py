@@ -204,7 +204,7 @@ class Stage13PreflightTest(unittest.TestCase):
         self.assertNotIn("subprocess.run(", MODULE.read_text())
         self.assertNotIn("subprocess.Popen(", MODULE.read_text())
         self.assertNotIn("os.system(", MODULE.read_text())
-        self.assertNotIn("docker compose up", MODULE.read_text())
+        self.assertNotIn("os.execvp(", MODULE.read_text())
         self.assertNotIn("systemctl restart", MODULE.read_text())
         for file in ("install.sh", "u-opti"):
             self.assertIn("smite-stage13-preflight.py", (ROOT / file).read_text())
