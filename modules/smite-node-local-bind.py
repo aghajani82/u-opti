@@ -30,11 +30,12 @@ def bind_host(mode: str, private_ip: str) -> str:
 
 
 def command_line(host: str) -> str:
-    # $$ escapes Compose interpolation; shell expands NODE_API_PORT at runtime.
+    # U-OPTI Standard Node uses TCP/8888 (and its healthcheck probes 8888).
+    # Use direct argv: no shell, Compose env interpolation or variable fallback.
     return (
-        '    command: ["/bin/sh", "-c", '
-        f"'exec uvicorn main:app --host {host} --port "
-        "\"$${NODE_API_PORT:-8888}\" --log-level info --access-log']\n"
+        '    command: ["uvicorn", "main:app", "--host", "'
+        + host
+        + '", "--port", "8888", "--log-level", "info", "--access-log"]\\n'
     )
 
 
