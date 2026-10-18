@@ -36,6 +36,7 @@ MODULES=(
     "backup.sh"
     "docker.sh"
     "smite.sh"
+    "smite-node-local-bind.py"
     "smite-digest-migrate.sh"
     "smite-install.sh"
     "smite-gateway.sh"
