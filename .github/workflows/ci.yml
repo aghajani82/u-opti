@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Stage15 verify archive delivery with tampering and no-install regressions
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage15-bundle-verify.py tests/test-smite-stage15-bundle-verify.py
+          python3 -B tests/test-smite-stage15-bundle-verify.py -v
+
       - name: Checkout pinned Stage14 Smite security source (source only, no images)
         uses: actions/checkout@v4
         with:
