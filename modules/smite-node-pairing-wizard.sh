@@ -2,11 +2,12 @@
 # U-OPTI Smite Node Pairing Preview.
 # No tunnel apply/remove, no service restart, no FRP/Backhaul/Nginx changes.
 smite_node_pairing_menu() {
-    local here helper candidate_helper audit_helper answer choice panel_image_root node_image_root
+    local here helper candidate_helper audit_helper review_helper answer choice panel_image_root node_image_root review_output
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     helper="$here/smite-node-pairing.py"
     candidate_helper="$here/smite-node-auth-candidate.py"
     audit_helper="$here/smite-auth-image-overlay-audit.py"
+    review_helper="$here/smite-stage11-overlay-review.py"
     if [ ! -f "$helper" ]; then
         echo "HOLD: Pairing helper not installed"
         return 2
@@ -23,9 +24,10 @@ smite_node_pairing_menu() {
         echo "5) Prepare INERT Node auth Compose candidate (no Docker changes)"
         echo "6) Discard only the unactivated Compose candidate"
         echo "7) Audit image sources vs host overlays (read-only, offline)"
+        echo "8) Prepare offline security/FRP/Backhaul overlay review bundle"
         echo "0) Back"
         echo
-        read -rp "Choose [0-7]: " choice || return 0
+        read -rp "Choose [0-8]: " choice || return 0
         case "$choice" in
             1)
                 python3 -B "$helper" --status || :
@@ -88,6 +90,22 @@ smite_node_pairing_menu() {
                     --panel-image-app "$panel_image_root" \
                     --node-image-app "$node_image_root" || :
                 echo "NOTE: SOURCE_PARITY does not authorize enabling signed mode."
+                ;;
+            8)
+                echo "This creates ONLY a local, private review bundle; never installs it."
+                [ -f "$review_helper" ] || { echo "HOLD: Stage11 review helper unavailable"; continue; }
+                read -rp "Trusted extracted Panel /app directory: " panel_image_root || return 2
+                read -rp "Trusted extracted Node /app directory: " node_image_root || return 2
+                read -rp "NEW offline review output directory (absolute): " review_output || return 2
+                if [[ "$panel_image_root" != /* || "$node_image_root" != /* || "$review_output" != /* ]]; then
+                    echo "HOLD: all paths must be absolute"
+                    continue
+                fi
+                python3 -B "$review_helper" \
+                    --panel-image-app "$panel_image_root" \
+                    --node-image-app "$node_image_root" \
+                    --output "$review_output" || :
+                echo "NOTE: The review bundle is NEVER ready to activate by itself."
                 ;;
             0) return 0 ;;
             *) echo "Invalid selection" ;;
