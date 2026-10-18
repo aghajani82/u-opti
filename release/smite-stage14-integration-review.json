@@ -12,7 +12,7 @@
     "smite": {
       "repository": "aghajani82/Smite",
       "ref": "feature/smite-stage14-release-candidate-review-20261018",
-      "commit": "567d2ba06a9fdb0cfe058468369ec74d3cdb0023",
+      "commit": "631df78551e097dbded3b934ed6ea4987c554869",
       "latest_stacked_pr_before_stage14": 12
     },
     "uopti_stacked_base": {
