@@ -76,6 +76,12 @@ jobs:
           python3 -B tests/test-smite-panel-auth-overlay.py -v
           python3 -B tests/test-smite-stage14-integration.py -v
 
+      - name: Stage19 pairing 443 private offline Nginx plan
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage19-pairing-443-plan.py tests/test-smite-stage19-pairing-443-plan.py
+          python3 -B tests/test-smite-stage19-pairing-443-plan.py -v
+
       - name: Stage13 IR KH deployment admission never greenlights live auth
         shell: bash
         run: |

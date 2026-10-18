@@ -71,6 +71,18 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage19 IR pairing/443 gateway plan (OFFLINE ONLY):** The existing
+  Standard installer already sets `PANEL_HOST=127.0.0.1`, so no
+  installer behavior is changed. New `smite-stage19-pairing-443-plan.py`
+  prepares a private 0700 directory containing a disabled-by-default
+  Panel pairing environment candidate, an independently generated Fernet
+  master, Nginx ingress proof stored in a dedicated 0600 include, and
+  exact-path `/api/node-pairing/redeem` location for the EXISTING
+  loopback TLS 8443 backend. No second TLS listener is created. Files
+  are never automatically installed, loaded, logged or uploaded; Stage19
+  refuses overwrite and exposes no secret in stdout. Real IR validation
+  of TLS, Nginx include permissions, gateway path, 8000 isolation,
+  backups, and both endpoints remains HOLD. No VPS was touched.
 - **Stage18 secure pre-registration bridge:** In Smite's disabled-by-default
   pairing preview, an authenticated admin can reserve a **pending**
   Foreign Node from the Servers page using just a name. The Panel issues
