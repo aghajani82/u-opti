@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "modules/smite-stage13-preflight.py"
 spec = importlib.util.spec_from_file_location("smite_stage13_admission", MODULE)
 gate = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = gate
 spec.loader.exec_module(gate)
 
 audit_file = ROOT / "modules/smite-auth-image-overlay-audit.py"
