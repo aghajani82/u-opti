@@ -581,7 +581,28 @@ smite_foreign_gateway_recreate_node() {
 
 smite_foreign_gateway_verify_panel() {
     local panel_domain="$1" node_name="$2" control_url="$3"
-    local attempt=1 tmp=""
+    local attempt=1 tmp="" identity helper
+    identity="/etc/u-opti/smite/identities/node-identity.json"
+    helper="${BASH_SOURCE[0]%/*}/smite-foreign-gateway-signed-check.py"
+
+    # After a Node identity is staged, NEVER downgrade to anonymous /api/nodes.
+    # Signed verification reveals only this Node's own gateway-ready boolean.
+    # In legacy installs without pairing, preserve the prior readiness probe
+    # until both sides of the secure migration have been rolled out.
+    if [ -e "$identity" ] || [ -L "$identity" ]; then
+        [ -s "$helper" ] || return 1
+        while [ "$attempt" -le 8 ]; do
+            if python3 -B "$helper" \
+                --panel-domain "$panel_domain" \
+                --node-name "$node_name" \
+                --control-url "$control_url"; then
+                return 0
+            fi
+            [ "$attempt" -lt 8 ] && sleep 5
+            attempt=$((attempt + 1))
+        done
+        return 1
+    fi
 
     tmp="$(mktemp)" || return 1
     while [ "$attempt" -le 8 ]; do
@@ -687,7 +708,7 @@ smite_foreign_gateway_status() {
     fi
 
     echo
-    echo "Security note  : Public TCP/8888 should be blocked by provider firewall or UFW."
+    echo "Security note  : Standard Node TCP/8888 must bind 127.0.0.1 and provider rules must block WAN."
     smite_foreign_gateway_pause
 }
 
