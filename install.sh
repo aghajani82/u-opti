@@ -45,6 +45,7 @@ MODULES=(
     "smite-stage13-preflight.py"
     "smite-panel-auth-overlay.py"
     "smite-stage15-bundle-verify.py"
+    "smite-clean-image-pair.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
     "smite-digest-migrate.sh"
