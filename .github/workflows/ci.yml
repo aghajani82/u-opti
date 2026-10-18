@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Verify Smite auth image shadow compatibility source audit
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-auth-image-overlay-audit.py tests/test-smite-auth-image-overlay-audit.py
+          python3 -B tests/test-smite-auth-image-overlay-audit.py -v
+
       - name: Verify inert Smite Node security Compose staging and rollback
         shell: bash
         run: |
