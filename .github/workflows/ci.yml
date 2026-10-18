@@ -35,6 +35,16 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n modules/smite-install.sh
+          bash -n tests/test-smite-clean-install.sh
+          python3 -m py_compile modules/smite-clean-image-pair.py tests/test-smite-clean-image-pair.py
+          python3 -B tests/test-smite-clean-image-pair.py -v
+          bash tests/test-smite-clean-install.sh
+
       - name: Stage15 verify archive delivery with tampering and no-install regressions
         shell: bash
         run: |
