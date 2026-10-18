@@ -192,6 +192,17 @@ class Stage13PreflightTest(unittest.TestCase):
         self.assertEqual(result["APPROVED_NODE_ORIGINS"], "PASS_LOCAL_EVIDENCE")
         self.assertEqual(result["AUTH_ACTIVATION"], "BLOCKED")
 
+    def test_cli_never_exits_zero_even_if_all_local_evidence_passes(self):
+        argv = ["smite-stage13-preflight.py", "--role", "kh"]
+        for key in self.p.__dataclass_fields__:
+            argv += ["--" + key.replace("_", "-"), str(getattr(self.p, key))]
+        with patch("sys.argv", argv), patch("builtins.print") as printing:
+            self.assertEqual(gate.main(), 2)
+        lines = [str(call.args[0]) for call in printing.call_args_list]
+        self.assertIn("STAGE13_LOCAL_CHECKS=PASS_INCOMPLETE", lines)
+        self.assertIn("STAGE13_DEPLOYMENT_AUTHORIZED=NO", lines)
+        self.assertIn("AUTH_ACTIVATION=BLOCKED", lines)
+
     def test_does_not_modify_input_files_or_log_credentials(self):
         before = self.p.identity.read_bytes()
         with patch("builtins.print") as log:
