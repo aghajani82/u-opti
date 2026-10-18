@@ -12,6 +12,98 @@ SMITE_PANEL_DIGEST="sha256:67f98cba1f49658e651779ab6142290f7eb0906b54b386939fcdb
 SMITE_NODE_DIGEST="sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 SMITE_PANEL_IMAGE="${SMITE_PANEL_REPO}@${SMITE_PANEL_DIGEST}"
 SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
+
+# Clean reinstall profile is an EXPLICIT disposable-server experiment.
+# Stable installed U-OPTI keeps using the historically validated v0.1.7
+# images; the new Panel/Node artifact pair is never selected implicitly.
+SMITE_INSTALL_PROFILE="${SMITE_INSTALL_PROFILE:-stable}"
+
+smite_install_clean_rc_preflight() {
+    local role="$1" mode="$2" helper_dir pair_result
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || {
+        echo "HOLD: Unexpected fresh Smite profile" >&2
+        return 1
+    }
+    if [ "$role" != panel-iran ] && [ "$role" != foreign ]; then
+        echo "HOLD: Unknown fresh-install server role" >&2
+        return 1
+    fi
+    if [ "$mode" != standard ]; then
+        echo "HOLD: Clean RC currently supports Standard mode only" >&2
+        return 1
+    fi
+    # Never migrate old configurations, databases, tunnels or containers.
+    if [ -e "$SMITE_STATE_FILE" ] || [ -L "$SMITE_STATE_FILE" ] ||
+       [ -e "$SMITE_PANEL_COMPOSE" ] || [ -L "$SMITE_PANEL_COMPOSE" ] ||
+       [ -e "$SMITE_NODE_COMPOSE" ] || [ -L "$SMITE_NODE_COMPOSE" ] ||
+       [ -e "$SMITE_OVERLAY_DIR/panel/main.py" ] ||
+       [ -e "$SMITE_OVERLAY_DIR/node/panel_client.py" ] ||
+       smite_container_exists smite-panel || smite_container_exists smite-node; then
+        echo "HOLD: Existing Smite installation detected. Clean RC is not an upgrader." >&2
+        return 1
+    fi
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
+       [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
+       [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
+        echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
+        return 1
+    fi
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    pair_result="$(python3 -B "$helper_dir/smite-clean-image-pair.py" \
+        --folder "$SMITE_RC_BUNDLE_DIR" \
+        --source-sha "$SMITE_RC_SOURCE_SHA" \
+        --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256")" || return 1
+    printf '%s\n' "$pair_result"
+    echo "RC_IMAGE_PROVENANCE=NOT_ATTESTED"
+    echo "RC_SIGNED_AUTH=NOT_ACTIVE"
+    # docker save archives carry exactly these two local preview tags.
+    # Loading is a separate explicit step after local source preflight.
+    SMITE_PANEL_IMAGE="smite-panel:stage15-local"
+    SMITE_NODE_IMAGE="smite-node:stage15-local"
+    return 0
+}
+
+smite_install_clean_rc_load_images() {
+    local role="$1" expected_panel expected_node loaded_panel loaded_node
+    local verifier_dir
+    verifier_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    # Recheck bytes at time of loading, not only at UI confirmation.
+    python3 -B "$verifier_dir/smite-clean-image-pair.py" \
+        --folder "$SMITE_RC_BUNDLE_DIR" \
+        --source-sha "$SMITE_RC_SOURCE_SHA" \
+        --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256" >/dev/null || return 1
+    read -r expected_panel expected_node < <(
+        python3 - "$SMITE_RC_BUNDLE_DIR" <<'PY_RC_IDS'
+import json, pathlib, sys
+data=json.loads((pathlib.Path(sys.argv[1]) / "stage15-images.json").read_text())
+print(data["images"]["panel"]["local_image_id"], data["images"]["node"]["local_image_id"])
+PY_RC_IDS
+    )
+    [ -n "$expected_panel" ] && [ -n "$expected_node" ] || return 1
+    if [ "$role" = panel-iran ]; then
+        ( set -o pipefail
+          gzip -cd "$SMITE_RC_BUNDLE_DIR/smite-panel-stage15.docker.tar.gz" |
+              docker load >/dev/null
+        ) || return 1
+        loaded_panel="$(docker image inspect "$SMITE_PANEL_IMAGE" --format '{{.Id}}' 2>/dev/null)" || return 1
+        if [ "$loaded_panel" != "$expected_panel" ]; then
+            echo "HOLD: Loaded Panel image ID differs from verified archive" >&2
+            return 1
+        fi
+    fi
+    ( set -o pipefail
+      gzip -cd "$SMITE_RC_BUNDLE_DIR/smite-node-stage15.docker.tar.gz" |
+          docker load >/dev/null
+    ) || return 1
+    loaded_node="$(docker image inspect "$SMITE_NODE_IMAGE" --format '{{.Id}}' 2>/dev/null)" || return 1
+    if [ "$loaded_node" != "$expected_node" ]; then
+        echo "HOLD: Loaded Node image ID differs from verified archive" >&2
+        return 1
+    fi
+    echo "CLEAN_RC_IMAGES=LOCAL_IDS_MATCH_VERIFIED_ARCHIVES"
+    echo "CLEAN_RC_PRODUCTION_ACTIVATION=NOT_AUTHORIZED"
+    return 0
+}
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
 
@@ -494,6 +586,16 @@ EOF_ENV
 
 smite_install_pull_images() {
     local need_panel="${1:-false}"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        local role=foreign
+        [ "$need_panel" = true ] && role=panel-iran
+        smite_install_clean_rc_load_images "$role"
+        return $?
+    fi
+    if [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite installation profile" >&2
+        return 1
+    fi
 
     if [ "$need_panel" = "true" ]; then
         echo "Pulling $SMITE_PANEL_IMAGE ..."
@@ -568,6 +670,15 @@ smite_recreate_with_overlays_noninteractive() {
 }
 
 smite_install_apply_compatibility() {
+    # New security image source already contains the validated FRP/Backhaul
+    # modules. Never graft v0.1.7 host Python patches onto clean RC images:
+    # that would mask new signed HMAC routers and might require a second
+    # container recreation. Existing stable v0.1.7 flow is unchanged.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "CLEAN_RC_LEGACY_HOST_OVERLAYS=SKIPPED"
+        echo "CLEAN_RC_SECOND_CONTAINER_RECREATE=SKIPPED"
+        return 0
+    fi
     echo
     echo "Preparing the tested U-OPTI Smite compatibility layer..."
     smite_prepare_overlays || return 1
@@ -681,6 +792,18 @@ smite_install_panel_iran() {
         y|Y|yes|YES) ;;
         *) echo "Installation cancelled."; sleep 1; return ;;
     esac
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_preflight "panel-iran" "$connection_mode"; then
+            echo "HOLD: Clean RC prerequisites not met; no service started."
+            smite_install_pause
+            return
+        fi
+    elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite install profile."
+        smite_install_pause
+        return
+    fi
 
     mkdir -p "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" || {
         echo "ERROR: Failed to create Smite directories."
@@ -981,6 +1104,18 @@ smite_install_foreign_node() {
         y|Y|yes|YES) ;;
         *) echo "Installation cancelled."; sleep 1; return ;;
     esac
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_preflight "foreign" "$connection_mode"; then
+            echo "HOLD: Clean RC prerequisites not met; no service started."
+            smite_install_pause
+            return
+        fi
+    elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite install profile."
+        smite_install_pause
+        return
+    fi
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || {
         echo "ERROR: Failed to create Smite node directories."
