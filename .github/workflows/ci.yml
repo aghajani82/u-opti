@@ -35,6 +35,12 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Stage12 signed Agent HTTPS 443 Nginx candidate never rewrites HMAC path
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage12-nginx-hmac-plan.py tests/test-smite-stage12-nginx-hmac-plan.py
+          python3 -B tests/test-smite-stage12-nginx-hmac-plan.py -v
+
       - name: Verify Stage11 secure FRP and Backhaul overlay migration review bundles
         shell: bash
         run: |
