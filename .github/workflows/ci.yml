@@ -35,6 +35,25 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Checkout pinned Stage14 Smite security source (source only, no images)
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 567d2ba06a9fdb0cfe058468369ec74d3cdb0023
+          path: .stage14-smite-src
+          persist-credentials: false
+
+      - name: Cross-repository Stage14 HMAC and admin JWT overlay regression
+        shell: bash
+        env:
+          SMITE_STAGE14_SOURCE: ${{ github.workspace }}/.stage14-smite-src
+        run: |
+          set -euo pipefail
+          python3 -m json.tool release/smite-stage14-integration-review.json >/dev/null
+          python3 -m py_compile modules/smite-panel-auth-overlay.py tests/test-smite-panel-auth-overlay.py tests/test-smite-stage14-integration.py
+          python3 -B tests/test-smite-panel-auth-overlay.py -v
+          python3 -B tests/test-smite-stage14-integration.py -v
+
       - name: Stage13 IR KH deployment admission never greenlights live auth
         shell: bash
         run: |
