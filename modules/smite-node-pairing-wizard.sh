@@ -2,10 +2,11 @@
 # U-OPTI Smite Node Pairing Preview.
 # No tunnel apply/remove, no service restart, no FRP/Backhaul/Nginx changes.
 smite_node_pairing_menu() {
-    local here helper candidate_helper answer choice
+    local here helper candidate_helper audit_helper answer choice panel_image_root node_image_root
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     helper="$here/smite-node-pairing.py"
     candidate_helper="$here/smite-node-auth-candidate.py"
+    audit_helper="$here/smite-auth-image-overlay-audit.py"
     if [ ! -f "$helper" ]; then
         echo "HOLD: Pairing helper not installed"
         return 2
@@ -21,9 +22,10 @@ smite_node_pairing_menu() {
         echo "4) Inspect Node Docker auth preflight (read-only, Standard)"
         echo "5) Prepare INERT Node auth Compose candidate (no Docker changes)"
         echo "6) Discard only the unactivated Compose candidate"
+        echo "7) Audit image sources vs host overlays (read-only, offline)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-6]: " choice || return 0
+        read -rp "Choose [0-7]: " choice || return 0
         case "$choice" in
             1)
                 python3 -B "$helper" --status || :
@@ -71,6 +73,21 @@ smite_node_pairing_menu() {
                 else
                     echo "Cancelled; no changes."
                 fi
+                ;;
+            7)
+                echo "Stage10 compares EXTRACTED, trusted image /app sources to U-OPTI host files."
+                echo "It does not build images, check image signatures or modify Docker."
+                [ -f "$audit_helper" ] || { echo "HOLD: Image auditor is missing"; continue; }
+                read -rp "Extracted Panel /app directory (absolute path): " panel_image_root || return 2
+                read -rp "Extracted Node /app directory (absolute path): " node_image_root || return 2
+                if [[ "$panel_image_root" != /* || "$node_image_root" != /* ]]; then
+                    echo "HOLD: Both paths must be absolute."
+                    continue
+                fi
+                python3 -B "$audit_helper" \
+                    --panel-image-app "$panel_image_root" \
+                    --node-image-app "$node_image_root" || :
+                echo "NOTE: SOURCE_PARITY does not authorize enabling signed mode."
                 ;;
             0) return 0 ;;
             *) echo "Invalid selection" ;;
