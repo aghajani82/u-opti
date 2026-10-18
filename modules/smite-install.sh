@@ -60,6 +60,9 @@ smite_install_clean_rc_preflight() {
     # Loading is a separate explicit step after local source preflight.
     SMITE_PANEL_IMAGE="smite-panel:stage15-local"
     SMITE_NODE_IMAGE="smite-node:stage15-local"
+    # The v0.1.7 upstream Compose is used as a known layout template;
+    # the application binaries are ONLY the paired offline RC images.
+    SMITE_UPSTREAM_VERSION="2.0.0-rc.0"
     return 0
 }
 
