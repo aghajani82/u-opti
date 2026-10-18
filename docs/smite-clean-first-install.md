@@ -71,6 +71,15 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage20 real isolated pair gateway lab:** Draft PR CI checks out
+  a pinned reviewed Smite commit and exercises the REAL JWT-admin and
+  pairing FastAPI routers through REAL ephemeral Nginx stream/SNI/TLS,
+  certificate and hostname verified, with only loopback ports.
+  Verifies admin reservation/issue, private ingress proof replacement,
+  replay/method/body-size denial, backend proof bypass denial,
+  non-pairing fallback preservation, malformed config HOLD and
+  temporary lab Nginx reload/rollback. **No two-host, public 443,
+  Docker, VPS or production security mode activation.**
 - **Stage19 IR pairing/443 gateway plan (OFFLINE ONLY):** The existing
   Standard installer already sets `PANEL_HOST=127.0.0.1`, so no
   installer behavior is changed. New `smite-stage19-pairing-443-plan.py`

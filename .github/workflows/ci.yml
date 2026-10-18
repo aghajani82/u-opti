@@ -412,6 +412,42 @@ jobs:
           bash -n tests/test-smite-backhaul-sidecar-tls.sh
           bash tests/test-smite-backhaul-sidecar-tls.sh
 
+  pairing-tls-e2e-isolated:
+    # Real temporary Nginx stream/SNI/TLS and real Smite pairing API.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout U-OPTI proposed branch
+        uses: actions/checkout@v4
+      - name: Checkout exact Smite source commit
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: eabd198c04f520ad682076bc778b92c779b3535b
+          path: .stage20-smite-src
+          persist-credentials: false
+      - name: Install isolated Nginx and pinned pairing runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nginx libnginx-mod-stream openssl
+          python -m pip install \
+            'fastapi==0.104.1' 'uvicorn==0.24.0' \
+            'pydantic==2.5.0' 'pydantic-settings==2.1.0' \
+            'sqlalchemy==2.0.23' 'aiosqlite==0.19.0' \
+            'cryptography==41.0.7' 'passlib[bcrypt]==1.7.4' \
+            'bcrypt==4.0.1' 'python-jose[cryptography]==3.3.0' \
+            'httpx==0.25.2'
+          test -f /usr/lib/nginx/modules/ngx_stream_module.so
+      - name: Real pairing security and reversible local Nginx test
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          python3 -m py_compile tests/fixtures/stage20_pairing_panel.py tests/test-smite-stage20-pairing-tls-e2e.py
+          python3 -B tests/test-smite-stage20-pairing-tls-e2e.py
+
   sidecar-service-reload-rollback:
     # These destructive synthetic-container drills are explicitly PR-only.
     # Their scripts intentionally refuse push/main execution.
