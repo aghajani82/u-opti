@@ -734,12 +734,19 @@ smite_install_panel_iran() {
         return
     fi
 
-    echo
-    echo "Connection mode:"
-    echo "1) Standard / Local"
-    echo "2) Private Network"
-    echo
-    read -rp "Please enter your selection [1-2]: " connection_choice
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # The disposable clean profile has exactly one supported mode.
+        # Do not ask beginners to select an option that will be rejected.
+        connection_choice=1
+        echo "Connection mode: Standard (automatic for clean install)"
+    else
+        echo
+        echo "Connection mode:"
+        echo "1) Standard / Local"
+        echo "2) Private Network"
+        echo
+        read -rp "Please enter your selection [1-2]: " connection_choice
+    fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
@@ -952,7 +959,11 @@ smite_install_panel_iran() {
     echo "Iran Node   : running on port 8888"
     echo "Panel Domain: $panel_domain"
     echo "Connection  : $connection_mode"
-    echo "Compatibility overlays: active"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Compatibility overlays: skipped (features are in RC images)"
+    else
+        echo "Compatibility overlays: active"
+    fi
     echo
     echo "IMPORTANT: TCP/443 gateway is not configured by this installer step yet."
     if [ "$connection_mode" = "private" ]; then
@@ -1025,12 +1036,17 @@ smite_install_foreign_node() {
         return
     fi
 
-    echo
-    echo "Connection mode:"
-    echo "1) Standard / HTTPS"
-    echo "2) Private Network"
-    echo
-    read -rp "Please enter your selection [1-2]: " connection_choice
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        connection_choice=1
+        echo "Connection mode: Standard / HTTPS (automatic for clean install)"
+    else
+        echo
+        echo "Connection mode:"
+        echo "1) Standard / HTTPS"
+        echo "2) Private Network"
+        echo
+        read -rp "Please enter your selection [1-2]: " connection_choice
+    fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
@@ -1246,7 +1262,11 @@ smite_install_foreign_node() {
         echo "Panel         : https://$panel_domain:443"
     fi
 
-    echo "Compatibility overlays: active"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Compatibility overlays: skipped (features are in RC images)"
+    else
+        echo "Compatibility overlays: active"
+    fi
     echo
 
     if [ "$connection_mode" = "private" ]; then
