@@ -147,13 +147,13 @@ def _verified_binary(archive: Path, trusted_sha: str) -> bytes:
 
 def _private_write(path: Path, data: bytes, mode: int) -> None:
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(data)
-            output.flush()
-            os.fsync(output.fileno())
-    finally:
-        pass
+    with os.fdopen(fd, "wb") as output:
+        # umask=077 intentionally protects staging creation, but executable
+        # artifact needs exact 0755 for the later read-only bind mount.
+        os.fchmod(output.fileno(), mode)
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
 
 
 def prepare(node_dir: Path, archive: Path, stage_root: Path,
@@ -191,8 +191,11 @@ def prepare(node_dir: Path, archive: Path, stage_root: Path,
         f"BACKHAUL_BINARY_SHA256={binary_sha}\n"
         f"ORIGINAL_COMPOSE_SHA256={hashlib.sha256(compose).hexdigest()}\n"
     ).encode()
-    os.umask(0o077)
-    stage = Path(tempfile.mkdtemp(prefix="backhaul-plan-", dir=stage_root))
+    old_umask = os.umask(0o077)
+    try:
+        stage = Path(tempfile.mkdtemp(prefix="backhaul-plan-", dir=stage_root))
+    finally:
+        os.umask(old_umask)
     os.chmod(stage, 0o700)
     try:
         outputs = [
