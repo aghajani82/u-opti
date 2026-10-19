@@ -77,6 +77,32 @@ during installation.
   inventory or operational rollback yet. None of the actions required
   for an actual activation are implied by a green preparation test.
 
+## New milestone: transaction and recovery rehearsal (PR CI only)
+
+- `modules/smite-managed-backhaul-transaction.py` takes a previously
+  authenticated Backhaul candidate and rehearses activation exclusively
+  inside a **marked, private directory under the GitHub Runner's temporary
+  folder**. It explicitly refuses live servers, regular shell execution,
+  non-PR contexts, untrusted candidates, tampered source files or
+  unsupported Core profiles.
+- Its journal contains the original Compose and registry bytes, their
+  SHA256, file modes, and expected Backhaul outputs. The trial copies the
+  binary, inserts a scoped read-only Compose mount and writes the registry
+  **last**. The simulator starts no Docker service and never touches Nginx,
+  FRP, Xray, Smite Panel, tunnels or public ports.
+- Crash-injection tests exercise failures immediately after binary,
+  Compose or registry operations. The rollback refuses out-of-band edits
+  and restores the exact prior Compose bytes/mode and other engine
+  declarations. Fresh registry/binary state disappears again on rollback.
+- A separate real-artifact CI test feeds the official SHA256-checked v0.7.2
+  AMD64 release through that temporary transaction, parses the resulting
+  real Smite Compose with Docker Compose, and runs rollback. It does
+  **not** recreate a container or prove the binary is active in a Node.
+- This **is not yet the production installer**: the exact host transaction,
+  protection against concurrent updates, runtime engine-version verification
+  in Node, signed status checks, container lifecycle restart and real
+  443 transport remain blocked pending separate acceptance.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
@@ -136,8 +162,8 @@ during installation.
   exposure, least privileges and operator-friendly Persian/English
   errors before any version promotion.
 
-**HOLD:** The pinned official AMD64/ARM64 archives are now verified
-for *preparation*, but **no real independent activation/rollback workflow**
-exists yet. No signed dual-Node inventory after installation, no actual
-Backhaul-over-443 data-flow acceptance, no IR/KH VPS trial and no release
-approval exist. Both PRs must remain Draft.
+**HOLD:** Official release preparation and **CI-only** filesystem
+transaction/rollback are verified. A real-host installer, Node runtime
+activation and signed IR/KH inventory, actual Backhaul-over-443 data-flow
+acceptance, VPS trial and release approval do **not** exist yet. Both PRs
+must remain Draft; no real server commands are authorized.
