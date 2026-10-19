@@ -139,6 +139,9 @@ jobs:
           python3 -B tests/test-smite-managed-engine-host-admission.py -v
           python3 -m py_compile modules/smite-managed-engine-host-plan.py tests/test-smite-managed-engine-host-plan.py
           python3 -B tests/test-smite-managed-engine-host-plan.py -v
+          # Lab-only: synthetic transactions; no host activation or Docker.
+          python3 -m py_compile tests/lab/smite_host_executor.py tests/test-smite-host-executor-lab.py
+          python3 -B tests/test-smite-host-executor-lab.py -v
           grep -Fq '"smite-managed-engine-host-plan.py"' install.sh
           grep -Fq '["smite-managed-engine-host-plan.py"]' u-opti
           grep -Fq '"smite-managed-engine-host-admission.py"' install.sh
