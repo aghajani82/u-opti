@@ -23,7 +23,7 @@ smite="$root/.managed-smite-source"
 [[ -d "$lab" && ! -L "$lab" && "$lab" == "${RUNNER_TEMP:?}"/backhaul-txn-* ]] || {
   echo "HOLD: not an expected temporary lab" >&2; exit 2;
 }
-[[ -f "$lab/EXPERIMENTAL-LAB" ]] || {
+sudo test -f "$lab/EXPERIMENTAL-LAB" || {
   echo "HOLD: trial marker missing" >&2; exit 2;
 }
 [[ "$(sudo cat "$lab/EXPERIMENTAL-LAB")" == U-OPTI-BACKHAUL-ISOLATED-LAB-V1 ]] || {
@@ -32,10 +32,14 @@ smite="$root/.managed-smite-source"
 # In all cases a real pinned Backhaul executable is mounted; declaring
 # an engine present based on a bundled executable alone MUST NOT be possible.
 binary="$lab/stages/$(sudo find "$lab/stages" -mindepth 1 -maxdepth 1 -type d -name 'backhaul-plan-*' -printf '%f\n' | head -n 1)/backhaul.bin"
-[[ -f "$binary" ]] || { echo "HOLD: candidate binary missing" >&2; exit 2; }
-if [[ "$expected" == ready || "$expected" == mismatched || "$expected" == malformed ]]; then
+sudo test -f "$binary" || { echo "HOLD: candidate binary missing" >&2; exit 2; }
+if [[ "$expected" == ready || "$expected" == malformed ]]; then
   binary="$lab/installed/backhaul"
-  [[ -f "$binary" ]] || { echo "HOLD: installed binary missing" >&2; exit 2; }
+  sudo test -f "$binary" || { echo "HOLD: installed binary missing" >&2; exit 2; }
+fi
+if [[ "$expected" == mismatched ]]; then
+  binary="$lab/mismatched-backhaul"
+  sudo test -f "$binary" || { echo "HOLD: explicit mismatched fixture missing" >&2; exit 2; }
 fi
 image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 # Execute the precise Python source module against the container's actual
