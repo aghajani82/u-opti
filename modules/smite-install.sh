@@ -582,12 +582,12 @@ if path.is_symlink() or not path.is_file():
 text = path.read_text()
 if text.count("  smite-node:\n") != 1 or text.count("    healthcheck:\n") != 1:
     raise SystemExit("HOLD: Unexpected Node Compose healthcheck layout")
-old = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://localhost:${NODE_API_PORT:-8888}/api/agent/status\')"]'
-new = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8888/\', timeout=5)"]'
-if text.count(old) != 1:
-    raise SystemExit("HOLD: Unknown Node healthcheck; cannot safely stage pending pairing")
-path.write_text(text.replace(old, new, 1))
-print("FOREIGN_RC_HEALTHCHECK=UNAUTHENTICATED_LOCAL_LIVENESS_ONLY")
+reviewed = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:${NODE_API_PORT:-8888}/healthz\')"]'
+if text.count(reviewed) != 1:
+    # Require the reviewed local-only health route in strict mode.
+    # Never replace unknown or old probes with superficial liveness.
+    raise SystemExit("HOLD: Reviewed local /healthz required for strict Node pairing")
+print("FOREIGN_RC_HEALTHCHECK=REVIEWED_LOCAL_HEALTHZ")
 print("FOREIGN_RC_AGENT_AUTH=STRICT_UNTIL_PAIRED")
 PY_RC_PAUSE
 }
