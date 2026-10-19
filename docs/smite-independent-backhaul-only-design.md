@@ -202,7 +202,8 @@ during installation.
   on the exact config mount, reviewed image reference, host-mode
   Compose without Docker port mappings, and minimum free disk.
 - The audit examines the **count only** of persisted tunnel specs in
-  the trusted durable Node data bind mount. If any existing saved
+  the trusted durable Smite Docker **named volume** (`smite-node-data`),
+  not a bind mount. If any existing saved
   tunnel is found, the plan is `HOLD_EXISTING_TUNNELS`; it must not
   interrupt working FRP/Backhaul/GOST configurations. Corrupt,
   symlinked or oversized state also holds. No tokens, tunnel specs,
@@ -281,6 +282,31 @@ during installation.
   provider snapshot restore and emergency console, active tunnel
   preservation, Nginx/TLS/443 routing, dynamic 3x-UI inbound and real
   Backhaul-Only cross-host data traffic. The menu Install stays HOLD.
+
+## IR/KH VPS Snapshot admission and redacted report pairing (latest)
+
+- A revised read-only `smite-managed-backhaul-host-gate.py` recognizes
+  the **real Smite Compose topology**: config as a bind mount but Node
+  persistent data as the `smite-node-data` Docker named volume. This
+  fixes an overly restrictive preflight which incorrectly expected
+  both to be bind mounts. Wrong volume names/drivers, substituted bind
+  mounts and missing volume declarations fail closed.
+- Use `--format json` or the Backhaul operator menu's new
+  **Show safe IR/KH report** option to produce bounded, redacted
+  role-labelled local status output. It never prints tokens, identity
+  data, tunnel specs, Docker environment values or mount paths; it
+  always returns an unapproved `HOLD`.
+- Offline `smite-managed-backhaul-pair-review.py` compares the IR
+  and KH JSON outputs, rejects incorrect roles, extra fields and
+  forged "snapshot verified" claims, and refuses a pair when a
+  stored tunnel must be protected. It is **not signed attestation**
+  or a substitute for approved host testing.
+- The operator-only runbook at
+  `docs/smite-backhaul-two-host-vps-trial-admission.md` lists the
+  remaining **manual** provider snapshot restore, out-of-band
+  console, real signed pairing and 443 route checks required before
+  any live-host activation. The runbook does not instruct deploying
+  new code to production, and neither PR is merged.
 
 ## Fail-closed installation transaction (to implement)
 
