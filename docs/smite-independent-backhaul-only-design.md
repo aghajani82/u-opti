@@ -249,6 +249,39 @@ during installation.
   active tunnel continuity, any real-host transaction and actual
   Backhaul transport. Successful CI must not unlock Host Install.
 
+## Latest milestone: genuine Docker Compose Node recreation in private CI
+
+- An **additional** PR-only integration test loads the *actual* current
+  Node Compose through `docker compose config --format json`, checking
+  its original service count, config bind, managed role, and the
+  Backhaul-only read-only mount from the verified filesystem transaction.
+- Because the production Smite Node Compose intentionally uses
+  `network_mode: host`, TUN and elevated capabilities, the test
+  **never runs that Compose directly**. A strict allowlist projects its
+  reviewed mounts into a distinct one-service Docker Compose trial with
+  `network_mode: none`, a read-only root filesystem, all capabilities
+  dropped, no published ports and an exact image digest.
+- GitHub Actions now invokes `docker compose up --force-recreate
+  --no-build --no-deps` against that *isolated* trial Compose.
+  Container inspection verifies the actual mounted config/data/Backhaul
+  paths. Signed Agent inventory, HMAC/replay protection and absence of
+  FRP enrollment are checked after **container recreation**, not merely
+  `docker restart`. Node identity and persistent replay state stay
+  attached to the same throwaway runner directories.
+- The lifecycle acceptance requires three distinct proof markers:
+  `PR_ONLY_ISOLATED_COMPOSE_PREPARED`,
+  `NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED`, and
+  `SIGNED_NODE_COMPOSE_{READY|ABSENT}_RECREATED`. A
+  `docker run`-only check cannot pass this gate.
+- A verified Backhaul enrollment is automatically rolled back even after
+  successful CI checks; a deliberately rejected post-recreate health
+  check must also cause rollback and signed recovery of the old status.
+  Both PRs remain Draft; no real host or public 443 datapath is touched.
+- **Still not approved**: a production/IR/KH Docker recreation, tested
+  provider snapshot restore and emergency console, active tunnel
+  preservation, Nginx/TLS/443 routing, dynamic 3x-UI inbound and real
+  Backhaul-Only cross-host data traffic. The menu Install stays HOLD.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
