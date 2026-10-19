@@ -68,6 +68,9 @@ jobs:
         run: |
           python3 -m py_compile modules/smite-managed-backhaul-transaction.py tests/test-smite-managed-backhaul-transaction.py
           python3 -B tests/test-smite-managed-backhaul-transaction.py -v
+          grep -Fq '"smite-managed-backhaul-transaction.py"' install.sh
+          grep -Fq '"smite-managed-backhaul-transaction.py"' u-opti
+          grep -Fq '["smite-managed-backhaul-transaction.py"]' u-opti
 
       - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
         shell: bash
