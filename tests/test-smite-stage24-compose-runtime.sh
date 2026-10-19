@@ -68,7 +68,8 @@ grep -Fxq "SMITE_AGENT_AUTH_MODE=strict" "$node_dir/.env"
 grep -Fxq "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED" "$lab/install.log"
 ! grep -Eq '/usr/local/bin/frp(c|s)' "$base"
 test ! -e "$node_dir/certs/ca.crt"
-grep -qF '127.0.0.1:8888/' "$base"
+grep -qF '/healthz' "$base"
+! grep -qF '/api/agent/status' "$base"
 test "$(stat -c %a "$node_dir/.env")" = 600
 baseline_sha="$(sha256sum "$base" | awk '{print $1}')"
 
@@ -113,7 +114,7 @@ def assert_composed(s):
     assert s["network_mode"]=="host", "Installer network setting unexpectedly changed"
     assert not s.get("ports"), "Unsafe published Node port"
     assert s["command"][s["command"].index("--host")+1]=="127.0.0.1"
-    assert s["healthcheck"]["test"][-1].find("127.0.0.1:8888/")>=0
+    assert "127.0.0.1:8888/healthz" in s["healthcheck"]["test"][-1]
 assert_composed(paused)
 assert_composed(signed)
 assert paused["environment"]["SMITE_NODE_PANEL_AUTH_MODE"]=="paused"
@@ -157,7 +158,7 @@ wait_node() {
       break
     fi
     if sudo docker exec stage24-kh python3 -c \
-      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/',timeout=2)" >/dev/null 2>&1; then
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz',timeout=2)" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
