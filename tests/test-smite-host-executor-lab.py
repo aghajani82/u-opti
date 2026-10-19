@@ -70,27 +70,25 @@ class HostTransactionLab(unittest.TestCase):
                            probe or self.probe, crash_at=crash_at)
 
     def check_prior(self):
-        self.assertFalse((self.node / "config/engine-state/engines.json").exists())
+        node = self.root / "node"
+        self.assertFalse((node / "config/engine-state/engines.json").exists())
         for engine in lab.BINARIES:
             for name in lab.BINARIES[engine]:
-                self.assertFalse((self.node / "managed-bin" / engine / name).exists())
-            self.assertFalse((self.node / ("docker-compose.managed-" + engine + ".yml")).exists())
-        self.assertEqual((self.node / "config/node-id").read_bytes(), b"node-identity-persistent")
-        self.assertEqual((self.node / "config/replay.db").read_bytes(), b"replay-db-immutable")
+                self.assertFalse((node / "managed-bin" / engine / name).exists())
+            self.assertFalse((node / ("docker-compose.managed-" + engine + ".yml")).exists())
+        self.assertEqual((node / "config/node-id").read_bytes(), b"node-identity-persistent")
+        self.assertEqual((node / "config/replay.db").read_bytes(), b"replay-db-immutable")
 
     def test_backhaul_and_frp_standalone_never_enable_real_host(self):
-        for engine in ("backhaul", "frp"):
-            with self.subTest(engine=engine):
-                with tempfile.TemporaryDirectory(prefix="uopti-engine-txn-lab-"):
-                    result = self.apply(engine)
-                    self.assertEqual(result["LAB_RESULT"], "COMMITTED_SIMULATION_ONLY")
-                    self.assertEqual(result["INSTALL_ALLOWED"], "NO")
-                    self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
-                    self.assertEqual(lab.recover(self.root, self.probe), "COMMITTED")
-                    self.assertEqual(self.calls[-1], ("new", engine))
-                    manifest = json.loads((self.node / "config/engine-state/engines.json").read_bytes())
-                    self.assertIn(engine, manifest["engines"])
-                break  # Separate test below exercises FRP-first.
+        engine = "backhaul"
+        result = self.apply(engine)
+        self.assertEqual(result["LAB_RESULT"], "COMMITTED_SIMULATION_ONLY")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertEqual(lab.recover(self.root, self.probe), "COMMITTED")
+        self.assertEqual(self.calls[-1], ("new", engine))
+        manifest = json.loads((self.node / "config/engine-state/engines.json").read_bytes())
+        self.assertIn(engine, manifest["engines"])
 
     def test_frp_first_independent_of_backhaul(self):
         self.apply("frp")
@@ -190,7 +188,8 @@ class HostTransactionLab(unittest.TestCase):
         manifest = self.node / "config/engine-state/engines.json"
         manifest.symlink_to(self.node / "config/node-id")
         with self.assertRaises(lab.Hold):
-            self.apply("backhaul")
+            lab.execute(self.root, "backhaul", binaries, overlay,
+                        {**preview, "INSTALL_ALLOWED": "NO"}, self.probe)
         self.assertEqual((self.node / "config/node-id").read_bytes(), b"node-identity-persistent")
 
     def test_no_host_executor_cli_or_network_capabilities(self):
