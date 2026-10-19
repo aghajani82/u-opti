@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import stat
 import tempfile
@@ -135,6 +137,34 @@ class HostTransactionLab(unittest.TestCase):
                             self.assertIn(("prior", engine), self.calls)
                         finally:
                             self.root = original_root
+
+    def test_process_death_after_restart_recovers_from_disk_journal(self):
+        # The entire process exits abruptly instead of raising an exception.
+        # Recovery is done by a DIFFERENT process using fsynced disk state.
+        binaries, overlay, preview = self.candidate("frp")
+        payload = {"engine": "frp", "binaries":
+                   {name: data.hex() for name, data in binaries.items()},
+                   "overlay": overlay.hex(), "preview": preview}
+        child = """
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("host_lab_child", sys.argv[1])
+lab = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(lab)
+data = json.loads(os.environ["UOPTI_LAB_PAYLOAD"])
+def power_cut(kind, engine):
+    os._exit(73)
+lab.execute(sys.argv[2], data["engine"],
+            {name: bytes.fromhex(value) for name, value in data["binaries"].items()},
+            bytes.fromhex(data["overlay"]), data["preview"], power_cut)
+"""
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", child, str(MODULE), str(self.root)],
+            env={**os.environ, "UOPTI_LAB_PAYLOAD": json.dumps(payload)},
+            capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 73)
+        self.assertTrue((self.root / ".engine-journal.json").exists())
+        self.assertEqual(lab.recover(self.root, self.probe), "ROLLED_BACK")
+        self.check_prior()
 
     def test_external_manifest_edit_blocks_recovery_without_overwrite(self):
         with self.assertRaises(lab.SimulatedCrash):
