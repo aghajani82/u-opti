@@ -136,6 +136,26 @@ class OperatorControl(unittest.TestCase):
         self.assertIn("NOT_INSTALLED", result.stdout)
         self.assertFalse((self.node / "config/engine-state").exists())
 
+    def test_menu_full_beginner_walkthrough_is_read_only(self):
+        result = subprocess.run(
+            ["bash", str(MENU), "--menu"],
+            input="1\\n2\\n3\\n0\\n", capture_output=True, text=True, timeout=15,
+            env={**os.environ, "SMITE_NODE_DIR": str(self.node), "TERM": "dumb"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("STATE=NOT_INSTALLED", result.stdout)
+        self.assertIn("INSTALL_ALLOWED=NO", result.stdout)
+        self.assertIn("installation on real IR/KH is disabled", result.stdout)
+        self.assertFalse((self.node / "config/engine-state").exists())
+
+    def test_concurrent_engine_operations_are_rejected_before_mutation(self):
+        # Simulate a trusted runner admission while testing only the lock.
+        with patch.object(control.transaction, "admission", return_value=None):
+            with control._lab_lock(self.root):
+                with self.assertRaisesRegex(control.Hold, "already.*progress"):
+                    with control._lab_lock(self.root):
+                        self.fail("A second concurrent transaction acquired the lock")
+
     def test_no_network_or_live_service_actions_in_menu_or_controller(self):
         script = MENU.read_text()
         controller = FILE.read_text()
