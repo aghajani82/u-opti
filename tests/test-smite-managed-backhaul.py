@@ -76,7 +76,7 @@ class BackhaulPrepare(unittest.TestCase):
             for name in (".env", "docker-compose.yml")
         }
         stage = self.prepare()
-        self.assertTrue(engine.verify(stage))
+        self.assertTrue(engine.verify(stage, official_only=False))
         self.assertEqual(stat.S_IMODE(stage.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE((stage / "backhaul.bin").stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE((stage / "engines.candidate.json").stat().st_mode), 0o600)
@@ -98,7 +98,7 @@ class BackhaulPrepare(unittest.TestCase):
         self.assertFalse((self.node / "config" / "engine-state").exists())
         self.assertFalse((self.node / "config" / "engine-state" / "engines.json").exists())
         (stage / "backhaul.bin").write_bytes(b"tampered")
-        self.assertFalse(engine.verify(stage))
+        self.assertFalse(engine.verify(stage, official_only=False))
 
     def test_preserves_other_independently_registered_engines(self):
         state = self.node / "config" / "engine-state"
