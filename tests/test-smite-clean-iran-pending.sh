@@ -31,7 +31,7 @@ services:
     volumes:
       - ./certs:/etc/smite-node/certs:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${NODE_API_PORT:-8888}/api/agent/status')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${NODE_API_PORT:-8888}/healthz')"]
 EOF_NODE
 smite_download_upstream() {
     case "$1" in
@@ -64,7 +64,7 @@ grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$SMITE_NODE_DIR/.env"
 grep -qx 'PANEL_ADDRESS=127.0.0.1:8000' "$SMITE_NODE_DIR/.env"
 grep -qx 'NODE_RC_REGISTRATION=PAUSED_UNTIL_SIGNED_PAIRING' "$TMP/node.log"
 grep -qx 'NODE_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION' "$TMP/node.log"
-grep -qF 'http://127.0.0.1:8888/' "$SMITE_NODE_COMPOSE"
+grep -qF '/healthz' "$SMITE_NODE_COMPOSE"
 ! grep -qF '/api/agent/status' "$SMITE_NODE_COMPOSE"
 
 # Full Panel installer must NOT wait for an unsigned local IR Node to
@@ -94,6 +94,8 @@ smite_install_panel_files ir.example.com 127.0.0.1 > "$TMP/stable-panel.log"
 ! grep -q '^SMITE_NODE_REGISTRATION_MODE=' "$SMITE_PANEL_DIR/.env"
 ! grep -q '^SMITE_PANEL_AGENT_AUTH_MODE=' "$SMITE_PANEL_DIR/.env"
 ! grep -q '^SMITE_ENGINE_MANAGEMENT_MODE=' "$SMITE_PANEL_DIR/.env"
+# Stable is intentionally left on the original legacy source health route.
+sed -i 's|127.0.0.1:${NODE_API_PORT:-8888}/healthz|localhost:${NODE_API_PORT:-8888}/api/agent/status|' "$TMP/node-upstream.yml"
 smite_install_node_files node-ir iran 127.0.0.1:8000 "$TMP/ca.pem" "" "" standard > "$TMP/stable-node.log"
 ! grep -q '^SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 ! grep -q '^SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"
