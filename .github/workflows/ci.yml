@@ -142,6 +142,8 @@ jobs:
           # Lab-only: synthetic transactions; no host activation or Docker.
           python3 -m py_compile tests/lab/smite_host_executor.py tests/test-smite-host-executor-lab.py
           python3 -B tests/test-smite-host-executor-lab.py -v
+          python3 -m py_compile tests/lab/smite_fd_guard.py tests/test-smite-fd-guard.py
+          python3 -B tests/test-smite-fd-guard.py -v
           grep -Fq '"smite-managed-engine-host-plan.py"' install.sh
           grep -Fq '["smite-managed-engine-host-plan.py"]' u-opti
           grep -Fq '"smite-managed-engine-host-admission.py"' install.sh
