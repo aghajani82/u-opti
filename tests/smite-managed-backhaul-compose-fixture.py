@@ -186,10 +186,20 @@ def main() -> int:
             os.fsync(file.fileno())
         print("PR_ONLY_ISOLATED_COMPOSE_PREPARED=YES")
         return 0
-    except (Hold, ValueError, OSError, TypeError) as exc:
+    except Hold as exc:
+        # Only static codes; never echo untrusted paths or Docker metadata.
         message = str(exc)
         safe = message if re.fullmatch("[A-Z0-9_]+", message) else "INVALID_INPUT"
         print("HOLD: " + safe, file=sys.stderr)
+        return 2
+    except FileExistsError:
+        print("HOLD: ISOLATED_COMPOSE_OUTPUT_ALREADY_EXISTS", file=sys.stderr)
+        return 2
+    except PermissionError:
+        print("HOLD: PRIVATE_RUNNER_OUTPUT_PERMISSION_DENIED", file=sys.stderr)
+        return 2
+    except (OSError, ValueError, TypeError):
+        print("HOLD: ISOLATED_COMPOSE_MALFORMED_INPUT_OR_IO", file=sys.stderr)
         return 2
 
 
