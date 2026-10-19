@@ -71,6 +71,17 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage25 two-direction HMAC admission guard:** Both isolated
+  U-OPTI test jobs use the SAME reviewed Smite source SHA
+  `0ba7fe4f174817a3822cf7efa09c495903fbee9c`. The real Panel signed NodeClient now refuses
+  to send any command until the Node is `active` with
+  `provisioning=signed_checkin`, established by real HMAC registration.
+  The independently admin-approved UUID, role and name must match
+  the registered Node and metadata; stale legacy `active`, paired-only
+  `pending`, name drift and missing trusted origins fail closed.
+  The existing full TLS/443 inbound test still runs, and its runner now
+  executes exact Smite outbound NodeClient regression tests as well.
+  No real Panel-to-KH TLS/443 gateway connectivity is asserted.
 - **Stage24 Docker Compose cross-project gate:** In PR-only CI,
   run the actual U-OPTI `smite_install_node_files` transforms against
   the pinned-reviewed Smite Node source's upstream Compose (FRP binary
