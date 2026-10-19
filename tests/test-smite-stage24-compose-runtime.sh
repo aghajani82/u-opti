@@ -239,7 +239,10 @@ body=json.dumps({"tunnel_id":"not-installed","core":"backhaul","type":"tcp","spe
                 sort_keys=True,separators=(",",":")).encode("ascii")
 sig=sign_request(secret=secret,node_id=node,method="POST",
                  target="/api/agent/tunnels/apply",body=body,nonce="f"*32)
-req=urllib.request.Request(apply_url,data=body,headers=sig,method="POST")
+req=urllib.request.Request(
+    apply_url, data=body,
+    headers={**sig, "Content-Type": "application/json"}, method="POST"
+)
 try:
     urllib.request.urlopen(req,timeout=4)
 except urllib.error.HTTPError as e:
