@@ -253,8 +253,9 @@ docker_smite_management_menu() {
         echo "2) Tunnel Management (FRP / Backhaul / Rathole)"
         echo "3) Status & Diagnostics"
         echo "4) Advanced & Legacy Tools"
+        echo "5) Independent Engines (Backhaul review)"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) if declare -F smite_tw_menu >/dev/null 2>&1; then
@@ -270,6 +271,15 @@ docker_smite_management_menu() {
                    echo "Status module missing; update U-OPTI from main first."
                fi ;;
             4) docker_smite_advanced_menu ;;
+            5)
+                if [ -s "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh" ]; then
+                    # Separate from FRP-dependent legacy Backhaul sidecar.
+                    source "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh"
+                    smite_managed_bh_menu
+                else
+                    echo "HOLD: Independent Backhaul module is missing."
+                fi
+                ;;
             0) return ;;
             *) echo "Invalid selection." ;;
         esac
