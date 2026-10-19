@@ -56,6 +56,8 @@ class HostTransactionLab(unittest.TestCase):
             new[engine]["server_sha256"] = lab.sha(binaries["frps"])
         preview = {
             "STAGE_ADMISSION": "VERIFIED_PREVIEW_ONLY",
+            "OTHER_ENGINE": ("SIGNED_READY_ATTESTED_SIMULATED" if
+                             any(k != engine for k in prior["engines"]) else "NOT_INSTALLED"),
             "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
             "BINARIES_SHA256": [lab.sha(binaries[k]) for k in lab.BINARIES[engine]],
             "SOURCE_COMPOSE_SHA256": lab.sha((self.node / "docker-compose.yml").read_bytes()),
@@ -108,6 +110,7 @@ class HostTransactionLab(unittest.TestCase):
         for filename, original in saved.items():
             self.assertEqual((self.node / filename).read_bytes(), original)
         self.assertTrue(list(self.root.glob("audit-*.json")))
+        self.assertIn(("other", "backhaul"), self.calls)
 
     def test_crash_every_checkpoint_recovers_exact_preimages(self):
         for engine in ("frp", "backhaul"):
@@ -167,6 +170,32 @@ class HostTransactionLab(unittest.TestCase):
             lab.recover(self.root, lambda *_: {"signed": False, "replay": True})
         self.assertEqual(lab.recover(self.root, self.probe), "ROLLED_BACK")
         self.check_prior()
+
+    def test_other_engine_incomplete_or_unsigned_blocks_second_install(self):
+        self.apply("backhaul")
+        binaries, overlay, preview = self.candidate("frp")
+        preview["OTHER_ENGINE"] = "NOT_INSTALLED"
+        with self.assertRaisesRegex(lab.Hold, "OTHER_ENGINE_SIGNED_PROOF_REQUIRED"):
+            lab.execute(self.root, "frp", binaries, overlay, preview, self.probe)
+        preview["OTHER_ENGINE"] = "SIGNED_READY_ATTESTED_SIMULATED"
+
+        def deny_existing(kind, engine):
+            return {"signed": kind != "other", "replay": True}
+        with self.assertRaisesRegex(lab.Hold, "SIGNED_RUNTIME_SIMULATION_FAILED"):
+            lab.execute(self.root, "frp", binaries, overlay, preview, deny_existing)
+        self.assertFalse((self.node / "managed-bin/frp").exists())
+        self.assertEqual(set(json.loads(
+            (self.node / "config/engine-state/engines.json").read_bytes())["engines"]),
+            {"backhaul"})
+
+    def test_changed_modes_also_block_rollback(self):
+        with self.assertRaises(lab.SimulatedCrash):
+            self.apply("frp", crash_at="after_frpc")
+        binary = self.node / "managed-bin/frp/frpc"
+        binary.chmod(0o777)
+        with self.assertRaisesRegex(lab.Hold, "EXTERNAL_MUTATION_CONFLICT"):
+            lab.recover(self.root, self.probe)
+        self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o777)
 
     def test_shared_lock_rejects_second_transaction(self):
         lock = os.open(self.root / ".shared-engine.lock", os.O_CREAT | os.O_RDWR, 0o600)
