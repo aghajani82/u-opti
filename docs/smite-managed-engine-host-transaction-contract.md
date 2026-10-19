@@ -39,34 +39,34 @@ not a signature, ticket, install secret or approval. Even a passing
 staged FRP plan reports `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD`.
 Commands `install` and `rollback` exit 2 without changing a machine.
 
-## Discovered Backhaul provenance blocker
+## Backhaul provenance hardening completed in this draft
 
-Existing Backhaul v0.7.2 candidates carried a checksum *claim* in the
-summary and a private `SHA256SUMS`, but did NOT retain and re-extract the
-official upstream release archive in the staged candidate. Local hashes
-alone could be replaced together and do not independently prove the
-candidate `backhaul.bin` came from the intended pinned archive.
+The earlier v0.7.2 Backhaul stage stored only a hash claim and editable
+SHA256SUMS, so a modified ELF and recomputed hashes could spoof it. This
+was **not acceptable** for real-host activation.
 
-The new host plan therefore reports
-`REASON=BACKHAUL_ARCHIVE_BINDING_REQUIRED` and
-`ARTIFACT_PROVENANCE=NOT_ARCHIVE_BOUND` even when an otherwise valid
-legacy candidate is reviewed. It deliberately does not bless that as a
-production artifact.
+The experimental Backhaul package now retains the official tarball
+(`backhaul.official.tar.gz`) in private staging. Verification checks
+both the release-pinned archive SHA-256 and exact executable bytes
+re-extracted from that archive. Rewriting local staging checksums,
+manifest or summary without changing the pinned archive cannot authorize
+a forged executable. An old archive-less stage fails closed.
 
-**Required next fix:** modify Backhaul candidate preparation and
-verification to retain the official archive, require its official pinned
-SHA-256, re-extract and byte-compare the staged binary, reject modified
-archives/unknown members, and expand official-artifact CI. Retain FRP's
-already archive-bound two-binary behavior and do not touch live Backhaul
-or FRP. Both host Install buttons remain blocked.
+The host plan now recognizes **both** archive-bound Backhaul and FRP
+candidate types, but *never* authorizes real installation: snapshot,
+console, signed Node health, host crash-recovery executor and approved
+two-host 443 acceptance are still unresolved. Reproducible synthetic
+archives in unit tests are fixture-only, not deployment authority.
 
 ## CI coverage and one-rebuild policy
 
-`tests/test-smite-managed-engine-host-plan.py` checks the FRP official
-archive path using a synthetic test-only pinned archive, deterministic
-plan hash, unchanged host files, cross-engine manifest drift, Compose
+`tests/test-smite-managed-engine-host-plan.py` covers **both** archive-bound
+engines with synthetic test-only pinned archives, deterministic plan
+hash, unchanged host files, cross-engine manifest drift, Compose
 drift, unsafe stages, saved tunnels, incomplete Core, missing snapshot
-approval and disabled install actions. Existing CI still covers Docker
+approval and disabled install actions. Additional Backhaul tests
+rewrite **all** local staging hashes and confirm archive re-extraction
+still rejects forged bytes. Existing CI still covers Docker
 Compose force-recreate and signed inventory/rollback on isolated hosts.
 
 No `main` changes or test-VPS writes. Do **not** Rebuild the current
