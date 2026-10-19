@@ -204,6 +204,7 @@ from app.agent_auth import read_identity
 from app.node_auth import sign_request
 assert os.getenv("SMITE_NODE_PANEL_AUTH_MODE")=="signed"
 assert os.getenv("SMITE_AGENT_AUTH_MODE")=="strict"
+assert os.getenv("SMITE_ENGINE_INVENTORY_MODE")=="managed"
 p=Path("/run/smite-node-identity/node-identity.json")
 node,secret=read_identity(p)
 assert node=="stage24-kh-reserved-0001"
@@ -222,7 +223,31 @@ with urllib.request.urlopen(request,timeout=4) as response:
 try: urllib.request.urlopen(request,timeout=4)
 except urllib.error.HTTPError as e: assert e.code==401
 else: raise AssertionError("Nonce replay was accepted")
+# Real Node Agent, same bundled FRP/Backhaul binaries: NO engine may be
+# considered installed without an explicit root-owned manifest.
+inventory_url="http://127.0.0.1:8888/api/agent/engines"
+sig=sign_request(secret=secret,node_id=node,method="GET",
+                 target="/api/agent/engines",body=b"",nonce="e"*32)
+with urllib.request.urlopen(urllib.request.Request(inventory_url,headers=sig),timeout=4) as response:
+    actual=json.load(response)
+assert actual["mode"]=="managed"
+assert set(actual["engines"])=={"backhaul","frp","gost","rathole","chisel"}
+assert set(actual["engines"].values())=={"not-installed"}
+# Even an AUTHENTICATED tunnel Apply cannot start a bundled engine.
+apply_url="http://127.0.0.1:8888/api/agent/tunnels/apply"
+body=json.dumps({"tunnel_id":"not-installed","core":"backhaul","type":"tcp","spec":{}},
+                sort_keys=True,separators=(",",":")).encode("ascii")
+sig=sign_request(secret=secret,node_id=node,method="POST",
+                 target="/api/agent/tunnels/apply",body=body,nonce="f"*32)
+req=urllib.request.Request(apply_url,data=body,headers=sig,method="POST")
+try:
+    urllib.request.urlopen(req,timeout=4)
+except urllib.error.HTTPError as e:
+    assert e.code==409, e.code
+else:
+    raise AssertionError("Bundled but not enrolled Backhaul was activated")
 PY
+echo "STAGE29_REAL_KH_NO_ENGINE_BUNDLED_APPLY=DENIED"
 sudo test -s "$replay_dir/agent-replay.sqlite3"
 test "$(sudo stat -c %a "$replay_dir/agent-replay.sqlite3")" = 600
 test "$(sudo sha256sum "$identity_dir/node-identity.json" | awk '{print $1}')" = "$identity_sha"
