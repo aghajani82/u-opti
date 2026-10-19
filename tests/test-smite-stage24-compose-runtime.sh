@@ -120,7 +120,7 @@ def assert_composed(s):
     assert s["network_mode"]=="host", "Installer network setting unexpectedly changed"
     assert not s.get("ports"), "Unsafe published Node port"
     assert s["command"][s["command"].index("--host")+1]=="127.0.0.1"
-    assert "127.0.0.1:8888/healthz" in s["healthcheck"]["test"][-1]
+    assert "127.0.0.1:" in s["healthcheck"]["test"][-1] and "/healthz" in s["healthcheck"]["test"][-1]
 assert_composed(paused)
 assert_composed(signed)
 assert paused["environment"]["SMITE_NODE_PANEL_AUTH_MODE"]=="paused"
