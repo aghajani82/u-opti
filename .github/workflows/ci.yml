@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   managed-frp-official-artifact:
+    # Trusted official downloads only on disposable PR CI, never push/main.
+    if: github.event_name == 'pull_request'
     name: managed-frp-official-${{ matrix.arch }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
