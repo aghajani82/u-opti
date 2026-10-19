@@ -152,7 +152,7 @@ class OperatorControl(unittest.TestCase):
         # Simulate a trusted runner admission while testing only the lock.
         with patch.object(control.transaction, "admission", return_value=None):
             with control._lab_lock(self.root):
-                with self.assertRaisesRegex(control.Hold, "already.*progress"):
+                with self.assertRaisesRegex(control.Hold, "transaction is in progress"):
                     with control._lab_lock(self.root):
                         self.fail("A second concurrent transaction acquired the lock")
 
