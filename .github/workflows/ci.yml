@@ -57,7 +57,7 @@ jobs:
           python3 -m py_compile tests/lab/smite_signed_runtime_probe.py tests/test-smite-signed-runtime-probe.py
           python3 -B tests/test-smite-signed-runtime-probe.py -v
   signed-fastapi-durable-replay-isolated:
-    # Actual pinned Smite FastAPI route/SQLite store via TestClient, no socket.
+    # New Smite strict replay lifecycle pinned by immutable SHA, ASGI only.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: a15c46288aae9849babc9c9358c68e46686bce9c
+          ref: 3751aeda6f946e5e5624e5e89ab1ce554fec4460
           path: .managed-smite-source
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .managed-smite-source rev-parse HEAD)" = "a15c46288aae9849babc9c9358c68e46686bce9c"
+          test "$(git -C .managed-smite-source rev-parse HEAD)" = "3751aeda6f946e5e5624e5e89ab1ce554fec4460"
           python3 -m pip install -r .managed-smite-source/node/requirements.txt
           python3 -m py_compile tests/test-smite-fastapi-durable-bridge.py
           python3 -B tests/test-smite-fastapi-durable-bridge.py -v
