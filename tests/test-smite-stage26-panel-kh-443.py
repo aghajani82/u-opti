@@ -50,6 +50,37 @@ def ensure(condition, title):
         raise AssertionError(title)
 
 
+@contextlib.contextmanager
+def isolated_trusted_ca(cafile: Path):
+    """Temporary CA for REAL TLS validation; production must use system CA.
+
+    The Panel implementation must still request verify=True and
+    trust_env=False. Never use verify=False or disable hostname checks.
+    httpx 0.25 caches certifi CA references at import, so patching only
+    certifi.where() does not inject the temporary CI issuer.
+    """
+    import httpx
+    from unittest.mock import patch
+
+    real_client = httpx.AsyncClient
+
+    class VerifiedCIClient(real_client):
+        def __init__(self, *args, **kwargs):
+            ensure(kwargs.get("verify") is True,
+                   "Panel disabled TLS verification")
+            ensure(kwargs.get("trust_env") is False,
+                   "Panel enabled untrusted proxy environment")
+            verified_context = ssl.create_default_context(cafile=str(cafile))
+            ensure(verified_context.verify_mode == ssl.CERT_REQUIRED
+                   and verified_context.check_hostname,
+                   "CI certificate verification/hostname check disabled")
+            kwargs["verify"] = verified_context
+            super().__init__(*args, **kwargs)
+
+    with patch("httpx.AsyncClient", VerifiedCIClient):
+        yield
+
+
 def wait_for(check, title):
     for _ in range(70):
         try:
@@ -131,7 +162,6 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
     from app.node_client import NodeClient
     from app.agent_request_signer import prepare_agent_request
     from app.signed_agent_transport import signed_agent_call, SignedAgentUnavailable
-    import certifi
     import httpx
 
     database = root / "panel.sqlite3"
@@ -177,7 +207,7 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
     # A key alone MUST NOT authorize control. With Nginx already running,
     # no attempt to contact an unapproved legacy target is allowed.
     client = NodeClient()
-    with patch.object(certifi, "where", return_value=str(ca)):
+    with isolated_trusted_ca(ca):
         pending = await client.get_tunnel_status(NODE_ID)
         ensure(pending["status"] == "error", "Pending KH got signed control")
 
@@ -274,7 +304,7 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
     cmd("openssl", "req", "-x509", "-newkey", "rsa:2048",
         "-nodes", "-days", "1", "-keyout", str(key), "-out", str(other),
         "-subj", "/CN=untrusted.stage26.test")
-    with patch.object(certifi, "where", return_value=str(other)):
+    with isolated_trusted_ca(other):
         result = await client.get_tunnel_status(NODE_ID)
         ensure(result.get("status") == "error", "Unknown CA was trusted")
     print("STAGE26_TLS_UNKNOWN_CA_FAILS_CLOSED=PASS")
@@ -382,11 +412,10 @@ def main():
 
             # Check actual Panel transport does not tolerate a path rewrite,
             # redirect or silently use the legacy node_address HTTP path.
-            import certifi
             from app.node_client import NodeClient
             client = NodeClient()
             async def test_bad_response():
-                with patch.object(certifi, "where", return_value=str(cert)):
+                with isolated_trusted_ca(cert):
                     result = await client.get_tunnel_status(NODE_ID)
                     ensure(result.get("status") == "error",
                            "Unexpected success through modified gateway")
@@ -396,7 +425,7 @@ def main():
             asyncio.run(test_bad_response())
             reload("pass")
             async def check_recovered():
-                with patch.object(certifi, "where", return_value=str(cert)):
+                with isolated_trusted_ca(cert):
                     return await client.get_tunnel_status(NODE_ID)
             assert asyncio.run(check_recovered())["status"] == "ok"
             print("STAGE26_REWRITTEN_PATH_REDIRECT_DENIED_AND_ROLLBACK=PASS")
