@@ -56,7 +56,8 @@ def paths(root: Path) -> tuple[Path, Path, dict[str, Path], Path]:
 @contextmanager
 def lock(root: Path):
     paths(root)
-    file = root / ".frp-engine.lock"
+    # Serialize with Backhaul as both engines share Compose + inventory.
+    file = root / ".smite-engine-transaction.lock"
     fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         st = os.fstat(fd)
