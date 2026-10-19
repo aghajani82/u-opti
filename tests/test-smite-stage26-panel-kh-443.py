@@ -212,6 +212,22 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
                 info = socket.getaddrinfo(HOST, 443, type=socket.SOCK_STREAM)
                 print("STAGE26_DNS_LOOPBACK=" + str(all(
                     entry[4][0] == "127.0.0.1" for entry in info)))
+                current = exc
+                for depth in range(6):
+                    current = current.__cause__ or current.__context__
+                    if current is None:
+                        break
+                    print(f"STAGE26_CHAIN_{depth}=" + type(current).__name__)
+                # Real TLS handshake with explicitly trusted test CA,
+                # not disabled verification. Only print exception types.
+                context = ssl.create_default_context(cafile=str(ca))
+                try:
+                    with socket.create_connection(("127.0.0.1", 443), timeout=4) as tcp:
+                        with context.wrap_socket(tcp, server_hostname=HOST) as channel:
+                            print("STAGE26_DIRECT_SSL=VERIFIED")
+                except Exception as error:
+                    print("STAGE26_DIRECT_SSL_ERROR=" + type(error).__name__)
+
         ensure(ready.get("status") == "ok" and ready.get("active_tunnels") == 0,
                "Signed Panel->KH status via verified TLS failed")
 
