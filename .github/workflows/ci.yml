@@ -546,3 +546,24 @@ jobs:
           python3 -B tests/test-smite-backhaul-sidecar-docker-lab-unit.py
           bash -n tests/test-smite-backhaul-sidecar-docker-executor.sh
           bash tests/test-smite-backhaul-sidecar-docker-executor.sh
+
+  managed-backhaul-official-artifact:
+    # Real pinned official archive and real Compose merge, but no live install.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout U-OPTI proposed branch
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite Node Compose
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: e16e263035e8fd34a74ac6c92225232b2d6aac1c
+          path: .managed-smite-source
+          persist-credentials: false
+      - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-backhaul-official.sh
+          bash tests/test-smite-managed-backhaul-official.sh
