@@ -150,7 +150,7 @@ def compose_candidate(*, identity: Path = IDENTITY, replay_dir: Path = REPLAY_DI
         + "      - SMITE_AGENT_IDENTITY_PATH=/run/smite-node-identity/node-identity.json\n"
         + "      - SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3\n"
         + "    healthcheck:\n"
-        + '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8888/\', timeout=5)"]\n'
+        + '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:8888/healthz\', timeout=5)"]\n'
         + "      interval: 30s\n"
         + "      timeout: 10s\n"
         + "      retries: 3\n"
