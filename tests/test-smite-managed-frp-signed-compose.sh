@@ -72,6 +72,10 @@ print("OFFICIAL_FRP_SOURCE_COMPOSE_DUAL_RO_MOUNTS=PASS")
 baseline="$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')"
 export SMITE_CI_ENGINE=frp SMITE_CI_COMPOSE_RECREATE=1
 bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
+sudo test ! -e "$lab/smite-node-isolated-absent.json" || {
+  echo "HOLD: FIRST_SIGNED_FRP_COMPOSE_CLEANUP_INCOMPLETE" >&2
+  exit 2
+}
 echo "SIGNED_FRP_NODE_ABSENT_BEFORE_INSTALL=PASS"
 
 txn() {
@@ -86,10 +90,16 @@ txn activate --stage "$stage" >/dev/null
 bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" ready
 echo "SIGNED_FRP_DUAL_BINARY_READY_AFTER_COMPOSE_RECREATE=PASS"
 txn rollback >/dev/null
+echo "OFFICIAL_FRP_FILESYSTEM_ROLLBACK=PASS"
 test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$baseline"
 sudo test ! -e "$lab/node/config/engine-state/engines.json"
 sudo test ! -e "$lab/installed/frp/frpc"
 sudo test ! -e "$lab/installed/frp/frps"
+sudo test ! -e "$lab/smite-node-isolated-absent.json" || {
+  echo "HOLD: STALE_ABSENT_COMPOSE_FROM_PREVIOUS_PROBE" >&2
+  exit 2
+}
+echo "OFFICIAL_FRP_ROLLBACK_BYTES_RESTORED=PASS"
 bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 echo "SIGNED_FRP_ABSENT_AFTER_EXACT_ROLLBACK=PASS"
 
