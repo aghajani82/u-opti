@@ -63,10 +63,28 @@ fi
 
 image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 name="uopti-managed-api-${GITHUB_RUN_ID:?}-${phase}"
+compose_mode="${SMITE_CI_COMPOSE_RECREATE:-0}"
+compose_file="$lab/smite-node-isolated-$phase.json"
+project="uopti-bh-${GITHUB_RUN_ID:?}-$phase"
+case "$compose_mode" in 0|1) ;; *) echo "HOLD: unknown trial mode" >&2; exit 2 ;; esac
 cleanup() {
-  sudo docker rm -f "$name" >/dev/null 2>&1 || true
+  if [[ "$compose_mode" == 1 && -f "$compose_file" ]]; then
+    sudo docker compose -p "$project" -f "$compose_file" down --remove-orphans >/dev/null 2>&1 || :
+    sudo rm -f -- "$compose_file" || :
+  else
+    sudo docker rm -f "$name" >/dev/null 2>&1 || :
+  fi
 }
 trap cleanup EXIT
+if [[ "$compose_mode" == 1 ]]; then
+  sudo docker compose -f "$lab/node/docker-compose.yml" config --format json |
+    sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+      GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
+      python3 "$root/tests/smite-managed-backhaul-compose-fixture.py" \
+      "$lab" "$phase" "${GITHUB_RUN_ID:?}" "$smite" "$compose_file"
+  sudo docker compose -p "$project" -f "$compose_file" config --quiet
+  sudo docker compose -p "$project" -f "$compose_file" up -d --no-build --force-recreate --no-deps smite-node >/dev/null
+else
 sudo docker run -d --name "$name" \
   --platform linux/amd64 \
   --network none --read-only --cap-drop ALL --pids-limit 96 --memory 384m \
@@ -87,6 +105,7 @@ sudo docker run -d --name "$name" \
   --mount "type=bind,src=$binary,dst=/usr/local/bin/backhaul,readonly" \
   --entrypoint python "$image" -m uvicorn main:app \
   --host 127.0.0.1 --port 8888 --no-access-log >/dev/null
+fi
 
 # Prove no host port was published, and Docker's network namespace is isolated.
 sudo docker inspect --format '{{json .HostConfig}}' "$name" | python3 -c '
@@ -98,6 +117,24 @@ assert host.get("ReadonlyRootfs") is True, "Container root is writable"
 assert host.get("CapDrop") == ["ALL"], "Unexpected Linux capabilities"
 print("SIGNED_NODE_NETWORK_NONE_NO_HOST_PORTS=PASS")
 '
+sudo docker inspect --format '{{json .Mounts}}' "$name" | python3 -c '
+import json,sys,os
+mounts=json.load(sys.stdin)
+root,phase,smite=sys.argv[1:]
+wanted={"/etc/smite-node":root+"/node/config","/var/lib/smite-node":root+"/node-data",
+        "/app/main.py":smite+"/node/main.py","/app/app":smite+"/node/app"}
+if os.environ.get("SMITE_CI_COMPOSE_RECREATE")=="1":
+    expected=set(wanted)
+    if phase=="ready": expected.add("/usr/local/bin/backhaul")
+    relevant=[m for m in mounts if m["Destination"] in expected]
+    assert {m["Destination"] for m in relevant}==expected, relevant
+    for m in relevant:
+        if m["Destination"]=="/usr/local/bin/backhaul":
+            assert m["Source"]==root+"/installed/backhaul" and m["RW"] is False
+        else: assert m["Source"]==wanted[m["Destination"]]
+    assert not any(m["Destination"] in ("/usr/local/bin/frpc","/usr/local/bin/frps") for m in mounts)
+print("NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS")
+' "$lab" "$phase" "$smite"
 for attempt in $(seq 1 16); do
   if sudo docker exec "$name" python -c     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/', timeout=2)" \
     >/dev/null 2>&1; then
@@ -196,7 +233,11 @@ print("SIGNED_API_BACKHAUL_" + phase.upper() + "_" + mode.upper() + "=PASS")
 PY_PROBE
 }
 probe initial
-sudo docker restart "$name" >/dev/null
+if [[ "$compose_mode" == 1 ]]; then
+  sudo docker compose -p "$project" -f "$compose_file" up -d --no-build --force-recreate --no-deps smite-node >/dev/null
+else
+  sudo docker restart "$name" >/dev/null
+fi
 for attempt in $(seq 1 16); do
   if sudo docker exec "$name" python -c \
     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/', timeout=2)" \
@@ -212,3 +253,6 @@ for attempt in $(seq 1 16); do
 done
 probe after-restart
 echo "SIGNED_NODE_API_${phase^^}_RESTART=PASS"
+if [[ "$compose_mode" == 1 ]]; then
+  echo "SIGNED_NODE_COMPOSE_${phase^^}_RECREATED=PASS"
+fi
