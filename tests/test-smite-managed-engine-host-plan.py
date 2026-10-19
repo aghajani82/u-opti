@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -22,6 +23,11 @@ SCRIPT = ROOT / "modules/smite-managed-engine-host-plan.py"
 spec = importlib.util.spec_from_file_location("uopti_host_transaction_plan_ci", SCRIPT)
 plan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plan)
+
+lab_spec = importlib.util.spec_from_file_location(
+    "uopti_host_plan_bound_recovery_lab", ROOT / "tests/lab/smite_host_executor.py")
+lab = importlib.util.module_from_spec(lab_spec)
+lab_spec.loader.exec_module(lab)
 
 ENV = ("NODE_ROLE=foreign\nSMITE_ENGINE_INVENTORY_MODE=managed\n"
        "SMITE_AGENT_AUTH_MODE=strict\nSMITE_NODE_PANEL_AUTH_MODE=paused\n")
@@ -173,6 +179,128 @@ class HostPlan(unittest.TestCase):
                                          staging_root=self.root,
                                          host_status=backhaul_status)["REASON"],
                              "BACKHAUL_OFFICIAL_ARCHIVE_NOT_VERIFIED")
+
+    def test_plan_binds_exact_stage_overlay_and_manifest_into_recovery_lab(self):
+        reviewed = self.preview()
+        self.assertEqual(reviewed["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+        self.assertEqual(reviewed["CANDIDATE_COMPOSE_OVERLAY_SHA256"],
+                         hashlib.sha256(
+                             (self.stage / "compose.override.candidate.yml").read_bytes()
+                         ).hexdigest())
+        sandbox = Path(tempfile.mkdtemp(prefix="uopti-engine-txn-lab-"))
+        sandbox.chmod(0o700)
+        self.addCleanup(shutil.rmtree, sandbox)
+        (sandbox / ".LAB_ONLY").write_bytes(lab.MARKER)
+        shutil.copytree(self.node, sandbox / "node")
+        isolated = sandbox / "node"
+        (isolated / "config/tunnels.json").write_bytes(b"[]\n")
+        (isolated / "config/node-id").write_bytes(b"UNCHANGED-IDENTITY")
+        (isolated / "config/replay.db").write_bytes(b"UNCHANGED-REPLAY")
+        binaries = {"frpc": (self.stage / "frpc.bin").read_bytes(),
+                    "frps": (self.stage / "frps.bin").read_bytes()}
+        overlay = (self.stage / "compose.override.candidate.yml").read_bytes()
+        candidate_manifest = (self.stage / "engines.candidate.json").read_bytes()
+        trusted = dict(reviewed, OTHER_ENGINE="NOT_INSTALLED")
+        fake_signed = lambda *_: {"signed": True, "replay": True}
+        with self.assertRaises(lab.SimulatedCrash):
+            lab.execute(sandbox, "frp", binaries, overlay, trusted, fake_signed,
+                        crash_at="after_frpc", candidate_manifest=candidate_manifest)
+        self.assertEqual(lab.recover(sandbox, fake_signed), "ROLLED_BACK")
+        self.assertFalse((isolated / "config/engine-state/engines.json").exists())
+        self.assertEqual((isolated / "config/node-id").read_bytes(), b"UNCHANGED-IDENTITY")
+        self.assertEqual((isolated / "config/replay.db").read_bytes(), b"UNCHANGED-REPLAY")
+        result = lab.execute(sandbox, "frp", binaries, overlay, trusted,
+                             fake_signed, candidate_manifest=candidate_manifest)
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertEqual((isolated / "config/engine-state/engines.json").read_bytes(),
+                         candidate_manifest)
+
+    def test_plan_bound_lab_rejects_modified_stage_after_review(self):
+        reviewed = self.preview()
+        sandbox = Path(tempfile.mkdtemp(prefix="uopti-engine-txn-lab-"))
+        sandbox.chmod(0o700)
+        self.addCleanup(shutil.rmtree, sandbox)
+        (sandbox / ".LAB_ONLY").write_bytes(lab.MARKER)
+        shutil.copytree(self.node, sandbox / "node")
+        (sandbox / "node/config/tunnels.json").write_bytes(b"[]\n")
+        binaries = {"frpc": (self.stage / "frpc.bin").read_bytes(),
+                    "frps": (self.stage / "frps.bin").read_bytes()}
+        overlay = (self.stage / "compose.override.candidate.yml").read_bytes()
+        manifest = (self.stage / "engines.candidate.json").read_bytes()
+        fake_signed = lambda *_: {"signed": True, "replay": True}
+        # No mutable file, no journal and no Node restart if preview and stage drift.
+        with self.assertRaisesRegex(lab.Hold, "CANDIDATE_COMPOSE_OVERLAY_DRIFT"):
+            lab.execute(sandbox, "frp", binaries, overlay + b"# drift\n",
+                        dict(reviewed, OTHER_ENGINE="NOT_INSTALLED"),
+                        fake_signed, candidate_manifest=manifest)
+        with self.assertRaisesRegex(lab.Hold, "CANDIDATE_MANIFEST_DRIFT"):
+            lab.execute(sandbox, "frp", binaries, overlay,
+                        dict(reviewed, OTHER_ENGINE="NOT_INSTALLED"),
+                        fake_signed, candidate_manifest=manifest + b" ")
+        self.assertFalse((sandbox / ".engine-journal.json").exists())
+
+    def test_backhaul_archive_bound_plan_reaches_only_disposable_executor(self):
+        archive = self.home / "backhaul-stage-lab.tar.gz"
+        payload = synthetic_frp_exe("backhaul")
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo("release/backhaul")
+            info.size = len(payload)
+            tf.addfile(info, io.BytesIO(payload))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        with patch.dict(plan.backhaul.OFFICIAL_TAR_SHA256, {"amd64": digest}):
+            stage = plan.backhaul.prepare(self.node, archive, self.root,
+                                          arch="amd64", allowed_sha=digest)
+            reviewed = plan.review("backhaul", self.node, stage,
+                staging_root=self.root, host_status=dict(self.status, ENGINE="BACKHAUL"))
+            self.assertEqual(reviewed["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+            sandbox = Path(tempfile.mkdtemp(prefix="uopti-engine-txn-lab-"))
+            sandbox.chmod(0o700)
+            self.addCleanup(shutil.rmtree, sandbox)
+            (sandbox / ".LAB_ONLY").write_bytes(lab.MARKER)
+            shutil.copytree(self.node, sandbox / "node")
+            node = sandbox / "node"
+            (node / "config/tunnels.json").write_bytes(b"[]\n")
+            (node / "config/node-id").write_bytes(b"identity-must-stay")
+            (node / "config/replay.db").write_bytes(b"replay-must-stay")
+            state = lab.execute(
+                sandbox, "backhaul", {"backhaul": (stage / "backhaul.bin").read_bytes()},
+                (stage / "compose.override.candidate.yml").read_bytes(),
+                dict(reviewed, OTHER_ENGINE="NOT_INSTALLED"),
+                lambda *_: {"signed": True, "replay": True},
+                candidate_manifest=(stage / "engines.candidate.json").read_bytes())
+            self.assertEqual(state["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(state["ACTIVATION_GATE"], "HOLD")
+            self.assertEqual((node / "config/node-id").read_bytes(), b"identity-must-stay")
+            self.assertEqual((node / "config/replay.db").read_bytes(), b"replay-must-stay")
+
+    def test_backhaul_override_tampering_with_recomputed_local_checksums_fails(self):
+        archive = self.home / "verified-bh-overlay-test.tar.gz"
+        binary = synthetic_frp_exe("backhaul")
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo("release/backhaul")
+            info.size = len(binary)
+            tf.addfile(info, io.BytesIO(binary))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        with patch.dict(plan.backhaul.OFFICIAL_TAR_SHA256, {"amd64": digest}):
+            stage = plan.backhaul.prepare(self.node, archive, self.root,
+                                          arch="amd64", allowed_sha=digest)
+            evidence = plan.review("backhaul", self.node, stage,
+                staging_root=self.root, host_status=dict(self.status, ENGINE="BACKHAUL"))
+            self.assertEqual(evidence["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+            overlay = stage / "compose.override.candidate.yml"
+            overlay.write_bytes(overlay.read_bytes().replace(
+                b"read_only: true", b"read_only: false"))
+            # Attacker also rewrites SHA256SUMS; official archive stays genuine.
+            sums = (stage / "SHA256SUMS").read_text().splitlines()
+            (stage / "SHA256SUMS").write_text("\n".join(
+                (f"{hashlib.sha256(overlay.read_bytes()).hexdigest()}  compose.override.candidate.yml"
+                 if line.endswith("  compose.override.candidate.yml") else line)
+                for line in sums) + "\n")
+            self.assertFalse(plan.backhaul.verify(stage, official_only=True))
+            rejected = plan.review("backhaul", self.node, stage,
+                staging_root=self.root, host_status=dict(self.status, ENGINE="BACKHAUL"))
+            self.assertEqual(rejected["REASON"], "BACKHAUL_OFFICIAL_ARCHIVE_NOT_VERIFIED")
 
     def test_no_live_executor_even_when_action_is_install(self):
         out = subprocess.run([

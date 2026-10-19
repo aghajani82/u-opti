@@ -236,9 +236,24 @@ def _status_probe(probe, kind, engine):
         raise Hold("SIGNED_RUNTIME_SIMULATION_FAILED")
 
 
-def _archive_completed(root, entry):
+def _verify_terminal(root, entry, probe):
+    # A completed journal is historical evidence, not a permanent runtime
+    # attestation. Every reuse checks file modes, hashes and simulated signed API.
+    _check_protected(root, entry)
+    committed = entry["state"] == "COMMITTED"
+    for name in _mutable(entry["engine"]):
+        expected = ({"sha256": entry["after"][name],
+                     "mode": entry["after_modes"][name]}
+                    if committed else entry["previous"][name])
+        if not _match(root, name, expected):
+            raise Hold("COMPLETED_JOURNAL_DRIFT")
+    _status_probe(probe, "new" if committed else "prior", entry["engine"])
+
+
+def _archive_completed(root, entry, probe):
     if entry["state"] not in ("COMMITTED", "ROLLED_BACK"):
         raise Hold("UNRESOLVED_JOURNAL")
+    _verify_terminal(root, entry, probe)
     destination = "audit-" + entry["id"] + ".json"
     if _path(root, destination).exists():
         raise Hold("AUDIT_CONFLICT")
@@ -251,6 +266,7 @@ def _recovery_locked(root, probe):
     if entry is None:
         return "NO_JOURNAL"
     if entry["state"] in ("COMMITTED", "ROLLED_BACK"):
+        _verify_terminal(root, entry, probe)
         return entry["state"]
     _check_protected(root, entry)
     # No blind overwrites: every tracked value must match exact old or new bytes.
@@ -283,7 +299,7 @@ def recover(root, probe):
         return _recovery_locked(root, probe)
 
 
-def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
+def execute(root, engine, binaries, overlay, preview, probe, crash_at=None, *, candidate_manifest=None):
     """Mutate only disposable fixture paths; approval flags remain NO/HOLD."""
     root = _validate(root)
     if engine not in BINARIES or set(binaries) != set(BINARIES[engine]):
@@ -292,6 +308,8 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
         raise Hold("BAD_OVERLAY")
     if any(not isinstance(v, bytes) or not v or len(v) > MAX_BINARY for v in binaries.values()):
         raise Hold("BAD_BINARY")
+    if preview.get("CANDIDATE_COMPOSE_OVERLAY_SHA256") != sha(overlay):
+        raise Hold("CANDIDATE_COMPOSE_OVERLAY_DRIFT")
     if (preview.get("STAGE_ADMISSION") != "VERIFIED_PREVIEW_ONLY"
             or preview.get("INSTALL_ALLOWED") != "NO"
             or preview.get("ACTIVATION_GATE") != "HOLD"
@@ -300,7 +318,7 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
     with _lock(root):
         previous_entry = _journal_read(root)
         if previous_entry is not None:
-            _archive_completed(root, previous_entry)
+            _archive_completed(root, previous_entry, probe)
         manifest_file = "node/config/engine-state/engines.json"
         compose = _safe_file(_path(root, "node/docker-compose.yml"))
         if compose is None or sha(compose) != preview.get("SOURCE_COMPOSE_SHA256"):
@@ -334,7 +352,22 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
         if engine == "frp":
             record["server_sha256"] = sha(binaries["frps"])
         output[engine] = record
-        new_manifest = canonical({"schema": 1, "engines": output})
+        expected_manifest = {"schema": 1, "engines": output}
+        if candidate_manifest is not None:
+            # Real Stage uses pretty JSON; compare exact staged bytes AND
+            # semantic engine contents rather than silently reformatting it.
+            if (not isinstance(candidate_manifest, bytes)
+                    or len(candidate_manifest) > 8192 or not candidate_manifest):
+                raise Hold("CANDIDATE_MANIFEST_INVALID")
+            try:
+                parsed = json.loads(candidate_manifest)
+            except (ValueError, UnicodeError, TypeError) as exc:
+                raise Hold("CANDIDATE_MANIFEST_INVALID") from exc
+            if parsed != expected_manifest:
+                raise Hold("CANDIDATE_MANIFEST_SEMANTIC_DRIFT")
+            new_manifest = candidate_manifest
+        else:
+            new_manifest = canonical(expected_manifest)
         if sha(new_manifest) != preview.get("CANDIDATE_MANIFEST_SHA256"):
             raise Hold("CANDIDATE_MANIFEST_DRIFT")
         mutable = _mutable(engine)

@@ -185,13 +185,16 @@ def review(engine: str, node: Path, stage: Path, *,
             else "OFFICIAL_BACKHAUL_ARCHIVE_VERIFIED"
         )
         result["SOURCE_COMPOSE_SHA256"] = source_sha
+        result["CANDIDATE_COMPOSE_OVERLAY_SHA256"] = hashlib.sha256(
+            strict_bytes(stage / "compose.override.candidate.yml", limit=8192)).hexdigest()
         result["CANDIDATE_MANIFEST_SHA256"] = hashlib.sha256(
             strict_bytes(stage / "engines.candidate.json", limit=8192)).hexdigest()
         result["BINARIES_SHA256"] = binary_hashes
         # Digest is a change-detector, NOT a signature or install ticket.
         plan_fingerprint = {
             "engine": engine, "arch": arch, "version": version,
-            "compose": source_sha, "manifest": result["CANDIDATE_MANIFEST_SHA256"],
+            "compose": source_sha, "compose_overlay": result["CANDIDATE_COMPOSE_OVERLAY_SHA256"],
+            "manifest": result["CANDIDATE_MANIFEST_SHA256"],
             "binary_hashes": binary_hashes,
         }
         result["PLAN_SHA256_NOT_AUTHORIZATION"] = hashlib.sha256(
