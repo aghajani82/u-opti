@@ -173,6 +173,18 @@ class FrpLabTransaction(unittest.TestCase):
                 with tx.lock(self.root):
                     self.fail("concurrent transaction was not refused")
 
+    def test_frp_and_backhaul_share_one_exclusive_node_lock(self):
+        control = read("uopti_backhaul_shared_lock_ci",
+                       "modules/smite-managed-backhaul-control.py")
+        with tx.lock(self.root):
+            with self.assertRaises(control.Hold):
+                with control._lab_lock(self.root):
+                    self.fail("Backhaul acquired lock while FRP was installing")
+        with control._lab_lock(self.root):
+            with self.assertRaisesRegex(tx.Hold, "ANOTHER_FRP_TRANSACTION_ACTIVE"):
+                with tx.lock(self.root):
+                    self.fail("FRP acquired lock while Backhaul was installing")
+
     def test_changed_compose_cannot_be_silently_overwritten(self):
         tx.activate(self.root, self.stage, fixture=True)
         with (self.node / "docker-compose.yml").open("a") as f:
