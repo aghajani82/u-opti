@@ -97,6 +97,50 @@ class ComposeProof(unittest.TestCase):
         with self.assertRaisesRegex(mod.Hold, "UNREVIEWED_NODE_HEALTHCHECK"):
             mod.checked(self.lab,"absent","12345",self.parsed,self.source)
 
+    def test_frp_pair_isolated_only_when_both_exact_readonly_mounts_present(self):
+        # FRP uses a different explicitly named lab, never production paths.
+        renamed = self.runner / "uopti-official-frp-pair"
+        self.lab.rename(renamed)
+        self.lab = renamed
+        self.source = self.lab / "reviewed"
+        self.parsed["services"]["smite-node"]["volumes"][0]["source"] = str(
+            self.lab / "node/config")
+        mounts = self.parsed["services"]["smite-node"]["volumes"]
+        for name in ("frpc", "frps"):
+            mounts.append({
+                "type": "bind",
+                "source": str(self.lab / "installed/frp" / name),
+                "target": "/usr/local/bin/" + name,
+                "read_only": True,
+            })
+        ok = mod.checked(self.lab, "ready", "12345", self.parsed,
+                         self.source, "frp")
+        service = ok["services"]["smite-node"]
+        self.assertEqual(service["network_mode"], "none")
+        self.assertEqual(service["cap_drop"], ["ALL"])
+        self.assertNotIn("ports", service)
+        created = {m["target"]: m for m in service["volumes"]}
+        for name in ("frpc", "frps"):
+            item = created["/usr/local/bin/" + name]
+            self.assertEqual(item["source"], str(self.lab / "installed/frp" / name))
+            self.assertTrue(item["read_only"])
+        self.assertNotIn("/usr/local/bin/backhaul", created)
+        mounts[-1]["read_only"] = False
+        with self.assertRaisesRegex(mod.Hold, "UNVERIFIED_ENGINE_BIND"):
+            mod.checked(self.lab, "ready", "12345", self.parsed, self.source, "frp")
+        mounts.pop()
+        with self.assertRaisesRegex(mod.Hold, "UNVERIFIED_ENGINE_BIND"):
+            mod.checked(self.lab, "ready", "12345", self.parsed, self.source, "frp")
+
+    def test_frp_and_backhaul_mount_mixing_is_denied(self):
+        self.parsed["services"]["smite-node"]["volumes"].append({
+            "type": "bind", "source": "/unsafe/frpc",
+            "target": "/usr/local/bin/frpc", "read_only": True,
+        })
+        with self.assertRaisesRegex(mod.Hold, "UNEXPECTED_OTHER_ENGINE_MOUNT"):
+            mod.checked(self.lab, "absent", "12345", self.parsed,
+                        self.source, "backhaul")
+
     def test_not_pr_and_invalid_lab_never_accepted(self):
         with patch.dict(os.environ,{"GITHUB_ACTIONS":"false"}):
             with self.assertRaisesRegex(mod.Hold,"NOT_GITHUB_PR"):
