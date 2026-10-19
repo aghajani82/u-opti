@@ -23,11 +23,13 @@ smite_managed_bh_check() {
 }
 
 smite_managed_bh_host_gate() {
+    local report_format="${1:-text}"
+    case "$report_format" in text|json) ;; *) echo "HOLD: Unsupported report format"; return 2 ;; esac
     if [ ! -s "$SMITE_MANAGED_BACKHAUL_HOST_GATE" ]; then
         echo "HOLD: Host safety check is not installed."
         return 2
     fi
-    python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_GATE" --node-dir "$SMITE_MANAGED_NODE_DIR"
+    python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_GATE" --node-dir "$SMITE_MANAGED_NODE_DIR" --format "$report_format"
 }
 
 smite_managed_bh_menu() {
@@ -41,15 +43,20 @@ smite_managed_bh_menu() {
         echo "1) Status (read-only)"
         echo "2) Review installation prerequisites"
         echo "3) Install Backhaul (not enabled yet)"
+        echo "4) Show safe IR/KH report (read-only)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-3]: " choice || return 0
+        read -rp "Choose [0-4]: " choice || return 0
         case "$choice" in
             1) smite_managed_bh_check status || : ;;
             2)
                 smite_managed_bh_check review || :
                 echo "===== HOST SAFETY AUDIT (READ ONLY) ====="
                 smite_managed_bh_host_gate || :
+                ;;
+            4)
+                echo "===== SAFE HOST REPORT (NO SECRETS) ====="
+                smite_managed_bh_host_gate json || :
                 ;;
             3)
                 echo "HOLD: Backhaul installation on real IR/KH is disabled."
@@ -66,12 +73,13 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         --status) smite_managed_bh_check status ;;
         --review) smite_managed_bh_check review ;;
-        --host-audit) smite_managed_bh_host_gate ;;
+        --host-audit) smite_managed_bh_host_gate text ;;
+        --host-report) smite_managed_bh_host_gate json ;;
         --install)
             echo "HOLD: Host installation disabled. No changes made." >&2
             exit 2
             ;;
         --menu) smite_managed_bh_menu ;;
-        *) echo "Usage: $0 --status|--review|--host-audit|--menu" >&2; exit 2 ;;
+        *) echo "Usage: $0 --status|--review|--host-audit|--host-report|--menu" >&2; exit 2 ;;
     esac
 fi
