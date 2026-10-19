@@ -63,6 +63,7 @@ MODULES=(
     "smite-managed-backhaul.py"
     "smite-managed-backhaul-control.py"
     "smite-managed-backhaul-menu.sh"
+    "smite-managed-backhaul-host-gate.py"
     "smite-managed-backhaul-transaction.py"
     "smite-backhaul-sidecar.py"
     "smite-backhaul-sidecar-readiness.py"
