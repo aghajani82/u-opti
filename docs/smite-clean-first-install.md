@@ -71,6 +71,17 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage27 fail-closed gateway/FRP/status hardening:** Both cross-project
+  CI branches now pin identical reviewed Smite source SHA `75412e8ea77565b6b21a6ac7f73827b221272d6a`.
+  Signed gateway readiness requires a genuine authenticated check-in,
+  matching the administrator-approved `Node.name` AND
+  `Node.metadata.node_name` individually; a changed name never
+  triggers an Agent probe. A signed FRP heartbeat cannot mark a paired
+  but pending Node connected. Signed Nodes without completed check-in
+  remain "waiting-for-pairing" in listings; the old FRP heartbeat hint
+  must never override a failed live signed Agent status check.
+  Existing legacy runtime modes were not enabled or changed. Unit,
+  integration, and negative security tests exercise these cases.
 - **Stage26 real outbound HTTPS/443 CI gate:** In disposable PR CI
   run actual `Smite/panel/app/node_client.py` HMAC requests over
   hostname/certificate-verified HTTPS/443 through an independent
