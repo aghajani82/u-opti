@@ -167,6 +167,29 @@ lab.execute(sys.argv[2], data["engine"],
         self.assertEqual(lab.recover(self.root, self.probe), "ROLLED_BACK")
         self.check_prior()
 
+    def test_completed_commit_cannot_mask_drift_or_unsigned_runtime(self):
+        self.apply("frp")
+        binary = self.node / "managed-bin/frp/frpc"
+        original = binary.read_bytes()
+        binary.write_bytes(b"POST_COMMIT_EXTERNAL_CHANGE")
+        with self.assertRaisesRegex(lab.Hold, "COMPLETED_JOURNAL_DRIFT"):
+            lab.recover(self.root, self.probe)
+        self.assertEqual(binary.read_bytes(), b"POST_COMMIT_EXTERNAL_CHANGE")
+        binary.write_bytes(original)
+        with self.assertRaisesRegex(lab.Hold, "SIGNED_RUNTIME_SIMULATION_FAILED"):
+            lab.recover(self.root, lambda *_: {"signed": False, "replay": True})
+        self.assertEqual(lab.recover(self.root, self.probe), "COMMITTED")
+
+    def test_completed_rollback_cannot_hide_outside_modification(self):
+        with self.assertRaises(lab.SimulatedCrash):
+            self.apply("frp", crash_at="after_frps")
+        self.assertEqual(lab.recover(self.root, self.probe), "ROLLED_BACK")
+        marker = self.node / "config/node-id"
+        marker.write_bytes(b"OUTSIDE_IDENTITY_MUTATION")
+        with self.assertRaisesRegex(lab.Hold, "PROTECTED_OR_OTHER_ENGINE_DRIFT"):
+            lab.recover(self.root, self.probe)
+        self.assertEqual(marker.read_bytes(), b"OUTSIDE_IDENTITY_MUTATION")
+
     def test_external_manifest_edit_blocks_recovery_without_overwrite(self):
         with self.assertRaises(lab.SimulatedCrash):
             self.apply("frp", crash_at="after_manifest")
