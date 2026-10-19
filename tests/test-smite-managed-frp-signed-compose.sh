@@ -95,11 +95,8 @@ echo "SIGNED_FRP_ABSENT_AFTER_EXACT_ROLLBACK=PASS"
 
 # Fault is injected after ONLY the client binary is installed. Old Node
 # identity and signed inventory must recover without starting any FRP.
-if txn activate --stage "$stage" >/dev/null 2>&1; then
-  echo "FAIL: expected simulated interruption" >&2
-  exit 1
-fi
-# Intentionally use separate fault injection with explicit runner admission.
+# Inject interruption exclusively through the reviewed PR-only runner
+# method; NEVER invoke a second normal installation at this point.
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   python3 -B - "$root" "$lab" "$stage" <<'PY'
