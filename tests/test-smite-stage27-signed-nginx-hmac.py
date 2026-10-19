@@ -57,10 +57,11 @@ def run(*argv: str) -> subprocess.CompletedProcess:
 
 def request(context: ssl.SSLContext, method: str, target: str,
             *, body: bytes | None = None, headers: dict | None = None,
-            hostname: str = HOST) -> tuple[int, bytes]:
+            hostname: str = HOST, source_ip: str = "127.0.0.1") -> tuple[int, bytes]:
     class LoopbackVerifiedTLS(http.client.HTTPSConnection):
         def connect(self) -> None:
-            sock = socket.create_connection(("127.0.0.1", 443), timeout=4)
+            sock = socket.create_connection(("127.0.0.1", 443), timeout=4,
+                                            source_address=(source_ip, 0))
             self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
     connection = LoopbackVerifiedTLS(hostname, 443, timeout=6, context=context)
@@ -211,6 +212,30 @@ def main() -> None:
                 raise AssertionError("STAGE27_BAD_HOSTNAME_ACCEPTED")
             print("STAGE27_TLS443_CA_SNI_REAL_VERIFICATION=PASS")
 
+            # Stage28: the Stage12 candidate ACL must use the true socket
+            # peer, not caller-provided forwarding headers. 127.0.0.2
+            # is an independent loopback source, NOT in the allow list.
+            # A denied request must not consume its signed Node nonce.
+            denied = signer.sign_request(
+                secret=key_bytes, node_id=NODE_ID, method="GET",
+                target=SIGN_PATH, body=b"", nonce="2" * 32)
+            forged_forwarded = {
+                **denied,
+                "X-Forwarded-For": "198.51.100.24",
+                "X-Real-IP": "198.51.100.24",
+                "Forwarded": "for=198.51.100.24;proto=https",
+            }
+            require(request(tls, "GET", SIGN_PATH, headers=forged_forwarded,
+                            source_ip="127.0.0.2")[0] == 403,
+                    "STAGE28_FORGED_PANEL_IP_BYPASSED_SOURCE_ACL")
+            require(request(tls, "GET", SIGN_PATH, headers=denied)[0] == 200,
+                    "STAGE28_NGINX_DENIED_REQUEST_CONSUMED_HMAC_NONCE")
+            require(request(tls, "GET", SIGN_PATH, headers=denied)[0] == 401,
+                    "STAGE28_REPLAY_NOT_DENIED_AFTER_VALID_SOURCE")
+            require(request(tls, "GET", SIGN_PATH, source_ip="127.0.0.2")[0] == 403,
+                    "STAGE28_UNSIGNED_FORBIDDEN_SOURCE_NOT_DENIED")
+            print("STAGE28_REAL_SOURCE_IP_ACL_FORGED_HEADERS_REJECTED=PASS")
+
             require(request(tls, "GET", SIGN_PATH)[0] == 401,
                     "STAGE27_UNSIGNED_AGENT_ACCEPTED")
             signed = signer.sign_request(
@@ -288,6 +313,61 @@ def main() -> None:
             require(request(tls, "GET", SIGN_PATH, headers=fresh)[0] == 200,
                     "STAGE27_GATEWAY_RESTORE_FAILED")
             print("STAGE27_REWRITE_REDIRECT_DENIED_AND_RESTORED=PASS")
+
+            # Stage28: read_identity reads the private pairing record on
+            # each request. A different Node ID must NOT inherit authorization
+            # just because the old HMAC key is still present.
+            original_identity = credential.read_bytes()
+            credential.write_text(json.dumps({
+                "version": 1, "node_id": "cccccccc-1111-2222-3333-444444444444",
+                "node_secret": key_bytes.decode()
+            }))
+            credential.chmod(0o600)
+            incompatible = signer.sign_request(
+                secret=key_bytes, node_id=NODE_ID,
+                method="GET", target=SIGN_PATH, body=b"", nonce="3" * 32)
+            require(request(tls, "GET", SIGN_PATH, headers=incompatible)[0] == 401,
+                    "STAGE28_DIFFERENT_NODE_ID_REUSED_OLD_HMAC")
+            credential.write_bytes(original_identity)
+            credential.chmod(0o600)
+            require(request(tls, "GET", SIGN_PATH, headers=incompatible)[0] == 200,
+                    "STAGE28_ORIGINAL_PAIRING_NOT_RECOVERED")
+            require(request(tls, "GET", SIGN_PATH, headers=incompatible)[0] == 401,
+                    "STAGE28_PAIRING_RESTORE_REPLAY_ACCEPTED")
+            print("STAGE28_PAIRED_IDENTITY_DRIFT_DENIED=PASS")
+
+            # A freshly initialized replay DB tied to ANOTHER paired Node
+            # must not be accepted even with the correct original HMAC.
+            # This is NOT an approved replay store restore procedure.
+            original_replay = replay_dir / "preserved-original.sqlite3"
+            foreign_replay = replay_dir / "foreign-node.sqlite3"
+            init = (
+                "from app.agent_auth import DurableNonceStore;"
+                "DurableNonceStore.initialize_new("
+                "os.environ['SMITE_AGENT_FOREIGN_REPLAY'],"
+                "'cccccccc-1111-2222-3333-444444444444')"
+            )
+            import_env = dict(env)
+            import_env["SMITE_AGENT_FOREIGN_REPLAY"] = str(foreign_replay)
+            subprocess.run(
+                [sys.executable, "-c", "import os;" + init],
+                env=import_env, capture_output=True, timeout=30, check=True)
+            os.replace(replay, original_replay)
+            os.replace(foreign_replay, replay)
+            unrelated = signer.sign_request(
+                secret=key_bytes, node_id=NODE_ID,
+                method="GET", target=SIGN_PATH, body=b"", nonce="4" * 32)
+            require(request(tls, "GET", SIGN_PATH, headers=unrelated)[0] == 503,
+                    "STAGE28_OTHER_NODE_REPLAY_DB_ACCEPTED")
+            # Restore the *same* original DB bytes and history while all
+            # authentication was denied; never restore a stale copy.
+            os.replace(replay, foreign_replay)
+            os.replace(original_replay, replay)
+            require(request(tls, "GET", SIGN_PATH, headers=unrelated)[0] == 200,
+                    "STAGE28_CONTINUOUS_REPLAY_STORE_NOT_RECOVERED")
+            require(request(tls, "GET", SIGN_PATH, headers=unrelated)[0] == 401,
+                    "STAGE28_REPLAY_AFTER_RECOVERY_ACCEPTED")
+            print("STAGE28_FOREIGN_NODE_REPLAY_DB_DENIED=PASS")
 
             replay.unlink()
             lost = signer.sign_request(
