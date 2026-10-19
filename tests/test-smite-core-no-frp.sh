@@ -91,8 +91,10 @@ grep -Fq "SMITE_CORE_FRP_VERSION_CHECK=NOT_REQUIRED" "$lab/ir-verify.log"
 ! grep -Eq '/usr/local/bin/frp(c|s):ro' "$SMITE_NODE_COMPOSE"
 grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"
+grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_NODE_REGISTRATION_MODE=signed' "$SMITE_PANEL_DIR/.env"
 grep -qx 'SMITE_PANEL_AGENT_AUTH_MODE=signed' "$SMITE_PANEL_DIR/.env"
+grep -qx 'SMITE_ENGINE_MANAGEMENT_MODE=managed' "$SMITE_PANEL_DIR/.env"
 
 SMITE_NODE_DIR="$lab/kh/node"
 SMITE_NODE_COMPOSE="$SMITE_NODE_DIR/docker-compose.yml"
@@ -103,6 +105,7 @@ assert_calls 0 0 0
 ! grep -Fq "STABLE_FRP_MOUNT" "$SMITE_NODE_COMPOSE"
 grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"
+grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$SMITE_NODE_DIR/.env"
 [ ! -e "$SMITE_NODE_DIR/certs/ca.crt" ]
 echo "PHASE1_IR_KH_CORE_NO_HOST_FRP=PASS"
 
@@ -124,6 +127,8 @@ assert_calls 2 2 2
 grep -Fq "STABLE_FRP_MOUNT=smite-panel" "$SMITE_PANEL_COMPOSE"
 grep -Fq "STABLE_FRP_MOUNT=smite-node" "$SMITE_NODE_COMPOSE"
 [ -e "$SMITE_NODE_DIR/certs/ca.crt" ]
+! grep -q '^SMITE_ENGINE_INVENTORY_MODE=' "$SMITE_NODE_DIR/.env"
+! grep -q '^SMITE_ENGINE_MANAGEMENT_MODE=' "$SMITE_PANEL_DIR/.env"
 echo "PHASE1_STABLE_FRP_PATH_UNCHANGED=PASS"
 
 # Unknown profiles fail closed before installing or verifying engines.

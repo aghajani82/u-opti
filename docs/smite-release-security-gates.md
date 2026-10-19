@@ -73,6 +73,24 @@ recovery codes and failure handling. See Smite
   All tunnel engines remain disabled until individually selected and
   verified. This is an offline milestone, not live-host admission.
 
+## Independent engines — Phase 1 managed admission (preview)
+
+The clean-RC IR Panel and both IR/KH Nodes start with independent
+engine-management mode enabled. All tunnel engines start as
+`not-installed`, even though the unpublished Docker image may still
+bundle their executables. The signed Node Agent exposes a read-only
+`GET /api/agent/engines` inventory; arbitrary unsigned calls fail.
+Only independently enrolled, root-owned and hash-verified engines may
+ever become `ready`.
+
+The Panel checks both selected Node inventories via signed HTTPS/443
+BEFORE saving a tunnel. No automatic install, no silent FRP fallback,
+no public data port changes. Per-engine installation, rollback and
+simple Create Tunnel UI feedback are subsequent steps; managed
+engines remain unusable until those steps are completed.
+
+Stable keeps default legacy engine behavior, without the new flags.
+
 ## Release blockers (must fail closed until all are checked)
 
 1. **Image provenance and supply chain.** The current Docker-save

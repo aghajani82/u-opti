@@ -36,6 +36,7 @@ smite_install_node_files node-kh foreign panel.example.com:443 "" "" "" standard
 
 grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"
+grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$SMITE_NODE_DIR/.env"
 grep -qx 'PANEL_ADDRESS=panel.example.com:443' "$SMITE_NODE_DIR/.env"
 grep -q 'FOREIGN_RC_CA_DOWNLOAD=DEFERRED_UNTIL_SECURE_ADMISSION' "$TMP/log"
 grep -q 'FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION' "$TMP/log"
@@ -74,5 +75,6 @@ printf '%s\n' '-----BEGIN CERTIFICATE-----' 'MOCK' '-----END CERTIFICATE-----' >
 smite_install_node_files node-kh foreign panel.example.com:443 "$TMP/test-ca.crt" "" "" standard >"$TMP/stable.log"
 test -f "$SMITE_NODE_DIR/certs/ca.crt"
 ! grep -q '^SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
+! grep -q '^SMITE_ENGINE_INVENTORY_MODE=' "$SMITE_NODE_DIR/.env"
 grep -qF "/api/agent/status" "$SMITE_NODE_COMPOSE"
 echo "FOREIGN_PAUSED_PAIRING_INSTALL_TESTS=PASSED"

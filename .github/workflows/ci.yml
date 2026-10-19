@@ -438,7 +438,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 708b4ae6806a35bbd9ccbca163ca0909b41ffa7c
+          ref: 3aefdaf1a0c66d436abb84452249aee1dd4134f3
           path: .stage24-smite-src
           persist-credentials: false
       - name: Verify actual installer Compose, signed overlay and rollback
@@ -461,7 +461,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 708b4ae6806a35bbd9ccbca163ca0909b41ffa7c
+          ref: 3aefdaf1a0c66d436abb84452249aee1dd4134f3
           path: .stage20-smite-src
           persist-credentials: false
       - name: Install isolated Nginx and pinned pairing runtime
