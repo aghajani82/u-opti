@@ -28,14 +28,18 @@ HEALTH_CMD = (
 HEALTH_TEST = ["CMD", "python", "-c", HEALTH_CMD]
 
 
-def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> dict:
+def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path, engine: str = "backhaul") -> dict:
     if (os.environ.get("GITHUB_ACTIONS") != "true" or
             os.environ.get("GITHUB_EVENT_NAME") != "pull_request" or
             os.environ.get("GITHUB_REPOSITORY") != "aghajani82/u-opti"):
         raise Hold("NOT_GITHUB_PR")
     runner = Path(os.environ.get("RUNNER_TEMP", "/"))
-    if (not root.is_absolute() or not runner.is_absolute()
-            or root.parent != runner or not root.name.startswith("backhaul-txn-")
+    if (engine not in ("backhaul", "frp")
+            or not root.is_absolute() or not runner.is_absolute()
+            or root.parent != runner
+            or not root.name.startswith(
+                "backhaul-txn-" if engine == "backhaul" else "uopti-official-frp-"
+            )
             or root.is_symlink() or not root.is_dir()):
         raise Hold("NOT_PRIVATE_RUNNER_LAB")
     if root.stat().st_mode & 0o077:
@@ -73,14 +77,28 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
             or core_mount.get("type") != "bind"
             or core_mount.get("source") != str(expected_config)):
         raise Hold("WRONG_CORE_CONFIG_SOURCE")
-    engine = mountmap.get(ENGINETARGET)
-    if phase == "ready":
-        if (engine is None or engine.get("type") != "bind"
-                or engine.get("source") != str(root / "installed" / "backhaul")
-                or engine.get("read_only") is not True):
-            raise Hold("UNVERIFIED_ENGINE_BIND")
-    elif engine is not None:
-        raise Hold("UNEXPECTED_ENGINE_MOUNT_BEFORE_INSTALL")
+    # Only the selected engine may appear in the source Compose. Never
+    # carry unrelated FRP/Backhaul mounts into a disposable runtime.
+    targets = (ENGINETARGET,) if engine == "backhaul" else (
+        "/usr/local/bin/frpc", "/usr/local/bin/frps")
+    other = ("/usr/local/bin/frpc", "/usr/local/bin/frps") if engine == "backhaul" else (
+        ENGINETARGET,)
+    if any(name in mountmap for name in other):
+        raise Hold("UNEXPECTED_OTHER_ENGINE_MOUNT")
+    for binary_target in targets:
+        mount = mountmap.get(binary_target)
+        if phase == "ready":
+            binary_name = ("backhaul" if engine == "backhaul"
+                           else binary_target.rsplit("/", 1)[-1])
+            expected_binary = (
+                root / "installed" / "backhaul" if engine == "backhaul"
+                else root / "installed" / "frp" / binary_name)
+            if (mount is None or mount.get("type") != "bind"
+                    or mount.get("source") != str(expected_binary)
+                    or mount.get("read_only") is not True):
+                raise Hold("UNVERIFIED_ENGINE_BIND")
+        elif mount is not None:
+            raise Hold("UNEXPECTED_ENGINE_MOUNT_BEFORE_INSTALL")
     if (not smite.is_dir() or not (smite / "node" / "app" / "agent_auth.py").is_file()
             or not (smite / "node" / "main.py").is_file()):
         raise Hold("MISSING_REVIEWED_SMITE_SOURCE")
@@ -100,8 +118,15 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
          "target": "/app/main.py", "read_only": True},
     ]
     if phase == "ready":
-        volumes.append({"type": "bind", "source": str(root / "installed/backhaul"),
-                        "target": ENGINETARGET, "read_only": True})
+        if engine == "backhaul":
+            volumes.append({"type": "bind", "source": str(root / "installed/backhaul"),
+                            "target": ENGINETARGET, "read_only": True})
+        else:
+            for name in ("frpc", "frps"):
+                volumes.append({
+                    "type": "bind", "source": str(root / "installed" / "frp" / name),
+                    "target": "/usr/local/bin/" + name, "read_only": True,
+                })
     service = {
         "image": IMAGE,
         "container_name": name,
@@ -141,15 +166,16 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
 
 
 def main() -> int:
-    if len(sys.argv) != 6:
-        print("HOLD: EXPECT_ROOT_PHASE_RUNID_SMITE_OUTPUT", file=sys.stderr)
+    if len(sys.argv) not in (6, 7):
+        print("HOLD: EXPECT_ROOT_PHASE_RUNID_SMITE_OUTPUT_ENGINE", file=sys.stderr)
         return 2
     root, phase, run_id, smite, output = (Path(sys.argv[1]), sys.argv[2],
                                           sys.argv[3], Path(sys.argv[4]),
                                           Path(sys.argv[5]))
+    engine = sys.argv[6] if len(sys.argv) == 7 else "backhaul"
     try:
         parsed = json.load(sys.stdin)
-        document = checked(root, phase, run_id, parsed, smite)
+        document = checked(root, phase, run_id, parsed, smite, engine)
         if output != root / f"smite-node-isolated-{phase}.json" or output.is_symlink():
             raise Hold("UNSAFE_OUTPUT_PATH")
         raw = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode()
