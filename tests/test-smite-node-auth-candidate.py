@@ -77,7 +77,7 @@ class Stage9Test(unittest.TestCase):
         self.assertNotIn("SMITE_NODE_PANEL_AUTH_MODE: signed", yaml)
         self.assertIn(":ro", yaml)
         self.assertIn("/var/lib/smite-node/auth:rw", yaml)
-        self.assertIn("http://127.0.0.1:8888/", yaml)
+        self.assertIn("http://127.0.0.1:8888/healthz", yaml)
         self.assertNotIn("http://127.0.0.1:8888/api/agent/status", yaml)
         self.assertNotIn("a" * 64, yaml)
         self.assertNotIn("docker compose up", yaml)
