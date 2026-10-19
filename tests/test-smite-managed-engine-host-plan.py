@@ -147,30 +147,32 @@ class HostPlan(unittest.TestCase):
                                      host_status=self.status)["REASON"],
                          "STAGE_OUTSIDE_PRIVATE_STAGING_ROOT")
 
-    def test_backhaul_old_candidate_is_explicitly_not_archive_bound(self):
-        # This legacy stage has editable hashes without the official
-        # archive bytes. Even an apparently valid metadata record is HOLD.
-        stage = self.root / "backhaul-test"
-        stage.mkdir(mode=0o700)
-        file = stage / "backhaul.bin"
-        file.write_bytes(synthetic_frp_exe("backhaul"))
-        good = hashlib.sha256(file.read_bytes()).hexdigest()
-        summary = (
-            "BACKHAUL_ARCH=v0.7.2-incorrect\n"
-            "CANDIDATE_ONLY=YES\n"
-            f"ARCHIVE_SHA256={plan.backhaul.OFFICIAL_TAR_SHA256['amd64']}\n"
-            f"ORIGINAL_COMPOSE_SHA256={hashlib.sha256(COMPOSE.encode()).hexdigest()}\n"
-        ).replace("BACKHAUL_ARCH=v0.7.2-incorrect", "BACKHAUL_ARCH=amd64")
-        (stage / "summary.txt").write_text(summary)
-        (stage / "engines.candidate.json").write_text(
-            json.dumps({"schema": 1, "engines": {"backhaul": {"sha256": good}}}))
-        with patch.object(plan.backhaul, "verify", return_value=True):
-            backhaul_status = dict(self.status, ENGINE="BACKHAUL")
-            result = plan.review("backhaul", self.node, stage, staging_root=self.root,
-                                 host_status=backhaul_status)
-        self.assertEqual(result["ARTIFACT_PROVENANCE"], "NOT_ARCHIVE_BOUND")
-        self.assertEqual(result["REASON"], "BACKHAUL_ARCHIVE_BINDING_REQUIRED")
-        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+    def test_backhaul_official_archive_binding_and_legacy_hold(self):
+        archive = self.home / "official-backhaul-test.tar.gz"
+        blob = synthetic_frp_exe("backhaul")
+        with tarfile.open(archive, "w:gz") as tf:
+            entry = tarfile.TarInfo("release/backhaul")
+            entry.size = len(blob)
+            tf.addfile(entry, io.BytesIO(blob))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        backhaul_status = dict(self.status, ENGINE="BACKHAUL")
+        with patch.dict(plan.backhaul.OFFICIAL_TAR_SHA256, {"amd64": digest}):
+            stage = plan.backhaul.prepare(
+                self.node, archive, self.root, arch="amd64", allowed_sha=digest)
+            verified = plan.review("backhaul", self.node, stage,
+                                   staging_root=self.root,
+                                   host_status=backhaul_status)
+            self.assertEqual(verified["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+            self.assertEqual(verified["ARTIFACT_PROVENANCE"],
+                             "OFFICIAL_BACKHAUL_ARCHIVE_VERIFIED")
+            self.assertEqual(verified["INSTALL_ALLOWED"], "NO")
+            # A candidate from the old packager lacking archive bytes must
+            # never pass the official package and host plan checks.
+            (stage / "backhaul.official.tar.gz").unlink()
+            self.assertEqual(plan.review("backhaul", self.node, stage,
+                                         staging_root=self.root,
+                                         host_status=backhaul_status)["REASON"],
+                             "BACKHAUL_OFFICIAL_ARCHIVE_NOT_VERIFIED")
 
     def test_no_live_executor_even_when_action_is_install(self):
         out = subprocess.run([
