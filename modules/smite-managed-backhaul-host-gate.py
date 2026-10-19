@@ -126,21 +126,33 @@ def check_runtime(report: dict, *, node_dir: Path) -> tuple[str, Path]:
             raise GateHold("UNTRUSTED_NODE_MOUNT")
         dest = mount.get("Destination")
         if dest in ("/etc/smite-node", "/var/lib/smite-node"):
-            if dest in mapping or mount.get("Type") != "bind":
-                raise GateHold("UNTRUSTED_NODE_MOUNT")
+            if dest in mapping:
+                raise GateHold("DUPLICATE_PERSISTENT_MOUNT")
             source = mount.get("Source")
             if not isinstance(source, str) or not source.startswith("/"):
                 raise GateHold("UNTRUSTED_NODE_MOUNT")
-            mapping[dest] = Path(source)
+            mapping[dest] = mount
+
     config_mount = mapping.get("/etc/smite-node")
     data_mount = mapping.get("/var/lib/smite-node")
-    if (config_mount is None or data_mount is None
-            or config_mount != node_dir / "config"):
+    if (config_mount is None or config_mount.get("Type") != "bind"
+            or config_mount.get("Source") != str(node_dir / "config")):
         raise GateHold("WRONG_NODE_CONFIG_VOLUME")
-    if (config_mount.is_symlink() or data_mount.is_symlink()
-            or not config_mount.is_dir() or not data_mount.is_dir()):
+    # The reviewed original Smite/node/docker-compose.yml uses:
+    # node-data:/var/lib/smite-node, name: smite-node-data, driver: local.
+    # This is NOT a bind mount. Silently demanding a bind would reject
+    # legitimate fresh Smite Core installations.
+    if (data_mount is None or data_mount.get("Type") != "volume"
+            or data_mount.get("Name") != "smite-node-data"
+            or data_mount.get("Driver") != "local"):
+        raise GateHold("WRONG_NODE_NAMED_VOLUME")
+    data_path = Path(data_mount["Source"])
+    if (node_dir.joinpath("config").is_symlink() or
+            data_path.is_symlink() or
+            not node_dir.joinpath("config").is_dir() or
+            not data_path.is_dir()):
         raise GateHold("INVALID_PERSISTENT_VOLUMES")
-    return image, data_mount
+    return image, data_path
 
 
 def tunnel_count(data_dir: Path) -> int:
@@ -169,6 +181,7 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         "NODE_ROLE": "HOLD",
         "LOCAL_CORE": "HOLD",
         "DOCKER_NODE": "HOLD",
+        "PERSISTENT_DATA": "UNVERIFIED",
         "PERSISTED_TUNNELS": "UNKNOWN",
         "DISK_SPACE": "HOLD",
         "ENGINE": "BACKHAUL_ONLY",
@@ -192,12 +205,15 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         if (len(re.findall(r"(?m)^  smite-node:\s*$", compose)) != 1
                 or not re.search(r"(?m)^\s+network_mode: host\s*$", compose)
                 or re.search(r"(?m)^\s+ports:\s*$", compose)
-                or not re.search(r"(?m)^\s+- ./config:/etc/smite-node\s*$", compose)):
+                or not re.search(r"(?m)^\s+- ./config:/etc/smite-node\s*$", compose)
+                or not re.search(r"(?m)^\s+- node-data:/var/lib/smite-node\s*$", compose)
+                or not re.search(r"(?m)^\s+name: smite-node-data\s*$", compose)):
             raise GateHold("UNTRUSTED_NODE_COMPOSE")
         result["COMPOSE_SHA256"] = hashlib.sha256(compose.encode("utf-8")).hexdigest()
         node_report = runtime if runtime is not None else read_only_docker_inspect(runner=runner)
         image, data_dir = check_runtime(node_report, node_dir=node)
         result["DOCKER_NODE"] = "RUNNING_REVIEWED_IMAGE"
+        result["PERSISTENT_DATA"] = "LOCAL_NAMED_VOLUME_CONFIRMED"
         result["IMAGE_REFERENCE_CLASS"] = (
             "LOCAL_TAG_UNATTESTED" if image == "smite-node:stage15-local"
             else "REVIEWED_DIGEST_UNATTESTED"
@@ -225,11 +241,17 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
 def main() -> int:
     p = argparse.ArgumentParser(description="Backhaul host preflight READ ONLY; never authorizes installation")
     p.add_argument("--node-dir", type=Path, default=Path("/opt/smite-node"))
+    p.add_argument("--format", choices=("text", "json"), default="text")
     args = p.parse_args()
     report = audit(args.node_dir)
-    for key, value in report.items():
-        print(f"{key}={value}")
-    print("BACKHAUL_ACTIVATION_GATE=HOLD")
+    report["BACKHAUL_ACTIVATION_GATE"] = "HOLD"
+    if args.format == "json":
+        # Explicit, bounded, secret-free report. No raw Docker inspect,
+        # .env, tunnel specifications, credentials or filesystem paths.
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    else:
+        for key, value in report.items():
+            print(f"{key}={value}")
     # Never make this look like an install-capable PASS.
     return 2
 
