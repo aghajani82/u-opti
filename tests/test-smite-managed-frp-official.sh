@@ -16,6 +16,7 @@ lab="$(mktemp -d "$RUNNER_TEMP/uopti-official-frp-XXXXXXXX")"
 chmod 0700 "$lab"
 trap 'rm -rf -- "$lab"' EXIT
 mkdir -m 0700 "$lab/node" "$lab/node/config" "$lab/stages"
+printf 'U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n' > "$lab/EXPERIMENTAL-LAB"
 cat > "$lab/node/.env" <<'EOF_ENV'
 NODE_ROLE=foreign
 SMITE_AGENT_AUTH_MODE=strict
@@ -62,4 +63,45 @@ assert "PORT_OR_TUNNEL_INPUT=NOT_REQUIRED" in (stage / "summary.txt").read_text(
 print("OFFICIAL_FRP_ARCHIVE_SHA256=PASS")
 print("OFFICIAL_FRPC_FRPS_ELF_PAIR=PASS")
 print("FRP_ONLY_NO_BACKHAUL_PORT_OR_HOST_MUTATION=PASS")
+PY
+# Real pinned artifact + private PR CI filesystem transaction; the lab
+# never runs a service, publishes ports or invokes Docker on a VPS.
+python3 -B - "$PWD" "$lab" "$arch" <<'PY'
+import importlib.util
+import json
+from pathlib import Path
+import sys
+repo, labroot, arch = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+spec = importlib.util.spec_from_file_location(
+    "frp_official_transaction_trial", repo / "modules/smite-managed-frp-transaction.py")
+tx = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tx)
+candidate = sorted((labroot / "stages").glob("frp-plan-*"))
+assert len(candidate) == 1
+stage = candidate[0]
+compose = (labroot / "node/docker-compose.yml").read_bytes()
+with tx.lock(labroot):
+    tx.activate(labroot, stage)
+    client = labroot / "installed/frp/frpc"
+    server = labroot / "installed/frp/frps"
+    assert client.is_file() and server.is_file()
+    data = json.loads((labroot / "node/config/engine-state/engines.json").read_text())
+    assert "frp" in data["engines"] and "backhaul" not in data["engines"]
+    tx.rollback(labroot)
+assert not (labroot / "installed/frp").exists()
+assert not (labroot / "frp-recovery-journal").exists()
+assert (labroot / "node/docker-compose.yml").read_bytes() == compose
+assert not (labroot / "node/config/engine-state/engines.json").exists()
+with tx.lock(labroot):
+    try:
+        tx.activate(labroot, stage, inject="after-frpc")
+    except tx.Hold as exc:
+        assert str(exc) == "INJECTED_INTERRUPTION"
+    else:
+        raise AssertionError("missing expected fail-closed injection")
+    tx.rollback(labroot)
+assert (labroot / "node/docker-compose.yml").read_bytes() == compose
+assert not (labroot / "installed/frp").exists()
+print("OFFICIAL_FRP_DUAL_BINARY_TRANSACTION_AND_RECOVERY=PASS")
+print("OFFICIAL_FRP_FAILURE_AFTER_FIRST_BINARY_RECOVERED=PASS")
 PY
