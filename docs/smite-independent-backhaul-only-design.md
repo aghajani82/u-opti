@@ -158,6 +158,36 @@ during installation.
   datapath, tunnel throughput/latency, and a real-server crash recovery
   drill. No host activation or U-OPTI Stable/main merge is authorized.
 
+## New milestone: simple U-OPTI Engines menu and isolated installation controller
+
+- `U-OPTI > Docker Management > Smite Management > Independent Engines
+  (Backhaul review)` is now separate from **Advanced & Legacy Tools**.
+  The visible operator flow is concise: Backhaul Status, Review, Install.
+  The **host Install button remains HOLD**, with a clear explanation.
+  Existing legacy FRP/Backhaul menus keep their original option numbers.
+- `modules/smite-managed-backhaul-control.py` provides read-only local
+  `status` and `review`, checks the strict managed Smite Core and its
+  configuration, and does **not** infer Ready from bundled executables.
+  States are `NOT_INSTALLED`, `UNAVAILABLE`, or
+  `ENROLLED_UNVERIFIED`; the last explicitly requires a signed Node
+  inventory request before anyone can claim `ready`.
+- The `install` and `rollback` actions are **available only to the
+  disposable GitHub pull-request lab**, never to live IR/KH. Both operations
+  use the existing manifest-verified transaction/rollback and an exclusive
+  transaction lock. Duplicate install, protected-file drift, unknown
+  Compose layout, untrusted candidates and attempts outside the CI lab
+  fail closed. Installation involves NO tunnel port, path, FRP control
+  connection, or repeated Smite Core deployment.
+- The installer and updater include the independent menu and controller
+  modules; CI checks both package manifests. A complete official
+  Backhaul v0.7.2 CI round now flows through the new controller and
+  separately validates Smite Node HMAC behavior before, during and after
+  the lab installation.
+- **Release gate:** A safe **real-host** transaction, signed post-restart
+  health verification, active tunnel preservation and robust rollback
+  following interrupted host Docker recreation have not been implemented
+  or approved. Host install remains disabled, with no changes to Stable.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
