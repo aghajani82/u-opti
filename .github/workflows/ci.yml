@@ -595,4 +595,6 @@ jobs:
           bash -n tests/test-smite-managed-backhaul-official.sh
           bash -n tests/test-smite-managed-backhaul-node-runtime.sh
           bash -n tests/test-smite-managed-backhaul-signed-api.sh
+          python3 -m py_compile tests/smite-managed-backhaul-compose-fixture.py tests/test-smite-managed-backhaul-compose-fixture.py
+          python3 -B tests/test-smite-managed-backhaul-compose-fixture.py -v
           bash tests/test-smite-managed-backhaul-official.sh
