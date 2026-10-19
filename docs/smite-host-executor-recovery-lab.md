@@ -71,8 +71,8 @@ Draft PR #40, on top of PR #39 (never `main`):
 - The disposable lab compares that overlay SHA and can consume the exact
   `engines.candidate.json` bytes from the actual pinned-archive stage,
   rejecting semantically altered or reserialized manifests.
-- An isolated FRP Stage→Plan→lab crash→journal recovery→lab commit test uses
-  *synthetic release archives* with temporarily injected fixture-only hash.
+- Isolated FRP Stage→Plan→lab crash→journal recovery→lab commit and
+  Backhaul Stage→Plan→lab commit tests use *synthetic release archives* with temporarily injected fixture-only hash.
   It never touches live Docker or the real upstream install directories.
 - Reusing a terminal `COMMITTED` or `ROLLED_BACK` journal now requires
   the prior file modes/hashes and simulated signed/replay status to match;
