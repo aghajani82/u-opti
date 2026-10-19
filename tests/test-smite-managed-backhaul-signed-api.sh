@@ -136,7 +136,7 @@ if os.environ.get("SMITE_CI_COMPOSE_RECREATE")=="1":
 print("NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS")
 ' "$lab" "$phase" "$smite"
 for attempt in $(seq 1 16); do
-  if sudo docker exec "$name" python -c     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/', timeout=2)" \
+  if sudo docker exec "$name" python -c     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz', timeout=2)" \
     >/dev/null 2>&1; then
     break
   fi
@@ -232,6 +232,21 @@ assert json.loads(content)["active_tunnels"] == 0
 print("SIGNED_API_BACKHAUL_" + phase.upper() + "_" + mode.upper() + "=PASS")
 PY_PROBE
 }
+assert_docker_health() {
+  if [[ "$compose_mode" != 1 ]]; then return 0; fi
+  local status
+  for attempt in $(seq 1 25); do
+    status="$(sudo docker inspect -f '{{.State.Health.Status}}' "$name")"
+    if [[ "$status" == healthy ]]; then
+      echo "STRICT_NODE_DOCKER_HEALTHY_${phase^^}=PASS"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "FAIL: strict-mode local Docker health never became healthy" >&2
+  return 1
+}
+assert_docker_health
 probe initial
 if [[ "$compose_mode" == 1 ]]; then
   sudo docker compose -p "$project" -f "$compose_file" up -d --no-build --force-recreate --no-deps smite-node >/dev/null
@@ -240,7 +255,7 @@ else
 fi
 for attempt in $(seq 1 16); do
   if sudo docker exec "$name" python -c \
-    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/', timeout=2)" \
+    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz', timeout=2)" \
     >/dev/null 2>&1; then
     break
   fi
@@ -251,6 +266,7 @@ for attempt in $(seq 1 16); do
   fi
   sleep 1
 done
+assert_docker_health
 probe after-restart
 echo "SIGNED_NODE_API_${phase^^}_RESTART=PASS"
 if [[ "$compose_mode" == 1 ]]; then
