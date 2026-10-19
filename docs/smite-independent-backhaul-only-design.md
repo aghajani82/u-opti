@@ -188,6 +188,39 @@ during installation.
   following interrupted host Docker recreation have not been implemented
   or approved. Host install remains disabled, with no changes to Stable.
 
+## New milestone: conservative real-host admission (READ ONLY)
+
+- The beginner-friendly `Review` option now runs a separate host
+  safety audit, `modules/smite-managed-backhaul-host-gate.py`, in
+  addition to the managed-Core installation review. This module
+  **cannot install Backhaul**; it never contacts the Panel, checks or
+  changes firewall/Nginx, starts any service, or writes any file.
+- It reads local root-owned Smite Core `.env` and Compose without
+  printing their contents, and performs exactly one optional
+  `docker inspect --type=container smite-node` (read-only). It
+  requires the managed strict Core, expected IR/KH role, running Node
+  on the exact config mount, reviewed image reference, host-mode
+  Compose without Docker port mappings, and minimum free disk.
+- The audit examines the **count only** of persisted tunnel specs in
+  the trusted durable Node data bind mount. If any existing saved
+  tunnel is found, the plan is `HOLD_EXISTING_TUNNELS`; it must not
+  interrupt working FRP/Backhaul/GOST configurations. Corrupt,
+  symlinked or oversized state also holds. No tokens, tunnel specs,
+  signed secrets or Docker environment variables enter the report.
+- Passing local probes is labeled `PASS_LOCAL_ONLY_INCOMPLETE`,
+  **never permission to deploy**. Cloud snapshot existence and a
+  tested restore, console access, publicly exposed port assessment,
+  443/Nginx TLS/HMAC routing, Panel/Node pairing, replay-state
+  preservation, signed inventory after recreation and tunnel
+  continuity after reboot remain `UNVERIFIED`. The tool always
+  prints `HOST_INSTALL_AUTHORIZED=NO`,
+  `BACKHAUL_ACTIVATION_GATE=HOLD` and exits nonzero.
+- GitHub CI regression tests use fake Docker-inspect data to prove
+  healthy baseline, wrong image/mount/network, unexpected ports,
+  active saved tunnels, unsafe file types, low disk and disclosure
+  resistance. The independent installer is still disabled in U-OPTI;
+  this is a review-only gate for an operator-controlled future trial.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
