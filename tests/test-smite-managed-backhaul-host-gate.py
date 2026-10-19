@@ -24,6 +24,11 @@ COMPOSE = """services:
     network_mode: host
     volumes:
       - ./config:/etc/smite-node
+      - node-data:/var/lib/smite-node
+
+volumes:
+  node-data:
+    name: smite-node-data
 """
 ENV = """NODE_ROLE=foreign
 SMITE_NODE_PANEL_AUTH_MODE=signed
@@ -52,7 +57,8 @@ class ReadOnlyGate(unittest.TestCase):
             "HostConfig": {"NetworkMode": "host", "PortBindings": {}},
             "Mounts": [
                 {"Type": "bind", "Destination": "/etc/smite-node", "Source": str(self.cfg)},
-                {"Type": "bind", "Destination": "/var/lib/smite-node", "Source": str(self.data)},
+                {"Type": "volume", "Name": "smite-node-data", "Driver": "local",
+                 "Destination": "/var/lib/smite-node", "Source": str(self.data)},
             ],
         }
         real = gate._local_file
@@ -71,6 +77,7 @@ class ReadOnlyGate(unittest.TestCase):
         self.assertEqual(status["NODE_ROLE"], "KH")
         self.assertEqual(status["LOCAL_CORE"], "MANAGED_STRICT")
         self.assertEqual(status["DOCKER_NODE"], "RUNNING_REVIEWED_IMAGE")
+        self.assertEqual(status["PERSISTENT_DATA"], "LOCAL_NAMED_VOLUME_CONFIRMED")
         self.assertEqual(status["PERSISTED_TUNNELS"], "ZERO")
         self.assertEqual(status["DISK_SPACE"], "MINIMUM_AVAILABLE")
         self.assertEqual(status["HOST_PREFLIGHT"], "PASS_LOCAL_ONLY_INCOMPLETE")
@@ -96,6 +103,35 @@ class ReadOnlyGate(unittest.TestCase):
         self.runtime["Mounts"][0]["Source"] = str(self.cfg)
         self.runtime["HostConfig"]["PortBindings"] = {"8888/tcp": [{"HostPort": "8888"}]}
         self.assertEqual(self.report()["HOLD_REASON"], "PUBLISHED_DOCKER_PORTS")
+
+    def test_named_volume_mismatch_and_duplicate_mounts_fail_closed(self):
+        data = self.runtime["Mounts"][1]
+        data["Name"] = "unrelated-data-volume"
+        self.assertEqual(self.report()["HOLD_REASON"], "WRONG_NODE_NAMED_VOLUME")
+        data["Name"] = "smite-node-data"
+        data["Type"] = "bind"
+        self.assertEqual(self.report()["HOLD_REASON"], "WRONG_NODE_NAMED_VOLUME")
+        data["Type"] = "volume"
+        data["Driver"] = "local"
+        self.runtime["Mounts"].append(dict(data))
+        self.assertEqual(self.report()["HOLD_REASON"], "DUPLICATE_PERSISTENT_MOUNT")
+        self.runtime["Mounts"].pop()
+
+    def test_actual_compose_must_declare_named_volume(self):
+        (self.node / "docker-compose.yml").write_text(
+            COMPOSE.replace("      - node-data:/var/lib/smite-node\\n", "")
+        )
+        self.assertEqual(self.report()["HOLD_REASON"], "UNTRUSTED_NODE_COMPOSE")
+
+    def test_json_report_redacts_every_sensitive_source(self):
+        with patch.object(gate, "read_only_docker_inspect", return_value=self.runtime):
+            report = self.report()
+        blob = json.dumps(report)
+        self.assertNotIn("DONT_PRINT", blob)
+        self.assertNotIn(str(self.data), blob)
+        self.assertNotIn(str(self.cfg), blob)
+        self.assertNotIn("TOKEN", blob)
+        self.assertEqual(report["HOST_INSTALL_AUTHORIZED"], "NO")
 
     def test_not_running_unreviewed_image_and_bridge_mode_held(self):
         self.runtime["State"]["Running"] = False
