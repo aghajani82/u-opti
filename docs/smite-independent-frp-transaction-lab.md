@@ -52,6 +52,40 @@ These drills execute **no FRP process**, publish no 443 route, run no
 Docker, and verify no tunnels. They are not runtime HMAC, live 443, VPS
 snapshot or operational rollback approvals.
 
+## New CI milestone: signed dual-binary FRP inside isolated Compose
+
+- Added a dedicated `managed-frp-signed-compose` GitHub PR job on Linux
+  AMD64. It checks out the reviewed Smite Node SHA alongside U-OPTI,
+  validates the **official** FRP v0.71.0 archive and both role binaries,
+  then uses the same strict Node HMAC/replay integration previously
+  accepted for Backhaul.
+- The original reviewed Smite Node Compose is **parsed and audited but
+  never started in host-network mode**. A separate private one-service
+  Compose carries only allowlisted config/data, reviewed Node app code
+  and both **read-only** FRP binary mounts; it uses `network_mode:none`,
+  read-only container root, `cap_drop:ALL`, no host ports and a fixed
+  image digest.
+- Before enrollment the signed inventory must report FRP
+  `not-installed`. After installing **both** files with the PR-only
+  filesystem transaction it must report `ready` after real
+  `docker compose up --force-recreate`. After exact rollback the
+  signed inventory must return to `not-installed` and replay of an
+  old HMAC nonce must still fail. In each phase, any absent Backhaul
+  Apply must be rejected; **no positive FRP Apply or tunnel launch** is
+  attempted.
+- The trial also injects failure immediately after **frpc** is staged,
+  requires journal recovery of that half-installed pair, and then
+  verifies signed Node `not-installed` again.
+- Only AMD64 is a real Node Docker runtime trial on the available
+  runner. ARM64 receives official-release hash, ELF and staged-pair
+  checks, **not** a claimed ARM64 Node runtime test.
+- The existing Backhaul integration shares this HMAC/Compose test
+  helper but retains its own default engine, output markers and
+  explicit single-binary gate; tests reject cross-engine mount
+  smuggling.
+- **Acceptance remains pending actual GitHub CI completion.**
+  These trials are not host install approval or live TLS 443 evidence.
+
 ## Still required before a single clean VPS Rebuild
 
 - All CI checks green for both draft branches on matching pinned commits
