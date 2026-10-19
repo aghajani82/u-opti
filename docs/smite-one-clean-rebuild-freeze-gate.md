@@ -12,7 +12,7 @@ No background rebuild, forced migration or silent Stable/main merge.
 | --- | --- | --- |
 | Smite Node strict Agent HMAC, replay persistence, signed Panel/Node pairing | Fail-closed unsigned/stale/replayed requests; no legacy silent fallback | PR CI proofs exist; physical IR/KH untested |
 | Strict-mode Docker health | Loopback-only `/healthz` works after Node initialization, while `/api/agent/*` still requires HMAC | Smite experimental branch fixed; cross-repo CI still needs final green |
-| Simplicity and account security | Finish reviewed UI/login security and operator-required two-step code before freezing | Not claimed finished |
+| Simplicity and account security | Reviewed simple operator UI, optional TOTP enrollment/recovery, server-side logout with all-device JWT revocation | Smite CI passed on reviewed branch; live login/recovery drill and release approval still pending |
 | Clean Smite Core | Install Panel IR and Node KH with no FRP/Backhaul initially; no default tunnel ports | Clean-RC in PR, not deployed |
 | Independent engine installer | Backhaul **and** FRP can each install independently; no automatic dependency, no static Xray inbound at engine install | Backhaul PR sandbox validated; production button intentionally HOLD; FRP independent installer not yet accepted |
 | Rollback and coexistence | Preserve identity, replay DB, data volume and active tunnels; never overwrite live FRP or other engines; restore cleanly if Node recreation fails | Docker Compose isolated rehearsals only, no host recovery approval |
