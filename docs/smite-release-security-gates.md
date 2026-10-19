@@ -36,6 +36,22 @@ CI evidence:
 - Smite: [same-SHA offline paired-image and first-boot gate](https://github.com/aghajani82/Smite/actions/runs/39209973222)
 - U-OPTI: [9-job offline integration](https://github.com/aghajani82/u-opti/actions/runs/39210581333)
 
+## Operator MFA (two-factor) safety
+
+Smite's reviewed Panel source `708b4ae6806a35bbd9ccbca163ca0909b41ffa7c` also adds a **local QR**
+to the existing password-confirmed 2FA setup (without a third-party
+image service). First login stays username + password, then the admin
+can opt in from Settings; subsequent logins need a TOTP or one-time
+recovery code. The code field is always visible but optional until
+MFA has been enabled. Input mistakes on setup/disable must not log
+the administrator out. Backend real-MFA integration and frontend
+client regression jobs are release gates.
+
+Before live deployment, confirm safe restoration of the actual
+Panel `SECRET_KEY`/encrypted MFA keys and database, backup of offline
+recovery codes and failure handling. See Smite
+`docs/operator-two-factor-guide-fa.md`. **No live MFA was enabled.**
+
 ## Release blockers (must fail closed until all are checked)
 
 1. **Image provenance and supply chain.** The current Docker-save
