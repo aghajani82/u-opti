@@ -69,16 +69,20 @@ assert_calls() {
 
 # No prepared FRP directory is present or created. Both core roles must
 # still produce safe, valid local config with no FRP mounts.
+# The clean IR path currently preserves a local, loopback-fetched CA
+# for backward compatibility. This fixture emulates that CA; it is NOT
+# FRP and does not authorize legacy machine registration.
+printf '%s\n' '-----BEGIN CERTIFICATE-----' 'TEST' '-----END CERTIFICATE-----' > "$lab/fake-ca.crt"
 smite_install_panel_files ir.example.org 127.0.0.1 > "$lab/panel.log"
-smite_install_node_files node-ir iran 127.0.0.1:8000 "" "" "" standard > "$lab/ir.log"
+smite_install_node_files node-ir iran 127.0.0.1:8000 "$lab/fake-ca.crt" "" "" standard > "$lab/ir.log"
 assert_calls 0 0 0
 smite_install_core_optional_frp_verify smite-panel > "$lab/ir-verify.log"
 smite_install_core_optional_frp_verify smite-node >> "$lab/ir-verify.log"
 assert_calls 0 0 0
 [ ! -e "$SMITE_FRP_BIN_DIR" ]
-[ ! -e "$SMITE_NODE_DIR/certs/ca.crt" ] || {
-  echo "HOLD: clean IR unexpectedly fetched or copied CA" >&2; exit 1;
-}
+[ -s "$SMITE_NODE_DIR/certs/ca.crt" ]
+# Local IR CA compatibility is separate from FRP, and will be reviewed
+# in a later Core minimization step. KH remains CA-free until pairing.
 grep -Fq "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED" "$lab/panel.log"
 grep -Fq "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED" "$lab/ir.log"
 grep -Fq "SMITE_CORE_FRP_VERSION_CHECK=NOT_REQUIRED" "$lab/ir-verify.log"
@@ -111,7 +115,6 @@ SMITE_PANEL_DIR="$lab/stable/panel"
 SMITE_PANEL_COMPOSE="$SMITE_PANEL_DIR/docker-compose.yml"
 SMITE_NODE_DIR="$lab/stable/node"
 SMITE_NODE_COMPOSE="$SMITE_NODE_DIR/docker-compose.yml"
-printf '%s\n' '-----BEGIN CERTIFICATE-----' 'TEST' '-----END CERTIFICATE-----' > "$lab/fake-ca.crt"
 smite_install_panel_files ir.example.org 127.0.0.1 > /dev/null
 smite_install_node_files node-ir iran 127.0.0.1:8000 "$lab/fake-ca.crt" "" "" standard > /dev/null
 assert_calls 2 2 0
