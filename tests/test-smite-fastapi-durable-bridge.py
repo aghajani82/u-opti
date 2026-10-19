@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -168,6 +169,46 @@ class RealFastAPIWithTestClient(unittest.TestCase):
         self.assertEqual(self.identity.read_bytes(), original_identity)
         self.assertEqual(self.verifier().check(ENGINES_ZERO)["ACTIVATION_GATE"], "HOLD")
 
+    def test_replay_is_rejected_by_independent_python_process(self):
+        # A completely new Python interpreter imports the reviewed Node
+        # routes and opens the SAME persistent, private SQLite replay DB.
+        signature = self.sign(nonce="d" * 32)
+        self.assertEqual(
+            self.client.get("/api/agent/status", headers=signature).status_code, 200)
+        script = """
+import json, sys
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+sys.path.insert(0, sys.argv[1])
+from app.config import settings
+from app.routers.agent import router
+from app import node_auth
+settings.smite_agent_auth_mode = "strict"
+settings.smite_agent_identity_path = sys.argv[2]
+settings.smite_agent_replay_db = sys.argv[3]
+settings.smite_engine_inventory_mode = "managed"
+settings.smite_engine_manifest_path = sys.argv[4]
+app = FastAPI()
+app.state.adapter_manager = type("Empty", (), {"active_tunnels": {}})()
+app.include_router(router, prefix="/api/agent")
+with TestClient(app, base_url="https://node-kh.example.test:443") as client:
+    reused = client.get("/api/agent/status", headers=json.loads(sys.argv[5]))
+    fresh = node_auth.sign_request(
+        secret=b"b" * 64, node_id="bbbbbbbb-1111-2222-3333-444444444444",
+        method="GET", target="/api/agent/status", body=b"")
+    accepted = client.get("/api/agent/status", headers=fresh)
+print(json.dumps({"reused": reused.status_code, "new": accepted.status_code}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script, str(SMITE / "node"),
+             str(self.identity), str(self.replay), str(self.manifest),
+             json.dumps(signature)],
+            capture_output=True, text=True, timeout=20, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout.strip()),
+                         {"reused": 401, "new": 200})
+        self.assertEqual(stat.S_IMODE(self.replay.stat().st_mode), 0o600)
+
     def test_inventory_real_endpoint_managed_state_digest_and_role(self):
         self.enroll_backhaul()
         before = self.verifier().check(ENGINES_BH)
@@ -181,8 +222,13 @@ class RealFastAPIWithTestClient(unittest.TestCase):
             dict(ENGINES_BH, backhaul="unavailable"))["ACTIVATION_GATE"], "HOLD")
 
     def test_missing_frps_prevents_forged_ready_frp(self):
+        # A valid, executable frpc fixture alone is never sufficient for FRP.
+        frpc = self.work / "not-installed-frp"
+        frpc.write_bytes(b"FRPC-CI-VALID-WITHOUT-FRPS")
+        frpc.chmod(0o755)
         self.manifest.write_text(json.dumps({"schema": 1, "engines": {
-            "frp": {"sha256": "f" * 64, "server_sha256": "e" * 64}
+            "frp": {"sha256": hashlib.sha256(frpc.read_bytes()).hexdigest(),
+                    "server_sha256": "e" * 64}
         }}))
         self.manifest.chmod(0o600)
         with self.assertRaisesRegex(probe.Hold, "SIGNED_ENGINE_INVENTORY_MISMATCH"):
