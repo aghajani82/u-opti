@@ -80,8 +80,12 @@ jobs:
           grep -Fq '["smite-managed-backhaul-menu.sh"]' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-host-gate.py tests/test-smite-managed-backhaul-host-gate.py
           python3 -B tests/test-smite-managed-backhaul-host-gate.py -v
+          python3 -m py_compile modules/smite-managed-backhaul-pair-review.py tests/test-smite-managed-backhaul-pair-review.py
+          python3 -B tests/test-smite-managed-backhaul-pair-review.py -v
           grep -Fq '"smite-managed-backhaul-host-gate.py"' install.sh
           grep -Fq '["smite-managed-backhaul-host-gate.py"]' u-opti
+          grep -Fq '"smite-managed-backhaul-pair-review.py"' install.sh
+          grep -Fq '["smite-managed-backhaul-pair-review.py"]' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle-official.py
           python3 -B tests/test-smite-managed-backhaul-lifecycle.py -v
           grep -Fq '"smite-managed-backhaul-lifecycle.py"' install.sh
