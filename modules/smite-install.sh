@@ -509,6 +509,18 @@ DB_PATH=./data/smite.db
 
 SECRET_KEY=$secret_key
 EOF_ENV
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Secure from first boot. Never expose the legacy anonymous
+        # POST /api/nodes machine registration API during IR setup.
+        # The signed endpoints remain 503 until separately migrated,
+        # provisioned and authorized; no implicit downgrade is allowed.
+        cat >> "$SMITE_PANEL_DIR/.env" <<'EOF_RC_PANEL_AUTH'
+SMITE_NODE_REGISTRATION_MODE=signed
+SMITE_PANEL_AGENT_AUTH_MODE=signed
+SMITE_NODE_PAIRING_PREVIEW_ENABLED=false
+EOF_RC_PANEL_AUTH
+        echo "PANEL_RC_LEGACY_MACHINE_REGISTRATION=DISABLED"
+    fi
     chmod 0600 "$SMITE_PANEL_DIR/.env" || return 1
 
     docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
@@ -580,10 +592,16 @@ smite_install_node_files() {
         return 1
     fi
 
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Both local IR and remote KH Nodes must start paused + strict:
+        # even the first IR Node must NOT post unsigned registration.
+        smite_install_clean_rc_pause_foreign_compose "$SMITE_NODE_COMPOSE" || return 1
+        echo "NODE_RC_REGISTRATION=PAUSED_UNTIL_SIGNED_PAIRING"
+    fi
+
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && [ "$node_role" = foreign ]; then
         # Signed mode uses the system TLS trust store, not legacy Panel CA.
         # No unauthenticated CA download or unpaired registration on KH.
-        smite_install_clean_rc_pause_foreign_compose "$SMITE_NODE_COMPOSE" || return 1
         echo "FOREIGN_RC_CA_DOWNLOAD=DEFERRED_UNTIL_SECURE_ADMISSION"
     else
         if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
@@ -603,14 +621,17 @@ PANEL_ADDRESS=$panel_address
 PANEL_API_PORT=8000
 EOF_ENV
 
-    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && [ "$node_role" = foreign ]; then
-        # The runtime enforces these modes. Their absence must NOT silently
-        # downgrade a public Foreign Node to HTTP/8000 registration.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Both roles fail closed: no unsigned HTTP/8000 registration or
+        # unauthenticated Agent commands before admin-approved pairing.
         cat >> "$SMITE_NODE_DIR/.env" <<'EOF_RC_AUTH'
 SMITE_NODE_PANEL_AUTH_MODE=paused
 SMITE_AGENT_AUTH_MODE=strict
 EOF_RC_AUTH
-        echo "FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+        echo "NODE_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+        if [ "$node_role" = foreign ]; then
+            echo "FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+        fi
     fi
 
     if [ -n "$control_address" ]; then
@@ -960,7 +981,10 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_wait_node_registration_local "$node_name"; then
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL"
+        echo "IR_RC_LEGACY_REGISTRATION_WAIT=SKIPPED"
+    elif ! smite_wait_node_registration_local "$node_name"; then
         echo "ERROR: The Iran node did not register with the local panel."
         echo "Check: docker logs smite-node"
         smite_install_pause
@@ -974,16 +998,21 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_wait_node_registration_local "$node_name"; then
-        echo "ERROR: Node registration was not restored after compatibility activation."
-        smite_install_pause
-        return
-    fi
-
-    if smite_set_local_control_address "$node_name"; then
-        echo "Panel control address set to local node API (127.0.0.1:8888)."
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # A not-yet-registered Node has no approved row to update.
+        # Never write a guessed control address or fake Connected status.
+        echo "IR_RC_CONTROL_ORIGIN=DEFERRED_UNTIL_SECURE_PAIRING"
     else
-        echo "WARNING: Could not set the local panel control address automatically."
+        if ! smite_wait_node_registration_local "$node_name"; then
+            echo "ERROR: Node registration was not restored after compatibility activation."
+            smite_install_pause
+            return
+        fi
+        if smite_set_local_control_address "$node_name"; then
+            echo "Panel control address set to local node API (127.0.0.1:8888)."
+        else
+            echo "WARNING: Could not set the local panel control address automatically."
+        fi
     fi
 
     smite_write_state \
