@@ -12,6 +12,101 @@ SMITE_PANEL_DIGEST="sha256:67f98cba1f49658e651779ab6142290f7eb0906b54b386939fcdb
 SMITE_NODE_DIGEST="sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 SMITE_PANEL_IMAGE="${SMITE_PANEL_REPO}@${SMITE_PANEL_DIGEST}"
 SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
+
+# Clean reinstall profile is an EXPLICIT disposable-server experiment.
+# Stable installed U-OPTI keeps using the historically validated v0.1.7
+# images; the new Panel/Node artifact pair is never selected implicitly.
+SMITE_INSTALL_PROFILE="${SMITE_INSTALL_PROFILE:-stable}"
+
+smite_install_clean_rc_preflight() {
+    local role="$1" mode="$2" helper_dir pair_result
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || {
+        echo "HOLD: Unexpected fresh Smite profile" >&2
+        return 1
+    }
+    if [ "$role" != panel-iran ] && [ "$role" != foreign ]; then
+        echo "HOLD: Unknown fresh-install server role" >&2
+        return 1
+    fi
+    if [ "$mode" != standard ]; then
+        echo "HOLD: Clean RC currently supports Standard mode only" >&2
+        return 1
+    fi
+    # Never migrate old configurations, databases, tunnels or containers.
+    if [ -e "$SMITE_STATE_FILE" ] || [ -L "$SMITE_STATE_FILE" ] ||
+       [ -e "$SMITE_PANEL_COMPOSE" ] || [ -L "$SMITE_PANEL_COMPOSE" ] ||
+       [ -e "$SMITE_NODE_COMPOSE" ] || [ -L "$SMITE_NODE_COMPOSE" ] ||
+       [ -e "$SMITE_OVERLAY_DIR/panel/main.py" ] ||
+       [ -e "$SMITE_OVERLAY_DIR/node/panel_client.py" ] ||
+       smite_container_exists smite-panel || smite_container_exists smite-node; then
+        echo "HOLD: Existing Smite installation detected. Clean RC is not an upgrader." >&2
+        return 1
+    fi
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
+       [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
+       [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
+        echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
+        return 1
+    fi
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    pair_result="$(python3 -B "$helper_dir/smite-clean-image-pair.py" \
+        --folder "$SMITE_RC_BUNDLE_DIR" \
+        --source-sha "$SMITE_RC_SOURCE_SHA" \
+        --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256")" || return 1
+    printf '%s\n' "$pair_result"
+    echo "RC_IMAGE_PROVENANCE=NOT_ATTESTED"
+    echo "RC_SIGNED_AUTH=NOT_ACTIVE"
+    # docker save archives carry exactly these two local preview tags.
+    # Loading is a separate explicit step after local source preflight.
+    SMITE_PANEL_IMAGE="smite-panel:stage15-local"
+    SMITE_NODE_IMAGE="smite-node:stage15-local"
+    # The v0.1.7 upstream Compose is used as a known layout template;
+    # the application binaries are ONLY the paired offline RC images.
+    SMITE_UPSTREAM_VERSION="2.0.0-rc.0"
+    return 0
+}
+
+smite_install_clean_rc_load_images() {
+    local role="$1" expected_panel expected_node loaded_panel loaded_node
+    local verifier_dir
+    verifier_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    # Recheck bytes at time of loading, not only at UI confirmation.
+    python3 -B "$verifier_dir/smite-clean-image-pair.py" \
+        --folder "$SMITE_RC_BUNDLE_DIR" \
+        --source-sha "$SMITE_RC_SOURCE_SHA" \
+        --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256" >/dev/null || return 1
+    read -r expected_panel expected_node < <(
+        python3 - "$SMITE_RC_BUNDLE_DIR" <<'PY_RC_IDS'
+import json, pathlib, sys
+data=json.loads((pathlib.Path(sys.argv[1]) / "stage15-images.json").read_text())
+print(data["images"]["panel"]["local_image_id"], data["images"]["node"]["local_image_id"])
+PY_RC_IDS
+    )
+    [ -n "$expected_panel" ] && [ -n "$expected_node" ] || return 1
+    if [ "$role" = panel-iran ]; then
+        ( set -o pipefail
+          gzip -cd "$SMITE_RC_BUNDLE_DIR/smite-panel-stage15.docker.tar.gz" |
+              docker load >/dev/null
+        ) || return 1
+        loaded_panel="$(docker image inspect "$SMITE_PANEL_IMAGE" --format '{{.Id}}' 2>/dev/null)" || return 1
+        if [ "$loaded_panel" != "$expected_panel" ]; then
+            echo "HOLD: Loaded Panel image ID differs from verified archive" >&2
+            return 1
+        fi
+    fi
+    ( set -o pipefail
+      gzip -cd "$SMITE_RC_BUNDLE_DIR/smite-node-stage15.docker.tar.gz" |
+          docker load >/dev/null
+    ) || return 1
+    loaded_node="$(docker image inspect "$SMITE_NODE_IMAGE" --format '{{.Id}}' 2>/dev/null)" || return 1
+    if [ "$loaded_node" != "$expected_node" ]; then
+        echo "HOLD: Loaded Node image ID differs from verified archive" >&2
+        return 1
+    fi
+    echo "CLEAN_RC_IMAGES=LOCAL_IDS_MATCH_VERIFIED_ARCHIVES"
+    echo "CLEAN_RC_PRODUCTION_ACTIVATION=NOT_AUTHORIZED"
+    return 0
+}
 SMITE_STATE_DIR="${SMITE_STATE_DIR:-/etc/u-opti/smite}"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
 
@@ -138,6 +233,40 @@ if new_mounts:
     compose.write_text(before + anchor + block + "".join(lines[end:]))
 print(f"Smite FRP read-only mounts ready: {service}")
 PY
+}
+
+# Core installation must not install an engine the operator did not select.
+# Legacy/stable retains exactly the old pinned FRP workflow.
+# Clean RC is only for disposable hosts and starts with NO host FRP files.
+smite_install_core_optional_frp_prepare() {
+    local compose_file="$1" service="$2"
+    case "$SMITE_INSTALL_PROFILE" in
+        stable)
+            smite_frp_prepare_binaries || return 1
+            smite_frp_mount_compose "$compose_file" "$service" || return 1
+            ;;
+        clean-rc)
+            echo "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED"
+            ;;
+        *)
+            echo "HOLD: Unknown Smite install profile for core engine setup" >&2
+            return 1
+            ;;
+    esac
+}
+
+smite_install_core_optional_frp_verify() {
+    local container="$1"
+    case "$SMITE_INSTALL_PROFILE" in
+        stable) smite_frp_verify_container "$container" ;;
+        clean-rc)
+            echo "SMITE_CORE_FRP_VERSION_CHECK=NOT_REQUIRED"
+            ;;
+        *)
+            echo "HOLD: Unknown Smite install profile for engine verification" >&2
+            return 1
+            ;;
+    esac
 }
 
 smite_frp_verify_container() {
@@ -395,8 +524,7 @@ smite_install_panel_files() {
         return 1
     fi
 
-    smite_frp_prepare_binaries || return 1
-    smite_frp_mount_compose "$SMITE_PANEL_COMPOSE" smite-panel || return 1
+    smite_install_core_optional_frp_prepare "$SMITE_PANEL_COMPOSE" smite-panel || return 1
 
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
 PANEL_PORT=8000
@@ -406,7 +534,7 @@ PANEL_DOMAIN=$panel_domain
 SMITE_HTTP_PORT=80
 SMITE_HTTPS_PORT=443
 SMITE_SSL_DOMAIN=$panel_domain
-DOCS_ENABLED=true
+DOCS_ENABLED=$([ "$SMITE_INSTALL_PROFILE" = clean-rc ] && echo false || echo true)
 SMITE_VERSION=$SMITE_UPSTREAM_VERSION
 
 DB_TYPE=sqlite
@@ -414,6 +542,19 @@ DB_PATH=./data/smite.db
 
 SECRET_KEY=$secret_key
 EOF_ENV
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Secure from first boot. Never expose the legacy anonymous
+        # POST /api/nodes machine registration API during IR setup.
+        # The signed endpoints remain 503 until separately migrated,
+        # provisioned and authorized; no implicit downgrade is allowed.
+        cat >> "$SMITE_PANEL_DIR/.env" <<'EOF_RC_PANEL_AUTH'
+SMITE_NODE_REGISTRATION_MODE=signed
+SMITE_PANEL_AGENT_AUTH_MODE=signed
+SMITE_NODE_PAIRING_PREVIEW_ENABLED=false
+SMITE_ENGINE_MANAGEMENT_MODE=managed
+EOF_RC_PANEL_AUTH
+        echo "PANEL_RC_LEGACY_MACHINE_REGISTRATION=DISABLED"
+    fi
     chmod 0600 "$SMITE_PANEL_DIR/.env" || return 1
 
     docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
@@ -422,6 +563,33 @@ EOF_ENV
     }
 
     return 0
+}
+
+
+# A fresh Foreign Node is intentionally started without any Panel
+# registration until per-Node HMAC identity + TLS/443 gateway are admitted.
+# This prevents legacy mode from silently using HTTP/8000 over the Internet.
+smite_install_clean_rc_pause_foreign_compose() {
+    local compose_file="$1"
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || return 1
+    python3 - "$compose_file" <<'PY_RC_PAUSE'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if path.is_symlink() or not path.is_file():
+    raise SystemExit("HOLD: Unsafe Foreign Compose path")
+text = path.read_text()
+if text.count("  smite-node:\n") != 1 or text.count("    healthcheck:\n") != 1:
+    raise SystemExit("HOLD: Unexpected Node Compose healthcheck layout")
+reviewed = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:${NODE_API_PORT:-8888}/healthz\')"]'
+if text.count(reviewed) != 1:
+    # Require the reviewed local-only health route in strict mode.
+    # Never replace unknown or old probes with superficial liveness.
+    raise SystemExit("HOLD: Reviewed local /healthz required for strict Node pairing")
+print("FOREIGN_RC_HEALTHCHECK=REVIEWED_LOCAL_HEALTHZ")
+print("FOREIGN_RC_AGENT_AUTH=STRICT_UNTIL_PAIRED")
+PY_RC_PAUSE
 }
 
 smite_install_node_files() {
@@ -445,8 +613,7 @@ smite_install_node_files() {
         return 1
     fi
 
-    smite_frp_prepare_binaries || return 1
-    smite_frp_mount_compose "$SMITE_NODE_COMPOSE" smite-node || return 1
+    smite_install_core_optional_frp_prepare "$SMITE_NODE_COMPOSE" smite-node || return 1
 
     if [ "$connection_mode" = standard ]; then
         python3 -B "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-node-local-bind.py" \
@@ -458,10 +625,23 @@ smite_install_node_files() {
         return 1
     fi
 
-    if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
-        cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Both local IR and remote KH Nodes must start paused + strict:
+        # even the first IR Node must NOT post unsigned registration.
+        smite_install_clean_rc_pause_foreign_compose "$SMITE_NODE_COMPOSE" || return 1
+        echo "NODE_RC_REGISTRATION=PAUSED_UNTIL_SIGNED_PAIRING"
     fi
-    chmod 0644 "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && [ "$node_role" = foreign ]; then
+        # Signed mode uses the system TLS trust store, not legacy Panel CA.
+        # No unauthenticated CA download or unpaired registration on KH.
+        echo "FOREIGN_RC_CA_DOWNLOAD=DEFERRED_UNTIL_SECURE_ADMISSION"
+    else
+        if [ "$ca_source" != "$SMITE_NODE_DIR/certs/ca.crt" ]; then
+            cp -f "$ca_source" "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+        fi
+        chmod 0644 "$SMITE_NODE_DIR/certs/ca.crt" || return 1
+    fi
 
     cat > "$SMITE_NODE_DIR/.env" <<EOF_ENV
 NODE_API_PORT=8888
@@ -473,6 +653,20 @@ PANEL_CA_PATH=/etc/smite-node/certs/ca.crt
 PANEL_ADDRESS=$panel_address
 PANEL_API_PORT=8000
 EOF_ENV
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # Both roles fail closed: no unsigned HTTP/8000 registration or
+        # unauthenticated Agent commands before admin-approved pairing.
+        cat >> "$SMITE_NODE_DIR/.env" <<'EOF_RC_AUTH'
+SMITE_NODE_PANEL_AUTH_MODE=paused
+SMITE_AGENT_AUTH_MODE=strict
+SMITE_ENGINE_INVENTORY_MODE=managed
+EOF_RC_AUTH
+        echo "NODE_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+        if [ "$node_role" = foreign ]; then
+            echo "FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
+        fi
+    fi
 
     if [ -n "$control_address" ]; then
         printf 'SMITE_CONTROL_ADDRESS=%s\n' "$control_address" >> "$SMITE_NODE_DIR/.env"
@@ -494,6 +688,16 @@ EOF_ENV
 
 smite_install_pull_images() {
     local need_panel="${1:-false}"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        local role=foreign
+        [ "$need_panel" = true ] && role=panel-iran
+        smite_install_clean_rc_load_images "$role"
+        return $?
+    fi
+    if [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite installation profile" >&2
+        return 1
+    fi
 
     if [ "$need_panel" = "true" ]; then
         echo "Pulling $SMITE_PANEL_IMAGE ..."
@@ -568,6 +772,15 @@ smite_recreate_with_overlays_noninteractive() {
 }
 
 smite_install_apply_compatibility() {
+    # New security image source already contains the validated FRP/Backhaul
+    # modules. Never graft v0.1.7 host Python patches onto clean RC images:
+    # that would mask new signed HMAC routers and might require a second
+    # container recreation. Existing stable v0.1.7 flow is unchanged.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "CLEAN_RC_LEGACY_HOST_OVERLAYS=SKIPPED"
+        echo "CLEAN_RC_SECOND_CONTAINER_RECREATE=SKIPPED"
+        return 0
+    fi
     echo
     echo "Preparing the tested U-OPTI Smite compatibility layer..."
     smite_prepare_overlays || return 1
@@ -581,7 +794,12 @@ smite_install_panel_iran() {
     echo "     Install Smite Panel + Iran"
     echo "======================================"
     echo
-    echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        echo "Not a production release; no live tunneling is configured here."
+    else
+        echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
+    fi
     echo "Panel API bind address depends on the selected connection mode."
     echo "The Iran node always bootstraps against the local panel endpoint."
     echo "TCP/443 gateway configuration is handled as a separate step."
@@ -620,12 +838,19 @@ smite_install_panel_iran() {
         return
     fi
 
-    echo
-    echo "Connection mode:"
-    echo "1) Standard / Local"
-    echo "2) Private Network"
-    echo
-    read -rp "Please enter your selection [1-2]: " connection_choice
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # The disposable clean profile has exactly one supported mode.
+        # Do not ask beginners to select an option that will be rejected.
+        connection_choice=1
+        echo "Connection mode: Standard (automatic for clean install)"
+    else
+        echo
+        echo "Connection mode:"
+        echo "1) Standard / Local"
+        echo "2) Private Network"
+        echo
+        read -rp "Please enter your selection [1-2]: " connection_choice
+    fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
@@ -674,13 +899,29 @@ smite_install_panel_iran() {
     if [ "$connection_mode" = "private" ]; then
         echo "Private IP   : $panel_private_ip"
     fi
-    echo "Smite version: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Smite profile: clean-rc (unpublished preview)"
+    else
+        echo "Smite version: $SMITE_UPSTREAM_VERSION"
+    fi
     echo
     read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
     case "$confirm" in
         y|Y|yes|YES) ;;
         *) echo "Installation cancelled."; sleep 1; return ;;
     esac
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_preflight "panel-iran" "$connection_mode"; then
+            echo "HOLD: Clean RC prerequisites not met; no service started."
+            smite_install_pause
+            return
+        fi
+    elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite install profile."
+        smite_install_pause
+        return
+    fi
 
     mkdir -p "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" || {
         echo "ERROR: Failed to create Smite directories."
@@ -718,7 +959,7 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-panel; then
+    if ! smite_install_core_optional_frp_verify smite-panel; then
         smite_install_pause
         return
     fi
@@ -769,12 +1010,15 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-node; then
+    if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
         return
     fi
 
-    if ! smite_wait_node_registration_local "$node_name"; then
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL"
+        echo "IR_RC_LEGACY_REGISTRATION_WAIT=SKIPPED"
+    elif ! smite_wait_node_registration_local "$node_name"; then
         echo "ERROR: The Iran node did not register with the local panel."
         echo "Check: docker logs smite-node"
         smite_install_pause
@@ -788,16 +1032,21 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_wait_node_registration_local "$node_name"; then
-        echo "ERROR: Node registration was not restored after compatibility activation."
-        smite_install_pause
-        return
-    fi
-
-    if smite_set_local_control_address "$node_name"; then
-        echo "Panel control address set to local node API (127.0.0.1:8888)."
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        # A not-yet-registered Node has no approved row to update.
+        # Never write a guessed control address or fake Connected status.
+        echo "IR_RC_CONTROL_ORIGIN=DEFERRED_UNTIL_SECURE_PAIRING"
     else
-        echo "WARNING: Could not set the local panel control address automatically."
+        if ! smite_wait_node_registration_local "$node_name"; then
+            echo "ERROR: Node registration was not restored after compatibility activation."
+            smite_install_pause
+            return
+        fi
+        if smite_set_local_control_address "$node_name"; then
+            echo "Panel control address set to local node API (127.0.0.1:8888)."
+        else
+            echo "WARNING: Could not set the local panel control address automatically."
+        fi
     fi
 
     smite_write_state \
@@ -826,7 +1075,11 @@ smite_install_panel_iran() {
     echo "Iran Node   : running on port 8888"
     echo "Panel Domain: $panel_domain"
     echo "Connection  : $connection_mode"
-    echo "Compatibility overlays: active"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Compatibility overlays: skipped (features are in RC images)"
+    else
+        echo "Compatibility overlays: active"
+    fi
     echo
     echo "IMPORTANT: TCP/443 gateway is not configured by this installer step yet."
     if [ "$connection_mode" = "private" ]; then
@@ -852,7 +1105,12 @@ smite_install_foreign_node() {
     echo "       Install Foreign Smite Node"
     echo "======================================"
     echo
-    echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        echo "Set the real 3x-UI inbound and tunnel only after both servers install."
+    else
+        echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
+    fi
     echo "Choose Standard HTTPS or Private Network transport."
     echo
 
@@ -899,12 +1157,17 @@ smite_install_foreign_node() {
         return
     fi
 
-    echo
-    echo "Connection mode:"
-    echo "1) Standard / HTTPS"
-    echo "2) Private Network"
-    echo
-    read -rp "Please enter your selection [1-2]: " connection_choice
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        connection_choice=1
+        echo "Connection mode: Standard / HTTPS (automatic for clean install)"
+    else
+        echo
+        echo "Connection mode:"
+        echo "1) Standard / HTTPS"
+        echo "2) Private Network"
+        echo
+        read -rp "Please enter your selection [1-2]: " connection_choice
+    fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
@@ -982,16 +1245,34 @@ smite_install_foreign_node() {
         *) echo "Installation cancelled."; sleep 1; return ;;
     esac
 
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_preflight "foreign" "$connection_mode"; then
+            echo "HOLD: Clean RC prerequisites not met; no service started."
+            smite_install_pause
+            return
+        fi
+    elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
+        echo "HOLD: Unknown Smite install profile."
+        smite_install_pause
+        return
+    fi
+
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || {
         echo "ERROR: Failed to create Smite node directories."
         smite_install_pause
         return
     }
 
-    temp_ca="$(mktemp)"
+    temp_ca="$(mktemp)" || {
+        echo "ERROR: Failed to create temporary CA file."
+        smite_install_pause
+        return
+    }
 
-    echo "Downloading the Foreign-node CA certificate from $ca_url ..."
-    if ! curl -fsS --retry 5 \
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Foreign RC: HTTPS/443 CA download deferred; Node will boot paused."
+        echo "Pairing and gateway setup happen after IR and KH core installation."
+    elif ! curl -fsS --retry 5 \
         "$ca_url" \
         -o "$temp_ca"; then
 
@@ -1012,7 +1293,7 @@ smite_install_foreign_node() {
         return
     fi
 
-    if ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
+    if [ "$SMITE_INSTALL_PROFILE" != clean-rc ] && ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
         rm -f "$temp_ca"
         echo "ERROR: The panel returned an invalid Foreign-node CA certificate."
         smite_install_pause
@@ -1059,7 +1340,7 @@ smite_install_foreign_node() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-node; then
+    if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
         return
     fi
@@ -1070,12 +1351,18 @@ smite_install_foreign_node() {
         return
     fi
 
-    sleep 3
-    if ! docker logs --since 2m smite-node 2>&1 | grep -q 'Node registered successfully'; then
-        echo "WARNING: Node registration success was not found in the recent logs."
-        echo "Check: docker logs smite-node"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Foreign node: installed and running locally; pairing is still REQUIRED."
+        echo "FOREIGN_RC_CONNECTED=NO"
+        echo "FOREIGN_RC_REINSTALL_REQUIRED=NO"
     else
-        echo "Foreign node registration: OK"
+        sleep 3
+        if ! docker logs --since 2m smite-node 2>&1 | grep -q 'Node registered successfully'; then
+            echo "WARNING: Node registration success was not found in the recent logs."
+            echo "Check: docker logs smite-node"
+        else
+            echo "Foreign node registration: OK"
+        fi
     fi
 
     smite_write_state \
@@ -1095,6 +1382,9 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     echo "Node          : $node_name"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Status        : Installed / Waiting for secure pairing"
+    fi
     echo "Panel domain  : $panel_domain"
     echo "Foreign domain: $foreign_domain"
     echo "Connection    : $connection_mode"
@@ -1108,13 +1398,21 @@ smite_install_foreign_node() {
         echo "Panel         : https://$panel_domain:443"
     fi
 
-    echo "Compatibility overlays: active"
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "Compatibility overlays: skipped (features are in RC images)"
+    else
+        echo "Compatibility overlays: active"
+    fi
     echo
 
     if [ "$connection_mode" = "private" ]; then
         echo "Private Network mode is active."
         echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
         echo "Machine-to-machine control traffic uses the private network."
+    elif [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo "NEXT: Pair this installed node over verified HTTPS/443 and enable signed mode."
+        echo "DO NOT enable legacy Panel registration or open port 8000/8888."
+        echo "No second Smite installation should be required."
     else
         echo "IMPORTANT: Panel -> Foreign Node control over 443 is configured in the gateway step."
         echo "Keep public port 8888 blocked at the firewall/provider level."
