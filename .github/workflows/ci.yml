@@ -578,4 +578,5 @@ jobs:
         shell: bash
         run: |
           bash -n tests/test-smite-managed-backhaul-official.sh
+          bash -n tests/test-smite-managed-backhaul-node-runtime.sh
           bash tests/test-smite-managed-backhaul-official.sh
