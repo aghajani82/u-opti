@@ -221,6 +221,34 @@ during installation.
   resistance. The independent installer is still disabled in U-OPTI;
   this is a review-only gate for an operator-controlled future trial.
 
+## New milestone: compensated Node restart and signed acceptance (PR only)
+
+- `modules/smite-managed-backhaul-lifecycle.py` now owns the complete
+  **disposable-runner** sequence: pin official candidate and previous
+  Compose/manifest, refuse existing persisted tunnels, acquire the
+  exclusive Backhaul transaction lock, stage/enroll binary and read-only
+  mount, then require a **separate signed Node API plus restart proof**.
+- **Mandatory compensation:** even when verification passes, the trial
+  restores the original Compose, manifest and executable layout and
+  repeats the signed `not-installed` Node API/restart check. A failing
+  post-install signed probe triggers the **same rollback** automatically.
+  It must not silently convert a failed `ready` probe into success.
+- Tests inject failures after binary, Compose and manifest writes,
+  rejected/expired health proofs, identity tampering and out-of-band
+  Compose drift. External edits must not be overwritten; an unsafe
+  rollback is reported as HOLD for manual review and its recovery
+  evidence remains available.
+- The real-artifact CI driver calls only the checked-in signed Node
+  API script (pinned image; Docker `--network none`, localhost
+  API, no published ports) and checks exact PASS markers including
+  Node restart. It rehearses one passing install/revert and one
+  deliberately failed post-restart proof followed by compensation.
+  Neither cycle installs Backhaul on a real IR or KH host.
+- **Still blocked:** operator-approved cloud Snapshot+restore, host
+  Docker Compose restart and signed Panel→Node HTTPS/443 health,
+  active tunnel continuity, any real-host transaction and actual
+  Backhaul transport. Successful CI must not unlock Host Install.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
