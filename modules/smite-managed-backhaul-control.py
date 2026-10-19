@@ -135,7 +135,9 @@ def _format(status: dict[str, str]) -> None:
 def _lab_lock(root: Path):
     # No lock creation is possible until the PR-only lab admission passes.
     transaction.admission(root)
-    file = root / ".backhaul-control.lock"
+    # All managed engines mutate the SAME Node Compose and manifest.
+    # FRP and Backhaul installs are independent, not concurrently writable.
+    file = root / ".smite-engine-transaction.lock"
     fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         st = os.fstat(fd)
