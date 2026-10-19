@@ -176,6 +176,10 @@ def prepare(node: Path, archive: Path, stage_root: Path, *, arch: str,
     os.chmod(stage, 0o700)
     try:
         outputs = [
+            # Keep the *real official tarball* in the private stage. An
+            # attacker cannot forge modified binaries merely by rewriting
+            # SHA256SUMS and copying an official archive digest into text.
+            ("frp.official.tar.gz", shared._file(archive, max_size=ARCHIVE_MAX), 0o600),
             ("frpc.bin", binaries["frpc"], 0o755),
             ("frps.bin", binaries["frps"], 0o755),
             ("engines.candidate.json", proposal, 0o600),
@@ -201,7 +205,8 @@ def verify(stage: Path, *, official_only: bool = True) -> bool:
     try:
         if stage.is_symlink() or not stage.is_dir():
             return False
-        required = {"frpc.bin", "frps.bin", "engines.candidate.json",
+        required = {"frp.official.tar.gz", "frpc.bin", "frps.bin",
+                    "engines.candidate.json",
                     "compose.override.candidate.yml", "summary.txt"}
         entries = {}
         for line in shared._file(stage / "SHA256SUMS", max_size=4096).decode().splitlines():
@@ -226,10 +231,29 @@ def verify(stage: Path, *, official_only: bool = True) -> bool:
                 or info.get("FRPC_SHA256") != entries["frpc.bin"]
                 or info.get("FRPS_SHA256") != entries["frps.bin"]):
             return False
+        if info.get("ARCHIVE_SHA256") != entries["frp.official.tar.gz"]:
+            return False
         if official_only and info.get("ARCHIVE_SHA256") != OFFICIAL_TAR_SHA256[arch]:
             return False
+        # Always re-extract and compare BOTH binaries to the archive whose
+        # checksum is trusted. This prevents stage-content checksum forgery.
+        unpacked = unpack(stage / "frp.official.tar.gz", arch=arch,
+                          trusted_sha=info["ARCHIVE_SHA256"])
         for binary in ("frpc", "frps"):
-            _elf(shared._file(stage / f"{binary}.bin", max_size=BINARY_MAX), arch=arch)
+            staged = shared._file(stage / f"{binary}.bin", max_size=BINARY_MAX)
+            _elf(staged, arch=arch)
+            if staged != unpacked[binary]:
+                return False
+        expected_overlay = (
+            "services:\\n  smite-node:\\n    volumes:\\n"
+            + "".join(
+                f"      - type: bind\\n        source: {INSTALL_ROOT / name}\\n"
+                f"        target: {target}\\n        read_only: true\\n"
+                for name, target in BINARY_PATHS.items()
+            )
+        ).encode().replace(b"\\n", b"\n")
+        if shared._file(stage / "compose.override.candidate.yml", max_size=8192) != expected_overlay:
+            return False
         manifest = json.loads(shared._file(stage / "engines.candidate.json", max_size=8192))
         return (manifest.get("schema") == 1 and isinstance(manifest.get("engines"), dict)
                 and manifest["engines"].get("frp") == {
