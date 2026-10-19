@@ -10,6 +10,30 @@ permissions:
   contents: read
 
 jobs:
+  managed-frp-signed-compose:
+    # PR-only, isolated Docker with network:none, no published host port;
+    # verifies actual signed Node inventory through full container recreate.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout reviewed U-OPTI experimental code
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite Node
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: b8d410e7ec4164bb5f49e3fd63d8033d2cb114ca
+          path: .managed-smite-source
+          persist-credentials: false
+      - name: Signed official FRP dual-binary Compose recreation and rollback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-frp-signed-compose.sh
+          bash -n tests/test-smite-managed-backhaul-signed-api.sh
+          python3 -m py_compile tests/smite-managed-backhaul-compose-fixture.py
+          bash tests/test-smite-managed-frp-signed-compose.sh
+
   managed-frp-official-artifact:
     # Trusted official downloads only on disposable PR CI, never push/main.
     if: github.event_name == 'pull_request'
