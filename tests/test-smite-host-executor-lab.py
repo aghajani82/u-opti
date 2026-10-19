@@ -63,6 +63,7 @@ class HostTransactionLab(unittest.TestCase):
             "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
             "BINARIES_SHA256": [lab.sha(binaries[k]) for k in lab.BINARIES[engine]],
             "SOURCE_COMPOSE_SHA256": lab.sha((self.node / "docker-compose.yml").read_bytes()),
+            "CANDIDATE_COMPOSE_OVERLAY_SHA256": lab.sha(overlay),
             "CANDIDATE_MANIFEST_SHA256":
                 lab.sha(lab.canonical({"schema": 1, "engines": new})),
         }
