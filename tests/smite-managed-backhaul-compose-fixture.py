@@ -122,10 +122,10 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path, engi
             volumes.append({"type": "bind", "source": str(root / "installed/backhaul"),
                             "target": ENGINETARGET, "read_only": True})
         else:
-            for name in ("frpc", "frps"):
+            for frp_binary_name in ("frpc", "frps"):
                 volumes.append({
-                    "type": "bind", "source": str(root / "installed" / "frp" / name),
-                    "target": "/usr/local/bin/" + name, "read_only": True,
+                    "type": "bind", "source": str(root / "installed" / "frp" / frp_binary_name),
+                    "target": "/usr/local/bin/" + frp_binary_name, "read_only": True,
                 })
     service = {
         "image": IMAGE,
