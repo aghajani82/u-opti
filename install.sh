@@ -62,6 +62,7 @@ MODULES=(
     "smite-tunnel-control-center.sh"
     "smite-managed-backhaul.py"
     "smite-managed-frp.py"
+    "smite-managed-frp-transaction.py"
     "smite-managed-frp-control.py"
     "smite-managed-frp-menu.sh"
     "smite-managed-backhaul-control.py"
