@@ -11,7 +11,7 @@ Copy this into a new chat:
 
 > «ادامه جمع‌بندی پروژه U-OPTI و Smite. لطفاً ابتدا فایل
 > `docs/PROJECT-CLOSEOUT-HANDOFF.md` را در Branch
-> `feature/smite-stage28-ingress-identity-recovery-20261019`
+> `feature/uopti-smite-closeout-integration-20261019`
 > از مخزن `aghajani82/u-opti`، سپس GitHub Issue #47 و آخرین کامنت‌هایش
 > را بخوان. وضعیت PRها و CI را مجدداً بررسی کن و از آخرین کار تأییدشده
 > ادامه بده. هدف، تکمیل امنیت و کدهای نیمه‌تمام و جمع‌بندی نسخهٔ نهایی
@@ -19,7 +19,7 @@ Copy this into a new chat:
 > نکن، Release نساز و روی IR/KH تغییری نده.»
 
 **For the assistant:**
-1. Read [this tracked file](https://github.com/aghajani82/u-opti/blob/feature/smite-stage28-ingress-identity-recovery-20261019/docs/PROJECT-CLOSEOUT-HANDOFF.md), then [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and **newest comments**. Never assume a recorded PR SHA/CI result is still current; verify.
+1. Read [this tracked file](https://github.com/aghajani82/u-opti/blob/feature/uopti-smite-closeout-integration-20261019/docs/PROJECT-CLOSEOUT-HANDOFF.md), then [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and **newest comments**. Never assume a recorded PR SHA/CI result is still current; verify.
 2. Check both GitHub repositories: `aghajani82/u-opti`, `aghajani82/Smite`. Respect existing Draft PR stack, do not casually duplicate/cherry-pick prior work.
 3. Take **one meaningful unresolved blocker** from the central closeout queue; investigate it, implement the minimum justified change on an *explicit experimental branch*, run negative tests/regressions and verify latest-head CI. Keep beginner usability.
 4. Before the chat gets long, **update this exact file and Issue #47** with completed/blocked/next tasks, exact GitHub links/SHAs/CI status. This file is the carry-forward note; progress in chat alone is not durable.
@@ -35,10 +35,15 @@ Copy this into a new chat:
 
 ## 2. GitHub baseline (verified on 2026-10-19, re-verify)
 
+**Current consolidation home:** [U-OPTI Draft PR #48](https://github.com/aghajani82/u-opti/pull/48) on the `feature/uopti-smite-closeout-integration-20261019` branch. This is ONE continuing closeout branch, **not another micro-stage**. The earlier 36-PR inventory predates this PR, so current open-Draft count can be 37 until GitHub changes.
+
+**Full dependency inventory:** [PROJECT-CLOSEOUT-PR-MATRIX.md](PROJECT-CLOSEOUT-PR-MATRIX.md) — explicitly distinguishes U-OPTI's separate #27 root from its #28→#46 stack, and Smite #1→#16.
+
+
 ### U-OPTI
 - Repository: https://github.com/aghajani82/u-opti
 - `main` README reports **v0.16.7**. The `main` `modules/smite-install.sh` uses **Smite upstream v0.1.7** with pinned original zzEdix container digests by default. New draft clean-RC is **not** automatically selected for normal users.
-- **20 open Draft PRs #27–#46.** Standalone auth-overlay [#27](https://github.com/aghajani82/u-opti/pull/27) starts from `main`. Core contiguous stack: [#28](https://github.com/aghajani82/u-opti/pull/28) → #29 … [#38](https://github.com/aghajani82/u-opti/pull/38) (clean RC) → [#39](https://github.com/aghajani82/u-opti/pull/39) (lab transaction) → [#40](https://github.com/aghajani82/u-opti/pull/40) (plan binding) → [#41](https://github.com/aghajani82/u-opti/pull/41) (fd guard) → [#42](https://github.com/aghajani82/u-opti/pull/42) (mock signed probe) → [#43](https://github.com/aghajani82/u-opti/pull/43) (real ASGI) → [#44](https://github.com/aghajani82/u-opti/pull/44) (replay DB fail-closed integration) → [#45](https://github.com/aghajani82/u-opti/pull/45) (actual loopback Nginx TLS/443) → [#46](https://github.com/aghajani82/u-opti/pull/46) (source ACL, identity drift, recovery HOLD).
+- **20 baseline Draft PRs #27–#46, plus the current consolidation Draft #48.** Standalone auth-overlay [#27](https://github.com/aghajani82/u-opti/pull/27) starts from `main`. Core contiguous stack: [#28](https://github.com/aghajani82/u-opti/pull/28) → #29 … [#38](https://github.com/aghajani82/u-opti/pull/38) (clean RC) → [#39](https://github.com/aghajani82/u-opti/pull/39) (lab transaction) → [#40](https://github.com/aghajani82/u-opti/pull/40) (plan binding) → [#41](https://github.com/aghajani82/u-opti/pull/41) (fd guard) → [#42](https://github.com/aghajani82/u-opti/pull/42) (mock signed probe) → [#43](https://github.com/aghajani82/u-opti/pull/43) (real ASGI) → [#44](https://github.com/aghajani82/u-opti/pull/44) (replay DB fail-closed integration) → [#45](https://github.com/aghajani82/u-opti/pull/45) (actual loopback Nginx TLS/443) → [#46](https://github.com/aghajani82/u-opti/pull/46) (source ACL, identity drift, recovery HOLD).
 - Base code of #46 before this handoff-document addition: `a20070f4fdc7c7a38edbb2e929e4e99f79e558fb`. That exact commit passed [GitHub Actions 16/16](https://github.com/aghajani82/u-opti/actions/runs/39316139366). **Once this document is committed the HEAD changes; these green results do not certify the new HEAD.**
 - GitHub comparison of #46 against main: **351 commits ahead, 108 files changed** (as observed on the documented baseline). Stacked PRs are NOT 20 independent changesets.
 - Verified **overlap**: the SHA of `modules/smite-panel-auth-overlay.py` in #27 and #46 is identical: `d9b9a0533c8afff7b07821aee588a41289e3cc2c`. Don't merge the same auth overlay twice; compare other #27 changes before making an exclusion decision.
@@ -97,6 +102,14 @@ Successful CI, HTTP 200, mock transports, synthetic binaries or a temporary test
 4. Multi-file install/update can be inconsistent under interruption; inspect both install and updater implementation and add non-destructive admission before real rollout.
 5. Smite strict Node/Panel mode defaults legacy for compatibility; avoid stealth-changing defaults without a staged migration.
 
+## 5a. Work actually completed toward closeout (2026-10-19)
+
+- **PR dependency overview recorded:** [dependency matrix](PROJECT-CLOSEOUT-PR-MATRIX.md). The complete U-OPTI #27 six-file scope was checked against the newest chain: the `smite-panel-auth-overlay.py` implementation AND its `tests/test-smite-panel-auth-overlay.py` test have identical Git blob SHAs; `install.sh` and the `u-opti` updater contain its required module distribution references; `modules/smite.sh` has an equivalent guarded host-overlay hook; the latest CI includes its authentication-overlay regression. **Conclusion:** #27 has already been functionally incorporated; do not merge its original branch separately without review. No PR has been closed.
+- **Actual updater bug fixed on experimental closeout branch PR #48:** The U-OPTI Update menu backed up the previous install and attempted rollback if copying new files failed, **but the failed-rollback branch deleted the recovery backup anyway**. The new branch retains its private backup if restore fails, accurately displays the recovery location and removes it only after the restore helper succeeds. `tests/test-uopti-update-rollback-retention.py` invokes the real extracted failure branch in temporary directories, checking both outcomes. **This is a focused defect fix, NOT full atomic/power-loss recovery.** Verify the latest PR #48 GitHub Actions CI before marking tested.
+- **Updater source audit nuance:** The Update menu ALREADY has downloaded-file syntax/feature checks, backups and catchable-error restoration, but lacks full power-loss crash recovery and consistent source-SHA pinning on mutable branch URLs. The separate `install.sh` also writes several live files sequentially. Do **not** incorrectly claim the updater has no backup functionality.
+
+**Next real blocker:** lock every install/update download to a coherent approved source SHA, then make recovery robust to interruption/power loss without changing current working installs. Coordinate with Smite #16 first-enrollment state and the independently installable Backhaul design after that.
+
 ## 6. How to report progress after each working session
 
 Append or refresh in **Issue #47 comments**, and update this document before leaving a long conversation:
@@ -113,7 +126,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action after preparing this file:** finish the precise PR overlap/dependency matrix; then select a coherent paired source/image baseline and address the real clean installer/updater + replay-store first-provisioning defects. Do not treat documentation as a completed fix. If asked for “next step”, work on the highest unresolved blocker, not another arbitrary stage number.
+**Current next action:** complete source-locked install/update reliability and review snapshot/power-loss recovery after the verified #27 overlap and initial backup-retention fix. Then integrate a coherent paired source/image baseline, Smite strict first provisioning and independent Backhaul. Do not treat documentation alone as a completed fix. Do not treat documentation as a completed fix. If asked for “next step”, work on the highest unresolved blocker, not another arbitrary stage number.
 
 ## 7. Operational conventions
 
