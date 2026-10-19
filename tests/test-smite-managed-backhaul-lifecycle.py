@@ -94,7 +94,7 @@ class Trial(unittest.TestCase):
         original = tx.candidate
         self.test_candidate = patch.object(
             tx, "candidate",
-            side_effect=lambda root, stage: original(root, stage, fixture=True),
+            side_effect=lambda root, stage, **kwargs: original(root, stage, fixture=True),
         )
         self.test_candidate.start()
         self.addCleanup(self.test_candidate.stop)
