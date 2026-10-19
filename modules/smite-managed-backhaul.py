@@ -283,6 +283,19 @@ def verify(stage: Path, *, official_only: bool = True) -> bool:
         if (staged != archived or
                 info.get("BACKHAUL_BINARY_SHA256") != hashlib.sha256(staged).hexdigest()):
             return False
+        # Local SHA256SUMS is mutable: bind the proposed Compose override
+        # to the exact reviewed read-only mount, not its editable checksum.
+        expected_overlay = (
+            "services:\\n"
+            "  smite-node:\\n"
+            "    volumes:\\n"
+            "      - type: bind\\n"
+            f"        source: {INSTALL_BINARY}\\n"
+            f"        target: {CONTAINER_BINARY}\\n"
+            "        read_only: true\\n"
+        ).encode()
+        if _file(stage / "compose.override.candidate.yml", max_size=8192) != expected_overlay:
+            return False
         # Stage-only checks never certify a real-world Node or its runtime.
         return True
     except (Hold, OSError, UnicodeError, ValueError, TypeError):
