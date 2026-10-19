@@ -21,7 +21,7 @@ services:
     volumes:
       - ./certs:/etc/smite-node/certs:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${NODE_API_PORT:-8888}/api/agent/status')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${NODE_API_PORT:-8888}/healthz')"]
 EOF_COMPOSE
 smite_download_upstream() {
     test "$1" = "node/docker-compose.yml"
@@ -41,19 +41,19 @@ grep -qx 'PANEL_ADDRESS=panel.example.com:443' "$SMITE_NODE_DIR/.env"
 grep -q 'FOREIGN_RC_CA_DOWNLOAD=DEFERRED_UNTIL_SECURE_ADMISSION' "$TMP/log"
 grep -q 'FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION' "$TMP/log"
 test ! -e "$SMITE_NODE_DIR/certs/ca.crt"
-grep -qF "http://127.0.0.1:8888/" "$SMITE_NODE_COMPOSE"
+grep -qF "/healthz" "$SMITE_NODE_COMPOSE"
 ! grep -qF "/api/agent/status" "$SMITE_NODE_COMPOSE"
 grep -qF '"127.0.0.1"' "$SMITE_NODE_COMPOSE"
 grep -qF "smite-node:stage15-local" "$SMITE_NODE_COMPOSE"
 ! grep -Eq 'SMITE_NODE_PANEL_AUTH_MODE=legacy|SMITE_AGENT_AUTH_MODE=legacy' "$SMITE_NODE_DIR/.env"
 
 # If upstream's healthcheck drifted, do not create a falsely healthy KH Node.
-sed -i 's|/api/agent/status|/api/agent/changed-status|' "$TMP/node-upstream.yml"
+sed -i 's|/healthz|/healthz-unreviewed|' "$TMP/node-upstream.yml"
 if smite_install_node_files node-kh foreign panel.example.com:443 "" "" "" standard >"$TMP/changed.log" 2>&1; then
     echo "FAIL: unsafe unknown upstream healthcheck was accepted" >&2
     exit 1
 fi
-grep -q "HOLD: Unknown Node healthcheck" "$TMP/changed.log"
+grep -q "HOLD: Reviewed local /healthz required" "$TMP/changed.log"
 
 # Stable source path retains its old CA and registration behavior.
 export SMITE_INSTALL_PROFILE=stable
