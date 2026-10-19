@@ -18,7 +18,7 @@ EXPECTED_ENGINES = frozenset(("backhaul", "frp", "gost", "rathole", "chisel"))
 STATES = frozenset(("not-installed", "unavailable", "ready"))
 TARGETS = ("/api/agent/status", "/api/agent/engines")
 NODE_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
-HOST = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{1,62}$")
+HOST = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$")
 HEX_NONCE = re.compile(r"^[a-f0-9]{32}$")
 
 
