@@ -60,6 +60,15 @@ jobs:
           grep -Fq '"smite-managed-backhaul.py"' u-opti
           grep -Fq '["smite-managed-backhaul.py"]' u-opti
 
+      - name: Rehearse isolated Backhaul activation, interrupted install and exact rollback
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          python3 -m py_compile modules/smite-managed-backhaul-transaction.py tests/test-smite-managed-backhaul-transaction.py
+          python3 -B tests/test-smite-managed-backhaul-transaction.py -v
+
       - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
         shell: bash
         run: |
