@@ -36,9 +36,9 @@ trap cleanup EXIT
 
 mkdir -p "$node_dir" "$lab/state"
 export SMITE_INSTALL_PROFILE=clean-rc
-# Execute the real installer layout transformations, except that the
-# reviewed Smite source replaces its download and FRP service changes
-# are excluded from this narrowly scoped auth-only CI test.
+# Execute the real installer layout transformations. The reviewed
+# Smite source replaces only the upstream Compose download; a clean
+# Core install MUST NOT invoke FRP preparation or Compose injection.
 source "$ROOT/modules/smite-install.sh"
 SMITE_NODE_IMAGE="smite-node:stage15-local"
 SMITE_NODE_DIR="$node_dir"
@@ -47,8 +47,16 @@ smite_download_upstream() {
   test "$1" = "node/docker-compose.yml"
   cp "$SMITE/node/docker-compose.yml" "$2"
 }
-smite_frp_prepare_binaries() { :; }
-smite_frp_mount_compose() { :; }
+# If the installer accidentally reintroduces host FRP, FAIL this
+# real-Compose Docker test instead of silently swallowing the call.
+smite_frp_prepare_binaries() {
+  echo "HOLD: clean KH attempted host FRP download" >&2
+  return 98
+}
+smite_frp_mount_compose() {
+  echo "HOLD: clean KH attempted host FRP mount" >&2
+  return 98
+}
 smite_install_node_files node-kh-01 foreign panel.stage24.test:443 "" "" "" standard > "$lab/install.log"
 # The actual U-OPTI installer runs as root on KH. The ephemeral GitHub
 # shell does not. Mirror that root-owned writable container config mount,
@@ -57,6 +65,8 @@ sudo chown -R 0:0 "$node_dir/config" "$node_dir/certs"
 sudo chmod 0700 "$node_dir/config"
 grep -Fxq "SMITE_NODE_PANEL_AUTH_MODE=paused" "$node_dir/.env"
 grep -Fxq "SMITE_AGENT_AUTH_MODE=strict" "$node_dir/.env"
+grep -Fxq "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED" "$lab/install.log"
+! grep -Eq '/usr/local/bin/frp(c|s)' "$base"
 test ! -e "$node_dir/certs/ca.crt"
 grep -qF '127.0.0.1:8888/' "$base"
 test "$(stat -c %a "$node_dir/.env")" = 600

@@ -52,6 +52,27 @@ Panel `SECRET_KEY`/encrypted MFA keys and database, backup of offline
 recovery codes and failure handling. See Smite
 `docs/operator-two-factor-guide-fa.md`. **No live MFA was enabled.**
 
+## Independent tunnel engines — Phase 1 initial milestone
+
+- The opt-in clean-RC Smite Core installer no longer depends on
+  `smite_frp_prepare_binaries`, `smite_frp_mount_compose`, or
+  `smite_frp_verify_container` for IR Panel, local IR Node, or KH Node.
+  Those three host-only actions now run only in the Stable profile.
+- An isolated installer regression simulates **no host FRP directory**
+  and a no-engine-first-boot on both IR/KH; a separate real
+  `docker compose` Node test fails if host FRP preparation or
+  injection returns. The Stable regression still proves the original
+  download/mount/verify sequence is invoked.
+- **Not complete:** unpublished Smite Panel and Node images still
+  contain bundled FRP binaries. The current frontend lists all
+  engines regardless of installation state. An engine registry,
+  per-engine install/uninstall and readiness, Backhaul-only real
+  traffic and an independent 443 transport proof remain required.
+  Smite management pairing must not silently start an FRP data path.
+- No new user-facing step or extra public port is introduced.
+  All tunnel engines remain disabled until individually selected and
+  verified. This is an offline milestone, not live-host admission.
+
 ## Release blockers (must fail closed until all are checked)
 
 1. **Image provenance and supply chain.** The current Docker-save
