@@ -152,8 +152,8 @@ def review(engine: str, node: Path, stage: Path, *,
             binaries = ("frpc.bin", "frps.bin")
             claimed_compose = summary.get("ORIGINAL_COMPOSE_SHA256")
         else:
-            if not backhaul.verify(stage):
-                raise Hold("BACKHAUL_STAGE_UNTRUSTED")
+            if not backhaul.verify(stage, official_only=True):
+                raise Hold("BACKHAUL_OFFICIAL_ARCHIVE_NOT_VERIFIED")
             version, arch, digest = "v0.7.2", summary.get("BACKHAUL_ARCH"), summary.get("ARCHIVE_SHA256")
             expected = backhaul.OFFICIAL_TAR_SHA256
             binaries = ("backhaul.bin",)
@@ -180,14 +180,10 @@ def review(engine: str, node: Path, stage: Path, *,
                            if engine == "frp" else {"sha256": binary_hashes[0]})
         if own_record != expected_record:
             raise Hold("CANDIDATE_ENGINE_DIGEST_MISMATCH")
-        if engine == "backhaul":
-            # Historical Backhaul candidate only has editable SHA256SUMS
-            # and an official archive *digest string*, not archive bytes.
-            # It is insufficient to prove the staged ELF came from that
-            # official archive. Do NOT attest a valid production candidate.
-            result["ARTIFACT_PROVENANCE"] = "NOT_ARCHIVE_BOUND"
-            raise Hold("BACKHAUL_ARCHIVE_BINDING_REQUIRED")
-        result["ARTIFACT_PROVENANCE"] = "OFFICIAL_FRP_ARCHIVE_VERIFIED"
+        result["ARTIFACT_PROVENANCE"] = (
+            "OFFICIAL_FRP_ARCHIVE_VERIFIED" if engine == "frp"
+            else "OFFICIAL_BACKHAUL_ARCHIVE_VERIFIED"
+        )
         result["SOURCE_COMPOSE_SHA256"] = source_sha
         result["CANDIDATE_MANIFEST_SHA256"] = hashlib.sha256(
             strict_bytes(stage / "engines.candidate.json", limit=8192)).hexdigest()
