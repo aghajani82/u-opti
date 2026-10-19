@@ -71,6 +71,21 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage24 Docker Compose cross-project gate:** In PR-only CI,
+  run the actual U-OPTI `smite_install_node_files` transforms against
+  the pinned-reviewed Smite Node source's upstream Compose (FRP binary
+  injection intentionally stubbed, as FRP traffic is out of scope).
+  The Stage9 private-root-owned secret and replay-volume overlay uses
+  matching Compose environment LIST syntax, not a mapping. Validate
+  real Docker Compose merge and inspect host-network baseline (no
+  `ports`) before running a strict *network:none* disposable
+  isolation-only override. Build the same-source Node image and exercise
+  `paused -> signed -> paused -> signed` with Docker Compose up
+  `--no-build`, confirming no reinstall, no insecure fallback,
+  read-only credentials, Agent HMAC, nonce replay persistence, health
+  and intact base Compose hash. This is **not a green light to activate
+  the host-network original**, Node-to-Panel public TLS, 3x-UI, FRP,
+  Backhaul or real two-host gateways.
 - **Stage22 signed registration transaction guard:** Smite's
   authentic signed Node check-in no longer marks a reserved KH active
   before Panel FRP return-configuration admission completes. An invalid

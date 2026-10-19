@@ -412,6 +412,32 @@ jobs:
           bash -n tests/test-smite-backhaul-sidecar-tls.sh
           bash tests/test-smite-backhaul-sidecar-tls.sh
 
+  node-compose-hmac-rollback-isolated:
+    # Execute the installer-created KH Compose and inert Stage9 overlay using
+    # the exact reviewed Smite Node source image, on runner network:none.
+    # Never activate real IR/KH, host network, tunnels or public endpoints.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout U-OPTI review branch
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 4091f40a5d78acd9ebbef284653fe12d8c679ac7
+          path: .stage24-smite-src
+          persist-credentials: false
+      - name: Verify actual installer Compose, signed overlay and rollback
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          bash -n tests/test-smite-stage24-compose-runtime.sh
+          bash tests/test-smite-stage24-compose-runtime.sh
+
   pairing-tls-e2e-isolated:
     # Real temporary Nginx stream/SNI/TLS and real Smite pairing API.
     if: github.event_name == 'pull_request'
