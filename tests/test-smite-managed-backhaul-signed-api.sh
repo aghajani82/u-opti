@@ -67,7 +67,7 @@ cleanup() {
   sudo docker rm -f "$name" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-sudo docker run -d --rm --name "$name" \
+sudo docker run -d --name "$name" \
   --platform linux/amd64 \
   --network none --read-only --cap-drop ALL --pids-limit 96 --memory 384m \
   --security-opt no-new-privileges --user 0:0 \
@@ -89,8 +89,15 @@ sudo docker run -d --rm --name "$name" \
   --host 127.0.0.1 --port 8888 --no-access-log >/dev/null
 
 # Prove no host port was published, and Docker's network namespace is isolated.
-sudo docker inspect -f '{{.HostConfig.NetworkMode}}|{{json .HostConfig.PortBindings}}' "$name" \
-  | grep -Fx 'none|{}'
+sudo docker inspect --format '{{json .HostConfig}}' "$name" | python3 -c '
+import json, sys
+host = json.load(sys.stdin)
+assert host["NetworkMode"] == "none", "Unexpected Node network exposure"
+assert not host.get("PortBindings"), "Node published a host port"
+assert host.get("ReadonlyRootfs") is True, "Container root is writable"
+assert host.get("CapDrop") == ["ALL"], "Unexpected Linux capabilities"
+print("SIGNED_NODE_NETWORK_NONE_NO_HOST_PORTS=PASS")
+'
 for attempt in $(seq 1 16); do
   if sudo docker exec "$name" python -c     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/', timeout=2)" \
     >/dev/null 2>&1; then
