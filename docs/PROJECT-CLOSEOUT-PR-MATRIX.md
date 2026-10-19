@@ -1,13 +1,13 @@
 # CLOSEOUT — GitHub Draft PR Dependency Matrix
 
-**Reviewed:** 2026-10-19  
+**Reviewed:** 2026-10-19 (plus a dedicated U-OPTI closeout branch / Draft #48)  
 **Tracker:** [U-OPTI Issue #47](https://github.com/aghajani82/u-opti/issues/47)  
 **Context:** [Cross-chat handoff](PROJECT-CLOSEOUT-HANDOFF.md)  
 **Status:** Inventory of PR parent branches and declared scope only; individual line-by-line diff/conflict review is **NOT COMPLETE**. No PR has been approved for merge.
 
 ## Critical insight
 
-These 36 open Draft PRs are **not** 36 independent mergeable patches.
+The original 36 Draft PRs (U-OPTI #27–#46 and Smite #1–#16) are **not** 36 independent mergeable patches. U-OPTI **#48** is the additional ongoing consolidation PR, not another numbered stage.
 
 - **U-OPTI**: [#27](https://github.com/aghajani82/u-opti/pull/27) is a separate root based on `main`. [#28](https://github.com/aghajani82/u-opti/pull/28) → ... → [#46](https://github.com/aghajani82/u-opti/pull/46) is a stacked chain based on the previous PR's head. Evidence of overlap: the auth overlay `modules/smite-panel-auth-overlay.py` in #27 and #46 has identical Git blob SHA `d9b9a0533c8afff7b07821aee588a41289e3cc2c`. Do not merge it twice or mark all #27 code redundant without checking the remaining files.
 - **Smite**: [#1](https://github.com/aghajani82/Smite/pull/1) → ... → [#16](https://github.com/aghajani82/Smite/pull/16) form a single stacked chain from `main`.
@@ -59,6 +59,23 @@ These 36 open Draft PRs are **not** 36 independent mergeable patches.
 | [#15](https://github.com/aghajani82/Smite/pull/15) | #14 | Simplified IR/KH UI and opt-in MFA |
 | [#16](https://github.com/aghajani82/Smite/pull/16) | #15 | Explicit first-time SQLite replay provision, no request-time reinit |
 
+## Actual parallel PR #27 overlap resolution (reviewed)
+
+Six changed files in U-OPTI #27 were compared to the newest U-OPTI chain:
+
+| File | Finding in #46/#48 chain |
+|---|---|
+| `modules/smite-panel-auth-overlay.py` | **Byte-for-byte same Git blob**, SHA `d9b9a0533c8afff7b07821aee588a41289e3cc2c` |
+| `tests/test-smite-panel-auth-overlay.py` | **Byte-for-byte same Git blob**, SHA `89621bb7d2bafdd2680472ca4d5d0326fba2fd29` |
+| `install.sh` | Contains exact module download/package list entry |
+| `u-opti` | Contains original overlay source and download/update mapping entries |
+| `modules/smite.sh` | Runs the same fail-closed `smite-panel-auth-overlay.py` hook after host overlay copy; comments differ because Stage14 integrated it |
+| `.github/workflows/ci.yml` | Performs `tests/test-smite-panel-auth-overlay.py` inside Stage14 integrated compatibility/regression CI; placement differs |
+
+**Verdict:** No independent #27 merge is needed for its intended admin-overlay behavior. Keep the existing Draft for history; no PR closure/rebase/merge has been authorized. This is functional/code equivalence evidence, not a proof that all other merged-together code is production ready.
+
+**Ongoing one-branch closeout:** [U-OPTI Draft #48](https://github.com/aghajani82/u-opti/pull/48) (stacked on #46), beginning with the real updater rollback-backup retention fix and offline regression. Any further needed fixes should be collected there where possible, rather than per-topic Draft PRs.
+
 ## Workstream reconciliation, not merge instructions
 
 | Workstream | Existing PR coverage | What is still required to mark DONE |
@@ -77,4 +94,4 @@ These 36 open Draft PRs are **not** 36 independent mergeable patches.
 3. Do NOT close, rebase or squash existing Draft PRs, or create a new release, without an explicit separate review/approval.
 4. Release qualification needs a coherent final source/image pair and actual negative/rollback test evidence. Keep `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` until authorized.
 
-**Next concrete audit:** inspect the remaining five PR #27 file diffs against the latest U-OPTI chain and classify keep/superseded/conflict; then audit `install.sh` and the U-OPTI updater for coherent/atomic updates. Update [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and [handoff](PROJECT-CLOSEOUT-HANDOFF.md) with the result.
+**Next concrete audit:** finish coherent immutable source lock across `install.sh` and interactive U-OPTI updater, followed by power-loss rollback recovery. Interactive Update already implements basic downloads, syntax validation, backup and catchable-error rollback; however one path erroneously discarded the backup after a failed restore (fixed in Draft #48, not yet in main). Full transactional/power-loss protection remains unimplemented. Update [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and [handoff](PROJECT-CLOSEOUT-HANDOFF.md) with the result.
