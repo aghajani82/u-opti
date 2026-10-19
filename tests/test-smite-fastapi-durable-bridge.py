@@ -118,7 +118,7 @@ class RealFastAPIWithTestClient(unittest.TestCase):
         app = FastAPI()
         app.state.adapter_manager = self.adapters
         app.include_router(router, prefix="/api/agent")
-        self.client = TestClient(app, base_url=ORIGIN, follow_redirects=False)
+        self.client = TestClient(app, base_url=ORIGIN)
 
     def recreate(self):
         self.client.close()
@@ -157,6 +157,7 @@ class RealFastAPIWithTestClient(unittest.TestCase):
 
     def test_authentication_and_durable_nonce_survive_asgi_recreate(self):
         self.assertEqual(self.client.get("/api/agent/status").status_code, 401)
+        original_identity = self.identity.read_bytes()
         header = self.sign(nonce="1" * 32)
         self.assertEqual(self.client.get("/api/agent/status", headers=header).status_code, 200)
         self.recreate()
@@ -164,7 +165,7 @@ class RealFastAPIWithTestClient(unittest.TestCase):
         self.assertEqual(self.client.get("/api/agent/status", headers=self.sign()).status_code, 200)
         self.assertTrue(self.replay.is_file())
         self.assertEqual(stat.S_IMODE(self.replay.stat().st_mode), 0o600)
-        self.assertEqual((self.identity.read_bytes()), (self.identity.read_bytes()))
+        self.assertEqual(self.identity.read_bytes(), original_identity)
         self.assertEqual(self.verifier().check(ENGINES_ZERO)["ACTIVATION_GATE"], "HOLD")
 
     def test_inventory_real_endpoint_managed_state_digest_and_role(self):
