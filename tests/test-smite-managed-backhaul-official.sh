@@ -86,8 +86,7 @@ sudo rm -f "$lab/mismatched-backhaul"
 
 # Malformed registry must fail closed instead of fabricating ready status.
 sudo mv "$lab/node/config/engine-state/engines.json" "$lab/node/config/engine-state/engines.backup"
-printf '%s\\n' '{"schema":1,"engines":{"backhaul":{"sha256":"INVALID"}}}' \\
-  | sudo tee "$lab/node/config/engine-state/engines.json" >/dev/null
+printf '%s\\n' '{"schema":1,"engines":{"backhaul":{"sha256":"INVALID"}}}' | sudo tee "$lab/node/config/engine-state/engines.json" >/dev/null
 sudo chmod 0600 "$lab/node/config/engine-state/engines.json"
 bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" malformed
 sudo rm -f "$lab/node/config/engine-state/engines.json"
