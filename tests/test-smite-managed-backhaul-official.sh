@@ -71,7 +71,7 @@ bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
 bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
-  python3 "$root/modules/smite-managed-backhaul-transaction.py" activate \
+  python3 "$root/modules/smite-managed-backhaul-control.py" activate \
   --lab-root "$lab" --stage "$stage"
 sudo test -f "$lab/installed/backhaul"
 sudo test -f "$lab/node/config/engine-state/engines.json"
@@ -99,7 +99,7 @@ sudo docker compose -f "$lab/node/docker-compose.yml" config --format json \
   | python3 -c 'import json,sys; n=json.load(sys.stdin)["services"]["smite-node"]; assert not n.get("ports"); assert any(v["target"]=="/usr/local/bin/backhaul" and v["read_only"] for v in n["volumes"])'
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
-  python3 "$root/modules/smite-managed-backhaul-transaction.py" rollback --lab-root "$lab"
+  python3 "$root/modules/smite-managed-backhaul-control.py" rollback --lab-root "$lab"
 test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$baseline"
 sudo test ! -e "$lab/node/config/engine-state/engines.json"
 sudo test ! -e "$lab/installed/backhaul"
