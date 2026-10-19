@@ -61,6 +61,8 @@ MODULES=(
     "smite-tunnel-wizard.sh"
     "smite-tunnel-control-center.sh"
     "smite-managed-backhaul.py"
+    "smite-managed-backhaul-control.py"
+    "smite-managed-backhaul-menu.sh"
     "smite-managed-backhaul-transaction.py"
     "smite-backhaul-sidecar.py"
     "smite-backhaul-sidecar-readiness.py"
