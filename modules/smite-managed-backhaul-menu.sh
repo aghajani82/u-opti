@@ -6,6 +6,7 @@ SMITE_ENGINE_MENU_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_MANAGED_BACKHAUL_CONTROL="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-control.py"
 SMITE_MANAGED_FRP_MENU="$SMITE_ENGINE_MENU_DIR/smite-managed-frp-menu.sh"
 SMITE_MANAGED_BACKHAUL_HOST_GATE="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-host-gate.py"
+SMITE_INDEPENDENT_ENGINE_HOST_GATE="$SMITE_ENGINE_MENU_DIR/smite-managed-engine-host-admission.py"
 SMITE_MANAGED_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 
 smite_managed_bh_check() {
@@ -53,8 +54,13 @@ smite_managed_bh_menu() {
             1) smite_managed_bh_check status || : ;;
             2)
                 smite_managed_bh_check review || :
-                echo "===== HOST SAFETY AUDIT (READ ONLY) ====="
-                smite_managed_bh_host_gate || :
+                echo "===== INDEPENDENT BACKHAUL HOST PREFLIGHT (READ ONLY) ====="
+                if [ -s "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" ]; then
+                    python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \
+                        --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" || :
+                else
+                    echo "HOLD: Common host admission helper missing."
+                fi
                 ;;
             4)
                 echo "===== SAFE HOST REPORT (NO SECRETS) ====="
