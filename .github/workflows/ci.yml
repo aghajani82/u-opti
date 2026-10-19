@@ -45,6 +45,12 @@ jobs:
           python3 -B tests/test-smite-clean-image-pair.py -v
           bash tests/test-smite-clean-install.sh
 
+      - name: Phase1 Smite Core installs without host FRP, Stable requires original FRP
+        shell: bash
+        run: |
+          bash -n tests/test-smite-core-no-frp.sh
+          bash tests/test-smite-core-no-frp.sh
+
       - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
         shell: bash
         run: |
