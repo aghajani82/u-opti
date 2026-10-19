@@ -116,6 +116,8 @@ class ComposeProof(unittest.TestCase):
         ok = mod.checked(self.lab, "ready", "12345", self.parsed,
                          self.source, "frp")
         service = ok["services"]["smite-node"]
+        self.assertEqual(service["container_name"], "uopti-managed-api-12345-ready")
+        self.assertNotEqual(service["container_name"], "frps")
         self.assertEqual(service["network_mode"], "none")
         self.assertEqual(service["cap_drop"], ["ALL"])
         self.assertNotIn("ports", service)
