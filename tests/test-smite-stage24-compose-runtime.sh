@@ -144,6 +144,12 @@ wait_node() {
     sleep 1
   done
   echo "HOLD: actual Compose Node did not become locally healthy" >&2
+  sudo docker inspect stage24-kh --format 'STATE={{.State.Status}} EXIT={{.State.ExitCode}} ERROR={{.State.Error}}' >&2 || true
+  # CI contains synthetic identity only; print failure class, never its
+  # environment, .env, paired secret, mounts or complete app output.
+  sudo docker logs stage24-kh 2>&1 |
+    grep -E 'Traceback|Error|ERROR|Exception|Permission denied|No such file|unavailable|failed' |
+    tail -18 >&2 || true
   exit 1
 }
 check_no_network() {
