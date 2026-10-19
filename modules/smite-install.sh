@@ -235,6 +235,40 @@ print(f"Smite FRP read-only mounts ready: {service}")
 PY
 }
 
+# Core installation must not install an engine the operator did not select.
+# Legacy/stable retains exactly the old pinned FRP workflow.
+# Clean RC is only for disposable hosts and starts with NO host FRP files.
+smite_install_core_optional_frp_prepare() {
+    local compose_file="$1" service="$2"
+    case "$SMITE_INSTALL_PROFILE" in
+        stable)
+            smite_frp_prepare_binaries || return 1
+            smite_frp_mount_compose "$compose_file" "$service" || return 1
+            ;;
+        clean-rc)
+            echo "SMITE_CORE_FRP_HOST_INSTALL=SKIPPED"
+            ;;
+        *)
+            echo "HOLD: Unknown Smite install profile for core engine setup" >&2
+            return 1
+            ;;
+    esac
+}
+
+smite_install_core_optional_frp_verify() {
+    local container="$1"
+    case "$SMITE_INSTALL_PROFILE" in
+        stable) smite_frp_verify_container "$container" ;;
+        clean-rc)
+            echo "SMITE_CORE_FRP_VERSION_CHECK=NOT_REQUIRED"
+            ;;
+        *)
+            echo "HOLD: Unknown Smite install profile for engine verification" >&2
+            return 1
+            ;;
+    esac
+}
+
 smite_frp_verify_container() {
     local container="$1" binary actual
     case "$container" in
@@ -490,8 +524,7 @@ smite_install_panel_files() {
         return 1
     fi
 
-    smite_frp_prepare_binaries || return 1
-    smite_frp_mount_compose "$SMITE_PANEL_COMPOSE" smite-panel || return 1
+    smite_install_core_optional_frp_prepare "$SMITE_PANEL_COMPOSE" smite-panel || return 1
 
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
 PANEL_PORT=8000
@@ -579,8 +612,7 @@ smite_install_node_files() {
         return 1
     fi
 
-    smite_frp_prepare_binaries || return 1
-    smite_frp_mount_compose "$SMITE_NODE_COMPOSE" smite-node || return 1
+    smite_install_core_optional_frp_prepare "$SMITE_NODE_COMPOSE" smite-node || return 1
 
     if [ "$connection_mode" = standard ]; then
         python3 -B "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-node-local-bind.py" \
@@ -925,7 +957,7 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-panel; then
+    if ! smite_install_core_optional_frp_verify smite-panel; then
         smite_install_pause
         return
     fi
@@ -976,7 +1008,7 @@ smite_install_panel_iran() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-node; then
+    if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
         return
     fi
@@ -1306,7 +1338,7 @@ smite_install_foreign_node() {
         return
     fi
 
-    if ! smite_frp_verify_container smite-node; then
+    if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
         return
     fi

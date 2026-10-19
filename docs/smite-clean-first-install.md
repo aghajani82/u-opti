@@ -71,6 +71,17 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Independent engines, phase 1 / Core only:** U-OPTI's opt-in
+  `clean-rc` Smite Panel and IR/KH Node installers **do not download,
+  install, mount or version-check host FRP binaries**. Core can start
+  paused/signed-only with **zero selected tunnel engines**; no FRP
+  service is enabled by the fresh default database. Stable retains
+  its existing pinned FRP preparation, mounts and verification.
+  IMPORTANT: current *unpublished Smite preview images still bundle*
+  FRP and Backhaul binaries internally: this is a removal of the
+  mandatory **host FRP installer dependency**, not yet a fully minimal
+  core-only image. Engine installation/activation and public 443 tunnel
+  data transport remain subsequent gated phases, not active features.
 - **Stage28 IR firstboot unsigned-registration closure:** Clean-RC
   Panel now explicitly boots with `SMITE_NODE_REGISTRATION_MODE=signed`
   and `SMITE_PANEL_AGENT_AUTH_MODE=signed`, while the pairing-preview
