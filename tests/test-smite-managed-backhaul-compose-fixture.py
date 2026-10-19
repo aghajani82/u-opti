@@ -34,6 +34,7 @@ class ComposeProof(unittest.TestCase):
             "image":"ghcr.io/zzedix/smite-node:reviewed",
             "network_mode":"host",
             "cap_add":["NET_ADMIN"],
+            "healthcheck":{"test":mod.HEALTH_TEST},
             "volumes":[
                 {"type":"bind","source":str(self.lab/"node/config"),"target":"/etc/smite-node","read_only":False},
                 {"type":"volume","source":"smite-node-data","target":"/var/lib/smite-node"},
@@ -58,6 +59,8 @@ class ComposeProof(unittest.TestCase):
         self.assertTrue(all(m["target"]!="/usr/local/bin/backhaul" for m in service["volumes"]))
         self.assertEqual(set(obj["services"]),{"smite-node"})
         self.assertIn("no-new-privileges:true",service["security_opt"])
+        self.assertEqual(service["healthcheck"]["test"], mod.HEALTH_TEST)
+        self.assertEqual(service["healthcheck"]["interval"], "2s")
 
     def test_ready_requires_exact_readonly_host_artifact(self):
         self.parsed["services"]["smite-node"]["volumes"].append({
@@ -83,6 +86,15 @@ class ComposeProof(unittest.TestCase):
         self.parsed["services"].pop("second")
         self.parsed["services"]["smite-node"]["ports"]=["8888:8888"]
         with self.assertRaisesRegex(mod.Hold,"UNEXPECTED_PRODUCTION_NETWORK"):
+            mod.checked(self.lab,"absent","12345",self.parsed,self.source)
+
+    def test_unreviewed_unauthenticated_agent_healthcheck_denied(self):
+        # A strict Node cannot use an unsigned Agent status healthcheck.
+        self.parsed["services"]["smite-node"]["healthcheck"]["test"] = [
+            "CMD", "python", "-c",
+            "import urllib.request; urllib.request.urlopen('http://localhost:8888/api/agent/status')",
+        ]
+        with self.assertRaisesRegex(mod.Hold, "UNREVIEWED_NODE_HEALTHCHECK"):
             mod.checked(self.lab,"absent","12345",self.parsed,self.source)
 
     def test_not_pr_and_invalid_lab_never_accepted(self):
