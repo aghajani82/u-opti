@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 006f8cb75974197378877e12c308b1a5a6a5afc1
+          ref: 3751aeda6f946e5e5624e5e89ab1ce554fec4460
           path: .managed-smite-source
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .managed-smite-source rev-parse HEAD)" = "006f8cb75974197378877e12c308b1a5a6a5afc1"
+          test "$(git -C .managed-smite-source rev-parse HEAD)" = "3751aeda6f946e5e5624e5e89ab1ce554fec4460"
           python3 -m pip install -r .managed-smite-source/node/requirements.txt
           python3 -m py_compile tests/test-smite-fastapi-durable-bridge.py
           python3 -B tests/test-smite-fastapi-durable-bridge.py -v
