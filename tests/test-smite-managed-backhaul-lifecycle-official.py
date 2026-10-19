@@ -31,7 +31,10 @@ def main() -> int:
     lifecycle.tx.admission(lab)
 
     def signed_probe(root: Path, phase: str) -> bool:
-        if phase not in ("ready", "absent"):
+        if (phase not in ("ready", "absent") or
+                os.environ.get("SMITE_CI_COMPOSE_RECREATE") != "1"):
+            # This acceptance is explicitly a Compose force-recreate gate:
+            # an ordinary docker run/restart trial can never satisfy it.
             return False
         try:
             process = subprocess.run(
@@ -45,6 +48,9 @@ def main() -> int:
             "SIGNED_NODE_NETWORK_NONE_NO_HOST_PORTS=PASS",
             f"SIGNED_NODE_API_{phase.upper()}_RESTART=PASS",
             f"SIGNED_API_BACKHAUL_{phase.upper()}_AFTER-RESTART=PASS",
+            "PR_ONLY_ISOLATED_COMPOSE_PREPARED=YES",
+            f"SIGNED_NODE_COMPOSE_{phase.upper()}_RECREATED=PASS",
+            "NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS",
         )
         # Never print raw stdout or stderr: they may contain HMAC test data.
         return process.returncode == 0 and all(token in stdout for token in required)
