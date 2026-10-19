@@ -21,6 +21,11 @@ class Hold(ValueError):
 
 IMAGE = "ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 ENGINETARGET = "/usr/local/bin/backhaul"
+HEALTH_CMD = (
+    "import urllib.request; "
+    "urllib.request.urlopen('http://127.0.0.1:8888/healthz')"
+)
+HEALTH_TEST = ["CMD", "python", "-c", HEALTH_CMD]
 
 
 def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> dict:
@@ -48,6 +53,9 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
     if (node.get("network_mode") != "host" or node.get("ports") or
             node.get("privileged") is True):
         raise Hold("UNEXPECTED_PRODUCTION_NETWORK")
+    if not isinstance(node.get("healthcheck"), dict) or (
+            node["healthcheck"].get("test") != HEALTH_TEST):
+        raise Hold("UNREVIEWED_NODE_HEALTHCHECK")
     mounts = node.get("volumes")
     if not isinstance(mounts, list):
         raise Hold("MISSING_SOURCE_MOUNTS")
@@ -119,6 +127,14 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
         "command": ["-m", "uvicorn", "main:app", "--host", "127.0.0.1",
                     "--port", "8888", "--no-access-log"],
         "volumes": volumes,
+        # Same reviewed localhost-only probe, accelerated for disposable CI.
+        "healthcheck": {
+            "test": HEALTH_TEST,
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 8,
+            "start_period": "4s",
+        },
         "restart": "no",
     }
     return {"services": {"smite-node": service}}
