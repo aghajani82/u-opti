@@ -139,7 +139,7 @@ class OperatorControl(unittest.TestCase):
     def test_menu_full_beginner_walkthrough_is_read_only(self):
         result = subprocess.run(
             ["bash", str(MENU), "--menu"],
-            input="1\\n2\\n3\\n0\\n", capture_output=True, text=True, timeout=15,
+            input="1\n2\n3\n0\n", capture_output=True, text=True, timeout=15,
             env={**os.environ, "SMITE_NODE_DIR": str(self.node), "TERM": "dumb"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
