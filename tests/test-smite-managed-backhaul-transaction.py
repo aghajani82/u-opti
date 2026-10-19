@@ -106,6 +106,7 @@ class TransactionLab(unittest.TestCase):
 
     def test_fresh_registry_creation_and_removal(self):
         stage = self.prepare()
+        self.compose.chmod(0o644)
         lab.activate(self.root, stage, fixture=True)
         self.assertEqual(
             set(json.loads((self.config / "engine-state/engines.json").read_text())["engines"]),
@@ -114,6 +115,7 @@ class TransactionLab(unittest.TestCase):
         lab.rollback(self.root)
         self.assertFalse((self.config / "engine-state/engines.json").exists())
         self.assertEqual(self.compose.read_text(), COMPOSE)
+        self.assertEqual(stat.S_IMODE(self.compose.stat().st_mode), 0o644)
 
     def test_recovery_from_each_partial_install_stage(self):
         for step in ("after-binary", "after-compose", "after-manifest"):
