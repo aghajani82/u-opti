@@ -131,6 +131,33 @@ during installation.
   Backhaul-only 443 data path. None of those production activation gates
   has been passed by the image-level inventory test.
 
+## Current milestone: real isolated Node service and signed Agent API
+
+- A fresh throwaway Smite Node process is now started via the pinned Node
+  Docker image plus **the exact reviewed Smite source**. The process binds
+  only to **127.0.0.1 inside a Docker `--network none` namespace**.
+  Docker publishes no ports, drops all Linux capabilities, has a read-only
+  filesystem, and cannot contact Panel/IR/KH. The Node's Panel registration
+  remains `paused`; its Agent runs with `strict` HMAC and persistent replay
+  rejection.
+- The real `GET /api/agent/engines` endpoint denies unsigned and
+  incorrectly signed access (HTTP 401), accepts a valid signature (HTTP
+  200), and rejects reused signatures across **actual Docker restarts**.
+  Invalid `POST /api/agent/tunnels/apply` for an unready engine returns
+  HTTP 409; no successful Apply or tunnel engine is started.
+- The same Node service is tested **before independent Backhaul enrollment,
+  after installing its official SHA-verified v0.7.2 binary, and after
+  exact rollback**. It reports `not-installed → ready → not-installed`
+  while FRP remains separately `not-installed` throughout.
+- The Smite experimental branch also now guards **persisted tunnel restore**
+  and internal adapter Apply in managed mode; restart cannot silently
+  bypass inventory admission. Unit tests verify fail-closed restore and
+  unchanged legacy behavior. Neither GitHub PR is merged.
+- Still NOT established: a general-purpose production installer, live
+  Compose recreation on an IR/KH VPS, an authorized public TLS/443
+  datapath, tunnel throughput/latency, and a real-server crash recovery
+  drill. No host activation or U-OPTI Stable/main merge is authorized.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
