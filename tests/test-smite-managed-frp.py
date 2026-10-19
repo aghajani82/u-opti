@@ -151,6 +151,34 @@ class OfflineFrp(unittest.TestCase):
         (stage / "frps.bin").write_bytes(b"tampered")
         self.assertFalse(frp.verify(stage, official_only=False))
 
+    def test_forged_candidate_checksums_cannot_imitate_upstream_binary(self):
+        stage = self.stage()
+        self.assertTrue(frp.verify(stage, official_only=False))
+        # An attacker who can replace a staged FRPC binary could rewrite
+        # every local checksum/manifest/summary. Matching staged checksums
+        # are NOT enough: re-extraction from the trusted archive must win.
+        new_content = elf("amd64") + b"attacker replacement"
+        (stage / "frpc.bin").write_bytes(new_content)
+        new_digest = hashlib.sha256(new_content).hexdigest()
+        manifest_file = stage / "engines.candidate.json"
+        data = json.loads(manifest_file.read_text())
+        data["engines"]["frp"]["sha256"] = new_digest
+        manifest_file.write_text(json.dumps(data))
+        summary = stage / "summary.txt"
+        summary.write_text(
+            summary.read_text().replace(
+                "FRPC_SHA256=" + hashlib.sha256(elf("amd64")).hexdigest(),
+                "FRPC_SHA256=" + new_digest,
+            )
+        )
+        checks = stage / "SHA256SUMS"
+        entries = checks.read_text().splitlines()
+        checks.write_text("".join(
+            f"{hashlib.sha256((stage / line.split('  ', 1)[1]).read_bytes()).hexdigest()}  {line.split('  ', 1)[1]}\\n"
+            for line in entries
+        ).replace("\\n", "\n"))
+        self.assertFalse(frp.verify(stage, official_only=False))
+
     def test_duplicate_env_and_existing_frp_mount_hold(self):
         (self.node / ".env").write_text(ENV + "SMITE_AGENT_AUTH_MODE=legacy\n")
         digest = self.archive_with()
