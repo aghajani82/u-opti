@@ -137,6 +137,10 @@ jobs:
           python3 -B tests/test-smite-managed-backhaul-host-gate.py -v
           python3 -m py_compile modules/smite-managed-engine-host-admission.py tests/test-smite-managed-engine-host-admission.py
           python3 -B tests/test-smite-managed-engine-host-admission.py -v
+          python3 -m py_compile modules/smite-managed-engine-host-plan.py tests/test-smite-managed-engine-host-plan.py
+          python3 -B tests/test-smite-managed-engine-host-plan.py -v
+          grep -Fq '"smite-managed-engine-host-plan.py"' install.sh
+          grep -Fq '["smite-managed-engine-host-plan.py"]' u-opti
           grep -Fq '"smite-managed-engine-host-admission.py"' install.sh
           grep -Fq '["smite-managed-engine-host-admission.py"]' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-pair-review.py tests/test-smite-managed-backhaul-pair-review.py
