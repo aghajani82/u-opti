@@ -240,6 +240,40 @@ class HostPlan(unittest.TestCase):
                         fake_signed, candidate_manifest=manifest + b" ")
         self.assertFalse((sandbox / ".engine-journal.json").exists())
 
+    def test_backhaul_archive_bound_plan_reaches_only_disposable_executor(self):
+        archive = self.home / "backhaul-stage-lab.tar.gz"
+        payload = synthetic_frp_exe("backhaul")
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo("release/backhaul")
+            info.size = len(payload)
+            tf.addfile(info, io.BytesIO(payload))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        with patch.dict(plan.backhaul.OFFICIAL_TAR_SHA256, {"amd64": digest}):
+            stage = plan.backhaul.prepare(self.node, archive, self.root,
+                                          arch="amd64", allowed_sha=digest)
+            reviewed = plan.review("backhaul", self.node, stage,
+                staging_root=self.root, host_status=dict(self.status, ENGINE="BACKHAUL"))
+            self.assertEqual(reviewed["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+            sandbox = Path(tempfile.mkdtemp(prefix="uopti-engine-txn-lab-"))
+            sandbox.chmod(0o700)
+            self.addCleanup(shutil.rmtree, sandbox)
+            (sandbox / ".LAB_ONLY").write_bytes(lab.MARKER)
+            shutil.copytree(self.node, sandbox / "node")
+            node = sandbox / "node"
+            (node / "config/tunnels.json").write_bytes(b"[]\n")
+            (node / "config/node-id").write_bytes(b"identity-must-stay")
+            (node / "config/replay.db").write_bytes(b"replay-must-stay")
+            state = lab.execute(
+                sandbox, "backhaul", {"backhaul": (stage / "backhaul.bin").read_bytes()},
+                (stage / "compose.override.candidate.yml").read_bytes(),
+                dict(reviewed, OTHER_ENGINE="NOT_INSTALLED"),
+                lambda *_: {"signed": True, "replay": True},
+                candidate_manifest=(stage / "engines.candidate.json").read_bytes())
+            self.assertEqual(state["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(state["ACTIVATION_GATE"], "HOLD")
+            self.assertEqual((node / "config/node-id").read_bytes(), b"identity-must-stay")
+            self.assertEqual((node / "config/replay.db").read_bytes(), b"replay-must-stay")
+
     def test_backhaul_override_tampering_with_recomputed_local_checksums_fails(self):
         archive = self.home / "verified-bh-overlay-test.tar.gz"
         binary = synthetic_frp_exe("backhaul")
