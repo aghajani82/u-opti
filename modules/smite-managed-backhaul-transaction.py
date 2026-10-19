@@ -113,7 +113,7 @@ def candidate(root: Path, stage: Path, *, fixture: bool = False) -> tuple[bytes,
     if stage.parent != stages:
         raise Hold("Candidate must be directly under the private stages directory")
     private_dir(stage)
-    if not pkg.verify(stage):
+    if not pkg.verify(stage, official_only=not fixture):
         raise Hold("Candidate SHA256 verification failed")
     summary = parse_summary(stage)
     archive = summary.get("ARCHIVE_SHA256")
