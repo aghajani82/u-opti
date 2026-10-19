@@ -132,7 +132,10 @@ def request(method, endpoint, body=b"", headers=None):
         base + endpoint,
         data=body if method == "POST" else None,
         method=method,
-        headers=headers or {},
+        headers={
+            **(headers or {}),
+            **({"Content-Type": "application/json"} if method == "POST" else {}),
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as reply:
