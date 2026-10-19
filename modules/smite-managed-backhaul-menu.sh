@@ -4,6 +4,7 @@
 # The install button stays CLOSED pending authorized two-host acceptance.
 SMITE_ENGINE_MENU_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_MANAGED_BACKHAUL_CONTROL="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-control.py"
+SMITE_MANAGED_FRP_MENU="$SMITE_ENGINE_MENU_DIR/smite-managed-frp-menu.sh"
 SMITE_MANAGED_BACKHAUL_HOST_GATE="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-host-gate.py"
 SMITE_MANAGED_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 
@@ -44,9 +45,10 @@ smite_managed_bh_menu() {
         echo "2) Review installation prerequisites"
         echo "3) Install Backhaul (not enabled yet)"
         echo "4) Show safe IR/KH report (read-only)"
+        echo "5) FRP — Independent install/review"
         echo "0) Back"
         echo
-        read -rp "Choose [0-4]: " choice || return 0
+        read -rp "Choose [0-5]: " choice || return 0
         case "$choice" in
             1) smite_managed_bh_check status || : ;;
             2)
@@ -57,6 +59,16 @@ smite_managed_bh_menu() {
             4)
                 echo "===== SAFE HOST REPORT (NO SECRETS) ====="
                 smite_managed_bh_host_gate json || :
+                ;;
+            5)
+                if [ ! -s "$SMITE_MANAGED_FRP_MENU" ]; then
+                    echo "HOLD: Independent FRP menu missing."
+                else
+                    # Source checked-in module to keep role selection simple.
+                    # It may only perform review and a disabled install.
+                    source "$SMITE_MANAGED_FRP_MENU"
+                    smite_managed_frp_menu
+                fi
                 ;;
             3)
                 echo "HOLD: Backhaul installation on real IR/KH is disabled."
