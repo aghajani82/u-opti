@@ -51,6 +51,7 @@ def main() -> int:
             "PR_ONLY_ISOLATED_COMPOSE_PREPARED=YES",
             f"SIGNED_NODE_COMPOSE_{phase.upper()}_RECREATED=PASS",
             "NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS",
+            f"STRICT_NODE_DOCKER_HEALTHY_{phase.upper()}=PASS",
         )
         # Never print raw stdout or stderr: they may contain HMAC test data.
         return process.returncode == 0 and all(token in stdout for token in required)
