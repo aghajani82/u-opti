@@ -87,8 +87,12 @@ compose_file="$lab/smite-node-isolated-$phase.json"
 project="uopti-bh-${GITHUB_RUN_ID:?}-$phase"
 case "$compose_mode" in 0|1) ;; *) echo "HOLD: unknown trial mode" >&2; exit 2 ;; esac
 cleanup() {
-  if [[ "$compose_mode" == 1 && -f "$compose_file" ]]; then
-    sudo docker compose -p "$project" -f "$compose_file" down --remove-orphans >/dev/null 2>&1 || :
+  if [[ "$compose_mode" == 1 ]]; then
+    if [[ -f "$compose_file" ]]; then
+      sudo docker compose -p "$project" -f "$compose_file" down --remove-orphans >/dev/null 2>&1 || :
+    fi
+    # Always unlink this disposable plan (even if Compose modified
+    # or replaced its file between the initial existence test and here).
     sudo rm -f -- "$compose_file" || {
       echo "HOLD: PRIVATE_COMPOSE_FILE_CLEANUP_FAILED" >&2
       return 2
@@ -316,15 +320,17 @@ echo "SIGNED_NODE_API_${phase^^}_RESTART=PASS"
 if [[ "$compose_mode" == 1 ]]; then
   echo "SIGNED_NODE_COMPOSE_${phase^^}_RECREATED=PASS"
 fi
-# On the successful path, tear down the sandbox explicitly. The EXIT
-# handler remains a fallback for crashes. Reusing the same phase for
-# recovery tests must not inherit a stale Compose file or a live Node.
+# Explicitly stop disposable Node and remove the temporary Compose file.
+# Keep the EXIT cleanup handler as a fallback until this postcondition passes.
 cleanup
-trap - EXIT
 if [[ "$compose_mode" == 1 ]]; then
-  sudo test ! -e "$compose_file" || {
+  # A second unconditional unlink is intentionally idempotent: a restarted
+  # compose client may still have held the plan during docker compose down.
+  sudo rm -f -- "$compose_file"
+  if sudo test -e "$compose_file"; then
     echo "HOLD: PRIVATE_COMPOSE_FILE_REMAINS_AFTER_CLEANUP" >&2
     exit 2
-  }
+  fi
 fi
+trap - EXIT
 echo "SIGNED_NODE_PRIVATE_COMPOSE_CLEANUP=PASS"
