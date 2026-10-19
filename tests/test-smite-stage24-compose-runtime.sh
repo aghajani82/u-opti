@@ -50,6 +50,11 @@ smite_download_upstream() {
 smite_frp_prepare_binaries() { :; }
 smite_frp_mount_compose() { :; }
 smite_install_node_files node-kh-01 foreign panel.stage24.test:443 "" "" "" standard > "$lab/install.log"
+# The actual U-OPTI installer runs as root on KH. The ephemeral GitHub
+# shell does not. Mirror that root-owned writable container config mount,
+# rather than granting elevated Docker capabilities to pass a test.
+sudo chown -R 0:0 "$node_dir/config" "$node_dir/certs"
+sudo chmod 0700 "$node_dir/config"
 grep -Fxq "SMITE_NODE_PANEL_AUTH_MODE=paused" "$node_dir/.env"
 grep -Fxq "SMITE_AGENT_AUTH_MODE=strict" "$node_dir/.env"
 test ! -e "$node_dir/certs/ca.crt"
