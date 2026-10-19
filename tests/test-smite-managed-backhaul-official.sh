@@ -65,12 +65,35 @@ baseline="$(sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')"
 sudo chown -R 0:0 "$lab"
 printf 'U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n' | sudo tee "$lab/EXPERIMENTAL-LAB" >/dev/null
 sudo chmod 0600 "$lab/EXPERIMENTAL-LAB"
+# Even though the pinned image has a bundled Backhaul binary, the reviewed
+# managed Node must return not-installed before enrollment.
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   python3 "$root/modules/smite-managed-backhaul-transaction.py" activate \
   --lab-root "$lab" --stage "$stage"
 sudo test -f "$lab/installed/backhaul"
 sudo test -f "$lab/node/config/engine-state/engines.json"
+# Recreate the container twice to establish independent inventory persistence.
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" ready
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" ready
+
+# Wrong binary SHA must fail closed: the registered binary is unchanged.
+sudo install -m 0755 "$stage/backhaul.bin" "$lab/mismatched-backhaul"
+printf 'NOT-THE-PINNED-DIGEST' | sudo tee -a "$lab/mismatched-backhaul" >/dev/null
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" mismatched
+sudo rm -f "$lab/mismatched-backhaul"
+
+# Malformed registry must fail closed instead of fabricating ready status.
+sudo mv "$lab/node/config/engine-state/engines.json" "$lab/node/config/engine-state/engines.backup"
+printf '%s\\n' '{"schema":1,"engines":{"backhaul":{"sha256":"INVALID"}}}' \\
+  | sudo tee "$lab/node/config/engine-state/engines.json" >/dev/null
+sudo chmod 0600 "$lab/node/config/engine-state/engines.json"
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" malformed
+sudo rm -f "$lab/node/config/engine-state/engines.json"
+sudo mv "$lab/node/config/engine-state/engines.backup" "$lab/node/config/engine-state/engines.json"
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" ready
+
 sudo docker compose -f "$lab/node/docker-compose.yml" config --format json \
   | python3 -c 'import json,sys; n=json.load(sys.stdin)["services"]["smite-node"]; assert not n.get("ports"); assert any(v["target"]=="/usr/local/bin/backhaul" and v["read_only"] for v in n["volumes"])'
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
@@ -79,4 +102,6 @@ sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
 test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$baseline"
 sudo test ! -e "$lab/node/config/engine-state/engines.json"
 sudo test ! -e "$lab/installed/backhaul"
+bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
 echo "BACKHAUL_REAL_ARTIFACT_TRANSACTION_AND_EXACT_ROLLBACK=PASS"
+echo "BACKHAUL_REAL_NODE_INVENTORY_BEFORE_AFTER_RECREATE_ROLLBACK=PASS"
