@@ -136,7 +136,11 @@ sudo docker compose -f "$base" -f "$ci_override" config --quiet
 docker build -q -f "$SMITE/node/Dockerfile" --build-arg SMITE_VERSION=2.0.0-rc.0 -t smite-node:stage15-local "$SMITE/node" >/dev/null
 
 wait_node() {
-  for attempt in $(seq 1 55); do
+  for attempt in $(seq 1 35); do
+    # A repeatedly exited container will never recover by polling longer.
+    if [ "$(sudo docker inspect -f '{{.State.Running}}' stage24-kh 2>/dev/null)" != true ]; then
+      break
+    fi
     if sudo docker exec stage24-kh python3 -c \
       "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/',timeout=2)" >/dev/null 2>&1; then
       return 0
