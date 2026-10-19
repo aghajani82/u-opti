@@ -3,6 +3,7 @@
 # Does not ask for a forwarded port, create a tunnel or touch Backhaul.
 SMITE_FRP_MENU_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_MANAGED_FRP_CONTROL="$SMITE_FRP_MENU_DIR/smite-managed-frp-control.py"
+SMITE_INDEPENDENT_FRP_HOST_GATE="$SMITE_FRP_MENU_DIR/smite-managed-engine-host-admission.py"
 SMITE_FRP_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 
 smite_managed_frp_check() {
@@ -30,7 +31,16 @@ smite_managed_frp_menu() {
         read -rp "Choose [0-3]: " selection || return 0
         case "$selection" in
             1) smite_managed_frp_check status || : ;;
-            2) smite_managed_frp_check review || : ;;
+            2)
+                smite_managed_frp_check review || :
+                echo "===== INDEPENDENT FRP HOST PREFLIGHT (READ ONLY) ====="
+                if [ -s "$SMITE_INDEPENDENT_FRP_HOST_GATE" ]; then
+                    python3 -B "$SMITE_INDEPENDENT_FRP_HOST_GATE" \
+                        --engine frp --node-dir "$SMITE_FRP_NODE_DIR" || :
+                else
+                    echo "HOLD: Common host admission helper missing."
+                fi
+                ;;
             3)
                 echo "HOLD: FRP installation on real IR/KH is disabled."
                 echo "No Backhaul, FRP, Smite, paths, ports or Docker containers changed."
