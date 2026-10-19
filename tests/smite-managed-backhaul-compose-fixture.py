@@ -104,7 +104,7 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path) -> d
         "pids_limit": 96,
         "mem_limit": "384m",
         "user": "0:0",
-        "tmpfs": {"/tmp": "rw,nosuid,nodev,noexec,size=16m"},
+        "tmpfs": ["/tmp:rw,nosuid,nodev,noexec,size=16m"],
         "environment": {
             "PYTHONDONTWRITEBYTECODE": "1",
             "SMITE_AGENT_AUTH_MODE": "strict",
