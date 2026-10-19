@@ -71,8 +71,12 @@ def ensure_in_lab(root: Path, path: Path) -> None:
 
 def admission(root: Path) -> tuple[Path, Path, Path, Path]:
     if (os.environ.get("GITHUB_ACTIONS") != "true"
-            or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"):
+            or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
+            or os.environ.get("GITHUB_REPOSITORY") != "aghajani82/u-opti"):
         raise Hold("DISPOSABLE GITHUB PR CI ONLY: live activation disabled")
+    runner_tmp = os.environ.get("RUNNER_TEMP", "")
+    if not runner_tmp or not Path(runner_tmp).is_absolute() or Path(runner_tmp) not in root.parents:
+        raise Hold("Lab must reside directly inside the disposable GitHub Runner temporary directory")
     if not root.is_absolute() or root == Path("/") or root.is_symlink():
         raise Hold("Invalid isolated lab root")
     private_dir(root)
