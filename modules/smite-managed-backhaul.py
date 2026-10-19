@@ -211,6 +211,9 @@ def prepare(node_dir: Path, archive: Path, stage_root: Path,
     os.chmod(stage, 0o700)
     try:
         outputs = [
+            # Retain the reviewed upstream tarball: local SHA256SUMS alone
+            # could be rewritten with a tampered binary in the staging dir.
+            ("backhaul.official.tar.gz", _file(archive, max_size=MAX_ARCHIVE_BYTES), 0o600),
             ("backhaul.bin", binary, 0o755),
             ("engines.candidate.json", proposal, 0o600),
             ("compose.override.candidate.yml", overlay, 0o600),
@@ -232,26 +235,57 @@ def prepare(node_dir: Path, archive: Path, stage_root: Path,
     return stage
 
 
-def verify(stage: Path) -> bool:
-    """Verify stage payload with no host mutations and no executable start."""
+def verify(stage: Path, *, official_only: bool = True) -> bool:
+    """Re-verify exact binary FROM the archive, not editable staging hashes.
+
+    official_only=False is permitted solely by disposable fixture tests:
+    production operator paths and host admission always use the pinned
+    official digest for the declared CPU architecture.
+    """
     if stage.is_symlink() or not stage.is_dir():
         return False
     try:
         checksums = _file(stage / "SHA256SUMS", max_size=4096).decode()
-        expected = {"backhaul.bin", "engines.candidate.json",
+        expected = {"backhaul.official.tar.gz", "backhaul.bin",
+                    "engines.candidate.json",
                     "compose.override.candidate.yml", "summary.txt"}
-        found = set()
+        found = {}
         for line in checksums.splitlines():
             sha, sep, name = line.partition("  ")
             if not sep or name not in expected or name in found:
                 return False
             if SHA_RE.fullmatch(sha) is None:
                 return False
-            found.add(name)
-            if hashlib.sha256(_file(stage / name, max_size=MAX_BINARY_BYTES)).hexdigest() != sha:
+            found[name] = sha
+            limit = MAX_ARCHIVE_BYTES if name == "backhaul.official.tar.gz" else MAX_BINARY_BYTES
+            if hashlib.sha256(_file(stage / name, max_size=limit)).hexdigest() != sha:
                 return False
-        return found == expected
-    except (Hold, OSError, UnicodeError):
+        if set(found) != expected:
+            return False
+        lines = _file(stage / "summary.txt", max_size=4096).decode().splitlines()
+        pairs = [line.split("=", 1) for line in lines]
+        if (not pairs or any(len(row) != 2 for row in pairs)
+                or len(pairs) != len({row[0] for row in pairs})):
+            return False
+        info = dict(pairs)
+        arch = info.get("BACKHAUL_ARCH")
+        claimed_archive = info.get("ARCHIVE_SHA256")
+        if (arch not in OFFICIAL_TAR_SHA256 or not isinstance(claimed_archive, str)
+                or SHA_RE.fullmatch(claimed_archive) is None
+                or info.get("BACKHAUL_VERSION") != VERSION
+                or info.get("CANDIDATE_ONLY") != "YES"
+                or claimed_archive != found["backhaul.official.tar.gz"]):
+            return False
+        if official_only and claimed_archive != OFFICIAL_TAR_SHA256[arch]:
+            return False
+        archived = _verified_binary(stage / "backhaul.official.tar.gz", claimed_archive)
+        staged = _file(stage / "backhaul.bin", max_size=MAX_BINARY_BYTES)
+        if (staged != archived or
+                info.get("BACKHAUL_BINARY_SHA256") != hashlib.sha256(staged).hexdigest()):
+            return False
+        # Stage-only checks never certify a real-world Node or its runtime.
+        return True
+    except (Hold, OSError, UnicodeError, ValueError, TypeError):
         return False
 
 
