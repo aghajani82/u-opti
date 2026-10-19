@@ -79,11 +79,23 @@ def _existing_manifest(config: Path) -> dict:
             or body["schema"] != 1 or not isinstance(body["engines"], dict)
             or not set(body["engines"]).issubset(ENGINE_NAMES)):
         raise Hold("Unrecognized engine manifest schema")
-    for record in body["engines"].values():
-        if (not isinstance(record, dict) or set(record) != {"sha256"}
-                or not isinstance(record["sha256"], str)
+    for name, record in body["engines"].items():
+        if (not isinstance(record, dict) or not isinstance(record.get("sha256"), str)
                 or SHA_RE.fullmatch(record["sha256"]) is None):
             raise Hold("Invalid existing engine SHA")
+        fields = set(record)
+        if name == "frp":
+            # A server-capable FRP release must pin frps as well as frpc.
+            # Old client-only metadata may be read for safe migration but
+            # cannot claim readiness in the managed Node runtime.
+            if fields not in ({"sha256"}, {"sha256", "server_sha256"}):
+                raise Hold("Unknown FRP registry fields")
+            if "server_sha256" in record and (
+                    not isinstance(record["server_sha256"], str)
+                    or SHA_RE.fullmatch(record["server_sha256"]) is None):
+                raise Hold("Invalid FRP server SHA")
+        elif fields != {"sha256"}:
+            raise Hold("Unknown other engine registry fields")
     return body["engines"]
 
 
