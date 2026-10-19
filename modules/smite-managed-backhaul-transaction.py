@@ -212,6 +212,8 @@ def activate(root: Path, stage: Path, *, fixture: bool = False, inject: str = ""
         "schema": 1, "compose_old": digest(raw_compose), "compose_new": digest(new_compose),
         "manifest_old": digest(prior_manifest) if prior_manifest is not None else None,
         "manifest_new": digest(new_manifest), "binary_new": digest(new_bin),
+        "compose_mode": stat.S_IMODE(compose.lstat().st_mode),
+        "manifest_mode": stat.S_IMODE(manifest.lstat().st_mode) if prior_manifest is not None else None,
         "binary_path": str(binary),
     }
     new_file(journal / "record.json", (json.dumps(record, sort_keys=True) + "\n").encode(), 0o600)
@@ -250,6 +252,11 @@ def rollback(root: Path) -> str:
     prior_manifest = checked(journal / "manifest.before", 8192) if record["manifest_old"] else None
     if digest(previous) != record["compose_old"]:
         raise Hold("Backup Compose tampered")
+    if (not isinstance(record.get("compose_mode"), int)
+            or record["compose_mode"] not in (0o600, 0o640, 0o644)
+            or (prior_manifest is not None
+                and record.get("manifest_mode") != 0o600)):
+        raise Hold("Unsafe original file modes")
     if prior_manifest is not None and digest(prior_manifest) != record["manifest_old"]:
         raise Hold("Backup manifest tampered")
     # Validate ALL existing files and ownership before any restoration.
@@ -267,12 +274,12 @@ def rollback(root: Path) -> str:
         if current not in acceptable:
             raise Hold("Registry modified by another operator")
     if digest(compose_bytes) != record["compose_old"]:
-        atomic(compose, previous, 0o600)
+        atomic(compose, previous, record["compose_mode"])
     if prior_manifest is None:
         if manifest.exists():
             manifest.unlink()
     elif not manifest.exists() or checked(manifest, 8192) != prior_manifest:
-        atomic(manifest, prior_manifest, 0o600)
+        atomic(manifest, prior_manifest, record["manifest_mode"])
     if binary.exists():
         binary.unlink()
     # Lab-only directories. Keep shared registry and other engines untouched.
