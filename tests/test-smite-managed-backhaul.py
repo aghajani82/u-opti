@@ -100,6 +100,33 @@ class BackhaulPrepare(unittest.TestCase):
         (stage / "backhaul.bin").write_bytes(b"tampered")
         self.assertFalse(engine.verify(stage, official_only=False))
 
+    def test_rewritten_local_checksums_cannot_fake_official_backhaul(self):
+        stage = self.prepare()
+        self.assertTrue(engine.verify(stage, official_only=False))
+        forged = bytes([127]) + b"ELF-attacker-replacement"
+        (stage / "backhaul.bin").write_bytes(forged)
+        forged_sha = hashlib.sha256(forged).hexdigest()
+        manifest_path = stage / "engines.candidate.json"
+        declared = json.loads(manifest_path.read_text())
+        declared["engines"]["backhaul"]["sha256"] = forged_sha
+        manifest_path.write_text(json.dumps(declared))
+        summary = stage / "summary.txt"
+        lines = summary.read_text().splitlines()
+        summary.write_text("\\n".join(
+            ("BACKHAUL_BINARY_SHA256=" + forged_sha)
+            if line.startswith("BACKHAUL_BINARY_SHA256=") else line
+            for line in lines
+        ).replace("\\n", "\n") + "\n")
+        checksums = stage / "SHA256SUMS"
+        names = [row.split("  ", 1)[1] for row in checksums.read_text().splitlines()]
+        checksums.write_text("".join(
+            f"{hashlib.sha256((stage / name).read_bytes()).hexdigest()}  {name}\n"
+            for name in names
+        ))
+        # Even with coherent local metadata/checksums, the *real original*
+        # staged upstream tarball still contains the untampered ELF.
+        self.assertFalse(engine.verify(stage, official_only=False))
+
     def test_preserves_other_independently_registered_engines(self):
         state = self.node / "config" / "engine-state"
         state.mkdir(mode=0o700)
