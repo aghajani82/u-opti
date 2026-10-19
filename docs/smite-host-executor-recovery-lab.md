@@ -59,4 +59,34 @@ actual restore-capable snapshots. Only then decide whether to develop
 a separately protected production executor. Never expose this test
 laboratory through the U-OPTI install menu.
 
+## Stage 6 next increment — archive-bound Plan → sandbox recovery
+
+Draft PR #40, on top of PR #39 (never `main`):
+
+- Backhaul verify now checks that the staged Compose override is byte-for-byte
+  equal to the reviewed, read-only executable bind mount. Rewriting local
+  SHA256SUMS alongside a `read_only: false` override must fail.
+- Read-only Host Plan includes `CANDIDATE_COMPOSE_OVERLAY_SHA256` in its
+  non-authorizing SHA fingerprint. No change to installation permissions.
+- The disposable lab compares that overlay SHA and can consume the exact
+  `engines.candidate.json` bytes from the actual pinned-archive stage,
+  rejecting semantically altered or reserialized manifests.
+- An isolated FRP Stage→Plan→lab crash→journal recovery→lab commit test uses
+  *synthetic release archives* with temporarily injected fixture-only hash.
+  It never touches live Docker or the real upstream install directories.
+- Reusing a terminal `COMMITTED` or `ROLLED_BACK` journal now requires
+  the prior file modes/hashes and simulated signed/replay status to match;
+  external changes produce HOLD, not a spurious "recovered" result.
+
+The original Stage tools still allow only read-only review, and the sandbox
+model still has **no live executor or network-side signed runtime proof**.
+The Stage→lab bridge is deliberately exercised only in tests. No production
+interface is exported, and no real host activation is authorized.
+
+Unresolved: race-free fd-relative traversal (`openat`/`O_NOFOLLOW` on all
+ancestors), independent signed Node API protocol with replay handling,
+cryptographic journal trust boundary beyond checksums, binding the review
+to a locked host snapshot at the point of write, full compose validation,
+real crash/power loss, and disposable dual-VPS restore/443 testing.
+
 **Main, release, IR and KH must remain unchanged.**
