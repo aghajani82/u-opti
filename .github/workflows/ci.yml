@@ -71,6 +71,13 @@ jobs:
           grep -Fq '"smite-managed-backhaul-transaction.py"' install.sh
           grep -Fq '"smite-managed-backhaul-transaction.py"' u-opti
           grep -Fq '["smite-managed-backhaul-transaction.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-backhaul-control.py tests/test-smite-managed-backhaul-control.py
+          python3 -B tests/test-smite-managed-backhaul-control.py -v
+          bash -n modules/smite-managed-backhaul-menu.sh
+          grep -Fq '"smite-managed-backhaul-control.py"' install.sh
+          grep -Fq '"smite-managed-backhaul-menu.sh"' install.sh
+          grep -Fq '["smite-managed-backhaul-control.py"]' u-opti
+          grep -Fq '["smite-managed-backhaul-menu.sh"]' u-opti
 
       - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
         shell: bash
