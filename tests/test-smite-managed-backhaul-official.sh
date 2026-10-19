@@ -68,6 +68,7 @@ sudo chmod 0600 "$lab/EXPERIMENTAL-LAB"
 # Even though the pinned image has a bundled Backhaul binary, the reviewed
 # managed Node must return not-installed before enrollment.
 bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
+bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   python3 "$root/modules/smite-managed-backhaul-transaction.py" activate \
@@ -76,6 +77,7 @@ sudo test -f "$lab/installed/backhaul"
 sudo test -f "$lab/node/config/engine-state/engines.json"
 # Recreate the container twice to establish independent inventory persistence.
 bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" ready
+bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" ready
 bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" ready
 
 # Wrong binary SHA must fail closed: the registered binary is unchanged.
@@ -102,5 +104,7 @@ test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$b
 sudo test ! -e "$lab/node/config/engine-state/engines.json"
 sudo test ! -e "$lab/installed/backhaul"
 bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
+bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 echo "BACKHAUL_REAL_ARTIFACT_TRANSACTION_AND_EXACT_ROLLBACK=PASS"
+echo "BACKHAUL_SIGNED_NODE_API_NO_PORTS_RESTART_ROLLBACK=PASS"
 echo "BACKHAUL_REAL_NODE_INVENTORY_BEFORE_AFTER_RECREATE_ROLLBACK=PASS"
