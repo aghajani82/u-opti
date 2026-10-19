@@ -204,6 +204,14 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
                 print("STAGE26_TRANSPORT_FAILURE=" + type(exc).__name__)
                 if exc.__cause__ is not None:
                     print("STAGE26_TRANSPORT_ROOT=" + type(exc.__cause__).__name__)
+                    nested = exc.__cause__.__cause__
+                    if nested is not None:
+                        print("STAGE26_SOCKET_CAUSE=" + type(nested).__name__)
+                        if nested.__cause__ is not None:
+                            print("STAGE26_CAUSE3=" + type(nested.__cause__).__name__)
+                info = socket.getaddrinfo(HOST, 443, type=socket.SOCK_STREAM)
+                print("STAGE26_DNS_LOOPBACK=" + str(all(
+                    entry[4][0] == "127.0.0.1" for entry in info)))
         ensure(ready.get("status") == "ok" and ready.get("active_tunnels") == 0,
                "Signed Panel->KH status via verified TLS failed")
 
