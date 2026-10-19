@@ -103,6 +103,34 @@ during installation.
   in Node, signed status checks, container lifecycle restart and real
   443 transport remain blocked pending separate acceptance.
 
+## Latest milestone: pinned Smite Node inventory, isolated Docker runtime
+
+- The PR-only `tests/test-smite-managed-backhaul-node-runtime.sh` executes
+  the **exact reviewed Smite Node inventory Python module and Settings**
+  inside the pinned Smite Node Docker image. The test deliberately uses
+  `--network none`, `--read-only`, `--cap-drop ALL`, no exposed ports,
+  an isolated temporary registry, and a read-only mount of the official
+  Backhaul v0.7.2 ELF. It never starts the Smite Node API daemon,
+  an engine service, or a real tunnel.
+- **Before enrollment:** the embedded image Backhaul/FRP binaries do *not*
+  cause `ready`; Backhaul is `not-installed` and Apply admission fails.
+- **After the isolated transaction:** Backhaul is `ready`, while
+  FRP/GOST/Rathole/Chisel stay independently `not-installed`. Re-creating
+  the isolated Docker process gives the same signed-inventory **data**
+  result. The runtime test does *not* itself send an HMAC API request;
+  the existing signed Agent and Panel tests cover authentication separately.
+- **Tampered executable:** a differing executable mounted in place of the
+  registered Backhaul SHA returns `unavailable` and rejects Apply.
+  **Malformed manifest:** fails closed rather than fabricating `ready`.
+  **After rollback:** the manifest disappears and Backhaul is
+  `not-installed` again even though the original image bundles binaries.
+- Remaining acceptance: use actual installer-produced Compose to
+  **recreate a live Node in a dedicated disposable host**, verify its
+  HMAC-signed `/api/agent/engines` endpoint and HTTP 409 Apply,
+  prove restored tunnel/service behavior after restart, then test the
+  Backhaul-only 443 data path. None of those production activation gates
+  has been passed by the image-level inventory test.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
