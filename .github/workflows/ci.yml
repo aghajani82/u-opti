@@ -59,6 +59,16 @@ jobs:
           grep -Fq '"smite-managed-backhaul.py"' install.sh
           grep -Fq '"smite-managed-backhaul.py"' u-opti
           grep -Fq '["smite-managed-backhaul.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-frp.py modules/smite-managed-frp-control.py tests/test-smite-managed-frp.py tests/test-smite-managed-frp-control.py
+          python3 -B tests/test-smite-managed-frp.py -v
+          python3 -B tests/test-smite-managed-frp-control.py -v
+          bash -n modules/smite-managed-frp-menu.sh
+          for helper in smite-managed-frp.py smite-managed-frp-control.py smite-managed-frp-menu.sh; do
+            grep -Fq "\"$helper\"" install.sh
+            grep -Fq "\"$helper\"" u-opti
+            grep -Fq "[$(printf '"%s"' "$helper")]" u-opti
+          done
+
 
       - name: Rehearse isolated Backhaul activation, interrupted install and exact rollback
         shell: bash
