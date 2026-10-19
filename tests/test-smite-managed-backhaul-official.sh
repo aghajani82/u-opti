@@ -116,6 +116,6 @@ echo "BACKHAUL_REAL_NODE_INVENTORY_BEFORE_AFTER_RECREATE_ROLLBACK=PASS"
 # signed-API helper needs GITHUB_RUN_ID for its unique throwaway container.
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
-  GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" \
+  GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" SMITE_CI_COMPOSE_RECREATE=1 \
   python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
   "$lab" "$stage"
