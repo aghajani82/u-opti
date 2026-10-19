@@ -476,6 +476,8 @@ jobs:
           # Run exact reviewed Panel outbound authorization tests too:
           # pending/legacy-active/name-drift cannot send to a Node.
           python3 -B .stage20-smite-src/tests/test_signed_node_inbound_panel.py -v
+          python3 -m py_compile tests/fixtures/stage26_kh_agent.py tests/test-smite-stage26-panel-kh-443.py
+          python3 -B tests/test-smite-stage26-panel-kh-443.py
 
   sidecar-service-reload-rollback:
     # These destructive synthetic-container drills are explicitly PR-only.

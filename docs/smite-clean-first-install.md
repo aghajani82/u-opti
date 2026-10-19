@@ -71,6 +71,19 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage26 real outbound HTTPS/443 CI gate:** In disposable PR CI
+  run actual `Smite/panel/app/node_client.py` HMAC requests over
+  hostname/certificate-verified HTTPS/443 through an independent
+  temporary loopback-only Nginx gateway to the genuine
+  `Smite/node/app/routers/agent.py` strict authentication middleware.
+  The Node's adapter is an inert in-memory fixture: status, Apply and
+  Remove are authenticated, but **no FRP/Backhaul tunnel is started**.
+  Check that a paired but pending KH receives no commands; approved
+  signed-checkin KH can receive exactly scoped commands, while HMAC
+  replay, body tamper, unknown CA, path rewrite and HTTP redirect
+  fail closed. All modifications, including the ephemeral DNS host
+  mapping and TLS listener, are restricted to and cleaned up on the
+  GitHub runner. This is NOT real two-host deployment.
 - **Stage25 two-direction HMAC admission guard:** Both isolated
   U-OPTI test jobs use the SAME reviewed Smite source SHA
   `0ba7fe4f174817a3822cf7efa09c495903fbee9c`. The real Panel signed NodeClient now refuses
