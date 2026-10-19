@@ -30,6 +30,7 @@ sys.path.insert(0, str(SMITE / "node"))
 
 from app import engine_inventory as inventory
 from app import node_auth
+from app.agent_auth import DurableNonceStore
 from app.config import settings
 from app.routers.agent import router
 
@@ -82,6 +83,9 @@ class RealFastAPIWithTestClient(unittest.TestCase):
         }))
         self.identity.chmod(0o600)
         self.replay = self.replay_dir / "agent-replay.sqlite3"
+        # Explicit offline pairing/bootstrap: production must never create
+        # a missing replay database while handling a request.
+        DurableNonceStore.initialize_new(self.replay, NODE_ID)
         self.manifest = self.manifest_dir / "engines.json"
         self.binary = self.work / "managed-backhaul"
         self.binary.write_bytes(b"CI-ONLY-SYNTHETIC-BACKHAUL-NOT-EXECUTABLE")
@@ -208,6 +212,23 @@ print(json.dumps({"reused": reused.status_code, "new": accepted.status_code}))
         self.assertEqual(json.loads(result.stdout.strip()),
                          {"reused": 401, "new": 200})
         self.assertEqual(stat.S_IMODE(self.replay.stat().st_mode), 0o600)
+
+    def test_missing_replay_database_stays_missing_after_restart_and_503(self):
+        initial = self.sign(nonce="a" * 32)
+        self.assertEqual(self.client.get("/api/agent/status", headers=initial).status_code, 200)
+        self.replay.unlink()
+        fresh = self.sign(nonce="b" * 32)
+        self.assertEqual(self.client.get("/api/agent/status", headers=fresh).status_code, 503)
+        self.assertFalse(self.replay.exists())
+        self.recreate()
+        self.assertEqual(self.client.get("/api/agent/status", headers=initial).status_code, 503)
+        self.assertEqual(self.client.get("/api/agent/status", headers=fresh).status_code, 503)
+        self.assertFalse(self.replay.exists())
+
+    def test_replay_bootstrap_cannot_reset_existing_node(self):
+        with self.assertRaises(Exception):
+            DurableNonceStore.initialize_new(self.replay, NODE_ID)
+        self.assertEqual(self.verifier().check(ENGINES_ZERO)["ACTIVATION_GATE"], "HOLD")
 
     def test_inventory_real_endpoint_managed_state_digest_and_role(self):
         self.enroll_backhaul()
