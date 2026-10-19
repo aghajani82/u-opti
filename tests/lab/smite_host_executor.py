@@ -11,6 +11,7 @@ import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,11 @@ MARKER = b"UOPTI_DISPOSABLE_HOST_EXECUTOR_LAB_V1\n"
 BINARIES = {"backhaul": ("backhaul",), "frp": ("frpc", "frps")}
 MAX_FILE = 1024 * 1024
 MAX_BINARY = 48 * 1024 * 1024
+
+_guard_spec = importlib.util.spec_from_file_location(
+    "smite_private_fd_guard_lab", Path(__file__).with_name("smite_fd_guard.py"))
+guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(guard)
 
 
 class Hold(RuntimeError):
@@ -49,88 +55,20 @@ def canonical(data):
     return (json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _safe_file(path, limit=MAX_FILE):
-    if path.is_symlink():
-        raise Hold("SYMLINK_FILE")
-    try:
-        st = path.lstat()
-    except FileNotFoundError:
-        return None
-    if (not stat.S_ISREG(st.st_mode) or st.st_nlink != 1
-            or st.st_uid != os.geteuid() or st.st_size > limit):
-        raise Hold("UNTRUSTED_FILE")
-    with path.open("rb") as stream:
-        data = stream.read(limit + 1)
-    if len(data) > limit:
-        raise Hold("UNTRUSTED_FILE")
-    return data
-
-
-def _path(root, relative):
-    if relative.startswith("/") or any(x in ("", ".", "..") for x in relative.split("/")):
-        raise Hold("PATH_ESCAPE")
-    current = root
-    for part in relative.split("/")[:-1]:
-        current = current / part
-        if current.is_symlink():
-            raise Hold("SYMLINK_PARENT")
-        if current.exists() and not current.is_dir():
-            raise Hold("NOT_A_DIRECTORY")
-    path = root / relative
-    if path.is_symlink():
-        raise Hold("SYMLINK_FILE")
-    return path
-
-
-def _mkdir_parent(root, relative):
-    parent = _path(root, relative).parent
-    missing = []
-    current = parent
-    while current != root:
-        if current.is_symlink():
-            raise Hold("SYMLINK_PARENT")
-        if current.exists():
-            if not current.is_dir():
-                raise Hold("NOT_A_DIRECTORY")
-            break
-        missing.append(current)
-        current = current.parent
-    for folder in reversed(missing):
-        folder.mkdir(mode=0o700)
-        os.chmod(folder, 0o700)
-        _sync(folder.parent)
-
-
-def _sync(folder):
-    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
 def _atomic(root, relative, data, mode=0o600):
-    _mkdir_parent(root, relative)
-    path = _path(root, relative)
-    fd, temporary = tempfile.mkstemp(prefix=".txn-", dir=path.parent)
     try:
-        with os.fdopen(fd, "wb") as stream:
-            os.fchmod(stream.fileno(), mode)
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        _sync(path.parent)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+        guard.replace(root, relative, data, mode)
+    except (guard.UnsafePath, OSError) as exc:
+        raise Hold(str(exc) if isinstance(exc, guard.UnsafePath)
+                   else "UNSAFE_FD_REPLACE") from exc
 
 
 def _remove(root, relative):
-    path = _path(root, relative)
-    if path.exists():
-        path.unlink()
-        _sync(path.parent)
+    try:
+        guard.remove(root, relative)
+    except (guard.UnsafePath, OSError) as exc:
+        raise Hold(str(exc) if isinstance(exc, guard.UnsafePath)
+                   else "UNSAFE_FD_REMOVE") from exc
 
 
 def _validate(root):
@@ -143,34 +81,29 @@ def _validate(root):
     st = root.lstat()
     if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) & 0o077:
         raise Hold("UNTRUSTED_LAB_ROOT")
-    if _safe_file(_path(root, ".LAB_ONLY")) != MARKER:
+    if _snapshot(root, ".LAB_ONLY")["bytes"] != encode(MARKER):
         raise Hold("MISSING_LAB_MARKER")
     return root
 
 
 @contextmanager
 def _lock(root):
-    file = _path(root, ".shared-engine.lock")
-    fd = os.open(file, os.O_NOFOLLOW | os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        st = os.fstat(fd)
-        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) & 0o077):
-            raise Hold("LOCK_UNTRUSTED")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise Hold("SHARED_ENGINE_TRANSACTION_LOCKED") from exc
-        yield
-    finally:
-        os.close(fd)
+        with guard.lock(root):
+            yield
+    except (guard.UnsafePath, OSError) as exc:
+        raise Hold(str(exc) if isinstance(exc, guard.UnsafePath)
+                   else "UNSAFE_FD_LOCK") from exc
 
 
 def _snapshot(root, relative, limit=MAX_FILE):
-    path = _path(root, relative)
-    blob = _safe_file(path, limit)
+    try:
+        blob, mode = guard.read(root, relative, limit)
+    except (guard.UnsafePath, OSError) as exc:
+        raise Hold(str(exc) if isinstance(exc, guard.UnsafePath)
+                   else "UNSAFE_FD_READ") from exc
     return {"bytes": encode(blob), "sha256": sha(blob) if blob is not None else None,
-            "mode": stat.S_IMODE(path.stat().st_mode) if blob is not None else None}
+            "mode": mode}
 
 
 def _match(root, relative, expected):
@@ -193,7 +126,8 @@ def _mutable(engine):
 
 
 def _journal_read(root):
-    data = _safe_file(_path(root, ".engine-journal.json"), MAX_FILE)
+    encoded = _snapshot(root, ".engine-journal.json")["bytes"]
+    data = decode(encoded)
     if data is None:
         return None
     try:
@@ -255,10 +189,10 @@ def _archive_completed(root, entry, probe):
         raise Hold("UNRESOLVED_JOURNAL")
     _verify_terminal(root, entry, probe)
     destination = "audit-" + entry["id"] + ".json"
-    if _path(root, destination).exists():
-        raise Hold("AUDIT_CONFLICT")
-    os.replace(_path(root, ".engine-journal.json"), _path(root, destination))
-    _sync(root)
+    try:
+        guard.move(root, ".engine-journal.json", destination)
+    except (guard.UnsafePath, OSError) as exc:
+        raise Hold("AUDIT_CONFLICT_OR_UNSAFE_PATH") from exc
 
 
 def _recovery_locked(root, probe):
@@ -320,10 +254,10 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None, *, c
         if previous_entry is not None:
             _archive_completed(root, previous_entry, probe)
         manifest_file = "node/config/engine-state/engines.json"
-        compose = _safe_file(_path(root, "node/docker-compose.yml"))
+        compose = decode(_snapshot(root, "node/docker-compose.yml")["bytes"])
         if compose is None or sha(compose) != preview.get("SOURCE_COMPOSE_SHA256"):
             raise Hold("COMPOSE_DRIFT")
-        existing_raw = _safe_file(_path(root, manifest_file))
+        existing_raw = decode(_snapshot(root, manifest_file)["bytes"])
         existing = json.loads(existing_raw) if existing_raw is not None else {"schema": 1, "engines": {}}
         if (set(existing) != {"schema", "engines"} or existing["schema"] != 1
                 or not isinstance(existing["engines"], dict)
