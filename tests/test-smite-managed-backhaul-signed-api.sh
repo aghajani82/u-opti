@@ -11,6 +11,8 @@ if [[ "${GITHUB_ACTIONS:-}" != true ||
 fi
 
 lab="${1:?requires isolated lab root}"
+engine="${SMITE_CI_ENGINE:-backhaul}"
+case "$engine" in backhaul|frp) ;; *) echo "HOLD: unknown CI-only engine" >&2; exit 2 ;; esac
 case "${2:-}" in
   absent|ready) phase="$2" ;;
   *) echo "HOLD: invalid Node API trial phase" >&2; exit 2 ;;
@@ -23,8 +25,13 @@ smite="$root/.managed-smite-source"
   echo "HOLD: pinned reviewed Node API source missing" >&2
   exit 2
 }
+if [[ "$engine" == "backhaul" ]]; then
+  prefix="backhaul-txn-"
+else
+  prefix="uopti-official-frp-"
+fi
 [[ -d "$lab" && ! -L "$lab" &&
-   "$lab" == "${RUNNER_TEMP:?}"/backhaul-txn-* ]] || {
+   "$lab" == "${RUNNER_TEMP:?}"/"$prefix"* ]] || {
   echo "HOLD: invalid disposable Node directory" >&2
   exit 2
 }
@@ -33,17 +40,29 @@ smite="$root/.managed-smite-source"
   exit 2
 }
 
-if [[ "$phase" == ready ]]; then
-  binary="$lab/installed/backhaul"
-  sudo test -f "$lab/node/config/engine-state/engines.json"
+if [[ "$engine" == "backhaul" ]]; then
+  if [[ "$phase" == ready ]]; then
+    binary="$lab/installed/backhaul"
+    sudo test -f "$lab/node/config/engine-state/engines.json"
+  else
+    binary="$(sudo find "$lab/stages" -mindepth 2 -maxdepth 2 -type f -name backhaul.bin -print -quit)"
+    sudo test ! -e "$lab/node/config/engine-state/engines.json"
+  fi
+  [[ -n "$binary" ]] && sudo test -f "$binary" || {
+    echo "HOLD: Backhaul trial binary missing" >&2
+    exit 2
+  }
 else
-  binary="$(sudo find "$lab/stages" -mindepth 2 -maxdepth 2 -type f -name backhaul.bin -print -quit)"
-  sudo test ! -e "$lab/node/config/engine-state/engines.json"
+  if [[ "$phase" == ready ]]; then
+    sudo test -f "$lab/node/config/engine-state/engines.json"
+    sudo test -f "$lab/installed/frp/frpc"
+    sudo test -f "$lab/installed/frp/frps"
+  else
+    sudo test ! -e "$lab/node/config/engine-state/engines.json"
+    sudo test ! -e "$lab/installed/frp/frpc"
+    sudo test ! -e "$lab/installed/frp/frps"
+  fi
 fi
-[[ -n "$binary" ]] && sudo test -f "$binary" || {
-  echo "HOLD: Backhaul trial binary missing" >&2
-  exit 2
-}
 
 # Never share a real pairing secret. This synthetic identity is generated only
 # for a throwaway private Docker container and is never printed.
@@ -81,10 +100,14 @@ if [[ "$compose_mode" == 1 ]]; then
     sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
       GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
       python3 "$root/tests/smite-managed-backhaul-compose-fixture.py" \
-      "$lab" "$phase" "${GITHUB_RUN_ID:?}" "$smite" "$compose_file"
+      "$lab" "$phase" "${GITHUB_RUN_ID:?}" "$smite" "$compose_file" "$engine"
   sudo docker compose -p "$project" -f "$compose_file" config --quiet
   sudo docker compose -p "$project" -f "$compose_file" up -d --no-build --force-recreate --no-deps smite-node >/dev/null
 else
+  if [[ "$engine" != "backhaul" ]]; then
+    echo "HOLD: FRP test requires isolated Docker Compose" >&2
+    exit 2
+  fi
 sudo docker run -d --name "$name" \
   --platform linux/amd64 \
   --network none --read-only --cap-drop ALL --pids-limit 96 --memory 384m \
@@ -120,21 +143,29 @@ print("SIGNED_NODE_NETWORK_NONE_NO_HOST_PORTS=PASS")
 sudo docker inspect --format '{{json .Mounts}}' "$name" | python3 -c '
 import json,sys,os
 mounts=json.load(sys.stdin)
-root,phase,smite=sys.argv[1:]
+root,phase,smite,engine=sys.argv[1:]
 wanted={"/etc/smite-node":root+"/node/config","/var/lib/smite-node":root+"/node-data",
         "/app/main.py":smite+"/node/main.py","/app/app":smite+"/node/app"}
 if os.environ.get("SMITE_CI_COMPOSE_RECREATE")=="1":
     expected=set(wanted)
-    if phase=="ready": expected.add("/usr/local/bin/backhaul")
+    chosen=(["/usr/local/bin/backhaul"] if engine=="backhaul"
+            else ["/usr/local/bin/frpc","/usr/local/bin/frps"])
+    if phase=="ready": expected.update(chosen)
     relevant=[m for m in mounts if m["Destination"] in expected]
     assert {m["Destination"] for m in relevant}==expected, relevant
     for m in relevant:
         if m["Destination"]=="/usr/local/bin/backhaul":
+            assert engine=="backhaul"
             assert m["Source"]==root+"/installed/backhaul" and m["RW"] is False
+        elif m["Destination"] in ("/usr/local/bin/frpc","/usr/local/bin/frps"):
+            assert engine=="frp"
+            assert m["Source"]==root+"/installed/frp/"+m["Destination"].rsplit("/",1)[-1] and m["RW"] is False
         else: assert m["Source"]==wanted[m["Destination"]]
-    assert not any(m["Destination"] in ("/usr/local/bin/frpc","/usr/local/bin/frps") for m in mounts)
+    forbidden=(["/usr/local/bin/frpc","/usr/local/bin/frps"]
+               if engine=="backhaul" else ["/usr/local/bin/backhaul"])
+    assert not any(m["Destination"] in forbidden for m in mounts)
 print("NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS")
-' "$lab" "$phase" "$smite"
+' "$lab" "$phase" "$smite" "$engine"
 for attempt in $(seq 1 16); do
   if sudo docker exec "$name" python -c     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz', timeout=2)" \
     >/dev/null 2>&1; then
@@ -153,6 +184,7 @@ done
 probe() {
   local check_mode="$1"
   sudo docker exec -i --env "EXPECTED_ENGINE_STATE=$phase" \
+    --env "EXPECTED_ENGINE_NAME=$engine" \
     --env "PROBE_MODE=$check_mode" "$name" python -B - <<'PY_PROBE'
 import json, os, urllib.error, urllib.request
 from app.agent_auth import read_identity
@@ -161,6 +193,7 @@ from app.node_auth import sign_request
 base = "http://127.0.0.1:8888"
 identity, secret = read_identity("/etc/smite-node/identity/node-identity.json")
 phase = os.environ["EXPECTED_ENGINE_STATE"]
+engine = os.environ["EXPECTED_ENGINE_NAME"]
 mode = os.environ["PROBE_MODE"]
 replay_file = "/var/lib/smite-node/auth/last-signed-request.json"
 
@@ -203,9 +236,9 @@ inventory = json.loads(payload)
 assert inventory["mode"] == "managed"
 assert set(inventory["engines"]) == {"backhaul", "frp", "gost", "rathole", "chisel"}
 expect = "ready" if phase == "ready" else "not-installed"
-assert inventory["engines"]["backhaul"] == expect, inventory
+assert inventory["engines"][engine] == expect, inventory
 assert all(state == "not-installed" for name, state in inventory["engines"].items()
-           if name != "backhaul"), inventory
+           if name != engine), inventory
 assert request("GET", endpoint, headers=headers)[0] == 401, "nonce replay accepted"
 
 if mode == "initial":
@@ -222,14 +255,22 @@ def denied_apply(core):
     status, content = request("POST", endpoint, body=body,
                               headers=signed("POST", endpoint, body))
     assert status == 409, (core, status, content[:160])
-denied_apply("frp")
-if phase != "ready":
+# A selected engine is never actually started in the PR trial. For
+# installed mode, do NOT submit an Apply that could run the executable.
+# Only absent engines must reliably reject Apply before tunnel creation.
+if engine == "backhaul":
+    denied_apply("frp")
+    if phase != "ready":
+        denied_apply("backhaul")
+else:
     denied_apply("backhaul")
+    if phase != "ready":
+        denied_apply("frp")
 status, content = request("GET", "/api/agent/status",
                           headers=signed("GET", "/api/agent/status"))
 assert status == 200, (status, content[:160])
 assert json.loads(content)["active_tunnels"] == 0
-print("SIGNED_API_BACKHAUL_" + phase.upper() + "_" + mode.upper() + "=PASS")
+print("SIGNED_API_" + engine.upper() + "_" + phase.upper() + "_" + mode.upper() + "=PASS")
 PY_PROBE
 }
 assert_docker_health() {
