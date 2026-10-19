@@ -174,7 +174,8 @@ def _snapshot(root, relative, limit=MAX_FILE):
 
 
 def _match(root, relative, expected):
-    return _snapshot(root, relative, MAX_BINARY if "/managed-bin/" in "/" + relative else MAX_FILE)["sha256"] == expected
+    now = _snapshot(root, relative, MAX_BINARY if "/managed-bin/" in "/" + relative else MAX_FILE)
+    return now["sha256"] == expected["sha256"] and now["mode"] == expected["mode"]
 
 
 def _protected(engine):
@@ -222,7 +223,7 @@ def _journal_write(root, entry):
 
 
 def _check_protected(root, entry):
-    if any(not _match(root, name, digest) for name, digest in entry["protected"].items()):
+    if any(not _match(root, name, snapshot) for name, snapshot in entry["protected"].items()):
         raise Hold("PROTECTED_OR_OTHER_ENGINE_DRIFT")
 
 
@@ -254,8 +255,11 @@ def _recovery_locked(root, probe):
     _check_protected(root, entry)
     # No blind overwrites: every tracked value must match exact old or new bytes.
     for name in _mutable(entry["engine"]):
-        current = _snapshot(root, name, MAX_BINARY)["sha256"]
-        if current not in (entry["previous"][name]["sha256"], entry["after"][name]):
+        now = _snapshot(root, name, MAX_BINARY)
+        before = entry["previous"][name]
+        allowed = ((before["sha256"], before["mode"]),
+                   (entry["after"][name], entry["after_modes"][name]))
+        if (now["sha256"], now["mode"]) not in allowed:
             raise Hold("EXTERNAL_MUTATION_CONFLICT")
     entry["state"] = "RECOVERING"
     _journal_write(root, entry)
@@ -308,6 +312,21 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
                 or engine in existing["engines"]
                 or not set(existing["engines"]).issubset(BINARIES)):
             raise Hold("MANIFEST_INCOMPATIBLE")
+        other = "backhaul" if engine == "frp" else "frp"
+        if other in existing["engines"]:
+            if preview.get("OTHER_ENGINE") != "SIGNED_READY_ATTESTED_SIMULATED":
+                raise Hold("OTHER_ENGINE_SIGNED_PROOF_REQUIRED")
+            record = existing["engines"][other]
+            for index, name in enumerate(BINARIES[other]):
+                expected = record.get("sha256" if index == 0 else "server_sha256")
+                saved = _snapshot(root, "node/managed-bin/" + other + "/" + name, MAX_BINARY)
+                if saved["sha256"] != expected or saved["mode"] != 0o755:
+                    raise Hold("OTHER_ENGINE_BINARY_UNVERIFIED")
+            if _snapshot(root, "node/docker-compose.managed-" + other + ".yml")["sha256"] is None:
+                raise Hold("OTHER_ENGINE_COMPOSE_MISSING")
+            _status_probe(probe, "other", other)
+        elif preview.get("OTHER_ENGINE") != "NOT_INSTALLED":
+            raise Hold("OTHER_ENGINE_STATE_DRIFT")
         if _snapshot(root, "node/config/tunnels.json")["sha256"] != sha(b"[]\n"):
             raise Hold("SAVED_TUNNELS_OR_UNKNOWN_STATE")
         output = dict(existing["engines"])
@@ -326,10 +345,12 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
         snapshots = {name: _snapshot(root, name, MAX_BINARY) for name in mutable}
         if any(snap["bytes"] is not None for name, snap in snapshots.items() if name != manifest_file):
             raise Hold("ENGINE_PARTIALLY_PRESENT")
-        protected = {name: _snapshot(root, name)["sha256"] for name in _protected(engine)}
+        protected = {name: _snapshot(root, name) for name in _protected(engine)}
         entry = {"schema": SCHEMA, "id": uuid.uuid4().hex, "engine": engine,
                  "state": "PREPARED", "previous": snapshots,
                  "after": {name: sha(value) for name, value in new_values.items()},
+                 "after_modes": {name: (0o755 if "/managed-bin/" in "/" + name else 0o600)
+                                 for name in new_values},
                  "protected": protected}
         _journal_write(root, entry)  # fsync BEFORE any mutation
         try:
@@ -366,6 +387,9 @@ def execute(root, engine, binaries, overlay, preview, probe, crash_at=None):
             if crash_at == "after_signed":
                 raise SimulatedCrash(crash_at)
             _check_protected(root, entry)
+            if any(not _match(root, name, {"sha256": digest, "mode": entry["after_modes"][name]})
+                   for name, digest in entry["after"].items()):
+                raise Hold("POST_RESTART_ENGINE_DRIFT")
             entry["state"] = "COMMITTED"
             _journal_write(root, entry)
             return {"LAB_RESULT": "COMMITTED_SIMULATION_ONLY",
