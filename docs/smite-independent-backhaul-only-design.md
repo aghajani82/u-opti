@@ -53,6 +53,30 @@ during installation.
   must not require host FRP, a running FRP daemon, private-network overlay,
   or a pre-existing Backhaul tunnel. Stable's old FRP paths are untouched.
 
+## Implemented now: verified package preparation only
+
+- `modules/smite-managed-backhaul.py` prepares an independent
+  root-private offline candidate from the **official Backhaul v0.7.2**
+  AMD64/ARM64 archive. Both compressed-release SHA256 values are pinned
+  to the matching GitHub release asset digests. A mismatched archive,
+  unsafe tar member, symlink, unexpected ELF or invalid managed Node
+  fails closed before creating any candidate.
+- The candidate contains a separately SHA256-checked Linux Backhaul
+  binary, an exact read-only Compose volume override and a proposed
+  `engines.json` that retains the declarations of all other engines.
+  The live `./config/engine-state` and existing Node Compose are not
+  changed; no Node is started or restarted.
+- `tests/test-smite-managed-backhaul.py` covers the no-mutation
+  contract, permissions, hash tampering, path safety, independent engine
+  preservation and Clean RC admission. The separate PR-only GitHub
+  workflow `managed-backhaul-official-artifact` also downloads the
+  actual pinned AMD64 asset, checks the executable version and validates
+  a Compose merge against the exact reviewed Smite Node source.
+- This preparation stage is **not** the installation menu: there is no
+  active bind mount, published port, engine enrollment, signed remote
+  inventory or operational rollback yet. None of the actions required
+  for an actual activation are implied by a green preparation test.
+
 ## Fail-closed installation transaction (to implement)
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
@@ -112,7 +136,8 @@ during installation.
   exposure, least privileges and operator-friendly Persian/English
   errors before any version promotion.
 
-**HOLD:** No verified per-arch Backhaul release digest, no independent
-per-engine installer implementation, no real signed dual-Node inventory
-after installation, no 443 data-flow acceptance, no IR/KH VPS trial,
-and no explicit release approval yet. Both PRs must remain Draft.
+**HOLD:** The pinned official AMD64/ARM64 archives are now verified
+for *preparation*, but **no real independent activation/rollback workflow**
+exists yet. No signed dual-Node inventory after installation, no actual
+Backhaul-over-443 data-flow acceptance, no IR/KH VPS trial and no release
+approval exist. Both PRs must remain Draft.
