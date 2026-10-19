@@ -192,6 +192,18 @@ async def main_tests(root: Path, ca: Path, identity_secret: str):
         # Actual Panel NodeClient, real HMAC transport, real verified TLS
         # and Nginx URI passthrough to actual strict Agent router.
         ready = await client.get_tunnel_status(NODE_ID)
+        if ready.get("status") != "ok":
+            # No secrets/headers/full exceptions leave the CI environment.
+            print("STAGE26_PANEL_CONTROL_RESULT=" + str(ready.get("status")))
+            try:
+                await signed_agent_call(
+                    node_id=NODE_ID, address=f"https://{HOST}", using_frp=False,
+                    method="GET", target="/api/agent/status", timeout=4,
+                )
+            except Exception as exc:
+                print("STAGE26_TRANSPORT_FAILURE=" + type(exc).__name__)
+                if exc.__cause__ is not None:
+                    print("STAGE26_TRANSPORT_ROOT=" + type(exc.__cause__).__name__)
         ensure(ready.get("status") == "ok" and ready.get("active_tunnels") == 0,
                "Signed Panel->KH status via verified TLS failed")
 
