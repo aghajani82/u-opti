@@ -1096,18 +1096,18 @@ while true; do
                 echo
                 echo "Update failed during installation or verification."
 
+                # NEVER delete the recovery copy when a rollback fails.
+                # This is a real updater path, not an offline simulation.
                 if ! update_failed_restore; then
-                    echo "WARNING: Restore routine returned an error."
+                    echo "CRITICAL: Automatic restore was incomplete."
+                    echo "Do not retry the update until the previous state is reviewed."
+                    echo "Recovery backup retained at:"
+                    echo "$BACKUP_DIR"
+                else
+                    echo "Previous installation restored successfully."
+                    rm -rf -- "$BACKUP_DIR"
                 fi
 
-                if [ -f "$BACKUP_DIR/u-opti" ] && \
-                   [ -f "$BACKUP_DIR/common.sh" ] && \
-                   [ -f "$BACKUP_DIR/VERSION" ]; then
-                    echo
-                    echo "Previous version restore check completed."
-                fi
-
-                rm -rf "$BACKUP_DIR"
                 cleanup_update_temp
 
                 echo
