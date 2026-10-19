@@ -71,6 +71,19 @@ operator-selected trial installation.
 - Pairing/machine registration, admin-approved Node destinations, new
   Nginx 443/HTTP target routing, permissions for Node's private HMAC
   identity and Panel Fernet master require a coordinated two-host trial.
+- **Stage28 IR firstboot unsigned-registration closure:** Clean-RC
+  Panel now explicitly boots with `SMITE_NODE_REGISTRATION_MODE=signed`
+  and `SMITE_PANEL_AGENT_AUTH_MODE=signed`, while the pairing-preview
+  API remains disabled until separately migrated and backed up. The
+  local **Iran Node**, like the KH Node, boots `paused + strict` with
+  an unauthenticated local-only liveness healthcheck. The IR installer
+  does **not** wait for a fake legacy active Node registration or
+  write an unapproved local control address. Both IR and KH remain
+  pending until explicit admin-approved signed enrollment. A dedicated
+  inert regression test checks the actual installer-generated Panel and
+  Iran Node files and explicitly verifies that the stable install
+  profile remains unchanged. This is still an unpublished review-only
+  image, NOT permission to deploy or bypass the two-host acceptance.
 - **Stage27 fail-closed gateway/FRP/status hardening:** Both cross-project
   CI branches now pin identical reviewed Smite source SHA `75412e8ea77565b6b21a6ac7f73827b221272d6a`.
   Signed gateway readiness requires a genuine authenticated check-in,
