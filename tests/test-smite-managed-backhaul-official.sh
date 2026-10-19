@@ -71,7 +71,7 @@ bash "$root/tests/test-smite-managed-backhaul-node-runtime.sh" "$lab" absent
 bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
-  python3 "$root/modules/smite-managed-backhaul-control.py" activate \
+  python3 "$root/modules/smite-managed-backhaul-control.py" install \
   --lab-root "$lab" --stage "$stage"
 sudo test -f "$lab/installed/backhaul"
 sudo test -f "$lab/node/config/engine-state/engines.json"
