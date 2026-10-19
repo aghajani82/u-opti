@@ -82,8 +82,24 @@ def main() -> int:
         assert not (lab / "recovery-journal").exists()
         print("OFFICIAL_BACKHAUL_PREVIOUS_NODE_AND_IDENTITY_RECOVERED=PASS")
         return 0
-    except (lifecycle.Hold, OSError, AssertionError):
-        print("HOLD: lifecycle rehearsal failed; review private CI logs", file=sys.stderr)
+    except lifecycle.Hold as error:
+        # Lifecycle Hold reasons are fixed internal codes, never credentials.
+        message = str(error)
+        allowed = {
+            "UNFINISHED_TRANSACTION_MUST_RECOVER_FIRST", "ENGINE_MUST_START_ABSENT",
+            "CORRUPT_SAVED_TUNNEL_REGISTRY", "UNKNOWN_SAVED_TUNNEL_REGISTRY",
+            "EXISTING_TUNNELS_DO_NOT_RECREATE",
+            "ROLLBACK_FAILED_MANUAL_REVIEW_REQUIRED",
+            "ROLLBACK_BYTES_OR_PROTECTED_STATE_MISMATCH",
+            "PREVIOUS_SIGNED_NODE_RUNTIME_NOT_RESTORED",
+            "ACTIVATION_FAILED_EXACT_ROLLBACK_PROVED",
+            "FAILED_HEALTH_PROOF_WAS_ACCEPTED",
+        }
+        print("HOLD: " + (message if message in allowed else "LIFECYCLE_ADMISSION_OR_ARTIFACT_FAILED"),
+              file=sys.stderr)
+        return 2
+    except (OSError, AssertionError):
+        print("HOLD: LIFECYCLE_SYSTEM_CHECK_FAILED", file=sys.stderr)
         return 2
 
 
