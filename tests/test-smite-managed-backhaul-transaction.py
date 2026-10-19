@@ -64,7 +64,12 @@ class TransactionLab(unittest.TestCase):
             f.addfile(m, io.BytesIO(binary))
         self.digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         self.archive = archive
-        self.patch_env = patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request"})
+        self.patch_env = patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "aghajani82/u-opti",
+            "RUNNER_TEMP": str(self.root.parent),
+        })
         self.patch_env.start()
         self.addCleanup(self.patch_env.stop)
 
