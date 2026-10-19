@@ -108,3 +108,11 @@ bash "$root/tests/test-smite-managed-backhaul-signed-api.sh" "$lab" absent
 echo "BACKHAUL_REAL_ARTIFACT_TRANSACTION_AND_EXACT_ROLLBACK=PASS"
 echo "BACKHAUL_SIGNED_NODE_API_NO_PORTS_RESTART_ROLLBACK=PASS"
 echo "BACKHAUL_REAL_NODE_INVENTORY_BEFORE_AFTER_RECREATE_ROLLBACK=PASS"
+
+# New lifecycle milestone: one controller holds the whole compensation
+# boundary while the actual pinned Node API restarts and answers signed HMAC.
+# On simulated failed post-restart health, it MUST automatically rollback.
+sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+  GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
+  python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
+  "$lab" "$stage"
