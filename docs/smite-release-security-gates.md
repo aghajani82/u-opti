@@ -64,11 +64,11 @@ recovery codes and failure handling. See Smite
   injection returns. The Stable regression still proves the original
   download/mount/verify sequence is invoked.
 - **Not complete:** unpublished Smite Panel and Node images still
-  contain bundled FRP binaries. The current frontend lists all
-  engines regardless of installation state. An engine registry,
-  per-engine install/uninstall and readiness, Backhaul-only real
-  traffic and an independent 443 transport proof remain required.
-  Smite management pairing must not silently start an FRP data path.
+  contain bundled FRP binaries. The managed signed inventory and
+  Create Tunnel readiness UX now fail closed, but no actual independent
+  Backhaul/FRP installer exists yet. Per-engine install/rollback,
+  Backhaul-only real traffic and an independent 443 transport proof
+  remain required. Smite pairing must not silently start an FRP path.
 - No new user-facing step or extra public port is introduced.
   All tunnel engines remain disabled until individually selected and
   verified. This is an offline milestone, not live-host admission.
@@ -84,10 +84,18 @@ Only independently enrolled, root-owned and hash-verified engines may
 ever become `ready`.
 
 The Panel checks both selected Node inventories via signed HTTPS/443
-BEFORE saving a tunnel. No automatic install, no silent FRP fallback,
-no public data port changes. Per-engine installation, rollback and
-simple Create Tunnel UI feedback are subsequent steps; managed
-engines remain unusable until those steps are completed.
+BEFORE saving a tunnel. Create Tunnel now displays readiness in a compact
+Persian/English message and disables creation unless both Nodes report
+`ready`. Managed spec-edit, single/bulk reapply and GOST pairing also
+fail closed before side effects; original foreign-node identity is
+preserved. No automatic install, no silent FRP fallback and no public
+port changes. The actual independent installer and two-host proof remain
+future gates; see `docs/smite-independent-backhaul-only-design.md`.
+
+The isolated cross-repo CI source is pinned to Smite
+`e16e263035e8fd34a74ac6c92225232b2d6aac1c`.
+Passing mocked/Docker CI does not demonstrate real public 443 data paths
+or authorize deployment.
 
 Stable keeps default legacy engine behavior, without the new flags.
 
