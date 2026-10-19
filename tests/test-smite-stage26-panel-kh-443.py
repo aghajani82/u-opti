@@ -338,8 +338,16 @@ def main():
             from importlib import import_module
             sys.path.insert(0, str(SMITE / "panel"))
             from app import node_pairing_store
+            # Scope the one fixture-secret override to 32-byte
+            # credential minting only. Genuine HMAC request nonces use
+            # secrets.token_hex(16) and MUST retain their 32-char length.
+            true_hex = node_pairing_store.secrets.token_hex
+            def only_fixture_identity(size=None):
+                if size == 32:
+                    return paired_secret
+                return true_hex(size)
             with mock.object(node_pairing_store.secrets, "token_hex",
-                             return_value=paired_secret):
+                             side_effect=only_fixture_identity):
                 asyncio.run(main_tests(root, cert, paired_secret))
 
             def reload(mode):
