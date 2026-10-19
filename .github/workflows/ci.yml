@@ -83,6 +83,43 @@ jobs:
           python3 -m py_compile tests/test-smite-fastapi-durable-bridge.py
           python3 -B tests/test-smite-fastapi-durable-bridge.py -v
 
+  signed-stage27-real-nginx-hmac-443:
+    # Real loopback TLS/443 + Stage12 inert snippet -> actual Smite strict API.
+    # Unique disposable PR runner, no public binding or production reload.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout experimental U-OPTI code
+        uses: actions/checkout@v4
+      - name: Checkout immutable reviewed Smite strict Node source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 3751aeda6f946e5e5624e5e89ab1ce554fec4460
+          path: .stage27-smite-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install disposable Nginx, OpenSSL and reviewed Smite Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .stage27-smite-src rev-parse HEAD)" = "3751aeda6f946e5e5624e5e89ab1ce554fec4460"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nginx openssl
+          python3 -m pip install -r .stage27-smite-src/node/requirements.txt
+      - name: Verify real TLS/SNI + exact signed path/query/body + missing DB fail-close
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-smite-stage27-signed-nginx-hmac.py
+          python3 -B tests/test-smite-stage27-signed-nginx-hmac.py
+
   managed-frp-official-artifact:
     # Trusted official downloads only on disposable PR CI, never push/main.
     if: github.event_name == 'pull_request'
