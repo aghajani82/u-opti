@@ -57,7 +57,13 @@ smite_frp_mount_compose() {
   echo "HOLD: clean KH attempted host FRP mount" >&2
   return 98
 }
-smite_install_node_files node-kh-01 foreign panel.stage24.test:443 "" "" "" standard > "$lab/install.log"
+if ! smite_install_node_files node-kh-01 foreign panel.stage24.test:443 "" "" "" standard > "$lab/install.log"; then
+  echo "HOLD: Stage24 reviewed Node installer did not complete" >&2
+  # Print fixed failure classifications only, never .env or key material.
+  grep -E '^(HOLD|ERROR)[: ]' "$lab/install.log" >&2 || true
+  exit 1
+fi
+echo "STAGE24_NODE_INSTALLER=PASS"
 # The actual U-OPTI installer runs as root on KH. The ephemeral GitHub
 # shell does not. Mirror that root-owned writable container config mount,
 # rather than granting elevated Docker capabilities to pass a test.
