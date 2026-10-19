@@ -9,7 +9,7 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_node="$root/.managed-smite-source/node/docker-compose.yml"
 test -s "$source_node" || { echo "HOLD: missing reviewed Node Compose source" >&2; exit 2; }
-lab="$(mktemp -d)"
+lab="$(mktemp -d "${RUNNER_TEMP:?}/backhaul-txn-XXXXXXXX")"
 chmod 0700 "$lab"
 cleanup() { sudo rm -rf -- "$lab"; }
 trap cleanup EXIT
@@ -65,13 +65,17 @@ baseline="$(sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')"
 sudo chown -R 0:0 "$lab"
 printf 'U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n' | sudo tee "$lab/EXPERIMENTAL-LAB" >/dev/null
 sudo chmod 0600 "$lab/EXPERIMENTAL-LAB"
-sudo python3 "$root/modules/smite-managed-backhaul-transaction.py" activate \
+sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \\
+  GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \\
+  python3 "$root/modules/smite-managed-backhaul-transaction.py" activate \
   --lab-root "$lab" --stage "$stage"
 sudo test -f "$lab/installed/backhaul"
 sudo test -f "$lab/node/config/engine-state/engines.json"
 sudo docker compose -f "$lab/node/docker-compose.yml" config --format json \
   | python3 -c 'import json,sys; n=json.load(sys.stdin)["services"]["smite-node"]; assert not n.get("ports"); assert any(v["target"]=="/usr/local/bin/backhaul" and v["read_only"] for v in n["volumes"])'
-sudo python3 "$root/modules/smite-managed-backhaul-transaction.py" rollback --lab-root "$lab"
+sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \\
+  GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \\
+  python3 "$root/modules/smite-managed-backhaul-transaction.py" rollback --lab-root "$lab"
 test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$baseline"
 sudo test ! -e "$lab/node/config/engine-state/engines.json"
 sudo test ! -e "$lab/installed/backhaul"
