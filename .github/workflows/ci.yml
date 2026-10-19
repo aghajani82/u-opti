@@ -478,7 +478,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 91c92508ae6f6b8cef4bb64aea1fe0579859b985
+          ref: c780a8c9774c322a7da3833f7a333433386901a9
           path: .stage24-smite-src
           persist-credentials: false
       - name: Verify actual installer Compose, signed overlay and rollback
@@ -501,7 +501,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 91c92508ae6f6b8cef4bb64aea1fe0579859b985
+          ref: c780a8c9774c322a7da3833f7a333433386901a9
           path: .stage20-smite-src
           persist-credentials: false
       - name: Install isolated Nginx and pinned pairing runtime
@@ -590,7 +590,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 91c92508ae6f6b8cef4bb64aea1fe0579859b985
+          ref: c780a8c9774c322a7da3833f7a333433386901a9
           path: .managed-smite-source
           persist-credentials: false
       - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
