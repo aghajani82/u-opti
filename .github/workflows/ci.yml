@@ -10,6 +10,21 @@ permissions:
   contents: read
 
 jobs:
+  managed-frp-official-artifact:
+    name: managed-frp-official-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify upstream FRP archive and BOTH binaries without host activation
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-frp-official.sh
+          bash tests/test-smite-managed-frp-official.sh "${{ matrix.arch }}"
   bash-validation:
     runs-on: ubuntu-latest
     steps:
