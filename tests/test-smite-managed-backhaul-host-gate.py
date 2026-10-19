@@ -119,7 +119,7 @@ class ReadOnlyGate(unittest.TestCase):
 
     def test_actual_compose_must_declare_named_volume(self):
         (self.node / "docker-compose.yml").write_text(
-            COMPOSE.replace("      - node-data:/var/lib/smite-node\\n", "")
+            COMPOSE.replace("      - node-data:/var/lib/smite-node\n", "")
         )
         self.assertEqual(self.report()["HOLD_REASON"], "UNTRUSTED_NODE_COMPOSE")
 
