@@ -25,6 +25,47 @@
 - Do **not** generate test traffic through the public 443 route yet. No
   snapshot or TLS check is performed by the Python admission modules.
 
+## Step 1A — Safe preliminary inspection without experimental modules
+
+If the disposable VPS does **not** yet have the experimental U-OPTI
+branch installed, do **not** fetch and execute an unreviewed installer
+as root merely to collect diagnostics. Use the same minimal read-only
+commands independently on both machines. These observations are
+*not* the structured signed/preflight attestation from Step 2.
+
+**TARGET: IR — disposable Iran-role server only, read-only**
+
+```bash
+echo '=== IR READ-ONLY SMITE BASELINE ==='
+if test -d /opt/smite-node; then echo 'NODE_DIRECTORY=PRESENT'; else echo 'NODE_DIRECTORY=MISSING'; fi
+for file in /opt/smite-node/.env /opt/smite-node/docker-compose.yml; do
+  if test -f "$file"; then echo "FILE=$(basename "$file") PRESENT"; else echo "FILE=$(basename "$file") MISSING"; fi
+done
+if test -f /opt/smite-node/.env; then
+  awk -F= '$1 ~ /^(NODE_ROLE|SMITE_ENGINE_INVENTORY_MODE|SMITE_AGENT_AUTH_MODE|SMITE_NODE_PANEL_AUTH_MODE)$/ {v=$2; gsub(/[^A-Za-z0-9_-]/,"?",v); print $1 "=" v}' /opt/smite-node/.env
+fi
+if command -v docker >/dev/null 2>&1; then
+  docker inspect --type=container --format 'NODE_RUNNING={{.State.Running}} NETWORK={{.HostConfig.NetworkMode}} IMAGE={{.Config.Image}}' smite-node 2>/dev/null || echo 'NODE_CONTAINER=NOT_FOUND'
+  docker inspect --type=container --format '{{range .Mounts}}MOUNT={{.Destination}} TYPE={{.Type}} NAME={{.Name}}{{println}}{{end}}' smite-node 2>/dev/null || true
+else echo 'DOCKER=NOT_INSTALLED'; fi
+```
+
+**TARGET: KH — disposable foreign-role server only, read-only**
+
+Run the **same block**, changing only the first line to:
+
+```bash
+echo '=== KH READ-ONLY SMITE BASELINE ==='
+```
+
+These commands disclose only an allowed set of non-secret mode fields
+and Docker container/mount metadata; they do not print `.env`
+contents, volume source paths, identity files or any tunnel tokens.
+They do not restart Docker, connect to another server or modify disks.
+The container image string might contain a private image name; review
+the output before sharing it. Both sides may be physically overseas,
+but their roles must still be separately `IR` and `KH`.
+
 ## Step 2 — Independently collect read-only, redacted reports
 
 Only if you **already have the experimental modules installed** on two
