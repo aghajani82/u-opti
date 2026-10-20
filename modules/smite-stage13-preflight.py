@@ -308,8 +308,8 @@ def _ok_panel_restore_revocation_witness(
             if (opened.st_dev, opened.st_ino) != (entry.st_dev, entry.st_ino):
                 raise AuditHold("panel_database_changed")
             header = stream.read(100)
-        if (len(header) < 100 or header[:16] != b"SQLite format 3\\x00"
-                or header[18:20] != b"\\x01\\x01"):
+        if (len(header) < 100 or header[:16] != b"SQLite format 3\x00"
+                or header[18:20] != b"\x01\x01"):
             raise AuditHold("panel_database_uncheckpointed")
         with closing(sqlite3.connect(
             db.absolute().as_uri() + "?mode=ro&immutable=1",

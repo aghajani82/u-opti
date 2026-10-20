@@ -183,11 +183,11 @@ class Stage13PreflightTest(unittest.TestCase):
                                 panel_revocation_witness=witness)
         state = p.state.read_text()
         nginx = p.nginx_vhost.read_text()
-        p.state.write_text("SMITE_ROLE=panel-iran\\nSMITE_CONNECTION_MODE=standard\\n")
+        p.state.write_text("SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\n")
         p.nginx_vhost.write_text(
-            "server { listen 443 ssl;\\n"
-            " location ^~ /api/node-control/ {\\n"
-            " proxy_pass http://127.0.0.1:8000;\\n }\\n}\\n"
+            "server { listen 443 ssl;\n"
+            " location ^~ /api/node-control/ {\n"
+            " proxy_pass http://127.0.0.1:8000;\n }\n}\n"
         )
         def review(sha=trusted):
             return dict(gate.audit("ir", p, recovery_old_node_id=old_id,
