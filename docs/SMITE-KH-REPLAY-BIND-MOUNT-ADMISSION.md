@@ -90,11 +90,17 @@ tables/nonce schema, and the exact Stage9 Compose generator:
 
 ## Still **NOT** established
 
-- **Real persistent Docker bind mounts** are not verified by parsing a
-  candidate YAML file. The base Node Compose also uses a parent
-  `node-data:/var/lib/smite-node` mount; only a disposable live Docker
-  inspection/recreation test can prove the nested bind and its durability.
-  A `PASS` above is not an admission for `docker compose up`.
+- **Important evidence update (2026-10-20):** The separate, existing
+  disposable Docker Compose test now checks actual merged mounts from
+  `docker inspect` (RO identity, RW nested replay and named parent volume),
+  creates the replay DB explicitly before startup, tests signed→paused→signed
+  container force-recreation and old-nonce denial, and confirms signed 503
+  after DB loss with refusal to re-enroll. [Full proof](SMITE-NODE-DOCKER-RECREATE-REPLAY-CI-EVIDENCE.md)
+  and [CI 39404517558](https://github.com/aghajani82/u-opti/actions/runs/39404517558)
+  (16/16 PASS). **The local static `PASS` still does not mean production
+  Compose may be applied.** CI proves one ephemeral runner's container
+  recreation, not physical storage durability across provider reboot or
+  recovery of stale snapshots.
 - The new Smite offline provisioning tool writes the marker beside the
   identity. If the identity bind is read-only at runtime, it must be
   provisioned through a **separate approved offline process before
@@ -113,12 +119,14 @@ tables/nonce schema, and the exact Stage9 Compose generator:
 
 ## Next real release work
 
-Reconcile a final reviewed paired Node image with **offline first pairing
-and enrollment**, then test isolated Docker Compose mount precedence and
-identity/replay persistence across container deletion/recreation, while
-ensuring a lost replay volume stays HOLD. Separately implement and test
-authorized replay-snapshot quarantine/key rotation; complete independent
-Backhaul and novice IR→KH wizard without more nested steps.
+Isolated Docker Compose nested-mount precedence, recreated-container
+nonce persistence and lost-replay fail-closed behavior now have positive
+CI evidence. **Next:** design and negative-test authorized, trusted-time
+snapshot/replay-store quarantine or coordinated signed key rotation and
+verify the complete pairing/mount lifecycle without automatically enabling
+strict mode. Finish independently installable Backhaul, novice IR→KH
+workflow, signed image release provenance and separately approved
+snapshot-backed VPS reboot tests.
 
 **`MAIN_MERGE=NO` · `RELEASE_PUBLISH=NO` · `INSTALL_ALLOWED=NO`
 · `ACTIVATION_GATE=HOLD` · `IR_KH_UNCHANGED=YES`.**
