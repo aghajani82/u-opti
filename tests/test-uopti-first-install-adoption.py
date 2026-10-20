@@ -213,6 +213,10 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         self.assertLess(s.index("u_opti_resolve_source_sha"),
                         s.index("Downloading VERSION"))
         self.assertIn('U_OPTI_ADOPT_EXISTING:-NO', s)
+        self.assertLess(s.index('U_OPTI_ADOPT_EXISTING:-NO'),
+                        s.index('REQUIRED_PACKAGES=('))
+        self.assertLess(s.index('U_OPTI_ADOPT_EXISTING:-NO'),
+                        s.index('Downloading VERSION'))
         self.assertNotIn('cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"', s)
         self.assertIn('python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply',
                       s)
