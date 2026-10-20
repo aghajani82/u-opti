@@ -128,6 +128,16 @@ Successful CI, HTTP 200, mock transports, synthetic binaries or a temporary test
 
 **NEXT MOST IMPORTANT WORK:** integrate verified strict Smite paired identity/one-time durable replay DB bootstrap with explicit opt-in safe pairing; ensure permanent source/digest release contract without automatically changing stable v0.1.7. Then finish independent Backhaul and simple IR/KH flow. Approval-gated disposable snapshot VPS qualification comes later.
 
+## 5c. 2026-10-20 — strict Replay DB one-time paired Node enrollment (lab complete)
+
+- **Existing [Smite Draft #16](https://github.com/aghajani82/Smite/pull/16)** now includes operator-only `node/app/replay_enrollment.py`, no HTTP/startup hook or automatic strict-mode switch. Paired Node identity must already exist with 0600 permissions in an owned private 0700 persistent directory. The replay DB has a **separate** private 0700 persistent directory. The tool requires explicit `--confirm-first-provision`, durably writes a 0600 independent `replay-enrollment.json` marker **alongside the identity before SQLite**, then explicitly provisions and verifies `DurableNonceStore`. Existing marker/DB, unsafe paths and partial failures HOLD without auto-deletion or retry.
+- **Why the marker matters:** if only the replay volume disappears while the identity volume persists, another first-boot call refuses to create a blank database. Signed Node request handling continues to return 503 for missing replay storage. **It does not solve loss of both volumes or rollback of a same-Node older replay DB snapshot**; these still require independent provenance and signed-traffic quarantine or authorized key rotation.
+- **Smite reviewed code/image pair:** `9201722336b05e833408a0a352cfee99465da2cb` (prior to documentation-only commits). Signed Agent [CI 39395144111](https://github.com/aghajani82/Smite/actions/runs/39395144111) PASS; exact-head two-image offline build [CI 39395144038](https://github.com/aghajani82/Smite/actions/runs/39395144038) PASS, artifact `12251038624`, manifest SHA256 `f40c6553a1573c6623f03634da187fe0a403a309590871045a8c0bcada6b590f`, ZIP SHA256 `2cef44711afed60666a6ec347a8e0b156d11a40609db913d6183ea879771e557`. **Temporary expiry 2026-10-23T08:42:39Z**. No release/push/live deployment.
+- **Same U-OPTI [Draft PR #48](https://github.com/aghajani82/u-opti/pull/48):** strict signed FastAPI and real Nginx 443 CI jobs now pin exact Smite `9201722...` source. FastAPI lab uses actual `provision_once` and proves missing-DB first-time bootstrap cannot be repeated while the marker survives. [CI 39395426015](https://github.com/aghajani82/u-opti/actions/runs/39395426015) **16/16 PASS**. Other historical integration baselines intentionally remain unchanged.
+- **Detailed permanent admission notes:** [SMITE-FIRST-REPLAY-ENROLLMENT-ADMISSION.md](SMITE-FIRST-REPLAY-ENROLLMENT-ADMISSION.md), including the fact that U-OPTI's preview identity location and Smite's actual private Node config paths are **not** yet safely reconciled or bind-mounted.
+
+**NEXT:** integrate reviewed KH identity + independent durable replay bind mounts into an explicit, fail-closed pairing/installer lifecycle **without** auto-enabling strict mode. Then design authenticated backup/restore and anti-rollback quarantine/key rotation before production strict traffic. Parallel release blockers remain FRP-independent Backhaul, simple novice UI and actual snapshot-backed host rehearsal.
+
 ## 6. How to report progress after each working session
 
 Append or refresh in **Issue #47 comments**, and update this document before leaving a long conversation:
@@ -144,7 +154,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** Verify the newest U-OPTI Draft #48 HEAD CI after repinning strict tests to Smite `995977d0...` and recording exact-head Panel+Node archive proof. Then close the actual strict replay DB provisioning/key rotation and *independent Backhaul* release blockers, retaining stable v0.1.7 until a separate release decision. No additional PR staircase, no install/activation/merge without approval.
+**Current next action:** review private identity and Replay DB volume mounts between U-OPTI pairing output and the strict Smite Node container; implement fail-closed first-enrollment integration only after reviewing exact paths and persistence. Then complete safe replay backup/quarantine/key rotation (same-identity replay DB rollback remains a real blocker), independent Backhaul, and the simple IR/KH workflow. Do not create new per-microstage Draft PRs. No main merge, release or IR/KH deployment. `INSTALL_ALLOWED=NO`; `ACTIVATION_GATE=HOLD`.
 
 ## 7. Operational conventions
 
