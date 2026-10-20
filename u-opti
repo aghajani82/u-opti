@@ -356,6 +356,31 @@ while true; do
 
             TEMP_DIR=$(mktemp -d)
 
+            # BEGIN: U-OPTI immutable per-operation source pin
+            # Resolve once; never download a mixture of mutable branch revisions.
+            u_opti_resolve_source_sha() {
+                local ref="$1" response
+                if [[ ! "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+                   [[ "$ref" == *".."* ]] || [[ "$ref" == /* ]]; then
+                    return 1
+                fi
+                response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 \
+                    -H 'Accept: application/vnd.github+json' \
+                    -H 'X-GitHub-Api-Version: 2022-11-28' \
+                    "https://api.github.com/repos/aghajani82/u-opti/commits/$ref")" || return 1
+                printf '%s' "$response" | python3 -c '
+            import json
+            import re
+            import sys
+            data = json.load(sys.stdin)
+            sha = data.get("sha") if isinstance(data, dict) else None
+            if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+                sys.exit("UNTRUSTED_SOURCE_SHA")
+            print(sha)
+            '
+            }
+            # END: U-OPTI immutable per-operation source pin
+
             download_repo_file() {
                 local REPO_PATH="$1"
                 local DESTINATION="$2"
@@ -365,7 +390,7 @@ while true; do
 
                 curl -fsSL --retry 3 \
                     -H "Accept: application/vnd.github.raw+json" \
-                    "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}&cb=${CACHE_BUST}" \
+                    "${UPDATE_RAW_BASE_URL}/${REPO_PATH}?cb=${CACHE_BUST}" \
                     -o "$DESTINATION"
             }
 
@@ -501,6 +526,18 @@ while true; do
             UPDATE_DEST_DIR="$MODULES_PATH"
 
             echo "Preparing update..."
+            echo
+
+            # Pin every fetched U-OPTI file to ONE reviewed GitHub commit.
+            # Retain BRANCH as the user-selected update channel for later runs.
+            if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
+                echo "HOLD: GitHub revision unavailable; update cancelled before changes." >&2
+                cleanup_update_temp
+                read -rp "Press Enter to return..."
+                continue
+            fi
+            UPDATE_RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
+            echo "Update source revision: $SOURCE_SHA"
             echo
 
             echo "Downloading VERSION..."
