@@ -194,9 +194,9 @@ class HostPlan(unittest.TestCase):
             path.chmod(0o755)
             digests[name] = hashlib.sha256(binary).hexdigest()
         compose = COMPOSE.replace(
-            "      - ./config:/etc/smite-node\\n",
-            ("      - ./config:/etc/smite-node\\n" +
-             "".join(f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+            "      - ./config:/etc/smite-node\n",
+            ("      - ./config:/etc/smite-node\n" +
+             "".join(f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n"
                      for name in ("frpc", "frps")))
         )
         (self.node / "docker-compose.yml").write_text(compose)
@@ -252,7 +252,7 @@ class HostPlan(unittest.TestCase):
             self.assertEqual(failed["REASON"], "HOST_ADMISSION_INCOMPLETE")
             # A malicious change to a pre-existing FRP role binary cannot
             # be laundered into a valid independent Backhaul plan.
-            (frp_dir / "frps").write_bytes(b"\\x7fELF" + b"tampered")
+            (frp_dir / "frps").write_bytes(b"\x7fELF" + b"tampered")
             with self.assertRaises(plan.backhaul.Hold):
                 plan.backhaul.prepare(self.node, archive, self.root,
                                       arch="amd64", allowed_sha=digest)
