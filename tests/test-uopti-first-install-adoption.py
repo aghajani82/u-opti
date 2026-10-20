@@ -72,14 +72,18 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
             "original=m._atomic\n"
             "def injected(path, body, mode):\n"
             "    original(path, body, mode)\n"
-            "    if os.environ.get('INJECT_PARENT_KILL')=='YES' and "
-            "path == pathlib.Path(os.environ['TEST_LIB'])/'common.sh':\n"
+            "    if ((os.environ.get('INJECT_PARENT_KILL')=='YES' and "
+            "path == pathlib.Path(os.environ['TEST_LIB'])/'common.sh') or "
+            "(os.environ.get('INJECT_META_KILL')=='YES' and "
+            "path == pathlib.Path(os.environ['TEST_LIB'])/'INSTALL_REF')):\n"
             "        os.kill(os.getppid(), signal.SIGKILL)\n"
             "        os._exit(91)\n"
             "m._atomic=injected\n"
             "stage, backup=map(pathlib.Path,sys.argv[2:4])\n"
-            "mods=sys.argv[4:]\n"
-            "m.apply(stage, backup, mods,\n"
+            "assert sys.argv[4]=='--source-ref'\n"
+            "source_ref=sys.argv[5]\n"
+            "mods=sys.argv[6:]\n"
+            "m.apply(stage, backup, mods, source_ref=source_ref,\n"
             "        lib=pathlib.Path(os.environ['TEST_LIB']),\n"
             "        install=pathlib.Path(os.environ['TEST_INSTALL']))\n"
         )
@@ -88,6 +92,7 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
             "common.sh": b"# old common\n",
             "VERSION": b"0.16.7\n",
             "alpha.sh": b"echo old alpha\n",
+            "INSTALL_REF": b"main\n",
         }
         self.env = {**os.environ, "TEST_LIB": str(self.lib),
                     "TEST_INSTALL": str(self.install)}
@@ -104,9 +109,10 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
             + installer_commit_block()
         )
 
-    def _run(self, *, adopt=False, kill=False):
+    def _run(self, *, adopt=False, kill=False, kill_metadata=False):
         env = {**self.env, "U_OPTI_ADOPT_EXISTING": "YES" if adopt else "NO",
-               "INJECT_PARENT_KILL": "YES" if kill else "NO"}
+               "INJECT_PARENT_KILL": "YES" if kill else "NO",
+               "INJECT_META_KILL": "YES" if kill_metadata else "NO"}
         return subprocess.run(
             ["bash", "-c", self._script()],
             capture_output=True, text=True, env=env, timeout=12,
@@ -116,14 +122,14 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         self.modules.mkdir(parents=True, mode=0o700)
         for name, data in self.legacy.items():
             path = (self.install if name=="u-opti" else
-                    self.lib/name if name in ("common.sh", "VERSION")
+                    self.lib/name if name in ("common.sh", "VERSION", "INSTALL_REF")
                     else self.modules/name)
             path.write_bytes(data)
             path.chmod(0o755)
 
     def _dest(self, name):
         return (self.install if name=="u-opti" else
-                self.lib/name if name in ("common.sh", "VERSION")
+                self.lib/name if name in ("common.sh", "VERSION", "INSTALL_REF")
                 else self.modules/name)
 
     def _recover_in_fresh_python(self):
@@ -169,6 +175,8 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         for name, data in self.legacy.items():
             self.assertEqual((backups[0] / name).read_bytes(), data)
         self.assertTrue((backups[0]/".new.py-was-missing").is_file())
+        self.assertEqual(self._dest("INSTALL_REF").read_bytes(),
+                         b"feature/test-closeout\n")
 
     def test_fresh_crash_recovers_to_empty_install_on_new_process(self):
         # SIGKILL only sandbox Bash, then independent interpreter recovers.
@@ -195,6 +203,32 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         self.assertFalse(self._dest("new.py").exists())
         self.assertFalse((self.lib/".uopti-update-pending").exists())
 
+    def test_crash_after_metadata_switch_recovers_original_channel(self):
+        self._setup_legacy()
+        killed = self._run(adopt=True, kill_metadata=True)
+        self.assertNotEqual(killed.returncode, 0)
+        self.assertEqual(self._dest("INSTALL_REF").read_bytes(),
+                         b"feature/test-closeout\n")
+        restored = self._recover_in_fresh_python()
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(self._dest("INSTALL_REF").read_bytes(), b"main\n")
+        for name, value in self.legacy.items():
+            self.assertEqual(self._dest(name).read_bytes(), value)
+
+    def test_old_install_without_channel_restores_absence_marker(self):
+        self._setup_legacy()
+        self._dest("INSTALL_REF").unlink()
+        killed = self._run(adopt=True, kill_metadata=True)
+        self.assertNotEqual(killed.returncode, 0)
+        self.assertEqual(self._dest("INSTALL_REF").read_bytes(),
+                         b"feature/test-closeout\n")
+        restored = self._recover_in_fresh_python()
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertFalse(self._dest("INSTALL_REF").exists())
+        for name, value in self.legacy.items():
+            if name != "INSTALL_REF":
+                self.assertEqual(self._dest(name).read_bytes(), value)
+
     def test_foreign_symlink_hold_before_writing(self):
         self._setup_legacy()
         (self.modules/"alpha.sh").unlink()
@@ -220,6 +254,8 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         self.assertNotIn('cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"', s)
         self.assertIn('python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply',
                       s)
+        self.assertIn('--source-ref "$BRANCH"', s)
+        self.assertNotIn('"$LIB_PATH/INSTALL_REF.new"', s)
 
 
 if __name__ == "__main__":
