@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 3751aeda6f946e5e5624e5e89ab1ce554fec4460
+          ref: 995977d0ac9be69b6c9e3d3c257c5cd8c1abe220
           path: .managed-smite-source
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .managed-smite-source rev-parse HEAD)" = "3751aeda6f946e5e5624e5e89ab1ce554fec4460"
+          test "$(git -C .managed-smite-source rev-parse HEAD)" = "995977d0ac9be69b6c9e3d3c257c5cd8c1abe220"
           python3 -m pip install -r .managed-smite-source/node/requirements.txt
           python3 -m py_compile tests/test-smite-fastapi-durable-bridge.py
           python3 -B tests/test-smite-fastapi-durable-bridge.py -v
@@ -96,7 +96,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 3751aeda6f946e5e5624e5e89ab1ce554fec4460
+          ref: 995977d0ac9be69b6c9e3d3c257c5cd8c1abe220
           path: .stage27-smite-src
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -106,7 +106,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .stage27-smite-src rev-parse HEAD)" = "3751aeda6f946e5e5624e5e89ab1ce554fec4460"
+          test "$(git -C .stage27-smite-src rev-parse HEAD)" = "995977d0ac9be69b6c9e3d3c257c5cd8c1abe220"
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends nginx openssl
           python3 -m pip install -r .stage27-smite-src/node/requirements.txt
