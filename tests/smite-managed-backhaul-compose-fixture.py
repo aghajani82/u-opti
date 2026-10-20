@@ -77,21 +77,26 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path, engi
             or core_mount.get("type") != "bind"
             or core_mount.get("source") != str(expected_config)):
         raise Hold("WRONG_CORE_CONFIG_SOURCE")
-    # Only the selected engine may appear in the source Compose. Never
-    # carry unrelated FRP/Backhaul mounts into a disposable runtime.
-    targets = (ENGINETARGET,) if engine == "backhaul" else (
-        "/usr/local/bin/frpc", "/usr/local/bin/frps")
-    other = ("/usr/local/bin/frpc", "/usr/local/bin/frps") if engine == "backhaul" else (
-        ENGINETARGET,)
+    # A Backhaul trial may preserve already verified FRP on the same Node.
+    # This is explicit PR-only opt-in, not permission for arbitrary engines.
+    existing_frp = os.environ.get("SMITE_CI_EXISTING_FRP", "0")
+    if existing_frp not in ("0", "1") or (existing_frp == "1" and engine != "backhaul"):
+        raise Hold("UNREVIEWED_DUAL_ENGINE_MODE")
+    dual = existing_frp == "1"
+    frp_targets = ("/usr/local/bin/frpc", "/usr/local/bin/frps")
+    targets = ((ENGINETARGET,) + frp_targets if dual else
+               (ENGINETARGET,) if engine == "backhaul" else frp_targets)
+    other = () if dual else (
+        frp_targets if engine == "backhaul" else (ENGINETARGET,))
     if any(name in mountmap for name in other):
         raise Hold("UNEXPECTED_OTHER_ENGINE_MOUNT")
     for binary_target in targets:
         mount = mountmap.get(binary_target)
-        if phase == "ready":
-            binary_name = ("backhaul" if engine == "backhaul"
+        if phase == "ready" or (dual and binary_target in frp_targets):
+            binary_name = ("backhaul" if binary_target == ENGINETARGET
                            else binary_target.rsplit("/", 1)[-1])
             expected_binary = (
-                root / "installed" / "backhaul" if engine == "backhaul"
+                root / "installed" / "backhaul" if binary_target == ENGINETARGET
                 else root / "installed" / "frp" / binary_name)
             if (mount is None or mount.get("type") != "bind"
                     or mount.get("source") != str(expected_binary)
@@ -117,16 +122,15 @@ def checked(root: Path, phase: str, run_id: str, config: dict, smite: Path, engi
         {"type": "bind", "source": str(smite / "node" / "main.py"),
          "target": "/app/main.py", "read_only": True},
     ]
-    if phase == "ready":
-        if engine == "backhaul":
-            volumes.append({"type": "bind", "source": str(root / "installed/backhaul"),
-                            "target": ENGINETARGET, "read_only": True})
-        else:
-            for frp_binary_name in ("frpc", "frps"):
-                volumes.append({
-                    "type": "bind", "source": str(root / "installed" / "frp" / frp_binary_name),
-                    "target": "/usr/local/bin/" + frp_binary_name, "read_only": True,
-                })
+    if phase == "ready" and engine == "backhaul":
+        volumes.append({"type": "bind", "source": str(root / "installed/backhaul"),
+                        "target": ENGINETARGET, "read_only": True})
+    if engine == "frp" and phase == "ready" or dual:
+        for frp_binary_name in ("frpc", "frps"):
+            volumes.append({
+                "type": "bind", "source": str(root / "installed" / "frp" / frp_binary_name),
+                "target": "/usr/local/bin/" + frp_binary_name, "read_only": True,
+            })
     service = {
         "image": IMAGE,
         "container_name": name,
