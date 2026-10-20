@@ -29,6 +29,12 @@ if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pen
         exit 1
     fi
     echo "Previous U-OPTI version restored after interrupted update."
+    # This shell is still executing the NEW program text loaded before
+    # rollback. Re-exec the restored OLD binary instead of mixing new
+    # functions with old modules.
+    exec "$INSTALL_PATH" "$@"
+    echo "HOLD: Could not relaunch restored U-OPTI executable." >&2
+    exit 1
 fi
 
 # Explicit environment selection takes priority; otherwise persist install source.
