@@ -174,13 +174,13 @@ smite_tw_backhaul_overview() {
     echo " Backhaul WS /channel + /tunnel/ -> KH TLS-verifying Nginx bridge -> KH Xray"
     if [ "$role" = ir ]; then
         echo "IR: Backhaul server bind 127.0.0.1:3080."
-        echo "IR: Backhaul data port 127.0.0.1:56053."
+        echo "IR: Backhaul data port is selected AFTER KH Sanaei inbound configuration."
         echo "IR: existing HTTPS backend is 127.0.0.1:8443."
-        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | legacy example path=/56053/www."
+        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | XHTTP path from actual KH inbound."
     else
         echo "KH: Backhaul client connects to 127.0.0.1:13080."
         echo "KH: Nginx bridge verifies TLS and SNI of IR domain."
-        echo "KH: Xray listens on 127.0.0.1:56053."
+        echo "KH: Configure Sanaei inbound first; its loopback Xray port/path are chosen later."
         echo "IMPORTANT: public /13080/... forwarding must be BLOCKED on KH."
     fi
     echo "Token: generate privately on IR, transfer securely to KH."
