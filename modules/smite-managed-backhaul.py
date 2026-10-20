@@ -322,6 +322,25 @@ def verify(stage: Path, *, official_only: bool = True) -> bool:
         if (staged != archived or
                 info.get("BACKHAUL_BINARY_SHA256") != hashlib.sha256(staged).hexdigest()):
             return False
+        # Metadata must describe the actual staged engine inventory.
+        # Recomputing editable SHA256SUMS must never make an inaccurate
+        # "FRP not installed" claim acceptable as a verified stage.
+        declaration = json.loads(_file(stage / "engines.candidate.json", max_size=8192))
+        if (not isinstance(declaration, dict)
+                or set(declaration) != {"schema", "engines"}
+                or declaration["schema"] != 1
+                or not isinstance(declaration["engines"], dict)
+                or "backhaul" not in declaration["engines"]
+                or declaration["engines"]["backhaul"] != {
+                    "sha256": hashlib.sha256(staged).hexdigest()
+                }
+                or not set(declaration["engines"]).issubset(ENGINE_NAMES)
+                or info.get("FRP_INSTALLED") != (
+                    "YES" if "frp" in declaration["engines"] else "NO")
+                or info.get("ENGINE_ENROLLED") != "NO"
+                or info.get("NODE_RESTARTED") != "NO"
+                or info.get("PUBLIC_PORTS_CHANGED") != "NO"):
+            return False
         # Local SHA256SUMS is mutable: bind the proposed Compose override
         # to the exact reviewed read-only mount, not its editable checksum.
         expected_overlay = (
