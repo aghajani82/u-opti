@@ -116,6 +116,58 @@ cross-VPS test have **not been released**. This code path still
 operates ONLY in the guarded disposable GitHub PR runner and does not
 change existing VPS deployments.
 
+## 2026-10-20 — read-only **host plan** for Backhaul beside verified local FRP
+
+**Small real defect:** `smite-managed-engine-host-admission.py`
+previously reported a correctly enrolled but signed-runtime-unverified
+other engine as a *hard local preflight failure*. Additionally,
+`smite-managed-engine-host-plan.py` hardcoded
+`OTHER_ENGINE=NOT_INSTALLED`. This wrongly prevented the operator from
+preparing an **inert host transaction plan** for Backhaul if FRP was
+already present—even though the already tested isolated Backhaul
+transaction can preserve both FRP binaries and its registry.
+
+**Fixed without enabling host actions:**
+
+1. When the target Backhaul is absent and local FRP inspection confirms
+   its existing readonly mounts and both SHA-pinned `frpc`/`frps`
+   files, host admission now returns
+   `LOCAL_PREFLIGHT=PASS_LOCAL_ONLY_INCOMPLETE`, while retaining
+   `REASON=OTHER_ENGINE_SIGNED_STATUS_REQUIRED`,
+   `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
+2. The **read-only plan generator** can accept this exact combination
+   (not an arbitrary spoofed status) and rechecks the official Backhaul
+   archive, stage contents, original Compose hash and old engine manifest.
+   Result is at most `STAGE_ADMISSION=VERIFIED_PREVIEW_ONLY`,
+   `OTHER_ENGINE_LOCAL_STATE=ENROLLED_UNVERIFIED`,
+   `OTHER_ENGINE_SIGNED_RUNTIME=UNVERIFIED`, with a distinct
+   signed-runtime/host-executor HOLD reason.
+3. Malformed or tampered FRP, a missing readonly binary mount,
+   mismatched digest, unknown Core layout, a lost stage or a forged
+   preflight reason stays HOLD. **Nothing starts or restarts**, no
+   `docker compose` action runs, no user port is requested, and the
+   prior FRP files, Compose and manifest are unmodified.
+
+The new regression in
+`tests/test-smite-managed-engine-host-plan.py` stages a synthetic
+verified two-binary FRP installation, runs the **real** read-only
+Backhaul candidate/plan against it, proves prior bytes unchanged and
+tests forged preflight plus binary corruption. The corresponding
+`tests/test-smite-managed-engine-host-admission.py` verifies the
+signed-runtime HOLD is not silently lifted.
+
+**Verified exact code HEAD:** `2bad4181f0d31203272f1aff48378ca6c532cef2`;
+[GitHub Actions run 39426442327](https://github.com/aghajani82/u-opti/actions/runs/39426442327)
+**completed/success, 16/16 CI jobs PASS**. The first version of the
+new test fixture used literal escaped newlines; that fixture was
+corrected, not the admission security logic.
+
+**Boundary:** We can now **prepare and audit** Backhaul safely both with
+FRP absent and with FRP locally verified, but this is NOT a production
+installer. The other engine's *signed Node runtime and restart* is
+unproven; no approved host installation/rollback runner or cloud
+snapshot evidence exists. `INSTALL_ALLOWED=NO` remains mandatory.
+
 ## Release blockers: do not obscure behind green CI
 
 - No approved production host engine-install transaction/executor and
