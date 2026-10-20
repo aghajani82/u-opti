@@ -155,6 +155,11 @@ def preflight(
     _private_dir(replay_dir)
     _secure_file(identity)
     node_id = candidate_helper.paired_identity(identity)
+    restore_hold = identity.parent / "replay-restore-hold.json"
+    if restore_hold.is_symlink() or restore_hold.exists():
+        # Even a malformed quarantine record must be treated as HOLD; only
+        # an independent, approved offline recovery may clear it.
+        raise AdmissionHold("Signed Node replay restore is quarantined")
     marker = _json(identity.parent / MARKER_NAME)
     replay = replay_dir / DB_NAME
     if (set(marker) != {"schema", "node_id", "replay_database", "status"}
