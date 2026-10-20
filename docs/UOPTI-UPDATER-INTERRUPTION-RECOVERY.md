@@ -31,6 +31,9 @@ takes over the file-replacement phase:
    and all current installed hashes. Recover the old set using atomic writes.
    Unknown/mismatched file, missing backup, corrupt journal or unsafe path:
    **HOLD and do not load any modules**; do not erase the backup.
+   When restoration succeeds, **re-exec the restored original `u-opti`** with
+   the same CLI arguments rather than mixing the new launcher in memory
+   with modules restored from the older version.
 
 Ordinary in-process update errors use the same journal recovery first, and
 retain the backup if recovery cannot complete. The existing older Bash
