@@ -5,6 +5,16 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## CURRENT CLOSEOUT STATUS — concise handoff (2026-10-20)
+
+**Work completed and verified, do not recreate these stages:** U-OPTI immutable source-SHA file downloads, journaled crash-recoverable install/upgrade and `INSTALL_REF`, offline exact Smite source Panel+Node image pair, one-time private Replay DB bootstrap/marker, read-only KH mount admission, and **real isolated Docker Node container recreate/nested-bind/nonce persistence/lost-DB 503**. Code changes and results are in the existing **U-OPTI Draft #48 / Smite Draft #16**, no new micro-PRs. All are experimental until explicit release approval.
+
+**Latest newly tested security change:** Smite source `02d05056d3a4baf577c9d3781d62af61c000f1ac` implements operator-only **one-way stale-snapshot Replay DB quarantine** (`node/app/replay_restore_hold.py`, new private `replay-restore-hold.json` on the independent identity volume). Signed requests return 503 while marker is present, including after SQLite restore and Node restart. No auto-unlock, DB recreation, secret rotation or runtime activation. [Smite Signed CI](https://github.com/aghajani82/Smite/actions/runs/39406442991) PASS; companion source-image workflows on this code SHA PASS. U-OPTI source `b27f17b7468b2917943efda757aa0724e27b58b2` has actual FastAPI 503/quarantine, KH static admission HOLD, and re-pinned real Docker CI; [U-OPTI run 39406706329](https://github.com/aghajani82/u-opti/actions/runs/39406706329) **16/16 PASS**. Later docs-only SHAs require separate current-HEAD verification.
+
+**Security limitation:** This quarantine covers **known, operator-declared** stale restores. It cannot detect an unannounced rollback of both identity+SQLite volumes, nor automatically release after a timer. Smite HMAC `MAX_CLOCK_SKEW=90` seconds; no automatic trusted-clock quarantine unlock is implemented.
+
+**Remaining release queue — keep short:** (1) finish **FRP-independent Backhaul install/setup** and dynamic KH Sanaei inbound mapping with simple IR→KH beginner wizard, (2) secure final paired Smite image provenance/distribution + manual replay restore/quarantine/key-rotation release procedure, (3) approval-gated snapshot-backed disposable dual-VPS reboot/recovery, then reviewed merge/release. Do not create additional numbered lab PRs solely for reports. `MAIN_MERGE=NO`, `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`, `IR/KH_UNCHANGED=YES`.
+
 ## 0. راهنمای سریع برای چت جدید / Start here
 
 Copy this into a new chat:
@@ -175,7 +185,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** real isolated Docker Compose recreation and missing-Replay data-loss protection are now lab verified (see Section 5e). **Next true release blocker** is a safe, operator-approved **stale-snapshot Replay DB restore/quarantine or coordinated signed key rotation**, with negative tests and actual Smite HMAC timestamp semantics; do not invent time values. Then decouple Backhaul from FRP and complete the simple IR/KH wizard, source/image release admission and operator-approved disposable VPS reboot test. Keep `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; no `main` merge, production deploy or release.
+**Current next action:** Treat operator-known stale Replay snapshot quarantine as lab implemented (Smite `02d0505...`, U-OPTI `b27f17...`); still **NOT** an automatically safe recovery of unknown dual-volume rollback. Now prioritize **independent Backhaul without mandatory FRP** and the original simple dynamic-port IR→KH flow. Next close verified immutable image provenance and explicit replay restore/key-rotation operator procedure, and finally approve disposable VPS reboot/migration matrix. Keep the project frozen: existing Draft PR #48 and Smite #16 only; no `main` merge, deployment, release or server changes without user authorization.
 
 ## 7. Operational conventions
 
