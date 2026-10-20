@@ -65,9 +65,12 @@ test "$(smite_tw_result missing)" = "NOT FOUND"
 
 ir_out="$(smite_tw_backhaul_overview ir)"
 grep -Fq '127.0.0.1:3080' <<< "$ir_out"
-grep -Fq 'path=/56053/www.' <<< "$ir_out"
+grep -Fq 'XHTTP path from actual KH inbound.' <<< "$ir_out"
+! grep -Fq '56053' <<< "$ir_out"
 kh_out="$(smite_tw_backhaul_overview kh)"
 grep -Fq '127.0.0.1:13080' <<< "$kh_out"
+grep -Fq 'Configure Sanaei inbound first' <<< "$kh_out"
+! grep -Fq '56053' <<< "$kh_out"
 grep -Fq 'BLOCKED' <<< "$kh_out"
 
 profile="$(smite_tw_backhaul_client)"
