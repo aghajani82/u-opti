@@ -143,10 +143,8 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(deployed["frp"], record["engines"]["frp"])
         self.assertIn("backhaul", deployed)
         for name in ("frpc", "frps"):
-            self.assertIn(
-                f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n".replace("\\\\n", "\\n"),
-                self.compose.read_text()
-            )
+            self.assertIn(f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n",
+                          self.compose.read_text())
         for name in ("frpc", "frps"):
             self.assertEqual((frp_dir / name).read_bytes(), initial_binary[name])
         self.assertEqual(lab.rollback(self.root), "LAB_EXACT_ROLLBACK_CONFIRMED")
