@@ -15,6 +15,22 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
+# Interrupted update recovery MUST run before sourcing any module. The
+# transaction journal bundles its original recovery code, independent of
+# the concurrently upgraded module file. Unknown/tampered state HOLDS.
+if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+    RECOVERY_SCRIPT="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ ! -f "$RECOVERY_SCRIPT" ] || [ -L "$RECOVERY_SCRIPT" ] || ! command -v python3 >/dev/null 2>&1; then
+        echo "HOLD: Interrupted U-OPTI update needs manual recovery; journal unreadable." >&2
+        exit 1
+    fi
+    if ! python3 -B "$RECOVERY_SCRIPT" recover; then
+        echo "HOLD: Could not safely recover interrupted update; no U-OPTI modules loaded." >&2
+        exit 1
+    fi
+    echo "Previous U-OPTI version restored after interrupted update."
+fi
+
 # Explicit environment selection takes priority; otherwise persist install source.
 BRANCH="${U_OPTI_BRANCH:-}"
 if [ -z "$BRANCH" ]; then
@@ -939,7 +955,13 @@ print(sha)
             echo
             echo "Creating backup of current installation..."
 
-            BACKUP_DIR=$(mktemp -d)
+            # Durable on-disk backup: /tmp is not reliable across reboots.
+            BACKUP_DIR=$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX") || {
+                echo "HOLD: Could not reserve persistent recovery directory."
+                cleanup_update_temp
+                read -rp "Press Enter to return..."
+                continue
+            }
 
             BACKUP_FILES=(
                 "system.sh"
@@ -1044,7 +1066,7 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
@@ -1074,79 +1096,45 @@ print(sha)
             echo "Backup created successfully."
 
             echo
-            echo "Installing update..."
+            echo "Installing update using recoverable, atomic-per-file journal..."
 
+            # This helper is part of the downloaded, syntax-checked SAME SHA.
+            # It writes a durable journal + private persistent recovery copy
+            # before changing any installed bytes. Crash -> startup recovery.
             UPDATE_FAILED=false
-
-            if ! cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
+            if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
+                    "$TEMP_DIR" "$BACKUP_DIR" "${UPDATE_FILE_NAMES[@]}"; then
                 UPDATE_FAILED=true
-            fi
-
-            if ! cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
-                UPDATE_FAILED=true
-            fi
-
-            if ! cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
-                UPDATE_FAILED=true
-            fi
-
-            for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                if ! cp "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
-                    UPDATE_FAILED=true
-                fi
-            done
-
-            if [ "$UPDATE_FAILED" = "false" ]; then
-                if ! chmod +x "$INSTALL_PATH" || \
-                   ! chmod +x "$LIB_PATH/common.sh"; then
-                    UPDATE_FAILED=true
-                fi
-
-                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                    if ! chmod +x "$MODULES_PATH/$FILE"; then
-                        UPDATE_FAILED=true
-                    fi
-                done
-            fi
-
-            if [ "$UPDATE_FAILED" = "false" ]; then
-                echo
-                echo "Verifying installed files..."
-
-                if ! cmp -s "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
-                    UPDATE_FAILED=true
-                fi
-
-                if ! cmp -s "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
-                    UPDATE_FAILED=true
-                fi
-
-                if ! cmp -s "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
-                    UPDATE_FAILED=true
-                fi
-
-                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                    if ! cmp -s "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
-                        UPDATE_FAILED=true
-                        break
-                    fi
-                done
             fi
 
             if [ "$UPDATE_FAILED" = "true" ]; then
                 echo
                 echo "Update failed during installation or verification."
+                RESTORE_OK=false
 
-                # NEVER delete the recovery copy when a rollback fails.
-                # This is a real updater path, not an offline simulation.
-                if ! update_failed_restore; then
+                if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+                    # When an atomic transaction was armed, restore only with
+                    # the journal's unchanged, private helper. The old Bash
+                    # restore knows nothing about hashes or power-loss state.
+                    if [ -f "$LIB_PATH/.uopti-update-pending/rescue.py" ] &&
+                       [ ! -L "$LIB_PATH/.uopti-update-pending/rescue.py" ] &&
+                       python3 -B "$LIB_PATH/.uopti-update-pending/rescue.py" recover; then
+                        RESTORE_OK=true
+                    fi
+                elif update_failed_restore; then
+                    # Legacy fail-before-arm fallback: no transaction wrote any
+                    # installed bytes, but preserve the original restore check.
+                    RESTORE_OK=true
+                fi
+
+                if [ "$RESTORE_OK" = "true" ]; then
+                    echo "Previous installation restored successfully."
+                    rm -rf -- "$BACKUP_DIR"
+                else
                     echo "CRITICAL: Automatic restore was incomplete."
                     echo "Do not retry the update until the previous state is reviewed."
                     echo "Recovery backup retained at:"
                     echo "$BACKUP_DIR"
-                else
-                    echo "Previous installation restored successfully."
-                    rm -rf -- "$BACKUP_DIR"
                 fi
 
                 cleanup_update_temp
