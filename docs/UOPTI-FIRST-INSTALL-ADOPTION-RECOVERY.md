@@ -40,8 +40,10 @@ For a clean install or explicitly approved old installation:
    then atomically swaps each live file.
 4. On failure, safely restore using the journal's rescue helper when
    available, otherwise **HOLD**. Retain recovery backup for review.
-5. Only after a successful transaction, persist the user's update
-   channel (`INSTALL_REF`) separately and start the installed program.
+5. Save the previous `INSTALL_REF` or its absence in the private backup;
+   the transaction derives the selected update channel from the validated
+   ref and commits `INSTALL_REF` **last, inside the same journal**, then starts
+   the installed program only after all staged files are verified.
 
 ## CI (offline, no root, no actual VPS)
 
@@ -74,10 +76,11 @@ host roots to disposable temporary files. Scenarios:
   was tested. A crash between directory creation and journal publication
   may require operator cleanup; safe shutdown/commit semantics under
   filesystem corruption or malicious root cannot be assumed.
-- Source `INSTALL_REF` remains a post-transaction metadata write, not
-  one of the journaled payload files. Its failure can leave a completed
-  installation with the previous selected update channel; treat as
-  an outstanding consistency issue before release.
+- The selected `INSTALL_REF` is now hashed and committed inside the same
+  durable file transaction. New regression tests simulate `SIGKILL` after
+  changing this metadata and restore both existing-channel bytes and the
+  previous absence marker. This does **not** replace the missing signed
+  source/image release provenance manifest.
 - GitHub API reachability is required to pin a source commit. This
   resolves source consistency but not independent artifact signature
   attestation, immutable paired Smite Panel/Node image digests, or
