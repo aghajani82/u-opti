@@ -123,6 +123,10 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         elif second["state"] == "UNAVAILABLE":
             output["REASON"] = "OTHER_ENGINE_INCOMPLETE"
         elif second["state"] == "ENROLLED_UNVERIFIED":
+            # Local binary SHA/mount evidence is enough to prepare a
+            # NONAUTHORIZING, read-only transaction plan. It is NOT a
+            # signed Node health attestation and never permits install.
+            output["LOCAL_PREFLIGHT"] = "PASS_LOCAL_ONLY_INCOMPLETE"
             output["REASON"] = "OTHER_ENGINE_SIGNED_STATUS_REQUIRED"
         else:
             output["LOCAL_PREFLIGHT"] = "PASS_LOCAL_ONLY_INCOMPLETE"
