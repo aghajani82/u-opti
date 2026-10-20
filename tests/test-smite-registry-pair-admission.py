@@ -56,7 +56,8 @@ digest = ref.split("@", 1)[1]
 if os.environ.get("FAKE_COSIGN_LIE") == role:
     digest = "sha256:" + "f" * 64
 source = next(x.split("=", 1)[1] for x in args if x.startswith("smite_source_sha="))
-print(json.dumps([{"critical": {"image": {"docker-manifest-digest": digest}},
+print(json.dumps([{"critical": {"type": "cosign container image signature",
+                                  "image": {"docker-manifest-digest": digest}},
                    "optional": {"smite_source_sha": source, "smite_role": role}}]))
 ''')
         fake.chmod(0o700)
@@ -86,8 +87,27 @@ print(json.dumps([{"critical": {"image": {"docker-manifest-digest": digest}},
             self.assertIn("smite_role=" + role, call)
             self.assertIn("--certificate-identity=" + gate.WORKFLOW + REF, call)
             self.assertIn("--certificate-oidc-issuer=" + gate.ISSUER, call)
+            self.assertIn("--certificate-github-workflow-sha=" + SOURCE, call)
+            self.assertIn("--certificate-github-workflow-repository=" + gate.REPO, call)
+            self.assertIn("--certificate-github-workflow-trigger=workflow_dispatch", call)
             self.assertFalse(any("insecure" in arg or "check-claims=false" in arg
                                  for arg in call))
+
+    def test_signed_payload_only_accepts_real_cosign_signature_type(self):
+        valid = [{"critical": {"type": "cosign container image signature",
+                              "image": {"docker-manifest-digest": PANEL}},
+                  "optional": {"smite_source_sha": SOURCE, "smite_role": "panel"}}]
+        self.assertTrue(gate._signed_payload_match(
+            valid, digest=PANEL, role="panel", source=SOURCE))
+        for invalid in ("attestation", "", None):
+            bad = json.loads(json.dumps(valid))
+            bad[0]["critical"]["type"] = invalid
+            self.assertFalse(gate._signed_payload_match(
+                bad, digest=PANEL, role="panel", source=SOURCE))
+        without_type = json.loads(json.dumps(valid))
+        del without_type[0]["critical"]["type"]
+        self.assertFalse(gate._signed_payload_match(
+            without_type, digest=PANEL, role="panel", source=SOURCE))
 
     def test_untrusted_manifest_and_release_inputs_stop_before_cosign(self):
         cases = [
