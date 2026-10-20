@@ -74,6 +74,11 @@ class DurableUpdaterTests(unittest.TestCase):
             saved.write_bytes(payload)
             saved.chmod(0o600)
         (self.backup / ".new.py-was-missing").write_bytes(b"")
+        (self.lib / "INSTALL_REF").write_bytes(b"main\n")
+        (self.lib / "INSTALL_REF").chmod(0o644)
+        (self.backup / "INSTALL_REF").write_bytes(b"main\n")
+        (self.backup / "INSTALL_REF").chmod(0o600)
+
 
     def _child(self, code: str) -> subprocess.CompletedProcess:
         intro = (
@@ -104,6 +109,51 @@ class DurableUpdaterTests(unittest.TestCase):
         self.assertEqual(self.install.read_bytes(), NEW["u-opti"])
         self.assertEqual(self.destinations["common.sh"].read_bytes(), NEW["common.sh"])
         self.assertEqual(self.destinations["alpha.sh"].read_bytes(), OLD["alpha.sh"])
+
+    def test_ref_commits_with_version_without_post_commit_write(self):
+        result = txn.apply(self.stage, self.backup, MODULES,
+                           source_ref="feature/rc-closeout",
+                           lib=self.lib, install=self.install)
+        self.assertEqual(result, "VERIFIED_TRANSACTION_COMMIT")
+        self.assertEqual((self.lib / "INSTALL_REF").read_bytes(),
+                         b"feature/rc-closeout\n")
+        self.assertEqual((self.lib / "VERSION").read_bytes(), NEW["VERSION"])
+        self.assertEqual(
+            stat.S_IMODE((self.lib / "INSTALL_REF").stat().st_mode), 0o644
+        )
+        self.assertFalse((self.lib / txn.TXN_NAME).exists())
+
+    def test_interrupt_after_metadata_change_recovers_old_ref_and_bytes(self):
+        result = self._child(
+            "original=m._atomic\n"
+            "def crash(dest,data,mode):\n"
+            "    original(dest,data,mode)\n"
+            "    if dest == lib/'INSTALL_REF': os._exit(93)\n"
+            "m._atomic=crash\n"
+            "m.apply(stage,backup,['alpha.sh','new.py'],"
+            "lib=lib,install=install,source_ref='feature/rc-closeout')\n"
+        )
+        self.assertEqual(result.returncode, 93, result.stderr)
+        self.assertEqual((self.lib / "INSTALL_REF").read_bytes(),
+                         b"feature/rc-closeout\n")
+        manifest = (self.lib / txn.TXN_NAME / "manifest.json").read_text()
+        self.assertIn('"INSTALL_REF"', manifest)
+        recovered = self._child("print(m.recover(lib=lib,install=install))\n")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual((self.lib / "INSTALL_REF").read_bytes(), b"main\n")
+        for name, expected in OLD.items():
+            self.assertEqual(self.destinations[name].read_bytes(), expected)
+        self.assertFalse(self.destinations["new.py"].exists())
+
+    def test_untrusted_source_ref_holds_before_journal(self):
+        for invalid in ("../main", "a ref", "/main", "main\\nSECOND", ""):
+            with self.subTest(ref=repr(invalid)):
+                with self.assertRaises(txn.Hold):
+                    txn.apply(self.stage, self.backup, MODULES,
+                              source_ref=invalid, lib=self.lib,
+                              install=self.install)
+                self.assertFalse((self.lib / txn.TXN_NAME).exists())
+        self.assertEqual((self.lib / "INSTALL_REF").read_bytes(), b"main\n")
 
     def test_future_launcher_cannot_drop_preimport_recovery(self):
         # Fail before the durable pending journal is armed.
