@@ -84,18 +84,17 @@ smite_bh_preflight() {
             [ -s "$SMITE_BH_OVERLAYS/panel/$f" ] || {
                 echo "ERROR: Missing Panel overlay $f" >&2; return 1; }
         done
-        for f in 3080 56053; do
+        # This is an OFFLINE candidate: FRP and any KH XHTTP data port
+        # must NOT be prerequisites during the engine preparation step.
+        for f in 3080; do
             if ss -lntH | grep -Eq ":$f[[:space:]]"; then
-                echo "ERROR: IR reserved port $f in use" >&2; return 1
+                echo "ERROR: IR reserved Backhaul control port $f in use" >&2
+                return 1
             fi
         done
-        ss -lntH | grep -Eq '127\.0\.0\.1:7000[[:space:]]' || {
-            echo "ERROR: FRP controller unexpectedly absent" >&2; return 1; }
     elif [ "$role" = kh ]; then
         ! ss -lntH | grep -Eq ':13080[[:space:]]' || {
             echo "ERROR: KH bridge port already in use" >&2; return 1; }
-        ss -lntH | grep -Eq '127\.0\.0\.1:56053[[:space:]]' || {
-            echo "ERROR: KH Xray port missing" >&2; return 1; }
     else
         echo "ERROR: Invalid role" >&2; return 1
     fi
@@ -142,8 +141,15 @@ smite_bh_prepare() {
             { rm -rf -- "$stage"; return 1; }
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-control 3080 \
             > "$stage/candidate/nginx/ir-control.conf" || { rm -rf -- "$stage"; return 1; }
-        bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-xhttp 56053 /56053/www kh.kolbe1.ir \
-            > "$stage/candidate/nginx/ir-xhttp.conf" || { rm -rf -- "$stage"; return 1; }
+        # No port/path fabricated during install. After setting KH Sanaei
+        # inbound, render a dynamic XHTTP route in the separate route menu.
+        cat > "$stage/candidate/nginx/IR-XHTTP-NOT-CONFIGURED.txt" <<'EOF_XHTTP'
+XHTTP ROUTE NOT CONFIGURED.
+After KH Sanaei/3x-UI installation, use the dedicated tunnel menu for
+the actual inbound port, XHTTP path and KH upstream hostname.
+This is a note, NOT an Nginx include or a usable route.
+FRP is NOT required for independent Backhaul offline preparation.
+EOF_XHTTP
     else
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-kh-bridge ir.kolbe1.ir 13080 \
             > "$stage/candidate/nginx/kh-bridge.conf" || { rm -rf -- "$stage"; return 1; }
@@ -165,7 +171,8 @@ EOF
     (cd "$stage" && find original candidate -type f -print0 | sort -z |
         xargs -0 sha256sum > SHA256SUMS) || { rm -rf -- "$stage"; return 1; }
     smite_bh_verify_stage "${stage##*/}" || { rm -rf -- "$stage"; return 1; }
-    echo "PREPARED: ${stage##*/} ($role). Live FRP, Nginx, Smite and Xray unchanged."
+    echo "PREPARED: ${stage##*/} ($role). FRP not required; KH inbound port/path deferred."
+    echo "CANDIDATE_ONLY=YES (no live tunnels, routes, Docker or FRP changed)."
 }
 
 smite_bh_discard_unused() {
