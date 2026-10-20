@@ -122,7 +122,46 @@ def _core_preflight(node_dir: Path) -> tuple[bytes, dict]:
     config = node_dir / "config"
     if config.is_symlink() or not config.is_dir():
         raise Hold("Missing or unsafe Node config mount")
-    return compose, _existing_manifest(config)
+    engines = _existing_manifest(config)
+    # Never enroll Backhaul on top of a partially installed or untrusted FRP.
+    # FRP is OPTIONAL: zero FRP mounts and no registry entry are fine.
+    # When FRP is already enrolled, its two independently pinned binaries
+    # must still match the existing read-only mounts and registry, otherwise
+    # touching shared Compose would turn a broken baseline into a fake pass.
+    frp_targets = {"frpc": "/usr/local/bin/frpc", "frps": "/usr/local/bin/frps"}
+    frp_mount_lines = {
+        name: [line.strip() for line in text.splitlines()
+               if line.strip().startswith("- ") and target in line]
+        for name, target in frp_targets.items()
+    }
+    frp_record = engines.get("frp")
+    if frp_record is None:
+        if any(frp_mount_lines.values()):
+            raise Hold("Unenrolled FRP binary mount: repair before Backhaul")
+    else:
+        if set(frp_record) != {"sha256", "server_sha256"}:
+            raise Hold("Existing FRP requires both verified role binaries")
+        for name, target in frp_targets.items():
+            lines = frp_mount_lines[name]
+            if len(lines) != 1 or not lines[0].endswith(f":{target}:ro"):
+                raise Hold("Incomplete or writable FRP mount blocks Backhaul")
+            source = lines[0][2:].removesuffix(f":{target}:ro")
+            binary = Path(source)
+            if (not binary.is_absolute() or binary.is_symlink()
+                    or not binary.is_file()):
+                raise Hold("Existing FRP binary missing or unsafe")
+            meta = binary.lstat()
+            if (not stat.S_ISREG(meta.st_mode)
+                    or meta.st_uid != os.geteuid() or meta.st_nlink != 1
+                    or stat.S_IMODE(meta.st_mode) & 0o022
+                    or not (stat.S_IMODE(meta.st_mode) & 0o111)
+                    or meta.st_size > MAX_BINARY_BYTES):
+                raise Hold("Existing FRP binary permissions untrusted")
+            expected = (frp_record["sha256"] if name == "frpc"
+                        else frp_record["server_sha256"])
+            if hashlib.sha256(_file(binary, max_size=MAX_BINARY_BYTES)).hexdigest() != expected:
+                raise Hold("Existing FRP binary digest mismatch")
+    return compose, engines
 
 
 def _verified_binary(archive: Path, trusted_sha: str) -> bytes:
