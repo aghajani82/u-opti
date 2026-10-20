@@ -28,6 +28,7 @@ LOCK_NAME = ".uopti-update-lock"
 DONE_NAME = ".uopti-update-finished"
 MAX_BYTES = 4 * 1024 * 1024
 VALID_MODULE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\Z")
+VALID_REF = re.compile(r"[A-Za-z0-9._/-]{1,200}\Z")
 SCHEMA = 1
 
 
@@ -117,11 +118,12 @@ def _lock(lib: Path):
         os.close(fd)
 
 
-def _paths(lib: Path, install: Path, modules: list[str]) -> dict[str, Path]:
+def _paths(lib: Path, install: Path, modules: list[str], *,
+           include_ref: bool = False) -> dict[str, Path]:
     if not modules or len(modules) != len(set(modules)):
         raise Hold("INVALID_MODULE_SET")
     if any(not VALID_MODULE.fullmatch(name) or name in
-           ("u-opti", "VERSION", "common.sh") for name in modules):
+           ("u-opti", "VERSION", "common.sh", "INSTALL_REF") for name in modules):
         raise Hold("UNSAFE_MODULE_NAME")
     if (lib.is_symlink() or lib.joinpath("modules").is_symlink()
             or not lib.joinpath("modules").is_dir()
@@ -130,6 +132,9 @@ def _paths(lib: Path, install: Path, modules: list[str]) -> dict[str, Path]:
     items = {"u-opti": install, "common.sh": lib / "common.sh",
              "VERSION": lib / "VERSION"}
     items.update({name: lib / "modules" / name for name in modules})
+    if include_ref:
+        # Commit the metadata after executables and modules.
+        items["INSTALL_REF"] = lib / "INSTALL_REF"
     return items
 
 
@@ -159,7 +164,10 @@ def _recover_locked(lib: Path, install: Path) -> str:
             or not _is_private_dir(backup)):
         raise Hold("UNTRUSTED_RECOVERY_BACKUP")
     names = [k for k in data["files"] if k not in ("u-opti", "common.sh", "VERSION")]
-    destinations = _paths(lib, install, names)
+    destinations = _paths(lib, install, names,
+                          include_ref="INSTALL_REF" in data["files"])
+    if set(destinations) != set(data["files"]):
+        raise Hold("UNEXPECTED_RECOVERY_MANIFEST_PATHS")
 
     restore = {}
     # Preflight ALL files before touching any: unknown operator changes HOLD.
@@ -242,7 +250,8 @@ def recover(*, lib=LIB, install=INSTALL) -> str:
 
 
 def apply(stage: Path, backup: Path, module_names: list[str],
-          *, lib=LIB, install=INSTALL, crash_after: int | None = None) -> str:
+          *, lib=LIB, install=INSTALL, source_ref: str | None = None,
+          crash_after: int | None = None) -> str:
     """Install the already verified staged update atomically per file.
 
     A durable journal + bundled independent rescue code is written before
@@ -254,7 +263,13 @@ def apply(stage: Path, backup: Path, module_names: list[str],
             _clear_finished(lib / DONE_NAME)
         if txn.exists() or txn.is_symlink():
             raise Hold("PENDING_UPDATE_REQUIRES_RECOVERY")
-        paths = _paths(lib, install, module_names)
+        if source_ref is not None and (
+            not isinstance(source_ref, str) or not VALID_REF.fullmatch(source_ref)
+            or ".." in source_ref or source_ref.startswith("/")
+        ):
+            raise Hold("UNSAFE_UPDATE_SOURCE_REF")
+        paths = _paths(lib, install, module_names,
+                       include_ref=source_ref is not None)
         if (stage.is_symlink() or not _is_private_dir(stage)
                 or backup.parent != lib or not backup.name.startswith(".uopti-backup-")
                 or not _is_private_dir(backup)):
@@ -262,7 +277,10 @@ def apply(stage: Path, backup: Path, module_names: list[str],
         candidates = {}
         records = {}
         for name, dest in paths.items():
-            candidate, _ = _read(stage / name)
+            # INSTALL_REF is derived from the validated selected channel:
+            # never read an unrelated, separately staged metadata file.
+            candidate = ((source_ref + "\n").encode("ascii")
+                         if name == "INSTALL_REF" else _read(stage / name)[0])
             previous, old_mode = _read(dest, allow_missing=True)
             if previous is None:
                 marker = backup / ("." + name + "-was-missing")
@@ -272,7 +290,7 @@ def apply(stage: Path, backup: Path, module_names: list[str],
                 saved, _ = _read(backup / name)
                 if saved != previous:
                     raise Hold("BACKUP_IS_NOT_CURRENT_INSTALL")
-            mode = 0o644 if name == "VERSION" else 0o755
+            mode = 0o644 if name in ("VERSION", "INSTALL_REF") else 0o755
             candidates[name] = candidate
             records[name] = {
                 "before": _sha(previous) if previous is not None else None,
@@ -331,7 +349,12 @@ def main() -> int:
         if len(sys.argv) == 2 and sys.argv[1] == "recover":
             print(recover())
             return 0
-        if len(sys.argv) >= 5 and sys.argv[1] == "apply":
+        if len(sys.argv) >= 7 and sys.argv[1] == "apply" and sys.argv[4] == "--source-ref":
+            print(apply(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[6:],
+                        source_ref=sys.argv[5]))
+            return 0
+        # Backward compatibility for existing isolated helper call sites.
+        if len(sys.argv) >= 5 and sys.argv[1] == "apply" and sys.argv[4] != "--source-ref":
             print(apply(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4:]))
             return 0
         raise Hold("INVALID_UPDATER_TRANSACTION_COMMAND")
