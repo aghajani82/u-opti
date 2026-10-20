@@ -168,6 +168,51 @@ installer. The other engine's *signed Node runtime and restart* is
 unproven; no approved host installation/rollback runner or cloud
 snapshot evidence exists. `INSTALL_ALLOWED=NO` remains mandatory.
 
+## 2026-10-20 — three-point signed FRP lifecycle proof required in CI
+
+The Backhaul **PR-only lifecycle** `modules/smite-managed-backhaul-lifecycle.py`
+previously accepted a signed Backhaul health callback after a simulated
+restart and a signed "Backhaul absent" callback after rollback, but did
+**not** independently require signed FRP inventory proof when FRP was
+already installed. This allowed a misleading result about the *other*
+engine when adding Backhaul, despite exact byte-level rollback tests.
+
+Now, when FRP is already present in the validated engine manifest:
+
+1. **Before** any Backhaul mutation, a separate
+   `check_other(root, "before")` callback is mandatory; missing/false
+   or raised proof **HOLDs before installation**.
+2. **After** Backhaul is staged and the caller's signed restart probe
+   accepts it, `check_other(root, "with-backhaul")` must also pass;
+   otherwise the ordinary compensating rollback runs.
+3. **After** exact rollback and independent signed proof that Backhaul
+   is absent again, `check_other(root, "after-rollback")` must pass;
+   failure is a distinct hard HOLD, never a successful restoration.
+   Returning a result reports all three phases only when they pass.
+
+When **FRP is absent**, the old Backhaul-only path remains valid, with
+no artificial FRP prerequisite or callback. Signed proof for an existing
+FRP is a *separate* callback, not simply a local SHA or Docker running
+flag.
+
+The regression in `tests/test-smite-managed-backhaul-lifecycle.py`
+models existing dual-role FRP files/manifest/RO mounts, verifies
+preservation and ordered callback calls, then injects missing/false
+prior, with-Backhaul and post-rollback proofs. This uses **synthetic
+callback results and temporary filesystem**, not a production signed
+Panel/Node verification or permission to deploy.
+
+**Exact code commit** `057e609b0334395edf56f9e0a670b7ec12e65084`:
+[GitHub CI 39429251440](https://github.com/aghajani82/u-opti/actions/runs/39429251440)
+(check job results before treating this as full CI PASS).
+No new PR, host executor, Docker restart or active tunnel was added.
+
+**Next release gate remains:** replace the CI callback with an
+operator-approved real TLS/HMAC/replay-aware **before / with Backhaul /
+after rollback** probe against the actual reviewed Node and existing
+FRP, with immutable image identity and authorized snapshot recovery.
+The host install/rollback actions remain deliberately **disabled**.
+
 ## Release blockers: do not obscure behind green CI
 
 - No approved production host engine-install transaction/executor and
