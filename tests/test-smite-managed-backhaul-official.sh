@@ -127,9 +127,11 @@ sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
 frp_asset="frp_0.71.0_linux_amd64.tar.gz"
 frp_url="https://github.com/fatedier/frp/releases/download/v0.71.0/$frp_asset"
 frp_hash="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
-curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+# The trial lab was deliberately changed to owner=root, mode 0700.
+# Download/verify the second official asset as root, not the runner user.
+sudo curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
   --max-time 120 --output "$lab/$frp_asset" "$frp_url"
-printf '%s  %s\n' "$frp_hash" "$lab/$frp_asset" | sha256sum --check --status
+test "$(sudo sha256sum "$lab/$frp_asset" | awk '{print $1}')" = "$frp_hash"
 
 # Only after the pinned tar digest matches, read exactly the two regular
 # role executables from the archive; never extract arbitrary tar paths.
