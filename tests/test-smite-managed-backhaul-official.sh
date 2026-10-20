@@ -129,7 +129,7 @@ frp_url="https://github.com/fatedier/frp/releases/download/v0.71.0/$frp_asset"
 frp_hash="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
   --max-time 120 --output "$lab/$frp_asset" "$frp_url"
-printf '%s  %s\\n' "$frp_hash" "$lab/$frp_asset" | sha256sum --check --status
+printf '%s  %s\n' "$frp_hash" "$lab/$frp_asset" | sha256sum --check --status
 
 # Only after the pinned tar digest matches, read exactly the two regular
 # role executables from the archive; never extract arbitrary tar paths.
@@ -150,7 +150,7 @@ with tarfile.open(archive, "r:gz") as tar:
         assert 4 <= matches[0].size <= 50 * 1024 * 1024
         with tar.extractfile(matches[0]) as inp:
             data = inp.read(50 * 1024 * 1024 + 1)
-        assert len(data) == matches[0].size and data.startswith(b"\\x7fELF")
+        assert len(data) == matches[0].size and data.startswith(b"\x7fELF")
         file = frp_dir / name
         fd = os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o755)
         with os.fdopen(fd, "wb") as out:
@@ -160,10 +160,10 @@ with tarfile.open(archive, "r:gz") as tar:
         digests[name] = hashlib.sha256(data).hexdigest()
 compose = root / "node/docker-compose.yml"
 original = compose.read_text()
-line = "      - ./config:/etc/smite-node\\n"
+line = "      - ./config:/etc/smite-node\n"
 assert original.count(line) == 1
 mounts = "".join(
-    f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+    f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n"
     for name in ("frpc", "frps"))
 compose.write_text(original.replace(line, line + mounts, 1))
 state = root / "node/config/engine-state"
