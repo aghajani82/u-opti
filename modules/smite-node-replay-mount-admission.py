@@ -96,9 +96,22 @@ def _json(path: Path) -> dict:
 
 def _database(db: Path, node_id: str) -> None:
     _secure_file(db, max_bytes=256 * 1024 * 1024, metadata_only=True)
+    # Exact offline inspection: don't recover a hot journal or read an
+    # inconsistent WAL snapshot. In immutable mode SQLite cannot create a
+    # -shm sidecar. An active/wal-mode database requires independent shutdown
+    # and checkpoint review, not a sneaky read of partial nonce history.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(db) + suffix)
+        if sidecar.exists() or sidecar.is_symlink():
+            raise AdmissionHold("Replay DB not offline/quiescent; journal sidecar present")
+    with db.open("rb") as stream:
+        header = stream.read(100)
+    if (len(header) < 100 or header[:16] != b"SQLite format 3\x00"
+            or header[18:20] != b"\x01\x01"):
+        raise AdmissionHold("Replay DB is not checkpointed in rollback-journal mode")
     try:
         with closing(sqlite3.connect(
-            db.absolute().as_uri() + "?mode=ro", uri=True, timeout=2
+            db.absolute().as_uri() + "?mode=ro&immutable=1", uri=True, timeout=2
         )) as conn:
             conn.execute("PRAGMA query_only=ON")
             if conn.execute("PRAGMA user_version").fetchone() != (1,):
