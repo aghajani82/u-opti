@@ -5,13 +5,20 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## Latest exact-HEAD checkpoint — 2026-10-20 (after the previous chat handoff)
+
+- **U-OPTI:** existing [Draft #48](https://github.com/aghajani82/u-opti/pull/48), source HEAD before this documentation edit `6865f8973ce1aca0d0ffb3a76bf35ef4df6246fa`. Its exact-head [CI run 39441616090](https://github.com/aghajani82/u-opti/actions/runs/39441616090) completed/success, **16/16 jobs PASS**. This handoff edit creates a new docs-only HEAD whose CI must be separately rechecked.
+- **Smite:** existing [Draft #16](https://github.com/aghajani82/Smite/pull/16), new HEAD [`eb0db509e8327cb26b2992f1420044ff521bb825`](https://github.com/aghajani82/Smite/commit/eb0db509e8327cb26b2992f1420044ff521bb825). Exactly six GitHub workflows completed/success on THAT SHA; [Stage15 offline paired-image workflow 39443101625](https://github.com/aghajani82/Smite/actions/runs/39443101625) **2/2 PASS**, including real unpublished paired image build and the source/role metadata gate.
+- **Concrete defect fixed on the SAME Smite draft:** `.github/workflows/publish-images.yml` previously omitted `SMITE_SOURCE_SHA` in both publish build commands, so the final Dockerfile's `org.opencontainers.image.revision` could remain the default `unverified`. Now both Panel and Node publication commands explicitly set `SMITE_SOURCE_SHA=${{ github.sha }}`; `tests/test_stage15_image_revision_gate.py` has a new static per-role regression check. The publish workflow was **NOT executed**; no GHCR push, release tag or image signature was created. This is a source-label integrity improvement, **NOT cryptographically signed provenance**.
+- **Still BLOCKED:** (1) separately authorized real-host independent Backhaul install and signed IR↔KH TLS443/XHTTP/dynamic Sanaei port+path with rollback; (2) trusted immutable registry digest/independently verified signature+attestation for BOTH images, final coordinated source/digest lock, operator-approved Replay DB recovery/key rotation and safe migration; (3) separate owner-approved two-snapshot-VPS acceptance, then independent merge/release decision.
+- **UNCHANGED:** `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`, `MAIN_MERGE=NO`, `RELEASE_PUBLISH=NO`, `IR_KH_UNCHANGED=YES`. Main/stable v0.1.7 and all real servers untouched; do not confuse preview CI success with approved release.
 ## هدف قطعی و نام چت بعدی — جمع کردن پروژه و تکمیل آن
 
 **عنوان پیشنهادی چت جدید:** «جمع کردن و تکمیل پروژه U-OPTI × Smite | آماده‌سازی انتشار»
 
 **خواستهٔ صاحب پروژه (اولویت اصلی و ثابت):** پروژه را **جمع کنیم و کامل کنیم**؛ عیب‌ها و بخش‌های نیمه‌تمام را ببندیم، تکرار آزمون‌های موفق و ساخت مرحله/منو/PR جدید بدون ضرورت را کنار بگذاریم و به یک نسخهٔ هماهنگ، ساده، امن و قابل‌نصب برسیم. امنیت در پشت صحنه باشد؛ مسیر کاربر مبتدی ساده بماند. در هر چت جدید ابتدا این فایل و آخرین کامنت‌های Issue #47 بررسی، سپس فقط روی یکی از موانع واقعی انتشار کار شود.
 
-**نقطهٔ تحویل قطعی، ۲۰ اکتبر ۲۰۲۶ — بررسی‌شده در GitHub:**
+**نقطهٔ تحویل گفت‌وگوی قبلی، ۲۰ اکتبر ۲۰۲۶ — مبنای تاریخی پیش از اصلاح جدید:**
 - **U-OPTI**: [Draft PR #48](https://github.com/aghajani82/u-opti/pull/48) در Branch `feature/uopti-smite-closeout-integration-20261019`، HEAD بررسی‌شده `ccda5f38cf25ed2f592312240eff620d6f0c46d6`، [Actions 39439994502](https://github.com/aghajani82/u-opti/actions/runs/39439994502) **16/16 PASS**.
 - **Smite**: [Draft PR #16](https://github.com/aghajani82/Smite/pull/16)، HEAD بررسی‌شده `66e7443685c7c7327be7429ed2813c29030af6ce`، **6/6 workflows SUCCESS**؛ [Stage15 ساخت واقعی و جفت‌شدهٔ Panel+Node از یک SHA](https://github.com/aghajani82/Smite/actions/runs/39439620030) **2/2 PASS**.
 - **اثبات انجام‌شده، نه بیشتر**: سورس یکسان، revision/role OCI label و تمایز Imageها در ساخت ایزولهٔ منتشرنشدهٔ Smite؛ آزمایش امضای HMAC و Replay، FRP/Backhaul هم‌زمان، ثبت یک‌بارهٔ Replay DB، Recreate کانتینر و Rollback در CI. **این‌ها امضای رمزنگاری‌شدهٔ Image منتشرشده، نصب تولیدی یا آزمون قطعی VPS نیستند.**
