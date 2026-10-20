@@ -46,6 +46,19 @@ INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 
+# Resume/rollback a previous interrupted install/update BEFORE new downloads
+# or package operations. Bundled rescue is not sourced through new modules.
+if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+    RESCUE="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ ! -f "$RESCUE" ] || [ -L "$RESCUE" ] ||
+       ! command -v python3 >/dev/null 2>&1 ||
+       ! python3 -B "$RESCUE" recover; then
+        echo "HOLD: Prior interrupted U-OPTI transaction requires recovery; installer stopped." >&2
+        exit 1
+    fi
+    echo "Previous interrupted U-OPTI transaction restored before installation."
+fi
+
 MODULES=(
     "system.sh"
     "time.sh"
@@ -288,31 +301,90 @@ done
 echo "Bash/Python syntax checks passed."
 
 echo
-echo "Creating directories..."
-mkdir -p "$LIB_PATH" "$MODULES_PATH"
+echo "Preparing recoverable installation transaction..."
+# A new installation and the first intentional migration from an old
+# U-OPTI installation use the SAME durable backup+journal protocol. Do
+# not overwrite a pre-existing installation without explicit consent.
+if [ -e "$INSTALL_PATH" ] || [ -L "$INSTALL_PATH" ]; then
+    if [ "${U_OPTI_ADOPT_EXISTING:-NO}" != "YES" ]; then
+        echo "HOLD: Existing U-OPTI installation found. Use its regular Update menu." >&2
+        echo "Legacy first adoption requires separate backup/review and explicit opt-in." >&2
+        exit 1
+    fi
+    echo "Explicit legacy-adoption mode selected; original bytes will be journal-backed."
+elif [ -e "$LIB_PATH/VERSION" ] || [ -L "$LIB_PATH/VERSION" ] ||
+     [ -e "$LIB_PATH/common.sh" ] || [ -L "$LIB_PATH/common.sh" ]; then
+    echo "HOLD: Incomplete existing installation without executable; manual review required." >&2
+    exit 1
+fi
 
-echo
-echo "Installing files..."
-cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
-cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
-cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do
-    cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"
+if [ -L "$LIB_PATH" ] || [ -L "$MODULES_PATH" ]; then
+    echo "HOLD: Unsafe U-OPTI installation directory." >&2
+    exit 1
+fi
+mkdir -p "$LIB_PATH" "$MODULES_PATH"
+# Persistent private backup, not volatile /tmp; all old-file bytes are saved
+# before calling apply. Missing files are represented by explicit markers.
+BACKUP_DIR="$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX")"
+backup_ok=true
+backup_items=(u-opti common.sh VERSION "${MODULES[@]}")
+for name in "${backup_items[@]}"; do
+    case "$name" in
+        u-opti) original="$INSTALL_PATH" ;;
+        common.sh) original="$LIB_PATH/common.sh" ;;
+        VERSION) original="$LIB_PATH/VERSION" ;;
+        *) original="$MODULES_PATH/$name" ;;
+    esac
+    if [ -L "$original" ]; then
+        backup_ok=false
+        echo "HOLD: Unsafe symlink at $original" >&2
+        break
+    elif [ -f "$original" ]; then
+        if [ ! -O "$original" ] || [ "$(stat -c %h "$original")" -ne 1 ] ||
+           ! cp -- "$original" "$BACKUP_DIR/$name"; then
+            backup_ok=false
+            break
+        fi
+        chmod 0600 "$BACKUP_DIR/$name"
+    elif [ ! -e "$original" ]; then
+        : > "$BACKUP_DIR/.$name-was-missing"
+        chmod 0600 "$BACKUP_DIR/.$name-was-missing"
+    else
+        backup_ok=false
+        echo "HOLD: Unexpected non-file installation target: $original" >&2
+        break
+    fi
 done
 
-# Reuse the same source branch after shell logout, reboot and Update U-OPTI.
-printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
+if [ "$backup_ok" != true ]; then
+    echo "HOLD: Could not secure installation backup; NO live files changed." >&2
+    echo "Review preserved backup: $BACKUP_DIR" >&2
+    exit 1
+fi
+# Exact same already-downloaded, syntax-checked and SHA-pinned candidates.
+# The helper records its own rescue copy before changing the first target.
+echo "Applying staged, journal-backed installation..."
+if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
+          "$TEMP_DIR" "$BACKUP_DIR" "${MODULES[@]}"; then
+    echo "HOLD: Transaction incomplete; attempting safely journaled rollback." >&2
+    RESCUE="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ -f "$RESCUE" ] && [ ! -L "$RESCUE" ] &&
+       python3 -B "$RESCUE" recover; then
+        echo "Original U-OPTI files restored; backup retained at $BACKUP_DIR" >&2
+    else
+        echo "HOLD: Recovery needs operator review; backup retained at $BACKUP_DIR" >&2
+    fi
+    exit 1
+fi
+
+# The selected channel is advisory for NEXT install/update; every file in
+# this operation has already been fetched from the immutable SOURCE_SHA.
+# Unlike the installed runtime, a crash in this metadata write is not
+# protected by the updater journal and requires separate review.
+printf '%s\\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
 mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
 chmod 0644 "$LIB_PATH/INSTALL_REF"
 
-echo
-echo "Setting permissions..."
-chmod +x "$INSTALL_PATH" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do
-    chmod +x "$MODULES_PATH/$MODULE"
-done
-
-echo
 echo "======================================"
 echo "       Installation completed"
 echo "======================================"
