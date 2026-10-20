@@ -77,6 +77,7 @@ MODULES=(
     "smite-node-local-bind.py"
     "smite-node-pairing.py"
     "smite-node-auth-candidate.py"
+    "smite-node-replay-mount-admission.py"
     "smite-auth-image-overlay-audit.py"
     "smite-stage11-overlay-review.py"
     "smite-stage12-nginx-hmac-plan.py"
