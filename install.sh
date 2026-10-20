@@ -381,7 +381,7 @@ fi
 # this operation has already been fetched from the immutable SOURCE_SHA.
 # Unlike the installed runtime, a crash in this metadata write is not
 # protected by the updater journal and requires separate review.
-printf '%s\\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
+printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
 mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
 chmod 0644 "$LIB_PATH/INSTALL_REF"
 
