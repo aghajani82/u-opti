@@ -105,12 +105,12 @@ class Trial(unittest.TestCase):
             manifest = node / "config/engine-state/engines.json"
             binary = self.root / "installed/backhaul"
             if not manifest.exists():
-                return {"state": "NOT_INSTALLED"}
-            if not binary.is_file():
-                return {"state": "UNAVAILABLE"}
+                return {"state": "NOT_INSTALLED" if not binary.exists() else "UNAVAILABLE"}
             record = json.loads(manifest.read_text())["engines"]
             if "backhaul" not in record:
                 return {"state": "NOT_INSTALLED" if not binary.exists() else "UNAVAILABLE"}
+            if not binary.is_file():
+                return {"state": "UNAVAILABLE"}
             data = record["backhaul"]["sha256"]
             return {"state": "ENROLLED_UNVERIFIED" if hashlib.sha256(binary.read_bytes()).hexdigest() == data else "UNAVAILABLE"}
         self.inspect_patch = patch.object(ctl, "inspect", side_effect=mocked_inspect)
