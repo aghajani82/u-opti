@@ -112,6 +112,9 @@ class TransactionLab(unittest.TestCase):
         manifest = state / "engines.json"
         frp_dir = self.root / "installed" / "frp"
         frp_dir.mkdir(parents=True, mode=0o700)
+        # Shared engine parent has the 0700 permissions required by the
+        # real PR-only transaction, independent of runner default umask.
+        frp_dir.parent.chmod(0o700)
         frp_hashes = {}
         initial_binary = {}
         for name in ("frpc", "frps"):
@@ -163,6 +166,9 @@ class TransactionLab(unittest.TestCase):
         manifest = state / "engines.json"
         frp_dir = self.root / "installed/frp"
         frp_dir.mkdir(parents=True, mode=0o700)
+        # Shared engine parent has the 0700 permissions required by the
+        # real PR-only transaction, independent of runner default umask.
+        frp_dir.parent.chmod(0o700)
         data = {}
         for name in ("frpc", "frps"):
             value = b"\x7fELF" + name.encode()
