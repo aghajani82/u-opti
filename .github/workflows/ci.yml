@@ -162,6 +162,13 @@ jobs:
           python3 -m py_compile tests/test-uopti-source-pin.py
           python3 -B tests/test-uopti-source-pin.py -v
 
+      - name: Safely install fresh and adopt legacy U-OPTI under forced shell crash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-first-install-adoption.py
+          python3 -B tests/test-uopti-first-install-adoption.py -v
+
       - name: Simulate interrupted U-OPTI multi-file update and recover next process
         shell: bash
         run: |
