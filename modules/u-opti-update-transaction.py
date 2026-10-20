@@ -280,6 +280,22 @@ def apply(stage: Path, backup: Path, module_names: list[str],
                 "new_mode": mode,
             }
 
+        # A future U-OPTI launcher without the pre-import journal guard
+        # would strand a pending transaction after reboot. Reject such
+        # update candidates BEFORE arming the journal or touching files.
+        launcher = candidates["u-opti"]
+        required = (
+            b'if [ -e "$LIB_PATH/.uopti-update-pending" ]',
+            b'python3 -B "$RECOVERY_SCRIPT" recover',
+            b'exec "$INSTALL_PATH" "$@"',
+            b'source "$LIB_PATH/common.sh"',
+        )
+        if any(marker not in launcher for marker in required) or not (
+            launcher.index(required[0]) < launcher.index(required[1])
+            < launcher.index(required[2]) < launcher.index(required[3])
+        ):
+            raise Hold("CANDIDATE_LAUNCHER_LACKS_PREIMPORT_RECOVERY")
+
         txn.mkdir(mode=0o700)
         try:
             # Copy this already executing helper into a stable rescue location
