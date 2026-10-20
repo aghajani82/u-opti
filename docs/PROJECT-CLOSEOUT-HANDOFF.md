@@ -1,9 +1,23 @@
-# U-OPTI × Smite — PROJECT CLOSEOUT & CHAT HANDOFF
+# جمع کردن پروژه و تکمیل آن — U-OPTI × Smite | PROJECT CLOSEOUT & CHAT HANDOFF
 
 > **Source of truth / مرجع ادامه کار:** [U-OPTI Issue #47 — CLOSEOUT TRACKER](https://github.com/aghajani82/u-opti/issues/47)  
 > **Last reviewed:** 2026-10-20  
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
+
+## هدف قطعی و نام چت بعدی — جمع کردن پروژه و تکمیل آن
+
+**عنوان پیشنهادی چت جدید:** «جمع کردن و تکمیل پروژه U-OPTI × Smite | آماده‌سازی انتشار»
+
+**خواستهٔ صاحب پروژه (اولویت اصلی و ثابت):** پروژه را **جمع کنیم و کامل کنیم**؛ عیب‌ها و بخش‌های نیمه‌تمام را ببندیم، تکرار آزمون‌های موفق و ساخت مرحله/منو/PR جدید بدون ضرورت را کنار بگذاریم و به یک نسخهٔ هماهنگ، ساده، امن و قابل‌نصب برسیم. امنیت در پشت صحنه باشد؛ مسیر کاربر مبتدی ساده بماند. در هر چت جدید ابتدا این فایل و آخرین کامنت‌های Issue #47 بررسی، سپس فقط روی یکی از موانع واقعی انتشار کار شود.
+
+**نقطهٔ تحویل قطعی، ۲۰ اکتبر ۲۰۲۶ — بررسی‌شده در GitHub:**
+- **U-OPTI**: [Draft PR #48](https://github.com/aghajani82/u-opti/pull/48) در Branch `feature/uopti-smite-closeout-integration-20261019`، HEAD بررسی‌شده `ccda5f38cf25ed2f592312240eff620d6f0c46d6`، [Actions 39439994502](https://github.com/aghajani82/u-opti/actions/runs/39439994502) **16/16 PASS**.
+- **Smite**: [Draft PR #16](https://github.com/aghajani82/Smite/pull/16)، HEAD بررسی‌شده `66e7443685c7c7327be7429ed2813c29030af6ce`، **6/6 workflows SUCCESS**؛ [Stage15 ساخت واقعی و جفت‌شدهٔ Panel+Node از یک SHA](https://github.com/aghajani82/Smite/actions/runs/39439620030) **2/2 PASS**.
+- **اثبات انجام‌شده، نه بیشتر**: سورس یکسان، revision/role OCI label و تمایز Imageها در ساخت ایزولهٔ منتشرنشدهٔ Smite؛ آزمایش امضای HMAC و Replay، FRP/Backhaul هم‌زمان، ثبت یک‌بارهٔ Replay DB، Recreate کانتینر و Rollback در CI. **این‌ها امضای رمزنگاری‌شدهٔ Image منتشرشده، نصب تولیدی یا آزمون قطعی VPS نیستند.**
+- **از سر نگیر**: رفع وابستگی FRP و پورت ثابت 56053، آزمون‌های موفق coexistence/rollback، ساخت آزمایشی جفت Image و ویزاردهای قدیمی. آخرین گفت‌وگو قبل از انتقال دربارهٔ **بستن موانع انتشار و منشأ/توزیع امن Image جفت Panel/Node** بود؛ کار جدیدی در آن مرحله هنوز انجام نشده بود.
+- **فقط سه مانع واقعی**: (۱) نصب/بازگشت مجاز Backhaul روی میزبان با کنترل سلامت امضاشده و مسیر واقعی TLS443 و Inbound انتخابی Sanaei بعد از نصب Core؛ (۲) تطبیق SHA و digest و امضای معتبر/انتشار جفت Image، بازیابی مجاز Replay DB و مهاجرت بدون آسیب به نسخهٔ پایدار؛ (۳) **فقط با تأیید مجزای کاربر** تست دو VPS آزمایشی دارای Snapshot، Reboot/Restore و مسیر واقعی ترافیک، سپس تصمیم مستقل Merge/Release.
+- **خط قرمز فعلی**: `MAIN_MERGE=NO` · `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD` · `RELEASE_PUBLISH=NO` · `IR_KH_UNCHANGED=YES`. اگر آخرین HEAD تغییر کرده بود، CI همان HEAD را دوباره بررسی کن، نه اینکه به این شماره‌ها اعتماد همیشگی داشته باشی.
 
 ## CURRENT CLOSEOUT STATUS — concise handoff (2026-10-20)
 
@@ -22,16 +36,11 @@
 
 ## 0. راهنمای سریع برای چت جدید / Start here
 
-Copy this into a new chat:
+**عنوان چت جدید:** «جمع کردن و تکمیل پروژه U-OPTI × Smite | آماده‌سازی انتشار»
 
-> «ادامه جمع‌بندی پروژه U-OPTI و Smite. لطفاً ابتدا فایل
-> `docs/PROJECT-CLOSEOUT-HANDOFF.md` را در Branch
-> `feature/uopti-smite-closeout-integration-20261019`
-> از مخزن `aghajani82/u-opti`، سپس GitHub Issue #47 و آخرین کامنت‌هایش
-> را بخوان. وضعیت PRها و CI را مجدداً بررسی کن و از آخرین کار تأییدشده
-> ادامه بده. هدف، تکمیل امنیت و کدهای نیمه‌تمام و جمع‌بندی نسخهٔ نهایی
-> است؛ نه افزودن مرحله و قابلیت جدید. بدون تأیید من به `main` Merge
-> نکن، Release نساز و روی IR/KH تغییری نده.»
+**پیام آماده برای شروع چت جدید:**
+
+> «ادامه پروژهٔ U-OPTI × Smite با هدف اصلی **جمع کردن پروژه و تکمیل آن**. لطفاً قبل از هر اقدامی فایل `docs/PROJECT-CLOSEOUT-HANDOFF.md` در Branch `feature/uopti-smite-closeout-integration-20261019` از `aghajani82/u-opti` و آخرین کامنت‌های GitHub Issue #47 را بخوان. سپس HEAD و تست‌های Draft PR #48 از U-OPTI و Draft PR #16 از Smite را مجدداً بررسی کن. کارهای انجام‌شده را تکرار نکن و PR/مرحله/منوی جدید بی‌دلیل نساز. فقط سه مانع اصلی انتشار را ببند: نصب امن و مستقل Backhaul روی میزبان و تست واقعی مسیر 443، جفت Imageهای معتبر و بازیابی امن Smite، و در نهایت تست دو VPS آزمایشی Snapshotدار فقط با تأیید من. هیچ Merge به main، Release یا تغییری روی IR/KH بدون اجازهٔ من انجام نده. ظاهر و مراحل نصب ساده و مناسب مبتدی بمانند. دستورات سرور را با نقش IR، KH یا BOTH مشخص کن.»
 
 **For the assistant:**
 1. Read [this tracked file](https://github.com/aghajani82/u-opti/blob/feature/uopti-smite-closeout-integration-20261019/docs/PROJECT-CLOSEOUT-HANDOFF.md), then [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and **newest comments**. Never assume a recorded PR SHA/CI result is still current; verify.
@@ -190,7 +199,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** Smite Panel+Node unpublished source-revision and role labels now pass REAL paired-image CI (Smite SHA `10486c1...`, run `39439403024` 2/2); U-OPTI standalone archive/manifest verification stays PRECHECK ONLY. **Do not rebuild prior CI helper stages.** Next close the actual approved image digest/signing+release-distribution and host Backhaul executor/rollback gates; then request explicit approval for snapshot-backed IR/KH dual-VPS test with dynamic Sanaei port/path. Keep Draft PR #48/#16 and current stable servers untouched.
+**Current next action / قدم عملی برای ادامه:** هدف اصلی **جمع کردن پروژه و تکمیل آن** است. آخرین وضعیت اثبات‌شده: همان سورس برای دو Image آزمایشی Panel/Node در Smite (HEAD `66e74436`, 6/6 و Stage15 2/2) و U-OPTI (HEAD `ccda5f38`, 16/16). در چت جدید جدیدترین HEAD را بازبینی کن؛ سپس **به‌جای تکرار تست‌های موفق** یکی از دو مانع اصلی پیاده‌سازی را ببند: منشأ/هویت رمزنگاری‌شده و توزیع قابل‌اعتماد جفت Imageهای نهایی، یا اجرای مجاز میزبان برای Backhaul با امضای سلامت و Rollback واقعی. آزمایش دو VPS را فقط پس از تأیید جداگانهٔ صاحب پروژه برنامه‌ریزی کن. سه مانع نهایی بالای همین فایل نوشته شده‌اند. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; stable main/IR/KH unchanged.
 
 ## 7. Operational conventions
 
