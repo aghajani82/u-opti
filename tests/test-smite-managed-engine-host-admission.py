@@ -106,7 +106,11 @@ class SharedHostAdmission(unittest.TestCase):
             self.assertEqual(r["OTHER_ENGINE"], "ENROLLED_UNVERIFIED")
             self.assertEqual(r["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
             self.assertEqual(r["REASON"], "OTHER_ENGINE_SIGNED_STATUS_REQUIRED")
+            self.assertEqual(r["LOCAL_PREFLIGHT"], "PASS_LOCAL_ONLY_INCOMPLETE")
+            self.assertEqual(r["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+            self.assertEqual(r["SIGNED_NODE_HEALTH_AND_REPLAY"], "UNVERIFIED")
             self.assertEqual(r["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(r["ACTIVATION_GATE"], "HOLD")
         with patch.object(gate, "local_state", side_effect=lambda engine, node:
                           {"state": "UNAVAILABLE", "reason": "MISSING_READONLY_MOUNT"}
                           if engine == "frp" else
