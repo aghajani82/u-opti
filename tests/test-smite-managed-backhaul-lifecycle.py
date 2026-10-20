@@ -67,6 +67,7 @@ class Trial(unittest.TestCase):
         self.identity.chmod(0o600)
         blob = b"\x7fELF" + b"BACKHAUL_TEST_NOT_EXECUTABLE"
         archive = self.root / "demo.tar.gz"
+        self.archive = archive
         with tarfile.open(archive, mode="w:gz") as tf:
             member = tarfile.TarInfo("backhaul")
             member.size = len(blob)
