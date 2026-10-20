@@ -197,7 +197,7 @@ def prepare(node_dir: Path, archive: Path, stage_root: Path,
         "CANDIDATE_ONLY=YES\n"
         "NODE_RESTARTED=NO\n"
         "ENGINE_ENROLLED=NO\n"
-        "FRP_INSTALLED=NO\n"
+        f"FRP_INSTALLED={'YES' if 'frp' in engines else 'NO'}\n"
         "PUBLIC_PORTS_CHANGED=NO\n"
         f"ARCHIVE_SHA256={digest}\n"
         f"BACKHAUL_BINARY_SHA256={binary_sha}\n"
