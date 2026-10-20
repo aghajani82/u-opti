@@ -15,6 +15,9 @@ takes over the file-replacement phase:
 
 1. Validate the private stage and backup, current installed bytes, each old/new
    module name, root owner and every source SHA256. Refuse unexpected changes.
+   Also reject a future candidate `u-opti` launcher that lacks recovery-before-
+   source and a re-exec of the restored binary, so an update cannot silently
+   disable its own crash recovery.
 2. Create `/usr/local/lib/u-opti/.uopti-update-pending` (private 0700)
    containing `rescue.py` (a copy of the exact currently executing helper)
    and `manifest.json` (old/new hashes, modes, backup path). Write, `fsync`
