@@ -107,7 +107,10 @@ class Trial(unittest.TestCase):
                 return {"state": "NOT_INSTALLED"}
             if not binary.is_file():
                 return {"state": "UNAVAILABLE"}
-            data = json.loads(manifest.read_text())["engines"]["backhaul"]["sha256"]
+            record = json.loads(manifest.read_text())["engines"]
+            if "backhaul" not in record:
+                return {"state": "NOT_INSTALLED" if not binary.exists() else "UNAVAILABLE"}
+            data = record["backhaul"]["sha256"]
             return {"state": "ENROLLED_UNVERIFIED" if hashlib.sha256(binary.read_bytes()).hexdigest() == data else "UNAVAILABLE"}
         self.inspect_patch = patch.object(ctl, "inspect", side_effect=mocked_inspect)
         self.inspect_patch.start()
@@ -136,6 +139,99 @@ class Trial(unittest.TestCase):
         self.assertEqual(report["PRODUCTION_ACTIVATION"], "HOLD")
         self.assertEqual(report["TRIAL_ROLLBACK"], "BYTES_AND_MODES_RESTORED")
         self.verify_clean()
+
+    def _existing_frp_fixture(self):
+        # A genuine FRP-pinned local inventory already occupying the shared
+        # engine directory. Its bytes and hashes must NEVER change.
+        installed = self.root / "installed"
+        installed.mkdir(mode=0o700)
+        frp_dir = installed / "frp"
+        frp_dir.mkdir(mode=0o700)
+        existing = {}
+        for name in ("frpc", "frps"):
+            value = b"\x7fELF" + name.encode() + b"-already-installed"
+            path = frp_dir / name
+            path.write_bytes(value)
+            path.chmod(0o755)
+            existing[name] = value
+        before = COMPOSE.replace(
+            "      - ./config:/etc/smite-node\n",
+            "      - ./config:/etc/smite-node\n" +
+            "".join(f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n"
+                    for name in ("frpc", "frps")))
+        self.node.joinpath("docker-compose.yml").write_text(before)
+        state = self.node / "config" / "engine-state"
+        state.mkdir(mode=0o700)
+        manifest = state / "engines.json"
+        record = {"schema": 1, "engines": {"frp": {
+            "sha256": hashlib.sha256(existing["frpc"]).hexdigest(),
+            "server_sha256": hashlib.sha256(existing["frps"]).hexdigest()}}}
+        manifest.write_text(json.dumps(record))
+        manifest.chmod(0o600)
+        stage = pkg.prepare(
+            self.node, self.archive, self.root / "stages",
+            arch="amd64", allowed_sha=hashlib.sha256(self.archive.read_bytes()).hexdigest())
+        return stage, before.encode(), manifest.read_bytes(), existing
+
+    def test_existing_frp_needs_three_signed_checks_and_exact_rollback(self):
+        stage, prior_compose, prior_manifest, prior_binary = self._existing_frp_fixture()
+        with self.assertRaisesRegex(life.Hold, "EXISTING_FRP_SIGNED_PROOF_REQUIRED"):
+            life.run_lab_rehearsal(
+                self.root, stage, check_ready=lambda _: True,
+                check_absent=lambda _: True)
+        self.assertEqual(self.node.joinpath("docker-compose.yml").read_bytes(), prior_compose)
+        self.assertFalse((self.root / "recovery-journal").exists())
+        calls = []
+        def other(root, phase):
+            calls.append(phase)
+            state = json.loads((self.node / "config/engine-state/engines.json").read_text())
+            self.assertEqual(state["engines"]["frp"]["sha256"],
+                             hashlib.sha256(prior_binary["frpc"]).hexdigest())
+            for name, payload in prior_binary.items():
+                self.assertEqual((root / "installed/frp" / name).read_bytes(), payload)
+            return phase in ("before", "with-backhaul", "after-rollback")
+        status = life.run_lab_rehearsal(
+            self.root, stage, check_ready=lambda _: True,
+            check_absent=lambda _: True, check_other=other)
+        self.assertEqual(calls, ["before", "with-backhaul", "after-rollback"])
+        self.assertEqual(status["EXISTING_FRP_SIGNED_RUNTIME"],
+                         "BEFORE_WITH_BACKHAUL_AND_AFTER_ROLLBACK_VERIFIED")
+        self.assertEqual(status["PRODUCTION_ACTIVATION"], "HOLD")
+        self.assertEqual(self.node.joinpath("docker-compose.yml").read_bytes(), prior_compose)
+        self.assertEqual((self.node / "config/engine-state/engines.json").read_bytes(),
+                         prior_manifest)
+        self.assertFalse((self.root / "installed/backhaul").exists())
+        self.assertFalse((self.root / "recovery-journal").exists())
+
+    def test_existing_frp_failed_signed_pre_and_post_checks_never_claim_success(self):
+        stage, prior_compose, prior_manifest, prior_binary = self._existing_frp_fixture()
+        with self.assertRaisesRegex(life.Hold, "EXISTING_FRP_PRIOR_SIGNED_RUNTIME_NOT_VERIFIED"):
+            life.run_lab_rehearsal(
+                self.root, stage, check_ready=lambda _: self.fail("no install"),
+                check_absent=lambda _: self.fail("no rollback"),
+                check_other=lambda root, phase: False)
+        self.assertFalse((self.root / "recovery-journal").exists())
+        calls = []
+        def other(root, phase):
+            calls.append(phase)
+            return phase != "with-backhaul"
+        with self.assertRaisesRegex(life.Hold, "ACTIVATION_FAILED_EXACT_ROLLBACK_PROVED"):
+            life.run_lab_rehearsal(
+                self.root, stage, check_ready=lambda _: True,
+                check_absent=lambda _: True, check_other=other)
+        self.assertEqual(calls, ["before", "with-backhaul", "after-rollback"])
+        self.assertFalse((self.root / "recovery-journal").exists())
+        with self.assertRaisesRegex(life.Hold, "EXISTING_FRP_AFTER_ROLLBACK_NOT_VERIFIED"):
+            life.run_lab_rehearsal(
+                self.root, stage, check_ready=lambda _: True,
+                check_absent=lambda _: True,
+                check_other=lambda _, phase: phase != "after-rollback")
+        self.assertFalse((self.root / "installed/backhaul").exists())
+        self.assertEqual(self.node.joinpath("docker-compose.yml").read_bytes(), prior_compose)
+        self.assertEqual((self.node / "config/engine-state/engines.json").read_bytes(),
+                         prior_manifest)
+        for name, payload in prior_binary.items():
+            self.assertEqual((self.root / "installed/frp" / name).read_bytes(), payload)
 
     def test_signed_ready_failure_forces_rollback_and_absent_proof(self):
         calls = []
