@@ -276,6 +276,58 @@ host executor. Actual `install`/`rollback` on IR/KH are still
 disabled, and signed image/replay restore admission remain release
 blockers. No public port or live tunnel was opened.
 
+## 2026-10-20 — official signed FRP+Backhaul CI upgraded to strict, one-time Smite Replay enrollment
+
+**Same existing U-OPTI Draft #48. CI-only; IR/KH and stable release unchanged.**
+
+The historical dual-engine Docker job passed with Smite code SHA
+`a15c46288aae9849babc9c9358c68e46686bce9c`, which still
+pre-dated the operator-confirmed, durable one-time Replay enrollment
+and stale-snapshot quarantine. Its successful HMAC inventory test was
+therefore **not evidence for the newer strict Replay DB lifecycle**.
+
+The **existing** `managed-backhaul-official-artifact` workflow now
+checks out **exact reviewed Smite security code SHA**
+`02d05056d3a4baf577c9d3781d62af61c000f1ac`. Its shell runner
+requires that SHA, and explicitly opts into the updated CI-only
+`SMITE_CI_STRICT_REPLAY_BOOTSTRAP=1` behavior. On the disposable
+private GitHub runner, the signed Node helper creates one synthetic
+paired identity, then invokes the **real**
+`python -m app.replay_enrollment --confirm-first-provision` in a
+`--network none`, read-only-root, capability-dropped one-shot Docker
+container, with the exact reviewed `node/app` source mounted
+read-only. The identity and Replay DB directories are separate
+root-owned private host binds. The original one-time marker
+`replay-enrollment.json` is persisted **alongside the identity**
+before SQLite is created.
+
+Subsequent signed API probes and force-recreated Node containers
+**reuse the same Replay DB and independent marker**; they do not
+attempt rebootstrap. Both files must remain 0600 and nonempty.
+A half-created marker/DB, unknown source SHA or wrong permissions
+makes the test HOLD instead of silently resetting nonce history.
+
+All other constraints from the real dual-engine regression remain:
+official SHA-verified FRP v0.71.0 and Backhaul v0.7.2, FRP signed
+`ready` at BEFORE / WITH-BACKHAUL / AFTER-ROLLBACK, backhaul staged
+`not-installed → ready → not-installed`, signed HMAC verification
+and nonce replay rejection through Docker recreation, byte-exact FRP
+Compose/binaries/registry after rollback, **zero tunnel Apply/public
+port**, and no real server changes.
+
+**Important provenance boundary:** the PR lab still uses the
+SHA256-pinned `ghcr.io/zzedix/smite-node` dependency/base image and
+mounts the *reviewed newer Python application source* read-only; the
+test has NOT released, installed or attested a complete new
+Panel+Node production image pair built from the latest Smite Draft.
+Other older CI jobs retain their own historical immutable reviewed
+Smite source pins. Do NOT claim that successful signed API tests
+constitute final deployable image parity.
+
+**Integration commit:** `44a6aab0e2efd4c2184b661644923d5bcfd9fb63`.
+[GitHub Actions run 39434522789](https://github.com/aghajani82/u-opti/actions/runs/39434522789)
+(verify completed job outcomes before reporting as PASS).
+
 ## Release blockers: do not obscure behind green CI
 
 - No approved production host engine-install transaction/executor and
