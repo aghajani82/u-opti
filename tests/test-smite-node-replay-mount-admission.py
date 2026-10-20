@@ -141,6 +141,21 @@ class ReplayMountReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(tool.AdmissionHold, "Untrusted private file"):
             self.review()
 
+    def test_offline_quiescence_refuses_wal_journal_or_active_storage(self):
+        # Offline inspection must not create SQLite -shm files or treat
+        # uncheckpointed WAL contents as a complete nonce history.
+        for extension in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=extension):
+                sidecar = Path(str(self.db) + extension)
+                sidecar.write_bytes(b"unreviewed historical nonce sidecar")
+                with self.assertRaisesRegex(tool.AdmissionHold, "journal sidecar"):
+                    self.review()
+                sidecar.unlink()
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+        with self.assertRaisesRegex(tool.AdmissionHold, "rollback-journal"):
+            self.review()
+
     def test_source_and_target_mount_drift_refused(self):
         original = self.candidate.read_text()
         for changed in (
