@@ -119,6 +119,8 @@ def review(engine: str, node: Path, stage: Path, *,
         "EMERGENCY_CONSOLE": "UNVERIFIED",
         "ROLLBACK_EXECUTOR": "NOT_ENABLED",
         "OTHER_ENGINE_POLICY": "NEVER_TOUCH",
+        "OTHER_ENGINE_LOCAL_STATE": "UNVERIFIED",
+        "OTHER_ENGINE_SIGNED_RUNTIME": "UNVERIFIED",
         "PORT_AND_TUNNEL_CONFIGURATION": "AFTER_INSTALL_IN_SMITE",
         "PUBLIC_PORT_CHANGE": "NONE",
         "INSTALL_ALLOWED": "NO",
@@ -133,11 +135,19 @@ def review(engine: str, node: Path, stage: Path, *,
                 or inspection.get("ACTIVATION_GATE") != "HOLD"
                 or inspection.get("LOCAL_PREFLIGHT") != "PASS_LOCAL_ONLY_INCOMPLETE"
                 or inspection.get("TARGET_ENGINE") != "NOT_INSTALLED"
-                or inspection.get("OTHER_ENGINE") != "NOT_INSTALLED"
+                or inspection.get("OTHER_ENGINE") not in (
+                    "NOT_INSTALLED", "ENROLLED_UNVERIFIED")
+                or (inspection.get("OTHER_ENGINE") == "ENROLLED_UNVERIFIED"
+                    and (inspection.get("REASON") != "OTHER_ENGINE_SIGNED_STATUS_REQUIRED"
+                         or inspection.get("OTHER_ENGINE_ACTION") != "NEVER_MODIFY"))
                 or inspection.get("SAVED_TUNNELS") != "ZERO"
                 or inspection.get("CORE_PROFILE") != "MANAGED_STRICT"
                 or inspection.get("NODE_CONTAINER") != "RUNNING_REVIEWED_IMAGE"):
             raise Hold("HOST_ADMISSION_INCOMPLETE")
+        # A pre-existing verified-by-local-digest engine can coexist, but
+        # its runtime is *still unverified* until signed Node inspection
+        # before AND after the actual, separately approved host transaction.
+        result["OTHER_ENGINE_LOCAL_STATE"] = inspection["OTHER_ENGINE"]
         staging(stage, staging_root)
         summary = _safe_summary(stage / "summary.txt")
         # Bounded byte reads; no token or user config ever enters output.
@@ -201,7 +211,11 @@ def review(engine: str, node: Path, stage: Path, *,
             json.dumps(plan_fingerprint, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         result["STAGE_ADMISSION"] = "VERIFIED_PREVIEW_ONLY"
-        result["REASON"] = "SNAPSHOT_SIGNED_RUNTIME_HOST_EXECUTOR_UNVERIFIED"
+        result["REASON"] = (
+            "OTHER_ENGINE_SIGNED_RUNTIME_AND_HOST_EXECUTOR_UNVERIFIED"
+            if inspection["OTHER_ENGINE"] == "ENROLLED_UNVERIFIED"
+            else "SNAPSHOT_SIGNED_RUNTIME_HOST_EXECUTOR_UNVERIFIED"
+        )
     except (Hold, OSError, ValueError, RuntimeError, UnicodeError) as exc:
         why = str(exc) if isinstance(exc, Hold) else "UNTRUSTED_STAGE_OR_HOST"
         result["REASON"] = why if re.fullmatch(r"[A-Z0-9_]{1,90}", why) else "UNTRUSTED_STAGE_OR_HOST"
