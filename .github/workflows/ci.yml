@@ -162,6 +162,13 @@ jobs:
           python3 -m py_compile tests/test-uopti-source-pin.py
           python3 -B tests/test-uopti-source-pin.py -v
 
+      - name: Simulate interrupted U-OPTI multi-file update and recover next process
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/u-opti-update-transaction.py tests/test-uopti-update-transaction.py
+          python3 -B tests/test-uopti-update-transaction.py -v
+
       - name: Preserve real U-OPTI updater backup after failed rollback (isolated)
         shell: bash
         run: |
