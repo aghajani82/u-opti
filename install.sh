@@ -17,6 +17,31 @@ if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$
     exit 1
 fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+# BEGIN: U-OPTI immutable per-operation source pin
+# Resolve once; never download a mixture of mutable branch revisions.
+u_opti_resolve_source_sha() {
+    local ref="$1" response
+    if [[ ! "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+       [[ "$ref" == *".."* ]] || [[ "$ref" == /* ]]; then
+        return 1
+    fi
+    response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "https://api.github.com/repos/aghajani82/u-opti/commits/$ref")" || return 1
+    printf '%s' "$response" | python3 -c '
+import json
+import re
+import sys
+data = json.load(sys.stdin)
+sha = data.get("sha") if isinstance(data, dict) else None
+if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+    sys.exit("UNTRUSTED_SOURCE_SHA")
+print(sha)
+'
+}
+# END: U-OPTI immutable per-operation source pin
+
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
@@ -141,6 +166,14 @@ cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
 CACHE_BUST="$(date +%s%N)"
+
+# Fail closed BEFORE downloading/committing any installation files.
+if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
+    echo "HOLD: GitHub source revision could not be verified; install cancelled." >&2
+    exit 1
+fi
+BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
+echo "Source revision locked for this installation: $SOURCE_SHA"
 
 echo "Downloading VERSION..."
 curl -fsSL --retry 3 "$BASE_URL/VERSION?cb=$CACHE_BUST" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
