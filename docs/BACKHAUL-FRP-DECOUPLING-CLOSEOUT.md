@@ -326,7 +326,12 @@ constitute final deployable image parity.
 
 **Integration commit:** `44a6aab0e2efd4c2184b661644923d5bcfd9fb63`.
 [GitHub Actions run 39434522789](https://github.com/aghajani82/u-opti/actions/runs/39434522789)
-(verify completed job outcomes before reporting as PASS).
+**completed/success, all 16/16 jobs PASS** for the strict-source
+code commit `44a6aab0e2efd4c2184b661644923d5bcfd9fb63`.
+The official Docker job also explicitly printed
+`SIGNED_NODE_OFFLINE_FIRST_REPLAY_ENROLLMENT=PASS`,
+`OFFICIAL_BACKHAUL_EXISTING_FRP_SIGNED_THREE_PHASES=PASS` and
+`OFFICIAL_DUAL_ENGINE_FRP_SURVIVED_BACKHAUL_SIGNED_RECREATE_AND_ROLLBACK=PASS`.
 
 ## Release blockers: do not obscure behind green CI
 
