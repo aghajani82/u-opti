@@ -344,12 +344,13 @@ mkdir -p "$LIB_PATH" "$MODULES_PATH"
 # before calling apply. Missing files are represented by explicit markers.
 BACKUP_DIR="$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX")"
 backup_ok=true
-backup_items=(u-opti common.sh VERSION "${MODULES[@]}")
+backup_items=(u-opti common.sh VERSION INSTALL_REF "${MODULES[@]}")
 for name in "${backup_items[@]}"; do
     case "$name" in
         u-opti) original="$INSTALL_PATH" ;;
         common.sh) original="$LIB_PATH/common.sh" ;;
         VERSION) original="$LIB_PATH/VERSION" ;;
+        INSTALL_REF) original="$LIB_PATH/INSTALL_REF" ;;
         *) original="$MODULES_PATH/$name" ;;
     esac
     if [ -L "$original" ]; then
@@ -382,7 +383,7 @@ fi
 # The helper records its own rescue copy before changing the first target.
 echo "Applying staged, journal-backed installation..."
 if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
-          "$TEMP_DIR" "$BACKUP_DIR" "${MODULES[@]}"; then
+          "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${MODULES[@]}"; then
     echo "HOLD: Transaction incomplete; attempting safely journaled rollback." >&2
     RESCUE="$LIB_PATH/.uopti-update-pending/rescue.py"
     if [ -f "$RESCUE" ] && [ ! -L "$RESCUE" ] &&
@@ -393,14 +394,6 @@ if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
     fi
     exit 1
 fi
-
-# The selected channel is advisory for NEXT install/update; every file in
-# this operation has already been fetched from the immutable SOURCE_SHA.
-# Unlike the installed runtime, a crash in this metadata write is not
-# protected by the updater journal and requires separate review.
-printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
-mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
-chmod 0644 "$LIB_PATH/INSTALL_REF"
 
 echo "======================================"
 echo "       Installation completed"
