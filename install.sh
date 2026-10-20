@@ -139,6 +139,23 @@ MODULES=(
     "fakesite.sh"
 )
 
+# Gate legacy adoption and uncertain partially installed states BEFORE
+# the package-manager preflight or any download. Recheck after staging too.
+if [ -L "$INSTALL_PATH" ] || [ -L "$LIB_PATH" ] || [ -L "$MODULES_PATH" ]; then
+    echo "HOLD: Unsafe U-OPTI installation path (symlink)." >&2
+    exit 1
+fi
+if [ -e "$INSTALL_PATH" ]; then
+    if [ "${U_OPTI_ADOPT_EXISTING:-NO}" != "YES" ]; then
+        echo "HOLD: Existing U-OPTI requires explicit migration approval." >&2
+        echo "Use the normal Update menu for an already-supported version." >&2
+        exit 1
+    fi
+elif [ -e "$LIB_PATH/common.sh" ] || [ -e "$LIB_PATH/VERSION" ]; then
+    echo "HOLD: Incomplete prior install with no executable; review first." >&2
+    exit 1
+fi
+
 echo "======================================"
 echo "          Installing U-OPTI"
 echo "======================================"
