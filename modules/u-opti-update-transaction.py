@@ -163,7 +163,7 @@ def _recover_locked(lib: Path, install: Path) -> str:
     if (backup.parent != lib or not backup.name.startswith(".uopti-backup-")
             or not _is_private_dir(backup)):
         raise Hold("UNTRUSTED_RECOVERY_BACKUP")
-    names = [k for k in data["files"] if k not in ("u-opti", "common.sh", "VERSION")]
+    names = [k for k in data["files"] if k not in ("u-opti", "common.sh", "VERSION", "INSTALL_REF")]
     destinations = _paths(lib, install, names,
                           include_ref="INSTALL_REF" in data["files"])
     if set(destinations) != set(data["files"]):
