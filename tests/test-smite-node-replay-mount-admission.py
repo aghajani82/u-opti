@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -55,7 +57,9 @@ class ReplayMountReviewTest(unittest.TestCase):
         self.marker = self.ident_dir / "replay-enrollment.json"
         self.marker.write_text(json.dumps({
             "schema": 1, "node_id": self.node_id,
-            "replay_database": str(self.db), "status": "ENROLLMENT_STARTED"
+            "replay_database": tool.CONTAINER_REPLAY,
+            "status": "ENROLLMENT_STARTED",
+            "key_binding": self.binding(self.secret),
         }))
         self.marker.chmod(0o600)
         self.base = self.node_dir / "docker-compose.yml"
@@ -78,6 +82,13 @@ class ReplayMountReviewTest(unittest.TestCase):
             replay_dir=self.replay, base_compose=self.base,
             candidate=self.candidate,
         )
+
+    def binding(self, secret):
+        return hmac.new(
+            secret.encode("ascii"),
+            b"smite-replay-key-binding-v1:" + self.node_id.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def review(self):
         return tool.preflight(**self.arguments)
@@ -112,20 +123,63 @@ class ReplayMountReviewTest(unittest.TestCase):
             self.review()
         self.marker.write_text(json.dumps({
             "schema": 1, "node_id": "different-node",
-            "replay_database": str(self.db), "status": "ENROLLMENT_STARTED"
+            "replay_database": tool.CONTAINER_REPLAY,
+            "status": "ENROLLMENT_STARTED",
+            "key_binding": self.binding(self.secret),
         }))
         self.marker.chmod(0o600)
         with self.assertRaisesRegex(tool.AdmissionHold, "mismatch"):
             self.review()
         self.marker.write_text(json.dumps({
             "schema": 1, "node_id": self.node_id,
-            "replay_database": str(self.db), "status": "ENROLLMENT_STARTED"
+            "replay_database": tool.CONTAINER_REPLAY,
+            "status": "ENROLLMENT_STARTED",
+            "key_binding": self.binding(self.secret),
         }))
         self.identity.write_text(json.dumps({
             "node_id": "new-identity", "node_secret": self.secret
         }))
         with self.assertRaises(tool.AdmissionHold):
             self.review()
+
+
+    def test_old_marker_wrong_host_path_and_key_mismatch_hold(self):
+        valid = json.loads(self.marker.read_text())
+        mutations = [
+            {"key_binding": None},
+            {"key_binding": ""},
+            {"key_binding": "a" * 64},
+            {"replay_database": str(self.db)},
+            {"replay_database": "/tmp/fake.sqlite3"},
+            {"status": "ENROLLMENT_COMPLETE"},
+        ]
+        for change in mutations:
+            with self.subTest(change=change):
+                doc = dict(valid)
+                if change.get("key_binding", "present") is None:
+                    doc.pop("key_binding")
+                else:
+                    doc.update(change)
+                self.marker.write_text(json.dumps(doc))
+                with self.assertRaisesRegex(tool.AdmissionHold, "identity/key mismatch"):
+                    self.review()
+        self.marker.write_text(json.dumps(valid))
+        self.assertEqual(self.review(), "KH_PRIVATE_BIND_MOUNTS_OFFLINE_PREFLIGHT_PASS")
+
+    def test_silent_secret_change_with_same_node_id_holds(self):
+        old = self.identity.read_bytes()
+        self.identity.write_text(json.dumps({
+            "node_id": self.node_id, "node_secret": "c" * 64, "version": 1
+        }))
+        with self.assertRaisesRegex(tool.AdmissionHold, "identity/key mismatch"):
+            self.review()
+        self.identity.write_bytes(old)
+        self.assertEqual(self.review(), "KH_PRIVATE_BIND_MOUNTS_OFFLINE_PREFLIGHT_PASS")
+
+    def test_kh_pass_does_not_claim_panel_restore_admission(self):
+        self.assertEqual(self.review(), "KH_PRIVATE_BIND_MOUNTS_OFFLINE_PREFLIGHT_PASS")
+        self.assertIn("PANEL_BACKUP_REVOCATION_WITNESS=NOT_VERIFIED", MODULE.read_text())
+        self.assertNotIn(self.secret, MODULE.read_text())
 
     def test_wrong_db_identity_schema_and_tamper_denied(self):
         with sqlite3.connect(self.db) as conn:

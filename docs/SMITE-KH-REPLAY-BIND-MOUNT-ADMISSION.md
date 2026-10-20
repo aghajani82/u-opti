@@ -37,9 +37,16 @@ It validates all of these before reporting the **limited local pass**:
    private 0700 directory, the file regular/0600 with a single link.
 3. `/etc/u-opti/smite/identities/replay-enrollment.json`: separate
    one-time Smite provisioning marker, private regular/0600 and bound
-   to the same Node ID and the **exact host DB path**. It must come from
-   the reviewed Smite offline `replay_enrollment.provision_once` process,
-   not be manually fabricated.
+   to the same Node ID and **exact container replay path**
+   `/var/lib/smite-node/auth/agent-replay.sqlite3`, NOT the bind-mounted
+   host source. Smite's first-enrollment marker now also includes the
+   `key_binding` HMAC commitment to its paired Node ID and secret.
+   The U-OPTI checker verifies that commitment using the same
+   domain-separated `smite-replay-key-binding-v1:` formula as Smite's
+   Strict runtime. Old 4-field markers, secret changes using the same
+   Node ID and path drift HOLD instead of silently migrating.
+   The marker must come from reviewed Smite
+   `replay_enrollment.provision_once`, never be fabricated.
 4. `/var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3`:
    exists under separate private 0700 host directories, file owner and
    mode 0600, single hardlink, valid SQLite v1 schema, `PRAGMA quick_check`
@@ -81,12 +88,33 @@ tables/nonce schema, and the exact Stage9 Compose generator:
 - Positive review leaves identity, marker, SQLite and both Compose files
   unmodified; permits only the expected RO/RW bind endpoints.
 - Missing DB after first enrollment holds; missing/mismatched/foreign
-  marker, mismatched Node identity, invalid SQLite schema, 0644
+  marker, missing/wrong key_binding, host DB path in a container marker,
+  silent same-ID key replacement, mismatched Node identity, invalid
+  SQLite schema, 0644
   permissions, active WAL/journal sidecars and WAL database mode hold.
 - Writable identity mount, read-only replay mount, wrong runtime path,
   modified Compose content, wrong KH role or symlink marker hold.
 - Source review denies Docker/host write and any replay DB bootstrap
   in this checker. It is packaged in first install and update.
+
+## Cross-repository Strict compatibility fix — 2026-10-20
+
+Before this change, U-OPTI expected Smite's old four-field
+first-enrollment marker and an absolute **host** SQLite path; Smite
+Draft #16's actual runtime records the path visible **inside the
+container** and verifies a domain-separated HMAC commitment binding
+the marker to the same Node secret. Consequently valid newly
+enrolled Strict Nodes were incompatible with the old U-OPTI preflight.
+This exact source/protocol mismatch is now covered by real filesystem
+and SQLite tests.
+
+This check is KH-only. It does **not** verify the *IR Panel*
+SQLite old-key revocation witness created by Smite's
+`panel/app/recovery_snapshot_admission.py`; that recovery witness
+needs a separate independently pinned SHA256 and an operator-approved
+offline restore on IR. A successful KH pass never means Panel
+rollback was detected or signed traffic may resume. The CLI explicitly
+reports `PANEL_BACKUP_REVOCATION_WITNESS=NOT_VERIFIED`.
 
 ## Still **NOT** established
 

@@ -10,6 +10,8 @@ same-Node snapshot rollback; deployment is always HOLD.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 from contextlib import closing
 import importlib.util
 import json
@@ -153,8 +155,15 @@ def preflight(
     _private_dir(identity.parent)
     _private_dir(replay_dir.parent)
     _private_dir(replay_dir)
-    _secure_file(identity)
+    # The exact Smite Strict marker binds the same Node ID AND HMAC secret.
+    # Never print the identity, secret or key commitment.
+    paired = _json(identity)
     node_id = candidate_helper.paired_identity(identity)
+    secret = paired.get("node_secret")
+    if (paired.get("node_id") != node_id
+            or not isinstance(secret, str)
+            or not candidate_helper.NODE_SECRET.fullmatch(secret)):
+        raise AdmissionHold("Paired identity changed or malformed")
     restore_hold = identity.parent / "replay-restore-hold.json"
     if restore_hold.is_symlink() or restore_hold.exists():
         # Even a malformed quarantine record must be treated as HOLD; only
@@ -162,12 +171,23 @@ def preflight(
         raise AdmissionHold("Signed Node replay restore is quarantined")
     marker = _json(identity.parent / MARKER_NAME)
     replay = replay_dir / DB_NAME
-    if (set(marker) != {"schema", "node_id", "replay_database", "status"}
-            or type(marker["schema"]) is not int or marker["schema"] != 1
-            or marker["status"] != "ENROLLMENT_STARTED"
-            or marker["node_id"] != node_id
-            or marker["replay_database"] != str(replay)):
-        raise AdmissionHold("Replay enrollment marker and paired identity mismatch")
+    # Smite records the replay file's path INSIDE the container, not
+    # the host bind mount. The runtime's own continuity check uses this
+    # exact path, ID and domain-separated HMAC commitment.
+    expected_binding = hmac.new(
+        secret.encode("ascii"),
+        b"smite-replay-key-binding-v1:" + node_id.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    binding = marker.get("key_binding")
+    if (set(marker) != {"schema", "node_id", "replay_database", "status", "key_binding"}
+            or type(marker.get("schema")) is not int or marker["schema"] != 1
+            or marker.get("status") != "ENROLLMENT_STARTED"
+            or marker.get("node_id") != node_id
+            or marker.get("replay_database") != CONTAINER_REPLAY
+            or not isinstance(binding, str) or len(binding) != 64
+            or not hmac.compare_digest(binding, expected_binding)):
+        raise AdmissionHold("Replay enrollment marker and paired identity/key mismatch")
     _database(replay, node_id)
     # Require exact candidate bytes, including trusted source mount,
     # read-only identity and read/write replay under their known endpoints.
@@ -201,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ACTIVATION_GATE=HOLD")
         print("PERSISTENCE_REBOOT_TEST=NOT_DONE")
         print("SAME_IDENTITY_SNAPSHOT_ROLLBACK=NOT_PROVEN_SAFE")
+        print("PANEL_BACKUP_REVOCATION_WITNESS=NOT_VERIFIED")
         return 0
     except (AdmissionHold, candidate_helper.StageHold, OSError) as exc:
         print("HOLD: " + str(exc), file=sys.stderr)
