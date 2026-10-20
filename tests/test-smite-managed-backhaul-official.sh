@@ -119,3 +119,89 @@ sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" SMITE_CI_COMPOSE_RECREATE=1 \
   python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
   "$lab" "$stage"
+
+
+# Repeat the exact signed Docker lifecycle with an ALREADY INSTALLED
+# official FRP v0.71.0 pair. This is a disposable fixture only: no FRP
+# service starts, no public port opens, and the real host installer stays HOLD.
+frp_asset="frp_0.71.0_linux_amd64.tar.gz"
+frp_url="https://github.com/fatedier/frp/releases/download/v0.71.0/$frp_asset"
+frp_hash="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
+curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+  --max-time 120 --output "$lab/$frp_asset" "$frp_url"
+printf '%s  %s\\n' "$frp_hash" "$lab/$frp_asset" | sha256sum --check --status
+
+# Only after the pinned tar digest matches, read exactly the two regular
+# role executables from the archive; never extract arbitrary tar paths.
+sudo python3 - "$lab" "$lab/$frp_asset" <<'PY_EXISTING_FRP'
+from pathlib import Path
+import hashlib, json, os, stat, sys, tarfile
+root, archive = Path(sys.argv[1]), Path(sys.argv[2])
+parent = root / "installed"
+parent.mkdir(mode=0o700)
+frp_dir = parent / "frp"
+frp_dir.mkdir(mode=0o700)
+digests = {}
+with tarfile.open(archive, "r:gz") as tar:
+    for name in ("frpc", "frps"):
+        target_name = f"frp_0.71.0_linux_amd64/{name}"
+        matches = [m for m in tar.getmembers() if m.name == target_name]
+        assert len(matches) == 1 and matches[0].isfile()
+        assert 4 <= matches[0].size <= 50 * 1024 * 1024
+        with tar.extractfile(matches[0]) as inp:
+            data = inp.read(50 * 1024 * 1024 + 1)
+        assert len(data) == matches[0].size and data.startswith(b"\\x7fELF")
+        file = frp_dir / name
+        fd = os.open(file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o755)
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        digests[name] = hashlib.sha256(data).hexdigest()
+compose = root / "node/docker-compose.yml"
+original = compose.read_text()
+line = "      - ./config:/etc/smite-node\\n"
+assert original.count(line) == 1
+mounts = "".join(
+    f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+    for name in ("frpc", "frps"))
+compose.write_text(original.replace(line, line + mounts, 1))
+state = root / "node/config/engine-state"
+state.mkdir(mode=0o700)
+manifest = state / "engines.json"
+document = {"schema": 1, "engines": {
+    "frp": {"sha256": digests["frpc"], "server_sha256": digests["frps"]}}}
+fd = os.open(manifest, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, "w") as out:
+    json.dump(document, out, sort_keys=True)
+    out.flush()
+    os.fsync(out.fileno())
+print("ISOLATED_OFFICIAL_FRP_PREEXISTING_FIXTURE=PASS")
+PY_EXISTING_FRP
+
+sudo python3 "$root/modules/smite-managed-backhaul.py" prepare \
+  --node-dir "$lab/node" --archive "$lab/backhaul.tar.gz" \
+  --staging-dir "$lab/stages" --arch amd64 >/dev/null
+stage_with_frp=""
+while IFS= read -r candidate_stage; do
+  if [[ "$candidate_stage" != "$stage" ]]; then
+    stage_with_frp="$candidate_stage"
+  fi
+done < <(sudo find "$lab/stages" -mindepth 1 -maxdepth 1 -type d -name 'backhaul-plan-*')
+[[ -n "$stage_with_frp" ]] || { echo "HOLD: existing-FRP candidate missing" >&2; exit 2; }
+sudo python3 "$root/modules/smite-managed-backhaul.py" verify --stage "$stage_with_frp" >/dev/null
+frp_before="$(sudo sha256sum "$lab/installed/frp/frpc" "$lab/installed/frp/frps" | sha256sum | awk '{print $1}')"
+compose_before="$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')"
+manifest_before="$(sudo sha256sum "$lab/node/config/engine-state/engines.json" | awk '{print $1}')"
+sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+  GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
+  GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" SMITE_CI_COMPOSE_RECREATE=1 \
+  SMITE_CI_EXISTING_FRP=1 \
+  python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
+  "$lab" "$stage_with_frp"
+test "$(sudo sha256sum "$lab/installed/frp/frpc" "$lab/installed/frp/frps" | sha256sum | awk '{print $1}')" = "$frp_before"
+test "$(sudo sha256sum "$lab/node/docker-compose.yml" | awk '{print $1}')" = "$compose_before"
+test "$(sudo sha256sum "$lab/node/config/engine-state/engines.json" | awk '{print $1}')" = "$manifest_before"
+sudo test ! -e "$lab/installed/backhaul"
+sudo test ! -e "$lab/recovery-journal"
+echo "OFFICIAL_DUAL_ENGINE_FRP_SURVIVED_BACKHAUL_SIGNED_RECREATE_AND_ROLLBACK=PASS"
