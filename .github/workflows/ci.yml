@@ -346,6 +346,13 @@ jobs:
           python3 -m py_compile modules/smite-node-auth-candidate.py tests/test-smite-node-auth-candidate.py
           python3 -B tests/test-smite-node-auth-candidate.py -v
 
+      - name: Read-only KH strict Node identity replay SQLite and Docker bind-mount preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-node-replay-mount-admission.py tests/test-smite-node-replay-mount-admission.py
+          python3 -B tests/test-smite-node-replay-mount-admission.py -v
+
       - name: Verify paired-only Foreign Smite gateway readiness
         shell: bash
         run: |
