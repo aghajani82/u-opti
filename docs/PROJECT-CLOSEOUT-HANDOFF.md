@@ -148,6 +148,17 @@ Successful CI, HTTP 200, mock transports, synthetic binaries or a temporary test
 
 **NEXT:** isolated disposable Docker Node container mount/recreate proof with the paired reviewed Smite build (or safe equivalent), including mount precedence and loss of Replay volume; then authorized replay recovery/anti-rollback quarantine/key rotation and independently runnable Backhaul. Keep the one consolidation PR, preserve simple workflow. `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD`.
 
+## 5e. 2026-10-20 — actual disposable Node Docker recreate, Replay DB persistence & loss denial (CI PASS)
+
+- **Real Docker lifecycle, not just static Compose text:** Updated **existing** `tests/test-smite-stage24-compose-runtime.sh` and its `node-compose-hmac-rollback-isolated` GitHub Actions job inside the SAME U-OPTI Draft #48. CI now checks out the exact reviewed **Smite security SHA `9201722336b05e833408a0a352cfee99465da2cb`**, not the older `a15c462...`, builds a real local Node image, and runs the actual `app.replay_enrollment` once using synthetic paired identity and separate 0700 host paths. The marker records the exact **host DB path**, and the existing read-only U-OPTI KH checker verifies it before starting Node.
+- **Effective runtime Docker mounts validated via `docker inspect`:** `node-data:/var/lib/smite-node` remains named-volume; nested `/var/lib/smite-node/auth` is a separate **RW host bind**; `/run/smite-node-identity` is a **RO host bind**. No host network or public port in CI. Real signed HMAC request works, nonce replay fails. Switching signed→paused→signed with forced container recreation retains the private identity/marker and persisted nonce, still rejects already-used nonce and permits a new nonce.
+- **Negative real-node data-loss test:** On the disposable runner, stop the container and move the synthetic Replay SQLite away while keeping identity/marker; force-recreate signed Node. Signed request returns **503**, SQLite remains absent (no automatic recreation), and another explicit first enrollment is refused because independent marker survives.
+- **Verified CI:** actual code commit `d65313b2b6c77fd37a2052ae792eb4082bd3f7d0`, [GitHub Actions run 39404517558](https://github.com/aghajani82/u-opti/actions/runs/39404517558) **completed/success, 16/16 PASS**. Documentation-only commits follow; verify latest HEAD CI separately.
+- **Permanent details and all caveats:** [SMITE-NODE-DOCKER-RECREATE-REPLAY-CI-EVIDENCE.md](SMITE-NODE-DOCKER-RECREATE-REPLAY-CI-EVIDENCE.md).
+- **What is STILL NOT tested/certified:** actual VPS reboot/storage power cut/provider snapshot restore, same-identity stale replay DB rollback, production Panel signed handshake and immutable signed image release, independent Backhaul install without FRP, or activation on IR/KH. Never infer that a CI recreated container equals a real disk power-loss test.
+
+**NEXT:** design and negative-test **safe Replay DB restore/quarantine**, using Smite's actual HMAC timestamp window with a trustworthy clock and an explicit operator gate (no automatic DB recreation or key rotation); then Backhaul independence and simple IR→KH sequence. Keep a single U-OPTI Draft #48 and Smite Draft #16, no micro-PRs. `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD`.
+
 ## 6. How to report progress after each working session
 
 Append or refresh in **Issue #47 comments**, and update this document before leaving a long conversation:
@@ -164,7 +175,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** validate the now-completed **read-only KH mount checker** under a disposable isolated Docker Compose recreation/restart lab, including the nested `node-data` mount and persistence of identity, marker and SQLite. Then implement approved stale-snapshot quarantine or coordinated signed key rotation—**never** auto-reset nonce storage—and finally engine-independent Backhaul. Latest `main`/IR/KH/release remain untouched; `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
+**Current next action:** real isolated Docker Compose recreation and missing-Replay data-loss protection are now lab verified (see Section 5e). **Next true release blocker** is a safe, operator-approved **stale-snapshot Replay DB restore/quarantine or coordinated signed key rotation**, with negative tests and actual Smite HMAC timestamp semantics; do not invent time values. Then decouple Backhaul from FRP and complete the simple IR/KH wizard, source/image release admission and operator-approved disposable VPS reboot test. Keep `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; no `main` merge, production deploy or release.
 
 ## 7. Operational conventions
 
