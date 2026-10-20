@@ -180,6 +180,83 @@ class HostPlan(unittest.TestCase):
                                          host_status=backhaul_status)["REASON"],
                              "BACKHAUL_OFFICIAL_ARCHIVE_NOT_VERIFIED")
 
+    def test_backhaul_readonly_host_plan_with_verified_local_frp_still_requires_signed_proof(self):
+        # Core already has FRP with BOTH binaries + pinned digests. Preparing
+        # Backhaul must not require uninstalling FRP or enabling an engine.
+        frp_dir = self.home / "installed" / "frp"
+        frp_dir.mkdir(parents=True, mode=0o700)
+        frp_dir.parent.chmod(0o700)
+        digests = {}
+        for name in ("frpc", "frps"):
+            binary = synthetic_frp_exe(name)
+            path = frp_dir / name
+            path.write_bytes(binary)
+            path.chmod(0o755)
+            digests[name] = hashlib.sha256(binary).hexdigest()
+        compose = COMPOSE.replace(
+            "      - ./config:/etc/smite-node\\n",
+            ("      - ./config:/etc/smite-node\\n" +
+             "".join(f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+                     for name in ("frpc", "frps")))
+        )
+        (self.node / "docker-compose.yml").write_text(compose)
+        state = self.node / "config" / "engine-state"
+        state.mkdir(mode=0o700)
+        manifest = state / "engines.json"
+        existing = {"schema": 1, "engines": {
+            "frp": {"sha256": digests["frpc"],
+                    "server_sha256": digests["frps"]}
+        }}
+        manifest.write_text(json.dumps(existing))
+        manifest.chmod(0o600)
+        prior_manifest = manifest.read_bytes()
+        prior_compose = (self.node / "docker-compose.yml").read_bytes()
+        archive = self.home / "candidate-backhaul-existing-frp.tar.gz"
+        bin_data = synthetic_frp_exe("backhaul")
+        with tarfile.open(archive, "w:gz") as tf:
+            info = tarfile.TarInfo("release/backhaul")
+            info.size = len(bin_data)
+            tf.addfile(info, io.BytesIO(bin_data))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        host_state = dict(
+            self.status, ENGINE="BACKHAUL",
+            OTHER_ENGINE="ENROLLED_UNVERIFIED",
+            OTHER_ENGINE_ACTION="NEVER_MODIFY",
+            REASON="OTHER_ENGINE_SIGNED_STATUS_REQUIRED",
+        )
+        with patch.dict(plan.backhaul.OFFICIAL_TAR_SHA256, {"amd64": digest}):
+            candidate = plan.backhaul.prepare(
+                self.node, archive, self.root, arch="amd64",
+                allowed_sha=digest)
+            inspected = plan.review(
+                "backhaul", self.node, candidate,
+                staging_root=self.root, host_status=host_state)
+            self.assertEqual(inspected["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
+            self.assertEqual(inspected["OTHER_ENGINE_LOCAL_STATE"],
+                             "ENROLLED_UNVERIFIED")
+            self.assertEqual(inspected["OTHER_ENGINE_SIGNED_RUNTIME"], "UNVERIFIED")
+            self.assertEqual(inspected["REASON"],
+                             "OTHER_ENGINE_SIGNED_RUNTIME_AND_HOST_EXECUTOR_UNVERIFIED")
+            self.assertEqual(inspected["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(inspected["ACTIVATION_GATE"], "HOLD")
+            self.assertEqual(inspected["ROLLBACK_EXECUTOR"], "NOT_ENABLED")
+            self.assertEqual(manifest.read_bytes(), prior_manifest)
+            self.assertEqual((self.node / "docker-compose.yml").read_bytes(),
+                             prior_compose)
+            for name in ("frpc", "frps"):
+                self.assertEqual((frp_dir / name).read_bytes(),
+                                 synthetic_frp_exe(name))
+            forged = dict(host_state, REASON="SNAPSHOT_SIGNED_NODE_AND_HOST_EXECUTOR_UNVERIFIED")
+            failed = plan.review("backhaul", self.node, candidate,
+                                 staging_root=self.root, host_status=forged)
+            self.assertEqual(failed["REASON"], "HOST_ADMISSION_INCOMPLETE")
+            # A malicious change to a pre-existing FRP role binary cannot
+            # be laundered into a valid independent Backhaul plan.
+            (frp_dir / "frps").write_bytes(b"\\x7fELF" + b"tampered")
+            with self.assertRaises(plan.backhaul.Hold):
+                plan.backhaul.prepare(self.node, archive, self.root,
+                                      arch="amd64", allowed_sha=digest)
+
     def test_plan_binds_exact_stage_overlay_and_manifest_into_recovery_lab(self):
         reviewed = self.preview()
         self.assertEqual(reviewed["STAGE_ADMISSION"], "VERIFIED_PREVIEW_ONLY")
