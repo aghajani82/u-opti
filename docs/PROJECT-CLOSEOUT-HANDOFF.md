@@ -118,6 +118,16 @@ Successful CI, HTTP 200, mock transports, synthetic binaries or a temporary test
 
 **Next real blocker:** select and verify ONE immutable Smite Panel+Node source/image provenance pair compatible with this U-OPTI HEAD, then finish explicit first pairing/SQLite replay-store provisioning, signed recovery and independent Backhaul. Real VPS migration, storage power cut, external registry robustness and full beginner UX still need separate admission.
 
+## 5b. 2026-10-20 — paired Smite source-HEAD image build (completed in CI, release HOLD)
+
+- **Critical provenance bug found in earlier Smite Stage15 build:** the old successful artifact from run `39313614098` used GitHub PR synthetic merge SHA `0fb747b0911432503643ad83efc1e8247b15aa6e`, not the exact Smite PR branch SHA. Its build can still be a valid test, but cannot be called a build *from the exact PR head*.
+- **Fixed without a new micro-stage PR:** In existing [Smite Draft #16](https://github.com/aghajani82/Smite/pull/16), Stage15 workflow now checks out `github.event.pull_request.head.sha` (not `github.sha` merge) and verifies `git rev-parse HEAD` matches the expected source before building *both* Panel and Node; image manifest and artifact use that same commit. Added regression in `tests/test_stage15_offline_bundle.py`.
+- **Verified exact source:** Smite PR #16 HEAD `995977d0ac9be69b6c9e3d3c257c5cd8c1abe220`, [Stage15 workflow run 39378799692](https://github.com/aghajani82/Smite/actions/runs/39378799692) **completed/success**; all five other reported PR workflows at that SHA were also completed/success. The ephemeral artifact ID `12244433473` (expires **2026-10-23T06:11:22Z**) contains *both* offline image archives with a manifest. SHA256 of `stage15-images.json` recorded from job logs: `d486dd2075b1187d735b50c18538a1002f066984962080474f3f4be6ae1e19ab`. SHA256 of the GitHub Actions artifact ZIP: `767f600e8d39b3882ff8d091f1d731d9b9f0f402dd613d464ea349b0743e1f58`. **These hashes refer to different objects.**
+- **U-OPTI integration:** In ongoing U-OPTI Draft #48, strict signed FastAPI/replay + real Nginx/443 integration CI jobs were repinned to Smite exact build source SHA `995977...`. Historical compatibility jobs stay on intentionally older source commits. See [complete exact-HEAD evidence and unresolved production trust gates](SMITE-PR-HEAD-OFFLINE-IMAGE-EVIDENCE.md).
+- **Still NOT a distributable production pair:** no GHCR push, no signed registry digest, no migration/rollback policy for stable v0.1.7, no real IR/KH test, and replay DB first enrollment/recovery is NOT live. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`. **Do not tell the operator to install this temporary CI artifact as a release.**
+
+**NEXT MOST IMPORTANT WORK:** integrate verified strict Smite paired identity/one-time durable replay DB bootstrap with explicit opt-in safe pairing; ensure permanent source/digest release contract without automatically changing stable v0.1.7. Then finish independent Backhaul and simple IR/KH flow. Approval-gated disposable snapshot VPS qualification comes later.
+
 ## 6. How to report progress after each working session
 
 Append or refresh in **Issue #47 comments**, and update this document before leaving a long conversation:
@@ -134,7 +144,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** verify latest CI for this PR #48 HEAD, then solve exact Smite Panel/Node image/source provenance and enrollment/replay DB lifecycle as a **single** release blocker. After that finish FRP-independent Backhaul, simple operator UI and controlled two-host snapshot tests. Do not open more micro-stage PRs. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; no main merge, release or live deployment.
+**Current next action:** Verify the newest U-OPTI Draft #48 HEAD CI after repinning strict tests to Smite `995977d0...` and recording exact-head Panel+Node archive proof. Then close the actual strict replay DB provisioning/key rotation and *independent Backhaul* release blockers, retaining stable v0.1.7 until a separate release decision. No additional PR staircase, no install/activation/merge without approval.
 
 ## 7. Operational conventions
 
