@@ -104,6 +104,101 @@ class TransactionLab(unittest.TestCase):
         self.assertFalse((self.root / "recovery-journal").exists())
         self.assertEqual(set(json.loads(manifest.read_text())["engines"]), {"gost"})
 
+    def test_independent_backhaul_preserves_healthy_existing_frp_dual_binaries(self):
+        # A valid installed FRP must not be changed, removed, or reported as
+        # absent when the operator chooses Backhaul as their second engine.
+        state = self.config / "engine-state"
+        state.mkdir(mode=0o700)
+        manifest = state / "engines.json"
+        frp_dir = self.root / "installed" / "frp"
+        frp_dir.mkdir(parents=True, mode=0o700)
+        frp_hashes = {}
+        initial_binary = {}
+        for name in ("frpc", "frps"):
+            payload = b"\\x7fELF" + ("FRP_EXISTING_" + name).encode()
+            target = frp_dir / name
+            target.write_bytes(payload)
+            target.chmod(0o755)
+            initial_binary[name] = payload
+            frp_hashes[name] = hashlib.sha256(payload).hexdigest()
+        self.compose.write_text(COMPOSE + "".join(
+            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+            for name in ("frpc", "frps")
+        ))
+        before_compose = self.compose.read_bytes()
+        record = {"schema": 1, "engines": {
+            "frp": {"sha256": frp_hashes["frpc"],
+                    "server_sha256": frp_hashes["frps"]}
+        }}
+        manifest.write_text(json.dumps(record))
+        manifest.chmod(0o600)
+        before_manifest = manifest.read_bytes()
+        stage = self.prepare()
+        summary = (stage / "summary.txt").read_text()
+        self.assertIn("FRP_INSTALLED=YES", summary)
+        self.assertIn("CANDIDATE_ONLY=YES", summary)
+        self.assertEqual(lab.activate(self.root, stage, fixture=True),
+                         "LAB_FILES_APPLIED_NO_DOCKER_NO_LIVE_ENGINE")
+        deployed = json.loads(manifest.read_text())["engines"]
+        self.assertEqual(deployed["frp"], record["engines"]["frp"])
+        self.assertIn("backhaul", deployed)
+        self.assertIn(before_compose, self.compose.read_bytes())
+        for name in ("frpc", "frps"):
+            self.assertEqual((frp_dir / name).read_bytes(), initial_binary[name])
+        self.assertEqual(lab.rollback(self.root), "LAB_EXACT_ROLLBACK_CONFIRMED")
+        self.assertEqual(self.compose.read_bytes(), before_compose)
+        self.assertEqual(manifest.read_bytes(), before_manifest)
+        for name in ("frpc", "frps"):
+            self.assertEqual((frp_dir / name).read_bytes(), initial_binary[name])
+        self.assertFalse((self.root / "installed/backhaul").exists())
+        self.assertFalse((self.root / "recovery-journal").exists())
+
+    def test_refuse_partial_or_tampered_frp_before_any_backhaul_write(self):
+        # Registry/Compose/binary mismatch is a bad shared baseline;
+        # never mutate shared files or destroy FRP to install Backhaul.
+        state = self.config / "engine-state"
+        state.mkdir(mode=0o700)
+        manifest = state / "engines.json"
+        frp_dir = self.root / "installed/frp"
+        frp_dir.mkdir(parents=True, mode=0o700)
+        data = {}
+        for name in ("frpc", "frps"):
+            value = b"\\x7fELF" + name.encode()
+            target = frp_dir / name
+            target.write_bytes(value)
+            target.chmod(0o755)
+            data[name] = hashlib.sha256(value).hexdigest()
+        baseline = COMPOSE + "".join(
+            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+            for name in ("frpc", "frps")
+        )
+        self.compose.write_text(baseline)
+        manifest.write_text(json.dumps({"schema": 1, "engines": {
+            "frp": {"sha256": data["frpc"], "server_sha256": data["frps"]}
+        }}))
+        manifest.chmod(0o600)
+        broken = [
+            baseline.replace(":/usr/local/bin/frpc:ro", ":/usr/local/bin/frpc:rw"),
+            baseline.replace(f"      - {frp_dir / 'frps'}:/usr/local/bin/frps:ro\\n", ""),
+        ]
+        for text in broken:
+            with self.subTest(compose=text[-55:]):
+                self.compose.write_text(text)
+                with self.assertRaises(pkg.Hold):
+                    self.prepare()
+                self.assertFalse((self.root / "recovery-journal").exists())
+                self.assertFalse((self.root / "installed/backhaul").exists())
+        self.compose.write_text(baseline)
+        (frp_dir / "frps").write_bytes(b"\\x7fELF" + b"tampered")
+        with self.assertRaisesRegex(pkg.Hold, "digest mismatch"):
+            self.prepare()
+        self.assertFalse((self.root / "installed/backhaul").exists())
+        self.assertFalse((self.root / "recovery-journal").exists())
+        # No registered FRP but stale FRP mount is also a hard stop.
+        manifest.unlink()
+        with self.assertRaisesRegex(pkg.Hold, "Unenrolled FRP"):
+            self.prepare()
+
     def test_fresh_registry_creation_and_removal(self):
         stage = self.prepare()
         self.compose.chmod(0o644)
