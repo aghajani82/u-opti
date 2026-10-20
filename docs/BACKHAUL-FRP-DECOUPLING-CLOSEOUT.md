@@ -67,6 +67,55 @@ general host installer: it still requires old Docker overlays and a
 compatible running Smite Node. The managed path and strict signed
 restore guarantees remain under review.
 
+## 2026-10-20 — managed Backhaul **FRP coexistence** transaction bug fixed
+
+In addition to the earlier legacy FRP/56053 prepare decoupling, this
+same Draft #48 now fixes a **real CI-discovered bug** in the *managed*
+Backhaul-only install/rollback rehearsal.
+
+**Cause:** `smite-managed-backhaul-transaction.py` unconditionally
+called `binary.parent.mkdir(parents=True, exist_ok=False)` on the
+shared `installed` engine parent. If FRP had already created
+`installed/frp/frpc` and `installed/frp/frps`, this raised
+`FileExistsError`, leaving an incomplete Backhaul recovery journal.
+It prevented the promised optional FRP + Backhaul coexistence.
+
+**Fix:** reuse an existing, owner-validated **private 0700** shared engine
+directory, or create it only when absent. Never chmod, delete or
+overwrite the existing FRP sibling. Exact Backhaul rollback restores
+the original Compose, engine registry and binary placement, retaining
+both FRP executables untouched.
+
+`smite-managed-backhaul.py` now reports `FRP_INSTALLED=YES` when
+FRP is actually in the Node's existing engine manifest, instead of
+always incorrectly saying NO. The stage verifier cross-checks this
+field against the proposed manifest. It also rejects Backhaul
+preparation on a **partial or untrusted FRP baseline**: orphan/writable/
+missing FRP binds, client-only FRP metadata or checksum-mismatched
+`frpc`/`frps` are HOLD. FRP absence is **fully supported**.
+
+**Regression:** Existing
+`tests/test-smite-managed-backhaul-transaction.py` creates two
+simulated FRP role executables, a trusted dual-role inventory and the
+corresponding read-only Compose binds, then stages/installs/rolls back
+Backhaul, verifying **byte-exact FRP and Compose/registry preservation**
+and independently required private permissions. Negative cases reject
+writable/missing FRP mounts, a corrupted FRP binary and orphan mounts.
+The first CI failures exposed the shared-parent bug and a test fixture
+with wrong parent permissions; both were corrected without weakening
+the security check.
+
+**Verified latest code SHA:** `285153b0400aba1e1b6a241a1b733b9369e213b8`.
+[GitHub Actions 39423755202](https://github.com/aghajani82/u-opti/actions/runs/39423755202)
+**completed/success, all 16/16 jobs PASS**.
+
+**Scope:** true dual-engine **CI filesystem transaction and exact
+rollback** are now proven at a deeper level. A real-host Backhaul
+executor, signed restart proof, actual dynamic XHTTP forwarding and
+cross-VPS test have **not been released**. This code path still
+operates ONLY in the guarded disposable GitHub PR runner and does not
+change existing VPS deployments.
+
 ## Release blockers: do not obscure behind green CI
 
 - No approved production host engine-install transaction/executor and
