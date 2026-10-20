@@ -22,7 +22,8 @@ takes over the file-replacement phase:
    containing `rescue.py` (a copy of the exact currently executing helper)
    and `manifest.json` (old/new hashes, modes, backup path). Write, `fsync`
    both files and their directories **before** modifying live files.
-3. Replace `u-opti`, `common.sh`, `VERSION`, then the modules one by one
+3. Replace `u-opti`, `common.sh`, `VERSION`, then the modules, and finally
+   the validated `INSTALL_REF` (all hash-covered in the same journal) one by one
    using a same-directory temporary file, `fsync`, `os.replace` and parent
    directory `fsync`. No installed target is truncated with ordinary `cp`.
 4. Verify every installed target matches the candidate hash. Atomically rename
@@ -41,6 +42,14 @@ takes over the file-replacement phase:
 Ordinary in-process update errors use the same journal recovery first, and
 retain the backup if recovery cannot complete. The existing older Bash
 restore remains a fallback only when no transaction was armed.
+
+The updater also saves the previous `INSTALL_REF` or an explicit
+`.INSTALL_REF-was-missing` marker under its private durable backup. The
+transaction takes `--source-ref "$BRANCH"` and derives the 0644 metadata
+content internally: there is **no separate `INSTALL_REF.new` write after
+commit**. Interrupted recovery restores the old channel or absence along
+with VERSION and modules. Old pending version-1 journals without this
+metadata remain readable.
 
 ## Disposable CI evidence
 
