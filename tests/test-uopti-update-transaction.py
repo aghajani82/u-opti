@@ -27,7 +27,15 @@ OLD = {"u-opti": b"#!/bin/bash\necho OLD\n",
        "common.sh": b"# shared old\n",
        "VERSION": b"0.16.7\n",
        "alpha.sh": b"echo prior alpha\n"}
-NEW = {"u-opti": b"#!/bin/bash\necho NEW\n",
+NEW = {"u-opti": (
+        b'#!/bin/bash\n'
+        b'if [ -e "$LIB_PATH/.uopti-update-pending" ]; then\n'
+        b'    python3 -B "$RECOVERY_SCRIPT" recover\n'
+        b'    exec "$INSTALL_PATH" "$@"\n'
+        b'fi\n'
+        b'source "$LIB_PATH/common.sh"\n'
+        b'echo NEW\n'
+       ),
        "common.sh": b"# shared new\n",
        "VERSION": b"0.17.0\n",
        "alpha.sh": b"echo upgraded alpha\n",
@@ -96,6 +104,18 @@ class DurableUpdaterTests(unittest.TestCase):
         self.assertEqual(self.install.read_bytes(), NEW["u-opti"])
         self.assertEqual(self.destinations["common.sh"].read_bytes(), NEW["common.sh"])
         self.assertEqual(self.destinations["alpha.sh"].read_bytes(), OLD["alpha.sh"])
+
+    def test_future_launcher_cannot_drop_preimport_recovery(self):
+        # Fail before the durable pending journal is armed.
+        (self.stage/"u-opti").write_bytes(b"#!/bin/bash\necho NO_RECOVERY\n")
+        with self.assertRaisesRegex(
+            txn.Hold, "CANDIDATE_LAUNCHER_LACKS_PREIMPORT_RECOVERY"
+        ):
+            txn.apply(self.stage, self.backup, MODULES,
+                      lib=self.lib, install=self.install)
+        self.assertFalse((self.lib/txn.TXN_NAME).exists())
+        for name, value in OLD.items():
+            self.assertEqual(self.destinations[name].read_bytes(), value)
 
     def test_full_atomic_commit_and_permissions(self):
         self.assertEqual(
