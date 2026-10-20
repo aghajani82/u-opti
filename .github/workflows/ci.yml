@@ -155,6 +155,13 @@ jobs:
             bash -n "$file"
           done < <(find modules -type f -name '*.sh' -print0 | sort -z)
 
+      - name: Lock install/update downloads to a single immutable GitHub SHA (mocked, offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-source-pin.py
+          python3 -B tests/test-uopti-source-pin.py -v
+
       - name: Preserve real U-OPTI updater backup after failed rollback (isolated)
         shell: bash
         run: |
