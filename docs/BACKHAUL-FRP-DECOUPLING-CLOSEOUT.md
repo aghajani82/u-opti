@@ -213,6 +213,69 @@ after rollback** probe against the actual reviewed Node and existing
 FRP, with immutable image identity and authorized snapshot recovery.
 The host install/rollback actions remain deliberately **disabled**.
 
+## 2026-10-20 — REAL isolated signed FRP+Backhaul three-point Docker CI (PASS)
+
+**Release-candidate safety gain in the existing U-OPTI Draft #48; NO production executor enabled.**
+
+Previously the CI-only `smite-managed-backhaul-lifecycle.py` required
+`check_other(root,phase)` at 3 checkpoints for existing FRP but its
+*official-artifact Docker runner* supplied only the Backhaul callbacks.
+The new integration **actually wires the additional callbacks** to the
+already reviewed Smite signed Agent API running in isolated Docker
+Compose, rather than accepting three synthetic boolean results.
+
+In the existing `managed-backhaul-official-artifact` GitHub PR job:
+
+1. The original **official Backhaul v0.7.2** test still stages,
+   installs, tests the signed Node API and compensates a failed restart
+   with exact rollback; no FRP binary is required in this first run.
+2. CI downloads **official FRP v0.71.0**, validates its exact pinned
+   SHA256 and extracts ONLY `frpc` and `frps` into the disposable
+   root-owned 0700 lab. An explicit **FRP-only preexisting inventory**
+   records their real SHA256 and read-only Docker mounts; neither
+   engine is started. This test-only setup is not a host installer.
+3. A second official Backhaul candidate is prepared atop that FRP
+   inventory. The existing lifecycle automatically installs and
+   **always rolls back** Backhaul during the rehearsal. FRP is probed
+   at BEFORE, WITH-BACKHAUL, AFTER-ROLLBACK by launching the real
+   checked-in `test-smite-managed-backhaul-signed-api.sh` at the
+   appropriate phase, including a real container force-recreation.
+4. `tests/smite-managed-backhaul-compose-fixture.py` now has an
+   *explicitly isolated* `SMITE_CI_EXISTING_FRP=1` case: it refuses
+   incomplete/writable/unexpected binds and checks both FRP
+   `frpc`/`frps` read-only mounts alongside the optional Backhaul
+   mount. It still outputs `network_mode: none`, read-only root,
+   dropped capabilities and **no published ports**.
+5. The signed API test requires a real HMAC-signed
+   `GET /api/agent/engines` with `frp=ready` throughout; Backhaul
+   is `not-installed` before/after and `ready` only during its trial.
+   It checks wrong signatures/unsigned requests, rejects replayed
+   nonces after Node restart and verifies zero active tunnels.
+   **Do NOT submit an Apply to an already-ready FRP**; this is
+   inventory/health-only, with no FRP/Backhaul tunnel starts.
+6. On return, original FRP executable SHA digests, Compose and engine
+   registry SHA are identical, the Backhaul binary and recovery
+   journal are absent. A deliberately failed postrestart Backhaul
+   probe is separately compensated, and FRP survives that rollback.
+
+**Proof:** [U-OPTI Actions run 39431780642](https://github.com/aghajani82/u-opti/actions/runs/39431780642)
+**completed/success, 16/16 jobs PASS**, source
+`8e0caedd0c35bc449c5cb9ea5ca051419cb0848d`.
+The official Backhaul Docker job explicitly printed
+`ISOLATED_OFFICIAL_FRP_PREEXISTING_FIXTURE=PASS`,
+`OFFICIAL_BACKHAUL_EXISTING_FRP_SIGNED_THREE_PHASES=PASS` and
+`OFFICIAL_DUAL_ENGINE_FRP_SURVIVED_BACKHAUL_SIGNED_RECREATE_AND_ROLLBACK=PASS`.
+
+**Limits:** This validates a real signed Agent API and checked in
+container image in **network:none GitHub CI**, with synthetic pairing
+credentials, older pinned reviewed signed Smite Node source overlay
+and official engine archives. It does NOT prove actual WAN/TLS443,
+final latest strict replay-store image pairing, real host snapshots,
+production Node upgrade, dynamic Sanaei inbound or a released
+host executor. Actual `install`/`rollback` on IR/KH are still
+disabled, and signed image/replay restore admission remain release
+blockers. No public port or live tunnel was opened.
+
 ## Release blockers: do not obscure behind green CI
 
 - No approved production host engine-install transaction/executor and
