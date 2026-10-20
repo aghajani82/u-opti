@@ -9,6 +9,14 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_node="$root/.managed-smite-source/node/docker-compose.yml"
 test -s "$source_node" || { echo "HOLD: missing reviewed Node Compose source" >&2; exit 2; }
+# Strict replay source comes from the same reviewed Smite Draft as the
+# fail-closed quarantine implementation. This is CI-only first enrollment.
+smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
+[[ "$(git -C "$root/.managed-smite-source" rev-parse HEAD)" == "$smite_sha" ]] || {
+  echo "HOLD: signed Node source not the reviewed security commit" >&2
+  exit 2
+}
+export SMITE_CI_STRICT_REPLAY_BOOTSTRAP=1
 lab="$(mktemp -d "${RUNNER_TEMP:?}/backhaul-txn-XXXXXXXX")"
 chmod 0700 "$lab"
 cleanup() { sudo rm -rf -- "$lab"; }
@@ -117,6 +125,7 @@ echo "BACKHAUL_REAL_NODE_INVENTORY_BEFORE_AFTER_RECREATE_ROLLBACK=PASS"
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" SMITE_CI_COMPOSE_RECREATE=1 \
+  SMITE_CI_STRICT_REPLAY_BOOTSTRAP=1 \
   python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
   "$lab" "$stage"
 
@@ -198,6 +207,7 @@ manifest_before="$(sudo sha256sum "$lab/node/config/engine-state/engines.json" |
 sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   GITHUB_RUN_ID="${GITHUB_RUN_ID:?}" SMITE_CI_COMPOSE_RECREATE=1 \
+  SMITE_CI_STRICT_REPLAY_BOOTSTRAP=1 \
   SMITE_CI_EXISTING_FRP=1 \
   python3 "$root/tests/test-smite-managed-backhaul-lifecycle-official.py" \
   "$lab" "$stage_with_frp"
