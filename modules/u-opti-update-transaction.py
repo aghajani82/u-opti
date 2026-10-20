@@ -25,6 +25,7 @@ INSTALL = Path("/usr/local/bin/u-opti")
 LIB = Path("/usr/local/lib/u-opti")
 TXN_NAME = ".uopti-update-pending"
 LOCK_NAME = ".uopti-update-lock"
+DONE_NAME = ".uopti-update-finished"
 MAX_BYTES = 4 * 1024 * 1024
 VALID_MODULE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\Z")
 SCHEMA = 1
@@ -205,15 +206,34 @@ def _recover_locked(lib: Path, install: Path) -> str:
     return "ROLLED_BACK_FROM_DURABLE_JOURNAL"
 
 
-def _clear_pending(txn: Path) -> None:
-    # Do not recurse through arbitrary payloads or follow symlinks.
-    if sorted(p.name for p in txn.iterdir()) != ["manifest.json", "rescue.py"]:
-        raise Hold("UNRECOGNIZED_PENDING_CONTENT")
+def _clear_finished(done: Path) -> None:
+    # Safe cleanup of fully committed/rolled-back transaction evidence.
+    if not _is_private_dir(done) or sorted(p.name for p in done.iterdir()) != [
+        "manifest.json", "rescue.py"
+    ]:
+        raise Hold("UNTRUSTED_FINISHED_TRANSACTION")
     for name in ("manifest.json", "rescue.py"):
-        (txn / name).unlink()
-    _sync_dir(txn)
-    txn.rmdir()
-    _sync_dir(txn.parent)
+        (done / name).unlink()
+    _sync_dir(done)
+    done.rmdir()
+    _sync_dir(done.parent)
+
+
+def _clear_pending(txn: Path) -> None:
+    # IMPORTANT: Don't unlink manifest.json while its directory is still
+    # named PENDING: a crash in the middle would destroy recovery metadata.
+    # Rename PENDING -> FINISHED atomically only AFTER all target writes
+    # and hashes have been verified, or the old state has been restored.
+    done = txn.parent / DONE_NAME
+    if done.exists() or done.is_symlink():
+        _clear_finished(done)
+    if not _is_private_dir(txn) or sorted(p.name for p in txn.iterdir()) != [
+        "manifest.json", "rescue.py"
+    ]:
+        raise Hold("UNRECOGNIZED_PENDING_CONTENT")
+    os.replace(txn, done)
+    _sync_dir(done.parent)
+    _clear_finished(done)
 
 
 def recover(*, lib=LIB, install=INSTALL) -> str:
@@ -230,6 +250,8 @@ def apply(stage: Path, backup: Path, module_names: list[str],
     """
     with _lock(lib):
         txn = lib / TXN_NAME
+        if (lib / DONE_NAME).exists() or (lib / DONE_NAME).is_symlink():
+            _clear_finished(lib / DONE_NAME)
         if txn.exists() or txn.is_symlink():
             raise Hold("PENDING_UPDATE_REQUIRES_RECOVERY")
         paths = _paths(lib, install, module_names)
