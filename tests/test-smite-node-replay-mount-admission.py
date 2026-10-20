@@ -156,6 +156,22 @@ class ReplayMountReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(tool.AdmissionHold, "rollback-journal"):
             self.review()
 
+    def test_stale_snapshot_quarantine_blocks_kh_admission(self):
+        hold = self.ident_dir / "replay-restore-hold.json"
+        hold.write_text(json.dumps({
+            "schema": 1, "node_id": self.node_id,
+            "status": "QUARANTINED", "replay_database": str(self.db)
+        }))
+        hold.chmod(0o600)
+        with self.assertRaisesRegex(tool.AdmissionHold, "quarantined"):
+            self.review()
+        hold.unlink()
+        hold.symlink_to(self.identity)
+        with self.assertRaisesRegex(tool.AdmissionHold, "quarantined"):
+            self.review()
+        hold.unlink()
+        self.assertEqual(self.review(), "KH_PRIVATE_BIND_MOUNTS_OFFLINE_PREFLIGHT_PASS")
+
     def test_source_and_target_mount_drift_refused(self):
         original = self.candidate.read_text()
         for changed in (
