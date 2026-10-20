@@ -42,7 +42,9 @@ def _signed_payload_match(result: object, *, digest: str, role: str, source: str
         if not isinstance(image, dict):
             continue
         actual = image.get("docker-manifest-digest", image.get("Docker-manifest-digest"))
-        if (actual == digest and optional.get("smite_source_sha") == source
+        signature_type = critical.get("type", critical.get("Type"))
+        if (signature_type == "cosign container image signature"
+                and actual == digest and optional.get("smite_source_sha") == source
                 and optional.get("smite_role") == role):
             return True
     return False
@@ -105,6 +107,9 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
             "cosign", "verify",
             "--certificate-identity=" + identity,
             "--certificate-oidc-issuer=" + ISSUER,
+            "--certificate-github-workflow-sha=" + source_sha,
+            "--certificate-github-workflow-repository=" + REPO,
+            "--certificate-github-workflow-trigger=workflow_dispatch",
             "-a", "smite_source_sha=" + source_sha,
             "-a", "smite_role=" + role,
             refs[role],
