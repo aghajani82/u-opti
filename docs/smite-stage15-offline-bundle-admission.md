@@ -33,6 +33,33 @@ FRP, Backhaul, secrets, Compose, SSH or currently running services.
 so an installer cannot mistake checksum verification for permission
 to deploy.
 
+## 2026-10-20 — Smite source/role labels checked BEFORE creating offline bundle
+
+The existing [Smite Draft #16](https://github.com/aghajani82/Smite/pull/16)
+Stage15 workflow now requires the **actual built Panel and Node images**
+to carry matching `org.opencontainers.image.revision` labels equal to
+the exact reviewed PR source SHA, the expected version
+`2.0.0-rc.0`, and distinct `smite.role=panel|node` labels and
+image IDs. Both Docker builds receive the immutable source SHA
+explicitly. Missing, swapped or tampered metadata **HOLDs** before
+the local `docker save` bundle is created.
+
+[Smite Stage15 Image build CI 39439403024](https://github.com/aghajani82/Smite/actions/runs/39439403024)
+**completed/success, both 2/2 jobs PASS** for Smite code
+`10486c1eef7ef112951c1ee0200e221df4fecfe4`
+(docs-only later commits may have their own CI). This is a
+meaningful **local image metadata parity check** and confirms two
+real unpublished images were successfully built at that exact SHA.
+
+**NOT an independent supply-chain attestation:** OCI labels are
+assertions by the local builder; U-OPTI's `smite-clean-image-pair.py`
+continues to require the independently pinned manifest digest,
+source SHA and both archive SHA256 values, and its output remains
+**PRECHECK ONLY / never authorizes Docker load or deployment**.
+An independently signed registry manifest, approved stable-image
+migration, secure Replay restoration and real IR/KH acceptance are
+still uncompleted release gates.
+
 ## From now to first safe use
 
 The remaining milestones are NOT artificial numbered stages:
