@@ -90,7 +90,39 @@ with os.fdopen(fd, "w") as stream:
 PY_IDENTITY
 fi
 
+# This is an opt-in test-only migration gate, never a Node startup hook.
+# New reviewed Smite strictly refuses signed traffic until its private
+# Replay DB has been explicitly enrolled ONCE. Use a one-shot, isolated
+# container; preserve the marker on identity storage for every restart.
 image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+replay_mode="${SMITE_CI_STRICT_REPLAY_BOOTSTRAP:-0}"
+case "$replay_mode" in 0|1) ;; *) echo "HOLD: invalid CI replay mode" >&2; exit 2 ;; esac
+if [[ "$replay_mode" == 1 ]]; then
+  expected_smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
+  [[ "$(git -C "$smite" rev-parse HEAD)" == "$expected_smite_sha" ]] || {
+    echo "HOLD: reviewed strict replay Smite source SHA mismatch" >&2
+    exit 2
+  }
+  if ! sudo test -e "$lab/node-data/auth/agent-replay.sqlite3" &&
+     ! sudo test -e "$lab/node/config/identity/replay-enrollment.json"; then
+    # First enrollment only. On all later probe calls, use persisted bytes.
+    sudo docker run --rm --platform linux/amd64 --network none \
+      --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 0:0 \
+      --mount "type=bind,src=$smite/node/app,dst=/app/app,readonly" \
+      --mount "type=bind,src=$lab/node/config,dst=/etc/smite-node" \
+      --mount "type=bind,src=$lab/node-data,dst=/var/lib/smite-node" \
+      --entrypoint python "$image" -m app.replay_enrollment \
+      --identity /etc/smite-node/identity/node-identity.json \
+      --replay-db /var/lib/smite-node/auth/agent-replay.sqlite3 \
+      --confirm-first-provision >/dev/null
+    echo "SIGNED_NODE_OFFLINE_FIRST_REPLAY_ENROLLMENT=PASS"
+  fi
+  sudo test -s "$lab/node/config/identity/replay-enrollment.json"
+  sudo test -s "$lab/node-data/auth/agent-replay.sqlite3"
+  test "$(sudo stat -c %a "$lab/node/config/identity/replay-enrollment.json")" = 600
+  test "$(sudo stat -c %a "$lab/node-data/auth/agent-replay.sqlite3")" = 600
+fi
 name="uopti-managed-api-${GITHUB_RUN_ID:?}-${phase}"
 compose_mode="${SMITE_CI_COMPOSE_RECREATE:-0}"
 compose_file="$lab/smite-node-isolated-$phase.json"
