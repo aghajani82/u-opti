@@ -74,7 +74,8 @@ def _secure_file(path: Path, *, max_bytes: int = MAX_JSON,
                     or info.st_size > max_bytes):
                 raise AdmissionHold("Private file changed during read")
             if metadata_only:
-                return b""
+                # Small fixed header from the already validated nofollow fd.
+                return stream.read(100)
             data = stream.read(max_bytes + 1)
             if len(data) > max_bytes:
                 raise AdmissionHold("Oversized private file")
@@ -95,7 +96,7 @@ def _json(path: Path) -> dict:
 
 
 def _database(db: Path, node_id: str) -> None:
-    _secure_file(db, max_bytes=256 * 1024 * 1024, metadata_only=True)
+    header = _secure_file(db, max_bytes=256 * 1024 * 1024, metadata_only=True)
     # Exact offline inspection: don't recover a hot journal or read an
     # inconsistent WAL snapshot. In immutable mode SQLite cannot create a
     # -shm sidecar. An active/wal-mode database requires independent shutdown
@@ -104,8 +105,6 @@ def _database(db: Path, node_id: str) -> None:
         sidecar = Path(str(db) + suffix)
         if sidecar.exists() or sidecar.is_symlink():
             raise AdmissionHold("Replay DB not offline/quiescent; journal sidecar present")
-    with db.open("rb") as stream:
-        header = stream.read(100)
     if (len(header) < 100 or header[:16] != b"SQLite format 3\x00"
             or header[18:20] != b"\x01\x01"):
         raise AdmissionHold("Replay DB is not checkpointed in rollback-journal mode")
