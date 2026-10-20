@@ -218,7 +218,14 @@ def activate(root: Path, stage: Path, *, fixture: bool = False, inject: str = ""
     }
     new_file(journal / "record.json", (json.dumps(record, sort_keys=True) + "\n").encode(), 0o600)
     # NO service restart and NO engine Apply, even when this rehearsal passes.
-    binary.parent.mkdir(parents=True, mode=0o700, exist_ok=False)
+    # Installing Backhaul AFTER FRP must reuse the reviewed shared engine
+    # parent directory; recreating it raises FileExistsError and strands a
+    # recovery journal. Never chmod, remove or rewrite sibling FRP state.
+    if binary.parent.exists() or binary.parent.is_symlink():
+        private_dir(binary.parent)
+    else:
+        binary.parent.mkdir(parents=True, mode=0o700, exist_ok=False)
+        private_dir(binary.parent)
     new_file(binary, new_bin, 0o755)
     if inject == "after-binary":
         raise Hold("Injected crash after binary; recovery required")
