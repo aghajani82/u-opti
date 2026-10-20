@@ -54,6 +54,7 @@ class UpdaterRollbackRetentionTest(unittest.TestCase):
             'set -u\n'
             'BACKUP_DIR="$TEST_BACKUP_DIR"\n'
             'TEMP_DIR="$TEST_TEMP_DIR"\n'
+            'LIB_PATH="$TEST_LIB_DIR"\n'
             'UPDATE_FAILED=true\n'
             'cleanup_update_temp() { rm -rf -- "$TEMP_DIR"; }\n'
             'update_failed_restore() { return "$STUB_RESTORE_RESULT"; }\n'
@@ -65,6 +66,7 @@ class UpdaterRollbackRetentionTest(unittest.TestCase):
         env = {**os.environ,
                "TEST_BACKUP_DIR": str(backup),
                "TEST_TEMP_DIR": str(stage),
+               "TEST_LIB_DIR": str(root),
                "STUB_RESTORE_RESULT": str(rollback_return_code)}
         run = subprocess.run(
             ["bash", "-c", script], env=env,
@@ -92,7 +94,8 @@ class UpdaterRollbackRetentionTest(unittest.TestCase):
 
     def test_updater_failure_branch_is_real_and_fails_closed(self):
         source = actual_rollback_failure_branch()
-        self.assertIn('if ! update_failed_restore; then', source)
+        self.assertIn('elif update_failed_restore; then', source)
+        self.assertIn('python3 -B "$LIB_PATH/.uopti-update-pending/rescue.py" recover', source)
         self.assertIn('rm -rf -- "$BACKUP_DIR"', source)
         self.assertIn('echo "$BACKUP_DIR"', source)
 
