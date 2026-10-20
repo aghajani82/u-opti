@@ -44,6 +44,10 @@ It validates all of these before reporting the **limited local pass**:
    exists under separate private 0700 host directories, file owner and
    mode 0600, single hardlink, valid SQLite v1 schema, `PRAGMA quick_check`
    passing and `replay_store_identity` exactly matching the paired ID.
+   This is **offline only**: any `-wal`, `-shm` or `-journal` sidecar,
+   or a WAL-mode database, is HOLD until a separately approved quiescent
+   checkpoint. SQLite opens as `mode=ro&immutable=1` to prevent creating
+   shared-memory files. It does NOT inspect a hot/running Node store.
    A missing, corrupt or different-identity SQLite file is **HOLD**;
    NO automatic initialize/reset/restore.
 5. `/opt/smite-node/docker-compose.security-candidate.yml`: an existing
@@ -77,8 +81,8 @@ tables/nonce schema, and the exact Stage9 Compose generator:
 - Positive review leaves identity, marker, SQLite and both Compose files
   unmodified; permits only the expected RO/RW bind endpoints.
 - Missing DB after first enrollment holds; missing/mismatched/foreign
-  marker, mismatched Node identity, invalid SQLite schema and 0644
-  permissions hold.
+  marker, mismatched Node identity, invalid SQLite schema, 0644
+  permissions, active WAL/journal sidecars and WAL database mode hold.
 - Writable identity mount, read-only replay mount, wrong runtime path,
   modified Compose content, wrong KH role or symlink marker hold.
 - Source review denies Docker/host write and any replay DB bootstrap
