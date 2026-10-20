@@ -119,14 +119,14 @@ class SourcePinTest(unittest.TestCase):
         self.assertLess(
             updater.index(marker), updater.index('echo "Downloading VERSION..."')
         )
-        self.assertIn(
-            'printf \'%s\\n\' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"',
-            updater,
-        )
-        self.assertIn(
-            'printf \'%s\\n\' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"',
-            install,
-        )
+        # The selected ref is now included in the SAME crash-safe journal
+        # as the source-locked executable and VERSION, not written later.
+        for script in (install, updater):
+            self.assertIn('--source-ref "$BRANCH"', script)
+            self.assertNotIn('"$LIB_PATH/INSTALL_REF.new"', script)
+        transaction = (ROOT / "modules/u-opti-update-transaction.py").read_text()
+        self.assertIn('items["INSTALL_REF"] = lib / "INSTALL_REF"', transaction)
+
 
 
 if __name__ == "__main__":
