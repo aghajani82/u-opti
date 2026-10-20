@@ -1069,6 +1069,25 @@ print(sha)
                 BACKUP_OK=false
             fi
 
+            # INSTALL_REF is now a journaled installed target, not a
+            # best-effort metadata write after the update has committed.
+            if [ -L "$LIB_PATH/INSTALL_REF" ]; then
+                echo "HOLD: Unsafe persisted update-channel symlink."
+                BACKUP_OK=false
+            elif [ -f "$LIB_PATH/INSTALL_REF" ]; then
+                if ! cp -f -- "$LIB_PATH/INSTALL_REF" "$BACKUP_DIR/INSTALL_REF" ||
+                   ! chmod 0600 "$BACKUP_DIR/INSTALL_REF"; then
+                    BACKUP_OK=false
+                fi
+            elif [ ! -e "$LIB_PATH/INSTALL_REF" ]; then
+                if ! : > "$BACKUP_DIR/.INSTALL_REF-was-missing" ||
+                   ! chmod 0600 "$BACKUP_DIR/.INSTALL_REF-was-missing"; then
+                    BACKUP_OK=false
+                fi
+            else
+                BACKUP_OK=false
+            fi
+
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
@@ -1083,7 +1102,7 @@ print(sha)
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne "$((3 + ${#BACKUP_FILES[@]}))" ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne "$((4 + ${#BACKUP_FILES[@]}))" ]; then
                 BACKUP_OK=false
             fi
 
@@ -1109,7 +1128,7 @@ print(sha)
             # before changing any installed bytes. Crash -> startup recovery.
             UPDATE_FAILED=false
             if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
-                    "$TEMP_DIR" "$BACKUP_DIR" "${UPDATE_FILE_NAMES[@]}"; then
+                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}"; then
                 UPDATE_FAILED=true
             fi
 
@@ -1167,11 +1186,6 @@ print(sha)
                 read -rp "Press Enter to return..."
                 continue
             fi
-
-            # Commit the selected source only after verified file replacement.
-            printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new" &&
-                mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
-            chmod 0644 "$LIB_PATH/INSTALL_REF"
 
             rm -rf "$BACKUP_DIR"
             cleanup_update_temp
