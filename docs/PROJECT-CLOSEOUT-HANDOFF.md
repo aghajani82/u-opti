@@ -138,6 +138,16 @@ Successful CI, HTTP 200, mock transports, synthetic binaries or a temporary test
 
 **NEXT:** integrate reviewed KH identity + independent durable replay bind mounts into an explicit, fail-closed pairing/installer lifecycle **without** auto-enabling strict mode. Then design authenticated backup/restore and anti-rollback quarantine/key rotation before production strict traffic. Parallel release blockers remain FRP-independent Backhaul, simple novice UI and actual snapshot-backed host rehearsal.
 
+## 5d. 2026-10-20 — KH identity and replay bind-mount admission (read-only, no activation)
+
+- **Real existing Stage9 candidate reused:** `modules/smite-node-auth-candidate.py` already stages an inert Compose override binding U-OPTI's paired identity host directory `/etc/u-opti/smite/identities` to `/run/smite-node-identity:ro` and private Replay host directory `/var/lib/u-opti/smite-node-security/replay` to `/var/lib/smite-node/auth:rw`, with exact runtime env paths. No need to create a second installer or silently change existing Node Docker mounts.
+- **New U-OPTI Draft #48 helper:** `modules/smite-node-replay-mount-admission.py` explicitly validates KH/Standard role, the known base Compose localhost:8888, paired 0600 identity, independent 0600 enrollment marker matching Node ID + **exact host replay DB path**, SQLite schema v1/quick-check and exact paired identity, private 0700 mount directories, and **byte-identical** inert Compose with read-only identity/read-write replay mounts plus matching Node environment paths. Missing/tampered/symlinked/incorrect state returns HOLD; does not run Docker, create folders or SQLite, change secrets or activate strict mode. Output always includes `DOCKER_COMPOSE_APPLY=NO` and `ACTIVATION_GATE=HOLD`.
+- **Packaged via both `install.sh` and U-OPTI Update.** `tests/test-smite-node-replay-mount-admission.py` exercises real checker in temporary folders with legitimate SQLite and known candidate, then missing DB, marker tamper/loss, wrong DB Node, SQLite schema drift, role/permission faults, unsafe RO/RW mount drift and extra Compose content. [GitHub Actions run 39397328938](https://github.com/aghajani82/u-opti/actions/runs/39397328938) **16/16 PASS** for the first code commit; verify latest documentation-only HEAD CI separately.
+- **Complete contract:** [SMITE-KH-REPLAY-BIND-MOUNT-ADMISSION.md](SMITE-KH-REPLAY-BIND-MOUNT-ADMISSION.md).
+- **Crucial limitation:** static preflight can only verify *planned* mounts, not Docker's effective nested named-volume/host bind precedence, that the directories are really on independent persistent storage, or successful container recreation/reboot. **No actual KH activation.** Stale same-ID Replay SQLite snapshots still require explicit operator quarantine/key rotation: a matching marker and SQLite schema are not anti-rollback proof.
+
+**NEXT:** isolated disposable Docker Node container mount/recreate proof with the paired reviewed Smite build (or safe equivalent), including mount precedence and loss of Replay volume; then authorized replay recovery/anti-rollback quarantine/key rotation and independently runnable Backhaul. Keep the one consolidation PR, preserve simple workflow. `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD`.
+
 ## 6. How to report progress after each working session
 
 Append or refresh in **Issue #47 comments**, and update this document before leaving a long conversation:
@@ -154,7 +164,7 @@ NEXT MOST IMPORTANT ACTION:
 MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 ```
 
-**Current next action:** review private identity and Replay DB volume mounts between U-OPTI pairing output and the strict Smite Node container; implement fail-closed first-enrollment integration only after reviewing exact paths and persistence. Then complete safe replay backup/quarantine/key rotation (same-identity replay DB rollback remains a real blocker), independent Backhaul, and the simple IR/KH workflow. Do not create new per-microstage Draft PRs. No main merge, release or IR/KH deployment. `INSTALL_ALLOWED=NO`; `ACTIVATION_GATE=HOLD`.
+**Current next action:** validate the now-completed **read-only KH mount checker** under a disposable isolated Docker Compose recreation/restart lab, including the nested `node-data` mount and persistence of identity, marker and SQLite. Then implement approved stale-snapshot quarantine or coordinated signed key rotation—**never** auto-reset nonce storage—and finally engine-independent Backhaul. Latest `main`/IR/KH/release remain untouched; `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
 
 ## 7. Operational conventions
 
