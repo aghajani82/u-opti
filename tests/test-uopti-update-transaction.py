@@ -176,6 +176,9 @@ class DurableUpdaterTests(unittest.TestCase):
         source = (ROOT/"u-opti").read_text()
         self.assertLess(source.index("python3 -B \"$RECOVERY_SCRIPT\" recover"),
                         source.index('source "$LIB_PATH/common.sh"'))
+        self.assertIn('exec "$INSTALL_PATH" "$@"', source)
+        self.assertLess(source.index('exec "$INSTALL_PATH" "$@"'),
+                        source.index('source "$LIB_PATH/common.sh"'))
         self.assertIn('mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX"', source)
         self.assertIn('python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply',
                       source)
