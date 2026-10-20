@@ -190,6 +190,13 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
 
+      - name: Independent signed registry Panel Node pair pre-admission (fake Cosign only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-registry-pair-admission.py tests/test-smite-registry-pair-admission.py
+          python3 -B tests/test-smite-registry-pair-admission.py -v
+
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
         run: |
