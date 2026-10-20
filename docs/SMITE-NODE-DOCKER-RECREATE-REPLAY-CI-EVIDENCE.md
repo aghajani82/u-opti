@@ -111,3 +111,27 @@ No real tunnel, Nginx ingress, public port or VPS traffic was opened.
 **Gates:** `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD` ·
 `MAIN_MERGE=NO` · `RELEASE_PUBLISH=NO` ·
 `IR_KH_UNCHANGED=YES`.
+
+## Latest cross-repo Docker test correction — 2026-10-20
+
+The prior successful CI run above is historical and tested the earlier
+Smite replay marker format and host-path assumption; do not cite it as
+evidence for the updated Strict key binding. The existing (not newly
+created) `node-compose-hmac-rollback-isolated` runner now checks out
+exactly reviewed Smite source commit `b08f375e4ed2cfe1dcbbe4c93ff18864ca833f66` from existing Draft #16
+and creates its one-time replay marker through the real current Smite
+`app.replay_enrollment` inside a network-isolated Docker container.
+The fixture binds the disposable host folders at the runtime-visible
+`/run/smite-node-identity` and `/var/lib/smite-node/auth` paths,
+so the marker records the latter database path and carries the
+same `smite-replay-key-binding-v1:` HMAC commitment as the actual
+Strict Node validator. The runner checks that key-bound marker,
+then executes the actual current Smite Node under paused→signed→paused
+recreation and replay-loss rejection, keeping the approved U-OPTI
+KH read-only preflight in the loop.
+
+The change fixes a real red CI regression that arose because the
+stricter U-OPTI gate properly rejected an earlier source's 4-field,
+host-path marker. This is PR-only sandbox verification; live VPS,
+main/release and registry remain untouched. Check the new exact-head
+CI run before claiming the latest Docker test passed.
