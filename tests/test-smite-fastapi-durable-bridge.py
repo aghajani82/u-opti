@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import stat
 import subprocess
@@ -32,6 +33,7 @@ from app import engine_inventory as inventory
 from app import node_auth
 from app.agent_auth import DurableNonceStore
 from app.replay_enrollment import provision_once, ReplayEnrollmentHold
+from app.replay_restore_hold import quarantine
 from app.config import settings
 from app.routers.agent import router
 
@@ -234,6 +236,28 @@ print(json.dumps({"reused": reused.status_code, "new": accepted.status_code}))
         with self.assertRaises(ReplayEnrollmentHold):
             provision_once(identity_path=self.identity, replay_path=self.replay)
         self.assertFalse(self.replay.exists())
+
+    def test_known_stale_snapshot_quarantine_survives_app_restart(self):
+        # Genuine same-Node stale SQLite restoration: old snapshot predates
+        # a successful signed request, and the independent identity marker
+        # must block ALL future signed routes until reviewed recovery.
+        stale = self.replay_dir / "older-same-node-snapshot.sqlite3"
+        shutil.copy2(self.replay, stale)
+        used = self.sign(nonce="c" * 32)
+        self.assertEqual(self.client.get("/api/agent/status", headers=used).status_code, 200)
+        quarantine(identity_path=self.identity, replay_path=self.replay)
+        hold = self.identity_dir / "replay-restore-hold.json"
+        self.assertTrue(hold.is_file())
+        shutil.copy2(stale, self.replay)
+        self.assertEqual(self.client.get("/api/agent/status", headers=used).status_code, 503)
+        self.assertEqual(self.client.get("/api/agent/status",
+                                         headers=self.sign()).status_code, 503)
+        self.recreate()
+        self.assertEqual(self.client.get("/api/agent/status",
+                                         headers=self.sign()).status_code, 503)
+        self.assertTrue(hold.exists())
+        with self.assertRaises(Exception):
+            quarantine(identity_path=self.identity, replay_path=self.replay)
 
     def test_replay_bootstrap_cannot_reset_existing_node(self):
         with self.assertRaises(ReplayEnrollmentHold):
