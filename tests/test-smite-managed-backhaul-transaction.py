@@ -115,14 +115,14 @@ class TransactionLab(unittest.TestCase):
         frp_hashes = {}
         initial_binary = {}
         for name in ("frpc", "frps"):
-            payload = b"\\x7fELF" + ("FRP_EXISTING_" + name).encode()
+            payload = b"\x7fELF" + ("FRP_EXISTING_" + name).encode()
             target = frp_dir / name
             target.write_bytes(payload)
             target.chmod(0o755)
             initial_binary[name] = payload
             frp_hashes[name] = hashlib.sha256(payload).hexdigest()
         self.compose.write_text(COMPOSE + "".join(
-            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n"
             for name in ("frpc", "frps")
         ))
         before_compose = self.compose.read_bytes()
@@ -163,13 +163,13 @@ class TransactionLab(unittest.TestCase):
         frp_dir.mkdir(parents=True, mode=0o700)
         data = {}
         for name in ("frpc", "frps"):
-            value = b"\\x7fELF" + name.encode()
+            value = b"\x7fELF" + name.encode()
             target = frp_dir / name
             target.write_bytes(value)
             target.chmod(0o755)
             data[name] = hashlib.sha256(value).hexdigest()
         baseline = COMPOSE + "".join(
-            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\\n"
+            f"      - {frp_dir / name}:/usr/local/bin/{name}:ro\n"
             for name in ("frpc", "frps")
         )
         self.compose.write_text(baseline)
@@ -179,7 +179,7 @@ class TransactionLab(unittest.TestCase):
         manifest.chmod(0o600)
         broken = [
             baseline.replace(":/usr/local/bin/frpc:ro", ":/usr/local/bin/frpc:rw"),
-            baseline.replace(f"      - {frp_dir / 'frps'}:/usr/local/bin/frps:ro\\n", ""),
+            baseline.replace(f"      - {frp_dir / 'frps'}:/usr/local/bin/frps:ro\n", ""),
         ]
         for text in broken:
             with self.subTest(compose=text[-55:]):
@@ -189,7 +189,7 @@ class TransactionLab(unittest.TestCase):
                 self.assertFalse((self.root / "recovery-journal").exists())
                 self.assertFalse((self.root / "installed/backhaul").exists())
         self.compose.write_text(baseline)
-        (frp_dir / "frps").write_bytes(b"\\x7fELF" + b"tampered")
+        (frp_dir / "frps").write_bytes(b"\x7fELF" + b"tampered")
         with self.assertRaisesRegex(pkg.Hold, "digest mismatch"):
             self.prepare()
         self.assertFalse((self.root / "installed/backhaul").exists())
