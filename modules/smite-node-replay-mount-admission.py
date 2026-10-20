@@ -53,7 +53,8 @@ def _private_dir(path: Path) -> None:
         raise AdmissionHold("Untrusted private directory (must be 0700 and owned)")
 
 
-def _secure_file(path: Path, *, max_bytes: int = MAX_JSON) -> bytes:
+def _secure_file(path: Path, *, max_bytes: int = MAX_JSON,
+                 metadata_only: bool = False) -> bytes:
     try:
         before = path.lstat()
         if (not stat.S_ISREG(before.st_mode)
@@ -72,6 +73,8 @@ def _secure_file(path: Path, *, max_bytes: int = MAX_JSON) -> bytes:
                     or info.st_nlink != 1
                     or info.st_size > max_bytes):
                 raise AdmissionHold("Private file changed during read")
+            if metadata_only:
+                return b""
             data = stream.read(max_bytes + 1)
             if len(data) > max_bytes:
                 raise AdmissionHold("Oversized private file")
@@ -92,7 +95,7 @@ def _json(path: Path) -> dict:
 
 
 def _database(db: Path, node_id: str) -> None:
-    _secure_file(db, max_bytes=64 * 1024 * 1024)
+    _secure_file(db, max_bytes=256 * 1024 * 1024, metadata_only=True)
     try:
         with closing(sqlite3.connect(
             db.absolute().as_uri() + "?mode=ro", uri=True, timeout=2
@@ -138,6 +141,7 @@ def preflight(
     _private_dir(identity.parent)
     _private_dir(replay_dir.parent)
     _private_dir(replay_dir)
+    _secure_file(identity)
     node_id = candidate_helper.paired_identity(identity)
     marker = _json(identity.parent / MARKER_NAME)
     replay = replay_dir / DB_NAME
