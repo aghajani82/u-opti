@@ -202,4 +202,21 @@ grep -q 'Invalid connection mode' "$TMP/stable-kh.log"
 [ ! -e "$SMITE_STATE_FILE" ]
 [ ! -e "$SMITE_PANEL_COMPOSE" ]
 [ ! -e "$SMITE_NODE_COMPOSE" ]
+# Existing signed Field Trial upgrade admits ONLY the exact reviewed rc.0 image line.
+mkdir -p "$TMP/upgrade"
+cat > "$TMP/upgrade/panel.yml" <<EOF_UPGRADE
+services:
+  smite-panel:
+    image: $SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE
+EOF_UPGRADE
+smite_install_field_trial_patch_compose_image     "$TMP/upgrade/panel.yml"     "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE"     "ghcr.io/aghajani82/smite-panel@sha256:$(python3 -c 'print("9"*64)')"
+grep -Fq 'image: ghcr.io/aghajani82/smite-panel@sha256:' "$TMP/upgrade/panel.yml"
+if smite_install_field_trial_patch_compose_image     "$TMP/upgrade/panel.yml"     "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE"     "ghcr.io/aghajani82/smite-panel@sha256:$(python3 -c 'print("8"*64)')" >/dev/null 2>&1; then
+    echo "FAIL: upgrade helper accepted a non-rc.0 Compose baseline" >&2
+    exit 1
+fi
+grep -Fq '5) Upgrade signed Field Trial candidate (existing IR)' "$ROOT/modules/smite-install.sh"
+grep -Fq 'ROLLBACK: restoring rc.0 Compose and Panel DB' "$ROOT/modules/smite-install.sh"
+grep -Fq 'ADMIN_2FA_DATA=PRESERVED' "$ROOT/modules/smite-install.sh"
+
 echo "CLEAN_FRESH_PROFILE_TESTS=PASSED"
