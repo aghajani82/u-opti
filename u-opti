@@ -232,9 +232,12 @@ while true; do
 
     IFS= read -r -p "Please enter your selection [0-9]: " choice
 
-    # Be tolerant of CRLF/paste artifacts from Windows SSH clients while
-    # preserving exact menu semantics.
-    choice="${choice//
+    # Trim leading/trailing whitespace (including a Windows CR) so Bitvise
+    # paste artifacts cannot turn a valid 0 into an invalid selection.
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
+
+    case "$choice" in
 
         1)
             clear
