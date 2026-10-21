@@ -112,7 +112,7 @@ class HostExecutor(unittest.TestCase):
                                     min_bytes=1,expected_node_image=IMAGE)
         reviewed=exe.plan.review("backhaul",self.node,self.stage,
                                  staging_root=self.stages,host_status=status)
-        self.assertEqual(reviewed["STAGE_ADMISSION"],"VERIFIED_PREVIEW_ONLY")
+        self.assertEqual(reviewed["STAGE_ADMISSION"],"VERIFIED_PREVIEW_ONLY",reviewed)
         self.plan=reviewed["PLAN_SHA256_NOT_AUTHORIZATION"]
         self.runner=FakeRunner()
         self.old_compose=(self.node/"docker-compose.yml").read_bytes()
