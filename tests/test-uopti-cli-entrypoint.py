@@ -53,6 +53,28 @@ class UOptiCliEntrypointTests(unittest.TestCase):
         self.assertIn("        0)\n            exit 0", code)
         self.assertIn("[![:space:]]", code)
 
+    def test_docker_install_keeps_uopti_version_global_intact(self):
+        """Sourcing os-release inside docker_install must not overwrite U-OPTI VERSION."""
+        script = f"""
+VERSION=0.16.7
+source {str(ROOT / "modules/docker.sh")!r}
+docker_is_installed() {{ return 0; }}
+docker_service_is_active() {{ return 0; }}
+docker_compose_is_installed() {{ return 0; }}
+read() {{ return 0; }}
+TERM=xterm docker_install >/dev/null
+printf '%s\\n' "$VERSION"
+"""
+        p = subprocess.run(
+            ["bash", "-c", script],
+            text=True,
+            capture_output=True,
+            timeout=10,
+            cwd=ROOT,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout, "0.16.7\n")
+
     def test_field_trial_submenu_numeric_reads_are_normalized(self):
         """Every numeric menu read on the active Field Trial path trims CR/space."""
         for path in FIELD_MENU_FILES:

@@ -350,6 +350,10 @@ docker_install() {
         return
     fi
 
+    # /etc/os-release defines VERSION, which is also U-OPTI's global
+    # application version. Keep OS release fields function-local so this
+    # installer cannot corrupt the main-menu banner after returning.
+    local ID="" VERSION="" VERSION_ID="" PRETTY_NAME="" UBUNTU_CODENAME="" VERSION_CODENAME=""
     . /etc/os-release
 
     if [ "${ID:-}" != "ubuntu" ]; then
