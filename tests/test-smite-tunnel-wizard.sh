@@ -52,7 +52,7 @@ grep -Fq '["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"' u-opti
 grep -Fq 'smite_tw_menu()' modules/smite-tunnel-wizard.sh
 grep -Fq 'twcc_menu()' modules/smite-tunnel-control-center.sh
 grep -Fq 'source "$SMITE_BH_DIR/smite-tunnel-wizard.sh"' modules/smite-backhaul-management.sh
-grep -Fq '2) Tunnel Management (FRP / Backhaul / Rathole)' modules/smite-backhaul-management.sh
+grep -Fq '3) Tunnel Management (FRP / Backhaul / Rathole)' modules/smite-backhaul-management.sh
 
 smite_bh_role() { echo ir; }
 source modules/smite-tunnel-wizard.sh
