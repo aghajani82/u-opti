@@ -130,6 +130,9 @@ sha256sum() {
 SMITE_RC_SIGNED_REGISTRY=1
 SMITE_FIELD_TRIAL_APPROVED=YES
 MOCK_WRONG_PANEL_ID=0
+# Signed registry is a separate source path. It must NOT inherit or require
+# the old Stage15 local bundle/source/manifest variables.
+unset SMITE_RC_BUNDLE_DIR SMITE_RC_SOURCE_SHA SMITE_RC_MANIFEST_SHA256
 : > "$TMP/docker-calls.log"
 smite_install_clean_rc_preflight panel-iran standard >"$TMP/signed-preflight.log"
 grep -q 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$TMP/signed-preflight.log"
