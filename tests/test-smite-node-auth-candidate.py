@@ -143,21 +143,29 @@ class Stage9Test(unittest.TestCase):
             tool.prepare(**self.kwargs)
         self.assertFalse(self.candidate.exists())
 
-    def test_no_live_docker_activation_and_packaging(self):
+    def test_candidate_remains_inert_and_live_activation_is_separately_gated(self):
         candidate_src = MODULE.read_text()
         for forbidden in (
             "subprocess.run(", "subprocess.Popen(", "os.system(",
             "docker compose -f", "systemctl restart", "docker restart",
         ):
             self.assertNotIn(forbidden, candidate_src)
+
         wrapper = (ROOT / "modules/smite-node-pairing-wizard.sh").read_text()
-        self.assertIn("--preflight", wrapper)
-        self.assertIn("--prepare", wrapper)
-        self.assertIn("--discard", wrapper)
-        self.assertIn("PREPARE-AUTH-ONLY", wrapper)
-        self.assertIn("DISCARD-CANDIDATE", wrapper)
+        self.assertIn("--enable-panel-field-trial", wrapper)
+        self.assertIn("--activate-ir-node-field-trial", wrapper)
+        self.assertIn("--rollback-node-field-trial", wrapper)
+        self.assertIn("UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES", wrapper)
+        self.assertNotIn("node_secret", wrapper)
+        self.assertNotIn("pairing_code", wrapper)
+
+        # Stage9 remains packaged as the reviewed inert Compose generator;
+        # the live controller may invoke it only after explicit Field Trial admission.
         for name in ("install.sh", "u-opti"):
             self.assertIn("smite-node-auth-candidate.py", (ROOT / name).read_text())
+        controller = (ROOT / "modules/smite-node-pairing.py").read_text()
+        self.assertIn('CANDIDATE_HELPER = Path(__file__).with_name("smite-node-auth-candidate.py")', controller)
+        self.assertIn("Explicit disposable-host Field Trial pairing approval required", controller)
 
 
 if __name__ == "__main__":
