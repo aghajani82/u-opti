@@ -62,8 +62,7 @@ class HostExecutor(unittest.TestCase):
         (self.node/"docker-compose.yml").write_text(COMPOSE)
         (self.node/"docker-compose.yml").chmod(0o600)
         self.data=self.root/"data"; self.data.mkdir(mode=0o700)
-        (self.data/"tunnels.json").write_text("[]\n")
-        (self.data/"tunnels.json").chmod(0o600)
+        # No saved-tunnel registry at all == genuine zero-tunnel fresh host.
         self.stages=self.root/"stages"; self.stages.mkdir(mode=0o700)
         self.state_anchor=self.root/"state"; self.state_anchor.mkdir(mode=0o700)
         self.state=self.state_anchor/"engine"/"backhaul"
