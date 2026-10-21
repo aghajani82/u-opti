@@ -21,10 +21,10 @@ SMITE_INSTALL_PROFILE="${SMITE_INSTALL_PROFILE:-stable}"
 # Exact, independently reviewed candidate used ONLY by the disposable-host
 # Field Trial. The candidate remains a prerelease and is never promoted by
 # this installer. Operator approval is separate from production approval.
-SMITE_FIELD_TRIAL_SOURCE_SHA="97bc67be1b0e16763935cb3383bcefca70fa5b2d"
-SMITE_FIELD_TRIAL_PUBLISH_REF="refs/tags/v2.0.0-rc.0"
-SMITE_FIELD_TRIAL_VERSION="2.0.0-rc.0"
-SMITE_FIELD_TRIAL_MANIFEST_SHA256="7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986"
+SMITE_FIELD_TRIAL_SOURCE_SHA="289f99cae8c53ba7d5b8e427bca19e5c04ebba8a"
+SMITE_FIELD_TRIAL_PUBLISH_REF="refs/tags/v2.0.0-rc.1"
+SMITE_FIELD_TRIAL_VERSION="2.0.0-rc.1"
+SMITE_FIELD_TRIAL_MANIFEST_SHA256="d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f"
 SMITE_FIELD_TRIAL_COSIGN_SHA256="c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74"
 
 smite_install_clean_rc_signed_registry_selected() {
@@ -157,7 +157,7 @@ smite_install_clean_rc_preflight() {
     SMITE_NODE_IMAGE="smite-node:stage15-local"
     # The v0.1.7 upstream Compose is used as a known layout template;
     # the application binaries are ONLY the paired offline RC images.
-    SMITE_UPSTREAM_VERSION="2.0.0-rc.0"
+    SMITE_UPSTREAM_VERSION="2.0.0-rc.1"
     return 0
 }
 
