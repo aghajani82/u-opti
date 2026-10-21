@@ -1766,6 +1766,7 @@ show_smite_install_menu() {
         echo "2) Install Foreign Node"
         echo "3) Installation State"
         echo "4) Install Sanaei 3x-UI on Foreign Node"
+        echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo
         echo "0) Back"
         echo
