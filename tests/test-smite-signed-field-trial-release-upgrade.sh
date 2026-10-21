@@ -58,7 +58,7 @@ test -s "$MODULES_PATH/smite-field-trial-candidate.json"
 cmp -s "$MODULES_PATH/smite-registry-pair-admission.py" modules/smite-registry-pair-admission.py
 cmp -s "$MODULES_PATH/smite-field-trial-candidate.json" modules/smite-field-trial-candidate.json
 [ "$(sha256sum "$MODULES_PATH/smite-field-trial-candidate.json" | awk '{print $1}')" = \
-  "7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986" ]
+  "d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f" ]
 
 # Idempotence: once complete, restart must not contact the network.
 cat > "$test_root/bin/curl" <<'MOCK'
