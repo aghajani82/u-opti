@@ -107,10 +107,18 @@ def _dir(path: Path, *, create: bool = False) -> None:
             or stat.S_IMODE(st.st_mode) & 0o077):
         raise Hold("PRIVATE_DIRECTORY_REQUIRED")
 
+def _trusted_anchor(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        raise Hold("UNSAFE_MANAGED_DIRECTORY")
+    st = path.lstat()
+    if (not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid()
+            or stat.S_IMODE(st.st_mode) & 0o022):
+        raise Hold("UNSAFE_MANAGED_DIRECTORY")
+
 def _mkdir_chain(path: Path, anchor: Path) -> None:
     if not anchor.is_absolute() or not path.is_absolute() or anchor not in path.parents:
         raise Hold("UNSAFE_MANAGED_DIRECTORY")
-    _dir(anchor)
+    _trusted_anchor(anchor)
     current = anchor
     for part in path.relative_to(anchor).parts:
         current = current / part
@@ -165,7 +173,8 @@ def _lock(path: Path):
     fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or stat.S_IMODE(st.st_mode) & 0o077):
             raise Hold("UNSAFE_LOCK_FILE")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
