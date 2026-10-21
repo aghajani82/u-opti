@@ -5,6 +5,27 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## Exact authorized GHCR candidate parameters — 2026-10-21
+
+Use ONLY these reviewed values for Gate 1:
+
+- Smite source SHA: `97bc67be1b0e16763935cb3383bcefca70fa5b2d`
+- Candidate tag: `v2.0.0-rc.0`
+- Workflow: `.github/workflows/publish-images.yml` / **Build and Publish Docker Images**
+- `expected_release_tag=v2.0.0-rc.0`
+- `expected_source_sha=97bc67be1b0e16763935cb3383bcefca70fa5b2d`
+- `confirm_candidate_publication=true`
+
+The tag MUST point exactly to the source SHA above. Do not retarget it, do not
+publish `latest`, and do not substitute a branch ref. The workflow is expected
+to emit digest-only Panel and Node registry objects, sign/verify both immutable
+digests, and upload the inert `registry-pair.json` artifact only after both jobs
+succeed. The artifact SHA256 and both real GHCR digests must be independently
+recorded before any field use.
+
+At the time of this checkpoint, GitHub reports no existing Smite tags through
+the available repository ref query, so `v2.0.0-rc.0` has no observed collision.
+
 ## Owner authorization update — 2026-10-21
 
 The owner has now explicitly authorized **Gate 1 candidate publication**:
