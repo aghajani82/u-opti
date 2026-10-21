@@ -18,6 +18,93 @@ SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
 # images; the new Panel/Node artifact pair is never selected implicitly.
 SMITE_INSTALL_PROFILE="${SMITE_INSTALL_PROFILE:-stable}"
 
+# Exact, independently reviewed candidate used ONLY by the disposable-host
+# Field Trial. The candidate remains a prerelease and is never promoted by
+# this installer. Operator approval is separate from production approval.
+SMITE_FIELD_TRIAL_SOURCE_SHA="97bc67be1b0e16763935cb3383bcefca70fa5b2d"
+SMITE_FIELD_TRIAL_PUBLISH_REF="refs/tags/v2.0.0-rc.0"
+SMITE_FIELD_TRIAL_VERSION="2.0.0-rc.0"
+SMITE_FIELD_TRIAL_MANIFEST_SHA256="7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986"
+SMITE_FIELD_TRIAL_COSIGN_SHA256="c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74"
+
+smite_install_clean_rc_signed_registry_selected() {
+    [ "${SMITE_RC_SIGNED_REGISTRY:-0}" = "1" ]
+}
+
+smite_install_field_trial_verify_candidate() {
+    local helper_dir verifier manifest cosign_path actual_cosign pair_result
+    local -a candidate=()
+
+    smite_install_clean_rc_signed_registry_selected || {
+        echo "HOLD: Signed registry Field Trial was not selected" >&2
+        return 1
+    }
+    [ "${SMITE_FIELD_TRIAL_APPROVED:-}" = "YES" ] || {
+        echo "HOLD: Explicit disposable-host Field Trial approval required" >&2
+        return 1
+    }
+
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    verifier="$helper_dir/smite-registry-pair-admission.py"
+    manifest="$helper_dir/smite-field-trial-candidate.json"
+
+    [ -f "$verifier" ] && [ ! -L "$verifier" ] &&
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || {
+        echo "HOLD: Signed Field Trial verifier/manifest is missing or unsafe" >&2
+        return 1
+    }
+
+    if [ "$(sha256sum "$manifest" | awk '{print $1}')" != "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]; then
+        echo "HOLD: Signed Field Trial manifest hash mismatch" >&2
+        return 1
+    fi
+
+    command -v cosign >/dev/null 2>&1 || {
+        echo "HOLD: Pinned Cosign verifier is not installed" >&2
+        return 1
+    }
+    cosign_path="$(command -v cosign)"
+    [ -f "$cosign_path" ] && [ ! -L "$cosign_path" ] || {
+        echo "HOLD: Cosign verifier path is not a regular non-symlink file" >&2
+        return 1
+    }
+    actual_cosign="$(sha256sum "$cosign_path" | awk '{print $1}')"
+    [ "$actual_cosign" = "$SMITE_FIELD_TRIAL_COSIGN_SHA256" ] || {
+        echo "HOLD: Cosign binary does not match reviewed v3.0.6 amd64 asset" >&2
+        return 1
+    }
+
+    pair_result="$(python3 -B "$verifier"         --manifest "$manifest"         --manifest-sha256 "$SMITE_FIELD_TRIAL_MANIFEST_SHA256"         --source-sha "$SMITE_FIELD_TRIAL_SOURCE_SHA"         --publish-ref "$SMITE_FIELD_TRIAL_PUBLISH_REF")" || return 1
+    printf '%s\n' "$pair_result"
+
+    mapfile -t candidate < <(python3 - "$manifest" <<'PY_SIGNED_RC'
+import json, pathlib, sys
+doc=json.loads(pathlib.Path(sys.argv[1]).read_text())
+print(doc["images"]["panel"])
+print(doc["images"]["node"])
+print(doc["version"])
+PY_SIGNED_RC
+    )
+    [ "${#candidate[@]}" -eq 3 ] || {
+        echo "HOLD: Signed Field Trial manifest parse failed" >&2
+        return 1
+    }
+
+    SMITE_PANEL_IMAGE="${candidate[0]}"
+    SMITE_NODE_IMAGE="${candidate[1]}"
+    SMITE_UPSTREAM_VERSION="${candidate[2]}"
+
+    [ "$SMITE_UPSTREAM_VERSION" = "$SMITE_FIELD_TRIAL_VERSION" ] || {
+        echo "HOLD: Signed Field Trial version mismatch" >&2
+        return 1
+    }
+
+    echo "FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED"
+    echo "FIELD_TRIAL_OPERATOR_APPROVAL=YES"
+    echo "PRODUCTION_RELEASE_APPROVAL=NO"
+    return 0
+}
+
 smite_install_clean_rc_preflight() {
     local role="$1" mode="$2" helper_dir pair_result
     [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || {
@@ -48,6 +135,13 @@ smite_install_clean_rc_preflight() {
         echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
         return 1
     fi
+    if smite_install_clean_rc_signed_registry_selected; then
+        smite_install_field_trial_verify_candidate || return 1
+        echo "RC_IMAGE_PROVENANCE=SIGSTORE_VERIFIED_REGISTRY_DIGESTS"
+        echo "RC_SIGNED_AUTH=PENDING_SECURE_PAIRING"
+        return 0
+    fi
+
     helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     pair_result="$(python3 -B "$helper_dir/smite-clean-image-pair.py" \
         --folder "$SMITE_RC_BUNDLE_DIR" \
@@ -70,6 +164,29 @@ smite_install_clean_rc_load_images() {
     local role="$1" expected_panel expected_node loaded_panel loaded_node
     local verifier_dir
     verifier_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+
+    if smite_install_clean_rc_signed_registry_selected; then
+        smite_install_field_trial_verify_candidate || return 1
+        if [ "$role" = panel-iran ]; then
+            echo "Pulling signed Panel candidate by immutable digest..."
+            docker pull "$SMITE_PANEL_IMAGE" || return 1
+            docker image inspect "$SMITE_PANEL_IMAGE" >/dev/null 2>&1 || {
+                echo "HOLD: Signed Panel digest was not retained locally" >&2
+                return 1
+            }
+        fi
+        echo "Pulling signed Node candidate by immutable digest..."
+        docker pull "$SMITE_NODE_IMAGE" || return 1
+        docker image inspect "$SMITE_NODE_IMAGE" >/dev/null 2>&1 || {
+            echo "HOLD: Signed Node digest was not retained locally" >&2
+            return 1
+        }
+        echo "CLEAN_RC_IMAGES=SIGNED_REGISTRY_DIGESTS_VERIFIED"
+        echo "CLEAN_RC_PRODUCTION_ACTIVATION=NOT_AUTHORIZED"
+        echo "CLEAN_RC_FIELD_TRIAL_ACTIVATION=OPERATOR_APPROVED"
+        return 0
+    fi
+
     # Recheck bytes at time of loading, not only at UI confirmation.
     python3 -B "$verifier_dir/smite-clean-image-pair.py" \
         --folder "$SMITE_RC_BUNDLE_DIR" \
@@ -795,7 +912,11 @@ smite_install_panel_iran() {
     echo "======================================"
     echo
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "FIELD TRIAL ONLY: signed Smite RC from immutable registry digests."
+        else
+            echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        fi
         echo "Not a production release; no live tunneling is configured here."
     else
         echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
@@ -902,7 +1023,11 @@ smite_install_panel_iran() {
         echo "Private IP   : $panel_private_ip"
     fi
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "Smite profile: clean-rc (unpublished preview)"
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "Smite profile: clean-rc signed-registry Field Trial"
+        else
+            echo "Smite profile: clean-rc (unpublished preview)"
+        fi
     else
         echo "Smite version: $SMITE_UPSTREAM_VERSION"
     fi
@@ -1108,7 +1233,11 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "FIELD TRIAL ONLY: signed Smite Node from an immutable registry digest."
+        else
+            echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        fi
         echo "Set the real 3x-UI inbound and tunnel only after both servers install."
     else
         echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
