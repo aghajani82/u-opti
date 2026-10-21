@@ -101,11 +101,17 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
             valid, digest=PANEL, role="panel", source=SOURCE))
         self.assertTrue(gate._signed_payload_match(
             valid[0], digest=PANEL, role="panel", source=SOURCE))
+        current = json.loads(json.dumps(valid))
+        current[0]["critical"]["type"] = "https://sigstore.dev/cosign/sign/v1"
+        self.assertTrue(gate._signed_payload_match(
+            current, digest=PANEL, role="panel", source=SOURCE))
+        self.assertTrue(gate._signed_payload_match(
+            current[0], digest=PANEL, role="panel", source=SOURCE))
         self.assertFalse(gate._signed_payload_match(
             {}, digest=PANEL, role="panel", source=SOURCE))
         self.assertFalse(gate._signed_payload_match(
             "not-json-records", digest=PANEL, role="panel", source=SOURCE))
-        for invalid in ("attestation", "", None):
+        for invalid in ("attestation", "https://slsa.dev/provenance/v1", "", None):
             bad = json.loads(json.dumps(valid))
             bad[0]["critical"]["type"] = invalid
             self.assertFalse(gate._signed_payload_match(

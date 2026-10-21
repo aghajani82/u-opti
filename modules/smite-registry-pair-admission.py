@@ -21,6 +21,10 @@ HASH = re.compile(r"[a-f0-9]{64}\Z")
 DIGEST = re.compile(r"sha256:[a-f0-9]{64}\Z")
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9][a-zA-Z0-9.-]*)?\Z")
 ROLES = {"panel", "node"}
+COSIGN_SIGNATURE_TYPES = {
+    "cosign container image signature",
+    "https://sigstore.dev/cosign/sign/v1",
+}
 REPO = "aghajani82/Smite"
 ISSUER = "https://token.actions.githubusercontent.com"
 WORKFLOW = "https://github.com/aghajani82/Smite/.github/workflows/publish-images.yml@"
@@ -52,7 +56,7 @@ def _signed_payload_match(result: object, *, digest: str, role: str, source: str
             continue
         actual = image.get("docker-manifest-digest", image.get("Docker-manifest-digest"))
         signature_type = critical.get("type", critical.get("Type"))
-        if (signature_type == "cosign container image signature"
+        if (signature_type in COSIGN_SIGNATURE_TYPES
                 and actual == digest and optional.get("smite_source_sha") == source
                 and optional.get("smite_role") == role):
             return True
