@@ -139,54 +139,7 @@ grep -q 'FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED' "$TMP/signed-preflight.log"
 smite_install_pull_images true >"$TMP/signed-pull.log"
 grep -Fq "pull $SMITE_PANEL_IMAGE" "$TMP/docker-calls.log"
 grep -Fq "pull $SMITE_NODE_IMAGE" "$TMP/docker-calls.log"
-! grep -q '^load: > "$TMP/docker-calls.log"
-smite_install_pull_images false >/dev/null
-grep -q '^pull ghcr.io/zzedix/smite-node' "$TMP/docker-calls.log"
-smite_install_apply_compatibility >/dev/null
-[ "$(wc -l < "$TMP/overlay-calls")" = 3 ]
-# Exercise the real interactive selection flow with all side-effectful steps
-# replaced by inert functions. A 3/4-line input must reach confirmation:
-# there must be NO connection-mode question in the clean RC profile.
-SMITE_INSTALL_PROFILE=clean-rc
-SMITE_FRP_TRIAL_ONLY=0
-smite_install_require_tools() { :; }
-smite_install_ensure_docker() { :; }
-smite_install_validate_domain() { return 0; }
-smite_install_validate_name() { return 0; }
-smite_install_pause() { :; }
-clear() { :; }
-smite_install_clean_rc_preflight() {
-    echo "$1:$2" >> "$TMP/mode-preflight.log"
-    return 1  # Stop before any directories, Docker, or network calls.
-}
-printf 'ir.example.com\nnode-ir\ny\n' |
-    smite_install_panel_iran >"$TMP/ir-selection.log" 2>&1
-grep -qx 'panel-iran:standard' "$TMP/mode-preflight.log"
-grep -q 'Connection mode: Standard (automatic for clean install)' "$TMP/ir-selection.log"
-grep -q 'Smite profile: clean-rc (unpublished preview)' "$TMP/ir-selection.log"
-grep -q 'PREVIEW ONLY:' "$TMP/ir-selection.log"
-printf 'ir.example.com\nkh.example.com\nnode-kh\ny\n' |
-    smite_install_foreign_node >"$TMP/kh-selection.log" 2>&1
-grep -qx 'foreign:standard' "$TMP/mode-preflight.log"
-grep -q 'Connection mode: Standard / HTTPS (automatic for clean install)' "$TMP/kh-selection.log"
-grep -q 'PREVIEW ONLY:' "$TMP/kh-selection.log"
-[ "$(wc -l < "$TMP/mode-preflight.log")" = 2 ]
-
-# Stable profile retains the explicit mode selection. Abort on an invalid
-# answer before a live install step; it must not silently select Standard.
-SMITE_INSTALL_PROFILE=stable
-printf 'ir.example.com\nnode-ir\n9\n' |
-    smite_install_panel_iran >"$TMP/stable-ir.log" 2>&1
-grep -q 'Invalid connection mode' "$TMP/stable-ir.log"
-printf 'ir.example.com\nkh.example.com\nnode-kh\n9\n' |
-    smite_install_foreign_node >"$TMP/stable-kh.log" 2>&1
-grep -q 'Invalid connection mode' "$TMP/stable-kh.log"
-[ "$(wc -l < "$TMP/mode-preflight.log")" = 2 ]
-[ ! -e "$SMITE_STATE_FILE" ]
-[ ! -e "$SMITE_PANEL_COMPOSE" ]
-[ ! -e "$SMITE_NODE_COMPOSE" ]
-echo "CLEAN_FRESH_PROFILE_TESTS=PASSED"
- "$TMP/docker-calls.log"
+! grep -q '^load$' "$TMP/docker-calls.log"
 grep -q 'CLEAN_RC_IMAGES=SIGNED_REGISTRY_DIGESTS_VERIFIED' "$TMP/signed-pull.log"
 
 SMITE_FIELD_TRIAL_APPROVED=NO
