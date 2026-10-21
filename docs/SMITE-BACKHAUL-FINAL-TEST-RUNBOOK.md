@@ -1,4 +1,11 @@
-# U-OPTI Backhaul — final two-existing-VPS trial runbook
+# U-OPTI Backhaul — historical two-existing-VPS Sidecar trial runbook
+
+> **HISTORICAL SIDECAR RUNBOOK — NOT THE FINAL MANAGED CLOSEOUT PATH (2026-10-21).**  
+> Keep this file only for audit/history. The current managed closeout path is
+> [smite-backhaul-two-host-vps-trial-admission.md](smite-backhaul-two-host-vps-trial-admission.md)
+> plus the packaged but menu-disabled `smite-managed-backhaul-host-executor.py`.
+> Do not follow the Sidecar assumptions below for the final release candidate.
+> Real IR/KH execution still requires separate owner authorization.
 
 **Status: experimental / draft PR #18, not a public release.**
 

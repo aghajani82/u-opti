@@ -1,6 +1,6 @@
 # CLOSEOUT — GitHub Draft PR Dependency Matrix
 
-**Reviewed:** 2026-10-19 (plus a dedicated U-OPTI closeout branch / Draft #48)  
+**Reviewed:** 2026-10-21 (final source-closeout reconciliation on U-OPTI Draft #48)  
 **Tracker:** [U-OPTI Issue #47](https://github.com/aghajani82/u-opti/issues/47)  
 **Context:** [Cross-chat handoff](PROJECT-CLOSEOUT-HANDOFF.md)  
 **Status:** Inventory of PR parent branches and declared scope only; individual line-by-line diff/conflict review is **NOT COMPLETE**. No PR has been approved for merge.
@@ -78,14 +78,14 @@ Six changed files in U-OPTI #27 were compared to the newest U-OPTI chain:
 
 ## Workstream reconciliation, not merge instructions
 
-| Workstream | Existing PR coverage | What is still required to mark DONE |
+| Workstream | Source/CI closeout status | Remaining external gate |
 |---|---|---|
-| Auth, identity and MFA | U-OPTI #27/#29–#36; Smite #1–#9, #15/#16 | Confirm one compatible Panel+Node pair, first enrollment, safe restore/key rotation, original admin controls; no duplicate host overlay |
-| Image and release provenance | U-OPTI #32, #36–#38; Smite #10, #13–#15 | Select immutable matching source + **actual image digests**, integrate installer opt-in and rollback |
-| Nginx 443 signed control | U-OPTI #30/#34/#35/#42–#46; Smite #7/#9/#12 | Test actual integrated release with existing public 443 vhost and correct Panel source, not just isolated CI loopback |
-| Independent engines | U-OPTI clean RC/managed FRP+Backhaul tools, Smite #11 | Remove actual Backhaul → FRP/Sidecar dependency; verify dynamic Sanaei port/path, install/uninstall independent |
-| Safe state mutation | U-OPTI #39–#41 **lab-only** | Production-safe permission boundary, journal/recovery, install/update atomicity; retain current production state |
-| Beginner UX | U-OPTI menus, Smite #15 | One coherent IR→KH→Sanaei→port/path→tunnel→VERIFY workflow, without wizard bloat |
+| Auth, identity and MFA | **SOURCE/CI COMPLETE:** paired HMAC, durable Replay enrollment/key binding, stale-restore HOLD/witness, encrypted Panel pairing store, Fernet all-row decryptability regression, original admin controls retained | Real snapshot-backed Panel master + old→new Node UUID recovery rehearsal on approved disposable hosts |
+| Image and release provenance | **SOURCE/CI COMPLETE:** exact source pins, paired unpublished images, manual-only digest-only publisher, keyless certificate SHA/repo/trigger policy, independent U-OPTI pair admission | Owner-authorized real GHCR candidate publish and independent real Cosign/provenance verification |
+| Nginx 443 signed control | **SOURCE/CI COMPLETE:** isolated real Nginx TLS443 HMAC/path/query/body and signed Agent regressions | Actual integrated IR/KH public 443 route/SNI/firewall verification during field trial |
+| Independent engines | **SOURCE/CI COMPLETE:** FRP and Backhaul independent package/control paths, shared transaction lock, official artifacts, coexistence, exact rollback, signed restart lifecycle; new explicit Backhaul disposable-host executor is packaged but menu remains HOLD | Approved two-host Backhaul install + dynamic Sanaei XHTTP/443/reboot/reconnect/rollback trial |
+| Safe state mutation | **SOURCE/CI COMPLETE:** durable U-OPTI update/first-adoption journal, SIGKILL recovery, engine journal/rollback, drift refusal and signed prior-runtime recovery | Real VPS filesystem/reboot/snapshot behavior under owner-approved trial |
+| Beginner UX | **READY FOR FINAL FIELD VALIDATION:** simple existing menu remains unchanged; install button intentionally HOLD | Enable only after field evidence, then one IR→KH→Sanaei→port/path→tunnel→VERIFY flow; no new wizard |
 
 ## Branch merge/risk rules
 
@@ -94,4 +94,6 @@ Six changed files in U-OPTI #27 were compared to the newest U-OPTI chain:
 3. Do NOT close, rebase or squash existing Draft PRs, or create a new release, without an explicit separate review/approval.
 4. Release qualification needs a coherent final source/image pair and actual negative/rollback test evidence. Keep `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` until authorized.
 
-**Next concrete audit:** finish coherent immutable source lock across `install.sh` and interactive U-OPTI updater, followed by power-loss rollback recovery. Interactive Update already implements basic downloads, syntax validation, backup and catchable-error rollback; however one path erroneously discarded the backup after a failed restore (fixed in Draft #48, not yet in main). Full transactional/power-loss protection remains unimplemented. Update [Issue #47](https://github.com/aghajani82/u-opti/issues/47) and [handoff](PROJECT-CLOSEOUT-HANDOFF.md) with the result.
+**Final closeout boundary (2026-10-21):** the immutable updater source lock, durable updater/first-adoption transaction, strict Replay lifecycle/recovery admission, image-pair signing/admission contracts, FRP-independent Backhaul transaction/rollback, exact candidate Node digest host binding and explicit disposable-host Backhaul executor now exist in Draft #48/#16 with CI coverage. Historical rows above are retained for dependency/audit context and must not be read as today's TODO list.
+
+No additional source feature is required before external qualification. The only remaining actions are authorization-bound: **(1)** publish and independently verify one real digest-only signed Panel+Node candidate, **(2)** exercise the packaged executor on approved snapshot-backed disposable IR/KH and verify 443/dynamic XHTTP/reboot/rollback/recovery, then **(3)** explicitly approve menu enablement, main merge and release. Until then keep `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`, `MAIN_MERGE=NO`, `RELEASE_PUBLISH=NO`.

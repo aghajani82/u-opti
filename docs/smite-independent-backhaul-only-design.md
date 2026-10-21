@@ -308,7 +308,7 @@ during installation.
   any live-host activation. The runbook does not instruct deploying
   new code to production, and neither PR is merged.
 
-## Fail-closed installation transaction (to implement)
+## Fail-closed installation transaction — implemented in Draft; field validation still HOLD
 
 1. **Preflight without mutation:** explicitly verify clean-RC managed
    profile, valid Node installation, supported architecture, official
@@ -367,8 +367,12 @@ during installation.
   exposure, least privileges and operator-friendly Persian/English
   errors before any version promotion.
 
-**HOLD:** Official release preparation and **CI-only** filesystem
-transaction/rollback are verified. A real-host installer, Node runtime
-activation and signed IR/KH inventory, actual Backhaul-over-443 data-flow
-acceptance, VPS trial and release approval do **not** exist yet. Both PRs
-must remain Draft; no real server commands are authorized.
+**2026-10-21 superseding status:** Official artifact preparation,
+filesystem transaction/rollback, signed restart lifecycle and an explicit
+journaled **disposable-host Backhaul executor** now exist in Draft #48 with
+CI coverage. The executor is packaged but deliberately **not connected to
+the beginner Install menu**. It still has no production certification:
+actual IR/KH execution, provider snapshot/console evidence, public TLS443,
+dynamic Sanaei XHTTP data flow, reboot/reconnect and recovery have not been
+performed. Therefore both PRs remain Draft and no real-server command is
+authorized until a separate owner-approved field trial.

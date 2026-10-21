@@ -348,3 +348,37 @@ The official Docker job also explicitly printed
 `MAIN_MERGE=NO` · `RELEASE_PUBLISH=NO` ·
 `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD` ·
 `IR_KH_UNCHANGED=YES`.
+
+
+## 2026-10-21 — source-closeout: explicit disposable-host Backhaul executor now exists
+
+**This supersedes the older statements above that a host executor had not been
+implemented. It does NOT supersede their warning that real IR/KH validation
+and release approval are still missing.**
+
+The existing U-OPTI Draft #48 now packages
+`modules/smite-managed-backhaul-host-executor.py`, a deliberately unlinked
+CLI executor for the final disposable-host trial. It consumes the already
+reviewed shared host admission and deterministic Backhaul host plan; requires
+an externally reviewed exact Smite Node digest, exact plan SHA256, official
+Backhaul v0.7.2 candidate, explicit snapshot+console acknowledgement and an
+IR/KH-specific confirmation phrase. It journals exact prior state before
+mutation, owns only Backhaul binary/Compose mount/engine manifest, recreates
+only `smite-node`, validates real in-container signed HMAC/replay inventory,
+and performs exact rollback + prior signed-runtime verification on failure.
+Interrupted trials require explicit recovery. Nginx, firewall, Xray/Sanaei,
+Panel, public ports, FRP bytes and tunnel Apply are outside its mutation set.
+
+The new executor is downloaded by the Draft installer/updater but is **not
+wired to the visible Install option**. That is intentional: source/CI
+availability is not field authorization. Its new tests are green inside the
+Draft's `bash-validation` on CI run 39546781285; full-run status must still
+be read from that exact run. No real host, GHCR registry, main branch or
+stable release was changed.
+
+The Backhaul source implementation is therefore **SOURCE/CI COMPLETE,
+FIELD-VALIDATION HOLD**. Remaining evidence is external: reviewed signed
+Panel+Node GHCR digest pair, provider snapshots/console, two disposable
+IR/KH host execution, real TLS443 + dynamic Sanaei XHTTP traffic, reboot and
+rollback/recovery. Only after that evidence may the beginner menu Install
+path be enabled.

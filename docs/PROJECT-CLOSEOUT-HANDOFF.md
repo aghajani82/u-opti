@@ -1,9 +1,23 @@
 # جمع کردن پروژه و تکمیل آن — U-OPTI × Smite | PROJECT CLOSEOUT & CHAT HANDOFF
 
 > **Source of truth / مرجع ادامه کار:** [U-OPTI Issue #47 — CLOSEOUT TRACKER](https://github.com/aghajani82/u-opti/issues/47)  
-> **Last reviewed:** 2026-10-20  
+> **Last reviewed:** 2026-10-21  
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
+
+## Source closeout — explicit Backhaul disposable-host executor implemented, field validation HOLD — 2026-10-21
+
+**This closes the last known Backhaul source/CI implementation gap without enabling the beginner Install menu or touching a VPS.**
+
+- **U-OPTI Draft #48 source HEAD before this docs-only reconciliation:** [`378cf7ab746587798a62956c91b5ac590ed4b47e`](https://github.com/aghajani82/u-opti/commit/378cf7ab746587798a62956c91b5ac590ed4b47e). New packaged module: `modules/smite-managed-backhaul-host-executor.py`; regression: `tests/test-smite-managed-backhaul-host-executor.py`. The installer/updater download lists include the module, but **`smite-managed-backhaul-menu.sh --install` remains disabled** until owner-authorized two-host evidence exists.
+- **Executor admission is deliberately difficult to satisfy:** root on default host paths; exact externally reviewed `ghcr.io/aghajani82/smite-node@sha256:...`; exact deterministic host-plan SHA; official pinned Backhaul v0.7.2 stage; clean managed/strict Core; no saved tunnels; explicit `SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED`; and exact role phrase `APPLY-BACKHAUL-IR-TRIAL` or `APPLY-BACKHAUL-KH-TRIAL`. It never discovers trust from a mutable image tag or from the local Docker reference alone.
+- **Mutation scope:** only the Backhaul binary, its read-only Smite Node Compose mount and managed engine manifest are transaction-owned. It does **not** configure Nginx, firewall, Xray/Sanaei, Panel, public ports, FRP binaries, tunnel routes or `/api/agent/tunnels/apply`. It recreates only `smite-node`.
+- **Journal/rollback:** a private persistent journal and exact prior Compose/manifest bytes are fsync'd before mutation. Unexpected Compose/manifest/binary/protected-state drift HOLDS rather than overwriting. A failed signed post-restart check triggers exact compensating rollback and a signed check of the prior inventory. Interrupted test transactions require explicit `recover`; a committed test requires explicit role-bound `rollback`.
+- **Signed runtime check:** the executor runs a fixed probe inside the reviewed Node container using Smite's installed `app.agent_auth.read_identity` and `app.node_auth.sign_request`; unsigned and wrong-key requests must fail, a signed inventory succeeds, replaying the identical nonce fails, a new nonce succeeds, engine inventory matches exactly, and Agent status must show zero active tunnels. This is **local signed Node evidence**, not WAN/TLS443 end-to-end proof.
+- **CI:** after fixture-only corrections (non-root CI ownership simulation, genuine absent zero-tunnel registry, and diagnostic visibility), the new executor suite is **PASS** inside `bash-validation` on [CI 39546781285](https://github.com/aghajani82/u-opti/actions/runs/39546781285). At this documentation checkpoint, **14/16 jobs PASS, zero failures**, with only long `managed-frp-signed-compose` and `managed-backhaul-official-artifact` jobs still running. Confirm final exact-head status separately.
+- **Project status after source closeout:** implementation work is now considered **SOURCE/CI COMPLETE PENDING FULL CI**, not production-ready. Only three external/authorization gates remain: (1) owner-approved real digest-only GHCR Panel+Node candidate publication plus independent real Cosign/provenance verification; (2) owner-approved snapshot-backed disposable IR/KH field trial using this executor, including real signed 443, dynamic Sanaei XHTTP, reboot/reconnect and rollback/Panel-master/Replay recovery; (3) explicit final `main` merge, menu enablement and release approval after evidence review.
+
+`INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD` · `MAIN_MERGE=NO` · `RELEASE_PUBLISH=NO` · `IR_KH_UNCHANGED=YES`.
 
 ## Latest final two-host candidate digest binding — 2026-10-21
 
