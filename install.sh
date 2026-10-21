@@ -86,6 +86,8 @@ MODULES=(
     "smite-panel-auth-overlay.py"
     "smite-stage15-bundle-verify.py"
     "smite-clean-image-pair.py"
+    "smite-registry-pair-admission.py"
+    "smite-field-trial-candidate.json"
     "u-opti-update-transaction.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
