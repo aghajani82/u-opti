@@ -5,6 +5,28 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## DEVELOPMENT FREEZE — SOURCE/CI CLOSED — 2026-10-21
+
+**This is the stop point for source development. Do not create new stages, menus,
+wizards, PRs or speculative hardening unless field evidence exposes a concrete bug.**
+
+Exact frozen checkpoints:
+
+- **U-OPTI executable/source checkpoint:** `378cf7ab746587798a62956c91b5ac590ed4b47e` — CI `39546781285` = **16/16 SUCCESS**.
+- **U-OPTI documentation closeout head:** `ce030e4c0cbec71d1d20e48d6816d6e583aa717f` — CI `39547525661` = **16/16 SUCCESS**.
+- **Smite source checkpoint:** `97bc67be1b0e16763935cb3383bcefca70fa5b2d` — exact-head **10/10 workflows SUCCESS**.
+- Both final Draft PRs remain OPEN+DRAFT and GitHub reports them mergeable. No merge/rebase/retarget/release was performed.
+
+There are now only **three authorization-bound external gates**:
+
+1. **Real signed candidate gate** — owner-approved one-time digest-only GHCR Panel+Node publish, independent real Cosign verification, source/build provenance review, and independently pinned pair-manifest SHA256. Until this happens, registry evidence is synthetic/offline only and `RELEASE_PUBLISH=NO`.
+2. **Disposable two-host field gate** — owner-approved snapshot-backed IR/KH trial using the packaged reviewed Backhaul executor and the exact independently verified Node digest. Prove signed Panel↔Node control on public TLS443, dynamic Sanaei XHTTP path/port, FRP independence, reboot/reconnect, Replay persistence, Panel Fernet recovery, exact rollback and working provider restore/console. Until this happens, `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD`.
+3. **Final release gate** — review full final top-head→`main` diffs, enable the beginner install path only if field evidence passes, then explicitly approve merge/tag/release. Until that explicit owner decision, `MAIN_MERGE=NO`.
+
+**Closeout rule:** green CI, offline images, fake-Cosign tests, local digest equality and a mergeable Draft do NOT satisfy these three external gates. Conversely, no additional source feature is currently required to begin authorized qualification.
+
+`SOURCE_DEVELOPMENT=FROZEN` · `INSTALL_ALLOWED=NO` · `ACTIVATION_GATE=HOLD` · `RELEASE_PUBLISH=NO` · `MAIN_MERGE=NO` · `IR_KH_UNCHANGED=YES`.
+
 ## Final stacked-PR merge strategy — audited, NOT executed — 2026-10-21
 
 - U-OPTI [Draft #48](https://github.com/aghajani82/u-opti/pull/48) is the **single closeout head** stacked directly on Draft #46; GitHub currently reports it mergeable, while its status may be `unstable` only when the latest checks are still running. The branch history already contains the #28→#46 chain. Parallel #27's intended admin-overlay behavior was previously reconciled as already present in the final chain; do not merge #27 independently just to duplicate it.
