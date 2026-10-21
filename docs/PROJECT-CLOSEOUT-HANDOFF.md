@@ -5,6 +5,31 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## Owner authorization update — 2026-10-21
+
+The owner has now explicitly authorized **Gate 1 candidate publication**:
+one experimental, digest-only GHCR Panel+Node candidate may be published and
+independently verified. This is NOT authorization to deploy to production.
+
+The owner also authorized final merge/release **conditionally** if the project
+is genuinely complete. That condition is **not yet satisfied** because the
+required snapshot-backed two-host IR/KH field qualification has not run.
+Therefore:
+
+- `CANDIDATE_PUBLISH_AUTHORIZED=YES`
+- `FIELD_TRIAL_AUTHORIZED=NOT_YET_EXECUTED`
+- `MAIN_MERGE=HOLD_PENDING_FIELD_EVIDENCE`
+- `FINAL_RELEASE=HOLD_PENDING_FIELD_EVIDENCE`
+
+The currently connected GitHub automation can inspect/edit repositories and
+CI but does not expose creating Git tags or invoking `workflow_dispatch`.
+Do NOT weaken the reviewed publisher back to automatic push merely to bypass
+that tooling limitation. Candidate publication must use the existing manual
+reviewed workflow on an exact version tag/source SHA, or an authorized browser
+session capable of performing those UI actions. Once the real workflow has
+run, independently verify BOTH immutable digests and the pair-manifest before
+proceeding to the disposable two-host field gate.
+
 ## DEVELOPMENT FREEZE — SOURCE/CI CLOSED — 2026-10-21
 
 **This is the stop point for source development. Do not create new stages, menus,
