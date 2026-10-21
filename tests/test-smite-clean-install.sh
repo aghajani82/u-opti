@@ -100,7 +100,7 @@ grep -q 'smite-field-trial-candidate.json' "$ROOT/u-opti"
 grep -q 'smite-registry-pair-admission.py' "$ROOT/install.sh"
 grep -q 'smite-field-trial-candidate.json' "$ROOT/install.sh"
 [ "$(/usr/bin/sha256sum "$ROOT/modules/smite-field-trial-candidate.json" | awk '{print $1}')" = \
-  "7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986" ]
+  "d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f" ]
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/cosign" <<'PY_COSIGN'
@@ -137,8 +137,8 @@ unset SMITE_RC_BUNDLE_DIR SMITE_RC_SOURCE_SHA SMITE_RC_MANIFEST_SHA256
 smite_install_clean_rc_preflight panel-iran standard >"$TMP/signed-preflight.log"
 grep -q 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$TMP/signed-preflight.log"
 grep -q 'FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED' "$TMP/signed-preflight.log"
-[ "$SMITE_PANEL_IMAGE" = "ghcr.io/aghajani82/smite-panel@sha256:6cfaec4a961f1c03eb05c684b41c001ce73178ee20231517aafced1dc972aadb" ]
-[ "$SMITE_NODE_IMAGE" = "ghcr.io/aghajani82/smite-node@sha256:bb4992698fc637719a489ec6e9a8384a5c898e9afeb6cae16fcfc41a626b482c" ]
+[ "$SMITE_PANEL_IMAGE" = "ghcr.io/aghajani82/smite-panel@sha256:90b5c99af6066e0c94fd1232ecdcd77d24478b65953f4f33fad32d6fbe803f7e" ]
+[ "$SMITE_NODE_IMAGE" = "ghcr.io/aghajani82/smite-node@sha256:9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec" ]
 smite_install_pull_images true >"$TMP/signed-pull.log"
 grep -Fq "pull $SMITE_PANEL_IMAGE" "$TMP/docker-calls.log"
 grep -Fq "pull $SMITE_NODE_IMAGE" "$TMP/docker-calls.log"
