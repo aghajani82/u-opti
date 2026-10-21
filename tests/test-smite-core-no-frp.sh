@@ -31,7 +31,7 @@ services:
     volumes:
       - ./certs:/etc/smite-node/certs:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${NODE_API_PORT:-8888}/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${NODE_API_PORT:-8888}/api/agent/status')"]
 EOF_NODE
 smite_download_upstream() {
   case "$1" in
