@@ -161,10 +161,20 @@ smite_bh_management_menu() { echo BACKHAUL_OK; }
 smite_tw_menu() { echo UNIFIED_TUNNELS_OK; }
 smite_tw_choose_role() { echo ir; }
 twcc_menu() { echo READONLY_STATUS_OK; }
+
+# IR role must route the final top-level Gateway entry to Panel Gateway.
+printf 'SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
 menu="$(printf '1\n2\n3\n4\n5\n6\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
 for value in CORE_INSTALL_OK PANEL_GATEWAY_OK PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
     grep -Fq "$value" <<< "$menu"
 done
+! grep -Fq 'FOREIGN_GATEWAY_OK' <<< "$menu"
+
+# KH role must route the same Gateway entry to Foreign Gateway.
+printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
+kh_gateway="$(printf '2\n0\n' | docker_smite_management_menu)"
+grep -Fq 'FOREIGN_GATEWAY_OK' <<< "$kh_gateway"
+! grep -Fq 'PANEL_GATEWAY_OK' <<< "$kh_gateway"
 grep -Fq '1) Install Smite Components' <<< "$menu"
 grep -Fq '2) 443 Gateway (auto-detect Panel / Foreign)' <<< "$menu"
 grep -Fq '3) Tunnel Management (FRP / Backhaul / Rathole)' <<< "$menu"
