@@ -5,6 +5,13 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## Final stacked-PR merge strategy — audited, NOT executed — 2026-10-21
+
+- U-OPTI [Draft #48](https://github.com/aghajani82/u-opti/pull/48) is the **single closeout head** stacked directly on Draft #46; GitHub currently reports it mergeable, while its status may be `unstable` only when the latest checks are still running. The branch history already contains the #28→#46 chain. Parallel #27's intended admin-overlay behavior was previously reconciled as already present in the final chain; do not merge #27 independently just to duplicate it.
+- Smite [Draft #16](https://github.com/aghajani82/Smite/pull/16) is the **single security/release closeout head** stacked on #15 and contains the #1→#15 history. GitHub reports the current pair #15/#16 mergeable/clean.
+- **Do not merge the stacked PRs one by one.** After real field qualification and explicit owner approval, review the complete final Head→`main` diff, then retarget/use the final top PR as the consolidation vehicle (or an equivalent single reviewed squash if explicitly chosen at that time). No retarget, squash, PR closure or merge has been performed now.
+- Before the eventual merge, re-run exact-head CI, verify `main` has not advanced incompatibly, re-review the full consolidated diff, and preserve Issue #47/handoff as the release evidence trail.
+
 ## Source closeout — explicit Backhaul disposable-host executor implemented, field validation HOLD — 2026-10-21
 
 **This closes the last known Backhaul source/CI implementation gap without enabling the beginner Install menu or touching a VPS.**

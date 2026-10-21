@@ -87,6 +87,15 @@ Six changed files in U-OPTI #27 were compared to the newest U-OPTI chain:
 | Safe state mutation | **SOURCE/CI COMPLETE:** durable U-OPTI update/first-adoption journal, SIGKILL recovery, engine journal/rollback, drift refusal and signed prior-runtime recovery | Real VPS filesystem/reboot/snapshot behavior under owner-approved trial |
 | Beginner UX | **READY FOR FINAL FIELD VALIDATION:** simple existing menu remains unchanged; install button intentionally HOLD | Enable only after field evidence, then one IR→KH→Sanaei→port/path→tunnel→VERIFY flow; no new wizard |
 
+## Final consolidation audit — 2026-10-21
+
+Current top-of-stack relationships were re-checked directly through GitHub:
+
+- U-OPTI #48: base = `feature/smite-stage28-ingress-identity-recovery-20261019` (Draft #46 head), final closeout branch = `feature/uopti-smite-closeout-integration-20261019`; GitHub reports `mergeable=true`.
+- Smite #16: base = `feature/smite-simple-operator-ui-20261018` (Draft #15 head), final closeout branch = `feature/smite-strict-replay-store-admission-20261019`; GitHub reports `mergeable=true`.
+- These top branches contain their stacked ancestors in Git history. Therefore final release review should use **one consolidated top-head→main diff per repository**, not a sequence of dozens of overlapping merges.
+- No base ref was retargeted and no PR was merged/closed/rebased during this audit. The eventual retarget/full-diff review is an **owner-authorized release action after field evidence**, not a source-development TODO.
+
 ## Branch merge/risk rules
 
 1. Do NOT merge individual stacked heads directly into `main` in arbitrary order. They include their parents; overlapping PR #27 must be reconciled by blob/change review.
