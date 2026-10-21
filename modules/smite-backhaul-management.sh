@@ -260,17 +260,24 @@ docker_smite_management_menu() {
         echo "======================================"
         echo "          Smite Management"
         echo "======================================"
-        echo "1) Private Network Wizard"
+        echo "1) Install Smite Components"
         echo "2) Tunnel Management (FRP / Backhaul / Rathole)"
         echo "3) Status & Diagnostics"
-        echo "4) Advanced & Legacy Tools"
-        echo "5) Independent Engines (Backhaul review)"
+        echo "4) Private Network Wizard"
+        echo "5) Advanced & Legacy Tools"
+        echo "6) Independent Engines (Backhaul review)"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-6]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
-            1) docker_smite_open_setup_wizard ;;
+            1)
+                if declare -F show_smite_install_menu >/dev/null 2>&1; then
+                    show_smite_install_menu
+                else
+                    echo "HOLD: Smite installer module is missing."
+                fi
+                ;;
             2) if declare -F smite_tw_menu >/dev/null 2>&1; then
                    smite_tw_menu
                else
@@ -283,8 +290,9 @@ docker_smite_management_menu() {
                else
                    echo "Status module missing; update U-OPTI from main first."
                fi ;;
-            4) docker_smite_advanced_menu ;;
-            5)
+            4) docker_smite_open_setup_wizard ;;
+            5) docker_smite_advanced_menu ;;
+            6)
                 if [ -s "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh" ]; then
                     # Separate from FRP-dependent legacy Backhaul sidecar.
                     source "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh"
