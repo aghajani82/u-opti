@@ -59,7 +59,8 @@ def local_state(engine: str, node: Path) -> dict[str, str]:
 
 
 def report(engine: str, node: Path, *, runtime: dict | None = None,
-           min_bytes: int = host.MIN_FREE_BYTES) -> dict[str, str]:
+           min_bytes: int = host.MIN_FREE_BYTES,
+           expected_node_image: str | None = None) -> dict[str, str]:
     if engine not in ENGINES:
         raise Hold("UNKNOWN_ENGINE")
     other = "frp" if engine == "backhaul" else "backhaul"
@@ -84,7 +85,10 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "ACTIVATION_GATE": "HOLD",
     }
     try:
-        evidence = host.audit(node, runtime=runtime, min_bytes=min_bytes)
+        evidence = host.audit(
+            node, runtime=runtime, min_bytes=min_bytes,
+            expected_node_image=expected_node_image,
+        )
         output["NODE_ROLE"] = evidence.get("NODE_ROLE", "UNVERIFIED")
         output["CORE_PROFILE"] = evidence.get("LOCAL_CORE", "UNVERIFIED")
         output["NODE_CONTAINER"] = evidence.get("DOCKER_NODE", "UNVERIFIED")
@@ -97,7 +101,7 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
                 else "HOST_PREFLIGHT_INCOMPLETE"
             )
             return output
-        if evidence.get("IMAGE_REFERENCE_CLASS") != "REVIEWED_DIGEST_UNATTESTED":
+        if evidence.get("IMAGE_REFERENCE_CLASS") != "OPERATOR_PINNED_DIGEST_UNATTESTED":
             output["REASON"] = "NODE_IMAGE_NOT_DIGEST_PINNED"
             return output
         original = host._local_file(
@@ -144,9 +148,16 @@ def main() -> int:
         description="Backhaul/FRP standalone host admission, ALWAYS read-only HOLD")
     p.add_argument("--engine", choices=ENGINES, required=True)
     p.add_argument("--node-dir", type=Path, default=Path("/opt/smite-node"))
+    p.add_argument(
+        "--expected-node-image",
+        help="Exact independently reviewed ghcr.io/aghajani82/smite-node@sha256:... ref",
+    )
     p.add_argument("--format", choices=("text", "json"), default="text")
     args = p.parse_args()
-    result = report(args.engine, args.node_dir)
+    result = report(
+        args.engine, args.node_dir,
+        expected_node_image=args.expected_node_image,
+    )
     if args.format == "json":
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     else:
