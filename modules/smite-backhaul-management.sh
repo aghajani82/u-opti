@@ -261,13 +261,14 @@ docker_smite_management_menu() {
         echo "          Smite Management"
         echo "======================================"
         echo "1) Install Smite Components"
-        echo "2) Tunnel Management (FRP / Backhaul / Rathole)"
-        echo "3) Status & Diagnostics"
-        echo "4) Private Network Wizard"
-        echo "5) Advanced & Legacy Tools"
-        echo "6) Independent Engines (Backhaul review)"
+        echo "2) 443 Gateway (auto-detect Panel / Foreign)"
+        echo "3) Tunnel Management (FRP / Backhaul / Rathole)"
+        echo "4) Status & Diagnostics"
+        echo "5) Private Network Wizard"
+        echo "6) Advanced & Legacy Tools"
+        echo "7) Independent Engines (Backhaul review)"
         echo "0) Back"
-        read -rp "Choose [0-6]: " choice || return
+        read -rp "Choose [0-7]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
@@ -278,21 +279,39 @@ docker_smite_management_menu() {
                     echo "HOLD: Smite installer module is missing."
                 fi
                 ;;
-            2) if declare -F smite_tw_menu >/dev/null 2>&1; then
+            2)
+                role="$(smite_bh_role 2>/dev/null || true)"
+                if [ "$role" = "ir" ]; then
+                    if declare -F show_smite_gateway_menu >/dev/null 2>&1; then
+                        show_smite_gateway_menu
+                    else
+                        echo "HOLD: Smite Panel gateway module is missing."
+                    fi
+                elif [ "$role" = "kh" ]; then
+                    if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
+                        show_smite_foreign_gateway_menu
+                    else
+                        echo "HOLD: Smite Foreign gateway module is missing."
+                    fi
+                else
+                    echo "HOLD: Install Smite Core first so the gateway role can be detected."
+                fi
+                ;;
+            3) if declare -F smite_tw_menu >/dev/null 2>&1; then
                    smite_tw_menu
                else
                    echo "Tunnel Wizard missing; update U-OPTI from main first."
                fi ;;
-            3) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
+            4) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
                   declare -F twcc_menu >/dev/null 2>&1; then
                    role="$(smite_tw_choose_role)" || continue
                    twcc_menu "$role"
                else
                    echo "Status module missing; update U-OPTI from main first."
                fi ;;
-            4) docker_smite_open_setup_wizard ;;
-            5) docker_smite_advanced_menu ;;
-            6)
+            5) docker_smite_open_setup_wizard ;;
+            6) docker_smite_advanced_menu ;;
+            7)
                 if [ -s "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh" ]; then
                     # Separate from FRP-dependent legacy Backhaul sidecar.
                     source "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh"
