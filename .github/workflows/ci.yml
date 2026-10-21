@@ -496,6 +496,10 @@ jobs:
         shell: bash
         run: bash tests/test-smite-frp-release-upgrade.sh
 
+      - name: Verify signed Field Trial bundle bootstrap for legacy updates
+        shell: bash
+        run: bash tests/test-smite-signed-field-trial-release-upgrade.sh
+
       - name: Test experimental Backhaul Standard renderer
         shell: bash
         run: |
