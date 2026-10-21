@@ -554,7 +554,8 @@ def enable_panel_field_trial(state: dict[str, str] | None = None) -> None:
     print("PRODUCTION_ACTIVATION=NO")
 
 
-def _identity_record(path: Path = IDENTITY_FILE) -> tuple[str, str]:
+def _identity_record(path: Path | None = None) -> tuple[str, str]:
+    path = IDENTITY_FILE if path is None else path
     _verify_private_dir(path.parent)
     try:
         doc = json.loads(_regular(path, mode=0o600, limit=4096))
