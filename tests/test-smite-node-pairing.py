@@ -5,9 +5,12 @@ import io
 import json
 import os
 from pathlib import Path
+import sqlite3
 import stat
 import tempfile
 import unittest
+import hashlib
+import hmac
 from unittest.mock import patch, Mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,6 +140,114 @@ class PreviewTests(unittest.TestCase):
                     self.assertEqual(rc, 2)
                     network.assert_not_called()
 
+    def test_field_trial_env_update_and_exact_pairing_location(self):
+        raw = (
+            b"SMITE_NODE_REGISTRATION_MODE=signed\n"
+            b"SMITE_PANEL_AGENT_AUTH_MODE=signed\n"
+            b"SMITE_NODE_PAIRING_PREVIEW_ENABLED=false\n"
+        )
+        updated = pairing._env_update(raw, {
+            "SMITE_NODE_PAIRING_PREVIEW_ENABLED": "true",
+            "SMITE_NODE_PAIRING_MASTER_KEY": "A" * 43 + "=",
+            "SMITE_NODE_PAIRING_INGRESS_TOKEN": "b" * 64,
+        })
+        self.assertEqual(updated.count(b"SMITE_NODE_PAIRING_PREVIEW_ENABLED="), 1)
+        self.assertIn(b"SMITE_NODE_PAIRING_PREVIEW_ENABLED=true", updated)
+        self.assertIn(b"SMITE_NODE_PAIRING_MASTER_KEY=", updated)
+        self.assertIn(b"SMITE_NODE_PAIRING_INGRESS_TOKEN=", updated)
+
+        location = pairing._render_pairing_location()
+        self.assertIn("location = /api/node-pairing/redeem", location)
+        self.assertIn("include /etc/nginx/u-opti-smite-pairing-secret.conf;", location)
+        self.assertIn("proxy_pass http://127.0.0.1:8000;", location)
+        self.assertIn("access_log off;", location)
+        self.assertNotIn("node_secret", location)
+        self.assertNotIn("pairing_code", location)
+
+    def test_private_pairing_secret_store_never_prints_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            parent = root / "smite"
+            parent.mkdir(mode=0o700)
+            private = parent / "pairing"
+            secret_file = private / "panel-pairing-secrets.json"
+            with (
+                patch.object(pairing, "PAIRING_PRIVATE_DIR", private),
+                patch.object(pairing, "PAIRING_SECRETS", secret_file),
+                patch("sys.stdout", io.StringIO()) as display,
+            ):
+                first = pairing._pairing_secrets()
+                second = pairing._pairing_secrets()
+            self.assertEqual(first, second)
+            self.assertEqual(display.getvalue(), "")
+            self.assertEqual(stat.S_IMODE(secret_file.stat().st_mode), 0o600)
+            self.assertRegex(first[0], r"^[A-Za-z0-9_-]{43}=$")
+            self.assertRegex(first[1], r"^[a-f0-9]{64}$")
+
+    def test_replay_marker_db_and_key_binding_must_match_pairing_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            identity_dir = root / "identity"
+            replay_dir = root / "replay"
+            identity_dir.mkdir(mode=0o700)
+            replay_dir.mkdir(mode=0o700)
+            identity = identity_dir / "node-identity.json"
+            marker = identity_dir / "replay-enrollment.json"
+            database = replay_dir / "agent-replay.sqlite3"
+            node_id = "node-ir-fieldtrial-0001"
+            secret = "d" * 64
+
+            identity.write_text(json.dumps({
+                "version": 1, "node_id": node_id, "node_secret": secret,
+            }))
+            identity.chmod(0o600)
+            binding = hmac.new(
+                secret.encode("ascii"),
+                b"smite-replay-key-binding-v1:" + node_id.encode("ascii"),
+                hashlib.sha256,
+            ).hexdigest()
+            marker.write_text(json.dumps({
+                "schema": 1, "node_id": node_id,
+                "replay_database": pairing.CONTAINER_REPLAY,
+                "status": "ENROLLMENT_STARTED",
+                "key_binding": binding,
+            }))
+            marker.chmod(0o600)
+            with sqlite3.connect(database) as db:
+                db.execute(
+                    "CREATE TABLE agent_nonces("
+                    "node_id TEXT NOT NULL, nonce TEXT NOT NULL, "
+                    "expires_at INTEGER NOT NULL, PRIMARY KEY(node_id,nonce))"
+                )
+                db.execute(
+                    "CREATE TABLE replay_store_identity(node_id TEXT NOT NULL PRIMARY KEY)"
+                )
+                db.execute("INSERT INTO replay_store_identity(node_id) VALUES (?)", (node_id,))
+                db.execute("PRAGMA user_version=1")
+            database.chmod(0o600)
+
+            with (
+                patch.object(pairing, "IDENTITY_DIR", identity_dir),
+                patch.object(pairing, "IDENTITY_FILE", identity),
+                patch.object(pairing, "REPLAY_DIR", replay_dir),
+                patch.object(pairing, "REPLAY_DB", database),
+            ):
+                self.assertTrue(pairing._replay_artifacts_valid())
+                changed = json.loads(marker.read_text())
+                changed["key_binding"] = "0" * 64
+                marker.write_text(json.dumps(changed))
+                marker.chmod(0o600)
+                with self.assertRaises(pairing.WizardHold):
+                    pairing._replay_artifacts_valid()
+
+    def test_live_field_trial_actions_remain_explicitly_gated(self):
+        with patch.object(pairing.os, "geteuid", return_value=0):
+            with patch.dict(os.environ, {"UOPTI_SMITE_PAIRING_FIELD_TRIAL": ""}):
+                with self.assertRaises(pairing.WizardHold):
+                    pairing._field_trial_gate()
+            with patch.dict(os.environ, {"UOPTI_SMITE_PAIRING_FIELD_TRIAL": "YES"}):
+                pairing._field_trial_gate()
+
     def test_packaging_and_cli_no_existing_wizard_edits(self):
         wrapper = (ROOT / "modules/smite-node-pairing-wizard.sh").read_text()
         install = (ROOT / "install.sh").read_text()
@@ -148,8 +259,11 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(launcher.count('["' + name + '"]="$TEMP_DIR/' + name + '"'), 1)
         self.assertIn('if [ "${1:-}" = "--smite-pairing" ]', launcher)
         self.assertIn("smite_node_pairing_menu()", wrapper)
-        self.assertNotIn("docker compose up", wrapper)
-        self.assertNotIn("systemctl restart", wrapper)
+        self.assertIn("Enable secure Panel pairing on HTTPS/443 (IR)", wrapper)
+        self.assertIn("Activate signed IR Node runtime", wrapper)
+        self.assertIn("UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES", wrapper)
+        self.assertNotIn("node_secret", wrapper)
+        self.assertNotIn("pairing_code", wrapper)
 
 
 if __name__ == "__main__":
