@@ -72,6 +72,8 @@ docker_3xui_select_instance() {
         echo
         echo "Select Instance [0-${#INSTANCE_IDS[@]}]:"
         read -r CHOICE
+        CHOICE="${CHOICE#"${CHOICE%%[![:space:]]*}"}"
+        CHOICE="${CHOICE%"${CHOICE##*[![:space:]]}"}"
 
         if [ "$CHOICE" = "0" ]; then
             return 1
@@ -227,6 +229,8 @@ docker_3xui_select_web_base_path() {
 
         echo "Select Web Base Path option [0-2]:"
         read -r CHOICE
+        CHOICE="${CHOICE#"${CHOICE%%[![:space:]]*}"}"
+        CHOICE="${CHOICE%"${CHOICE##*[![:space:]]}"}"
 
         case "$CHOICE" in
             1)
@@ -2496,6 +2500,8 @@ docker_3xui_restore() {
     echo
 
     read -rp "Please select a backup [0-${#VALID_BACKUPS[@]}]: " RESTORE_CHOICE
+    RESTORE_CHOICE="${RESTORE_CHOICE#"${RESTORE_CHOICE%%[![:space:]]*}"}"
+    RESTORE_CHOICE="${RESTORE_CHOICE%"${RESTORE_CHOICE##*[![:space:]]}"}"
 
     if [ "$RESTORE_CHOICE" = "0" ]; then
         echo
@@ -2961,6 +2967,8 @@ docker_3xui_uninstall() {
     echo
 
     read -rp "Please enter your selection [0-2]: " UNINSTALL_CHOICE
+    UNINSTALL_CHOICE="${UNINSTALL_CHOICE#"${UNINSTALL_CHOICE%%[![:space:]]*}"}"
+    UNINSTALL_CHOICE="${UNINSTALL_CHOICE%"${UNINSTALL_CHOICE##*[![:space:]]}"}"
 
     case "$UNINSTALL_CHOICE" in
         1|2)
@@ -3478,6 +3486,8 @@ docker_3xui_nginx_ssl_management() {
         echo
 
         read -r -p "Please enter your selection [0-3]: " NGINX_MENU_CHOICE
+        NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE#"${NGINX_MENU_CHOICE%%[![:space:]]*}"}"
+        NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE%"${NGINX_MENU_CHOICE##*[![:space:]]}"}"
 
         case "$NGINX_MENU_CHOICE" in
             1)
@@ -3572,6 +3582,8 @@ show_docker_3xui_menu() {
         echo
 
         read -rp "Please enter your selection [0-13]: " DOCKER_3XUI_CHOICE
+        DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
+        DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
 
         case "$DOCKER_3XUI_CHOICE" in
             1) docker_3xui_install ;;

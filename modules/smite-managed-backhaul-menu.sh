@@ -50,6 +50,8 @@ smite_managed_bh_menu() {
         echo "0) Back"
         echo
         read -rp "Choose [0-5]: " choice || return 0
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_managed_bh_check status || : ;;
             2)

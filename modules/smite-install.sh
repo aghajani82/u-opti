@@ -850,6 +850,8 @@ smite_install_panel_iran() {
         echo "2) Private Network"
         echo
         read -rp "Please enter your selection [1-2]: " connection_choice
+        connection_choice="${connection_choice#"${connection_choice%%[![:space:]]*}"}"
+        connection_choice="${connection_choice%"${connection_choice##*[![:space:]]}"}"
     fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
@@ -1167,6 +1169,8 @@ smite_install_foreign_node() {
         echo "2) Private Network"
         echo
         read -rp "Please enter your selection [1-2]: " connection_choice
+        connection_choice="${connection_choice#"${connection_choice%%[![:space:]]*}"}"
+        connection_choice="${connection_choice%"${connection_choice##*[![:space:]]}"}"
     fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
@@ -1491,6 +1495,8 @@ show_smite_install_menu() {
         echo
 
         read -rp "Please enter your selection [0-4]: " smite_install_choice
+        smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
+        smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
             1) smite_install_panel_iran ;;
             2) smite_install_foreign_node ;;

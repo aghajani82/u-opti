@@ -29,6 +29,8 @@ smite_managed_frp_menu() {
         echo "0) Back"
         echo
         read -rp "Choose [0-3]: " selection || return 0
+        selection="${selection#"${selection%%[![:space:]]*}"}"
+        selection="${selection%"${selection##*[![:space:]]}"}"
         case "$selection" in
             1) smite_managed_frp_check status || : ;;
             2)

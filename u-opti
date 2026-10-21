@@ -276,6 +276,8 @@ while true; do
                 echo
 
                 read -rp "Please enter your selection [0-6]: " opt_choice
+                opt_choice="${opt_choice#"${opt_choice%%[![:space:]]*}"}"
+                opt_choice="${opt_choice%"${opt_choice##*[![:space:]]}"}"
 
                 case "$opt_choice" in
 
@@ -332,6 +334,8 @@ while true; do
                 echo
 
                 read -rp "Please enter your selection [0-3]: " security_choice
+                security_choice="${security_choice#"${security_choice%%[![:space:]]*}"}"
+                security_choice="${security_choice%"${security_choice##*[![:space:]]}"}"
 
                 case "$security_choice" in
 

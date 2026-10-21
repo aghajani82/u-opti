@@ -210,6 +210,8 @@ smite_bh_management_menu() {
         echo "5) Discard UNUSED candidate ID"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_bh_status ;;
             2) role="$(smite_bh_role)" && smite_bh_preflight "$role" ;;
@@ -239,6 +241,8 @@ docker_smite_advanced_menu() {
         echo "3) Legacy Backhaul offline preparation (NOT installer)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_frp_standard_guide ;;
             2) smite_frp_wizard_menu ;;
@@ -263,6 +267,8 @@ docker_smite_management_menu() {
         echo "5) Independent Engines (Backhaul review)"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) if declare -F smite_tw_menu >/dev/null 2>&1; then

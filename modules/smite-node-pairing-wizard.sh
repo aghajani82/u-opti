@@ -32,6 +32,8 @@ smite_node_pairing_menu() {
         echo "0) Back"
         echo
         read -rp "Choose [0-10]: " choice || return 0
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1)
                 python3 -B "$helper" --status || :
