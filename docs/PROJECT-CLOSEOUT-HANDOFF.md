@@ -5,6 +5,26 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
+## GATE 1 CLOSED — REAL SIGNED GHCR CANDIDATE VERIFIED — 2026-10-21
+
+The owner-authorized registry qualification is complete.
+
+- Smite pre-release: `v2.0.0-rc.0`, exact reviewed source `97bc67be1b0e16763935cb3383bcefca70fa5b2d`.
+- Publisher run `39553219864`: **SUCCESS**.
+- Panel digest: `ghcr.io/aghajani82/smite-panel@sha256:6cfaec4a961f1c03eb05c684b41c001ce73178ee20231517aafced1dc972aadb`.
+- Node digest: `ghcr.io/aghajani82/smite-node@sha256:bb4992698fc637719a489ec6e9a8384a5c898e9afeb6cae16fcfc41a626b482c`.
+- Independently downloaded `registry-pair.json` SHA256: `7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986`.
+- GitHub artifact ZIP digest: `848090b6ab87bc131e7dbbbddfba51af4c5258cbe15755c8baf9654701397798`.
+- Pair manifest remains inert: `activation_allowed=false`, `release_approved=false`.
+- Independent fresh-runner verification `39554813412`: **SUCCESS** with `packages:read` only, no signing OIDC and no registry write.
+- Independent verifier log proved BOTH immutable image signatures, exact reviewed source/tag and exact publisher artifact/hash.
+- Real Cosign v3 qualification exposed and fixed a strict parser compatibility defect. U-OPTI verifier SHA `8353684675b3cf6740dd3c8f50f60caa15de6e27` accepts only the legacy Cosign signature type and the current official `https://sigstore.dev/cosign/sign/v1` type while continuing to reject unrelated attestation types. CI `39554654985` = **16/16 SUCCESS**.
+- Smite closeout stack was consolidated once into `main` at merge commit `85372a07426172d0c6e5128d436dbfeeed7cc699`; candidate tag/signatures remain bound to the original reviewed source SHA above.
+
+**Project state after Gate 1:** `REAL_SIGNED_CANDIDATE=PASS`. The only substantive qualification gate before U-OPTI main merge/final release is the owner-authorized snapshot-backed disposable IR/KH field trial and rollback/recovery acceptance. Do not add new source scope unless that field trial exposes a concrete bug.
+
+`FIELD_TRIAL=NEXT` · `U_OPTI_MAIN_MERGE=HOLD_PENDING_FIELD` · `PRODUCTION_ACTIVATION=HOLD_PENDING_FIELD`.
+
 ## Exact authorized GHCR candidate parameters — 2026-10-21
 
 Use ONLY these reviewed values for Gate 1:
