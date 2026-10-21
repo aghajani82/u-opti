@@ -164,7 +164,7 @@ fi
 u_opti_ensure_signed_field_trial_bundle() {
     local verifier="smite-registry-pair-admission.py"
     local manifest="smite-field-trial-candidate.json"
-    local expected_manifest_sha="7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986"
+    local expected_manifest_sha="d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f"
     local tmp_dir stage_dir actual_manifest complete=true
 
     if [ ! -s "$MODULES_PATH/$verifier" ] ||
