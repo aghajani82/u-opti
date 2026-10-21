@@ -153,6 +153,7 @@ class SharedHostAdmission(unittest.TestCase):
         self.runtime["Config"]["Image"] = "smite-node:stage15-local"
         out = self.report("frp")
         self.assertEqual(out["REASON"], "LOCAL_TEST_IMAGE_CANNOT_SATISFY_PIN")
+        self.runtime["Config"]["Image"] = IMAGE
         self.runtime["HostConfig"]["PortBindings"] = {"8888/tcp": [
             {"HostPort": "8888", "HostIp": "0.0.0.0"}]}
         out = self.report("backhaul")
