@@ -151,6 +151,7 @@ cmp -s "$tmp/node-before" "$SMITE_BH_OVERLAY_ROOT/node/core_adapters.py"
 # The four simulated KH Backhaul processes/configs remain untouched.
 test "$(pgrep -xc backhaul)" = 4
 clear() { :; }
+show_smite_install_menu() { echo CORE_INSTALL_OK; }
 docker_smite_open_setup_wizard() { echo PRIVATE_OK; }
 docker_smite_frp_standard_guide() { echo FRP_GUIDE_OK; }
 smite_frp_wizard_menu() { echo FRP_WIZARD_OK; }
@@ -158,10 +159,13 @@ smite_bh_management_menu() { echo BACKHAUL_OK; }
 smite_tw_menu() { echo UNIFIED_TUNNELS_OK; }
 smite_tw_choose_role() { echo ir; }
 twcc_menu() { echo READONLY_STATUS_OK; }
-menu="$(printf '1\n2\n3\n4\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
-for value in PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
+menu="$(printf '1\n2\n3\n4\n5\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
+for value in CORE_INSTALL_OK PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
     grep -Fq "$value" <<< "$menu"
 done
-grep -Fq '4) Advanced & Legacy Tools' <<< "$menu"
-echo 'Backhaul offline candidates are independent of FRP and fixed Xray inbound; safe menus preserved: PASS'
+grep -Fq '1) Install Smite Components' <<< "$menu"
+grep -Fq '2) Tunnel Management (FRP / Backhaul / Rathole)' <<< "$menu"
+grep -Fq '4) Private Network Wizard' <<< "$menu"
+grep -Fq '5) Advanced & Legacy Tools' <<< "$menu"
+echo 'Backhaul offline candidates are independent of FRP and fixed Xray inbound; Core install stays primary: PASS'
 
