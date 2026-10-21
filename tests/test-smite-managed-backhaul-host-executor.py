@@ -72,6 +72,16 @@ class HostExecutor(unittest.TestCase):
         self.lock=self.root/"engine.lock"
         self.paths=exe.Paths(node=self.node,staging=self.stages,state=self.state,
                              lock=self.lock,binary=self.binary)
+        # CI runner is intentionally non-root. Production code keeps the
+        # root-owner checks; only these temp fixtures skip the UID==0 branch.
+        for host_module in (exe.admission.host, exe.plan.admission.host):
+            real_file=host_module._local_file
+            patcher=patch.object(
+                host_module, "_local_file",
+                side_effect=lambda path, *, max_bytes, require_root=False, _real=real_file:
+                    _real(path, max_bytes=max_bytes, require_root=False),
+            )
+            patcher.start(); self.addCleanup(patcher.stop)
         self.runtime={
             "Name":"/smite-node","State":{"Running":True},
             "Config":{"Image":IMAGE,"Env":[]},
