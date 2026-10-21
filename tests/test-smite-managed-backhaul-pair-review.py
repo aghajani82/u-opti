@@ -16,7 +16,7 @@ spec.loader.exec_module(pair)
 
 
 def report(role, *, status="PASS_LOCAL_ONLY_INCOMPLETE",
-           tunnels="ZERO", image="REVIEWED_DIGEST_UNATTESTED"):
+           tunnels="ZERO", image="OPERATOR_PINNED_DIGEST_UNATTESTED"):
     return {
         "NODE_ROLE":role,
         "LOCAL_CORE":"MANAGED_STRICT",
@@ -126,6 +126,18 @@ class PairReview(unittest.TestCase):
         self.irpath.write_text("x"*9000)
         with self.assertRaisesRegex(pair.Hold,"INVALID_REPORT_FILE"):
             pair.read_report(self.irpath)
+
+
+    def test_legacy_or_local_image_class_cannot_satisfy_final_pair_review(self):
+        for image_class in ("REVIEWED_DIGEST_UNATTESTED", "LOCAL_TAG_UNATTESTED"):
+            with self.subTest(image_class=image_class):
+                self.ir = report("IR", image=image_class)
+                self.save()
+                result = pair.compare(
+                    pair.read_report(self.irpath), pair.read_report(self.khpath)
+                )
+                self.assertEqual(result["IR_LOCAL_PREFLIGHT"], "HOLD")
+                self.assertEqual(result["HOST_INSTALL_AUTHORIZED"], "NO")
 
     def test_dynamic_image_tag_not_considered_reviewed_attestation(self):
         self.ir["IMAGE_REFERENCE_CLASS"]="LOCAL_TAG_UNATTESTED"
