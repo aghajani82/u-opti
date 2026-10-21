@@ -129,17 +129,18 @@ smite_install_clean_rc_preflight() {
         echo "HOLD: Existing Smite installation detected. Clean RC is not an upgrader." >&2
         return 1
     fi
-    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
-       [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
-       [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
-        echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
-        return 1
-    fi
     if smite_install_clean_rc_signed_registry_selected; then
         smite_install_field_trial_verify_candidate || return 1
         echo "RC_IMAGE_PROVENANCE=SIGSTORE_VERIFIED_REGISTRY_DIGESTS"
         echo "RC_SIGNED_AUTH=PENDING_SECURE_PAIRING"
         return 0
+    fi
+
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
+       [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
+       [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
+        echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
+        return 1
     fi
 
     helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
