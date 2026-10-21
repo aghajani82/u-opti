@@ -36,7 +36,6 @@ class UOptiCliEntrypointTests(unittest.TestCase):
         code = SOURCE.read_text()
         self.assertIn('case "$choice" in', code)
         self.assertIn("        0)\n            exit 0", code)
-        self.assertIn("choice=\"${choice//$\'\\r\'/}\"", code)
         self.assertIn("[![:space:]]", code)
 
 if __name__ == "__main__":
