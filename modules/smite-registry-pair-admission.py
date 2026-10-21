@@ -29,9 +29,18 @@ class AdmissionHold(ValueError):
     pass
 
 def _signed_payload_match(result: object, *, digest: str, role: str, source: str) -> bool:
-    if not isinstance(result, list) or not result:
+    # Cosign JSON output may be either one Simple-Signing object or a list
+    # of such objects. Normalize only those two shapes; everything else
+    # remains fail-closed.
+    if isinstance(result, dict):
+        records = [result]
+    elif isinstance(result, list):
+        records = result
+    else:
         return False
-    for record in result:
+    if not records:
+        return False
+    for record in records:
         if not isinstance(record, dict):
             continue
         critical = record.get("critical", record.get("Critical"))

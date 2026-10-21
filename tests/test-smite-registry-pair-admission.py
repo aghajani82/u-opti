@@ -99,6 +99,12 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
                   "optional": {"smite_source_sha": SOURCE, "smite_role": "panel"}}]
         self.assertTrue(gate._signed_payload_match(
             valid, digest=PANEL, role="panel", source=SOURCE))
+        self.assertTrue(gate._signed_payload_match(
+            valid[0], digest=PANEL, role="panel", source=SOURCE))
+        self.assertFalse(gate._signed_payload_match(
+            {}, digest=PANEL, role="panel", source=SOURCE))
+        self.assertFalse(gate._signed_payload_match(
+            "not-json-records", digest=PANEL, role="panel", source=SOURCE))
         for invalid in ("attestation", "", None):
             bad = json.loads(json.dumps(valid))
             bad[0]["critical"]["type"] = invalid
