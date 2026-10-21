@@ -164,9 +164,9 @@ class OperatorControl(unittest.TestCase):
             self.assertNotIn(text, script)
             self.assertNotIn(text, controller)
         parent = (ROOT / "modules/smite-backhaul-management.sh").read_text()
-        self.assertIn('5) Independent Engines (Backhaul review)', parent)
+        self.assertIn('6) Independent Engines (Backhaul review)', parent)
         self.assertIn('smite_managed_bh_menu', parent)
-        self.assertIn('4) docker_smite_advanced_menu', parent)
+        self.assertIn('5) docker_smite_advanced_menu', parent)
 
 
 if __name__ == "__main__":
