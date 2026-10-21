@@ -93,6 +93,111 @@ if smite_install_clean_rc_preflight foreign standard >/dev/null 2>&1; then
     echo "FAIL: accepted wrong expected manifest SHA" >&2; exit 1
 fi
 
+# Signed-registry Field Trial: exact vendored manifest + real admission helper,
+# with Cosign mocked only inside this isolated regression.
+grep -q 'smite-registry-pair-admission.py' "$ROOT/u-opti"
+grep -q 'smite-field-trial-candidate.json' "$ROOT/u-opti"
+grep -q 'smite-registry-pair-admission.py' "$ROOT/install.sh"
+grep -q 'smite-field-trial-candidate.json' "$ROOT/install.sh"
+[ "$(/usr/bin/sha256sum "$ROOT/modules/smite-field-trial-candidate.json" | awk '{print $1}')" = \
+  "7044e417e6a6cb2b87dfd0271cec70dcf23cf01d47412a3f604fed8130c30986" ]
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/cosign" <<'PY_COSIGN'
+#!/usr/bin/env python3
+import json, sys
+args=sys.argv[1:]
+ref=args[-1]
+role="panel" if "smite-panel@" in ref else "node"
+digest=ref.split("@",1)[1]
+source=next(x.split("=",1)[1] for x in args if x.startswith("smite_source_sha="))
+print(json.dumps([{
+    "critical":{"type":"cosign container image signature",
+                "image":{"docker-manifest-digest":digest}},
+    "optional":{"smite_source_sha":source,"smite_role":role}
+}]))
+PY_COSIGN
+chmod 0700 "$TMP/bin/cosign"
+OLD_PATH="$PATH"
+PATH="$TMP/bin:$PATH"
+sha256sum() {
+    if [ "$1" = "$TMP/bin/cosign" ]; then
+        printf '%s  %s\n' "$SMITE_FIELD_TRIAL_COSIGN_SHA256" "$1"
+    else
+        /usr/bin/sha256sum "$@"
+    fi
+}
+SMITE_RC_SIGNED_REGISTRY=1
+SMITE_FIELD_TRIAL_APPROVED=YES
+MOCK_WRONG_PANEL_ID=0
+: > "$TMP/docker-calls.log"
+smite_install_clean_rc_preflight panel-iran standard >"$TMP/signed-preflight.log"
+grep -q 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$TMP/signed-preflight.log"
+grep -q 'FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED' "$TMP/signed-preflight.log"
+[ "$SMITE_PANEL_IMAGE" = "ghcr.io/aghajani82/smite-panel@sha256:6cfaec4a961f1c03eb05c684b41c001ce73178ee20231517aafced1dc972aadb" ]
+[ "$SMITE_NODE_IMAGE" = "ghcr.io/aghajani82/smite-node@sha256:bb4992698fc637719a489ec6e9a8384a5c898e9afeb6cae16fcfc41a626b482c" ]
+smite_install_pull_images true >"$TMP/signed-pull.log"
+grep -Fq "pull $SMITE_PANEL_IMAGE" "$TMP/docker-calls.log"
+grep -Fq "pull $SMITE_NODE_IMAGE" "$TMP/docker-calls.log"
+! grep -q '^load: > "$TMP/docker-calls.log"
+smite_install_pull_images false >/dev/null
+grep -q '^pull ghcr.io/zzedix/smite-node' "$TMP/docker-calls.log"
+smite_install_apply_compatibility >/dev/null
+[ "$(wc -l < "$TMP/overlay-calls")" = 3 ]
+# Exercise the real interactive selection flow with all side-effectful steps
+# replaced by inert functions. A 3/4-line input must reach confirmation:
+# there must be NO connection-mode question in the clean RC profile.
+SMITE_INSTALL_PROFILE=clean-rc
+SMITE_FRP_TRIAL_ONLY=0
+smite_install_require_tools() { :; }
+smite_install_ensure_docker() { :; }
+smite_install_validate_domain() { return 0; }
+smite_install_validate_name() { return 0; }
+smite_install_pause() { :; }
+clear() { :; }
+smite_install_clean_rc_preflight() {
+    echo "$1:$2" >> "$TMP/mode-preflight.log"
+    return 1  # Stop before any directories, Docker, or network calls.
+}
+printf 'ir.example.com\nnode-ir\ny\n' |
+    smite_install_panel_iran >"$TMP/ir-selection.log" 2>&1
+grep -qx 'panel-iran:standard' "$TMP/mode-preflight.log"
+grep -q 'Connection mode: Standard (automatic for clean install)' "$TMP/ir-selection.log"
+grep -q 'Smite profile: clean-rc (unpublished preview)' "$TMP/ir-selection.log"
+grep -q 'PREVIEW ONLY:' "$TMP/ir-selection.log"
+printf 'ir.example.com\nkh.example.com\nnode-kh\ny\n' |
+    smite_install_foreign_node >"$TMP/kh-selection.log" 2>&1
+grep -qx 'foreign:standard' "$TMP/mode-preflight.log"
+grep -q 'Connection mode: Standard / HTTPS (automatic for clean install)' "$TMP/kh-selection.log"
+grep -q 'PREVIEW ONLY:' "$TMP/kh-selection.log"
+[ "$(wc -l < "$TMP/mode-preflight.log")" = 2 ]
+
+# Stable profile retains the explicit mode selection. Abort on an invalid
+# answer before a live install step; it must not silently select Standard.
+SMITE_INSTALL_PROFILE=stable
+printf 'ir.example.com\nnode-ir\n9\n' |
+    smite_install_panel_iran >"$TMP/stable-ir.log" 2>&1
+grep -q 'Invalid connection mode' "$TMP/stable-ir.log"
+printf 'ir.example.com\nkh.example.com\nnode-kh\n9\n' |
+    smite_install_foreign_node >"$TMP/stable-kh.log" 2>&1
+grep -q 'Invalid connection mode' "$TMP/stable-kh.log"
+[ "$(wc -l < "$TMP/mode-preflight.log")" = 2 ]
+[ ! -e "$SMITE_STATE_FILE" ]
+[ ! -e "$SMITE_PANEL_COMPOSE" ]
+[ ! -e "$SMITE_NODE_COMPOSE" ]
+echo "CLEAN_FRESH_PROFILE_TESTS=PASSED"
+ "$TMP/docker-calls.log"
+grep -q 'CLEAN_RC_IMAGES=SIGNED_REGISTRY_DIGESTS_VERIFIED' "$TMP/signed-pull.log"
+
+SMITE_FIELD_TRIAL_APPROVED=NO
+if smite_install_clean_rc_preflight foreign standard >/dev/null 2>&1; then
+    echo "FAIL: signed Field Trial accepted without explicit approval" >&2; exit 1
+fi
+SMITE_FIELD_TRIAL_APPROVED=YES
+SMITE_RC_SIGNED_REGISTRY=0
+unset -f sha256sum
+PATH="$OLD_PATH"
+
 SMITE_INSTALL_PROFILE=stable
 SMITE_NODE_IMAGE="ghcr.io/zzedix/smite-node@sha256:$(python3 -c 'print("b"*64)')"
 : > "$TMP/docker-calls.log"
