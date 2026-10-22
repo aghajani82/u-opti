@@ -83,6 +83,23 @@ class Stage9Test(unittest.TestCase):
         self.assertNotIn("docker compose up", yaml)
         self.assertEqual(json.loads(self.identity.read_text())["node_secret"], "a" * 64)
 
+    def test_prepare_creates_missing_fresh_host_replay_hierarchy(self):
+        # Regression: a clean host may have none of the U-OPTI replay tree yet.
+        # Only the already-known grandparent exists; prepare must securely
+        # create the private root, security directory and replay directory.
+        self.storage_root.rmdir()
+        self.assertFalse(self.storage_root.exists())
+        self.assertEqual(tool.prepare(**self.kwargs), "PREPARED")
+        for path in (
+            self.storage_root,
+            self.replay_dir.parent,
+            self.replay_dir,
+        ):
+            self.assertTrue(path.is_dir())
+            self.assertFalse(path.is_symlink())
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+            self.assertEqual(path.stat().st_uid, os.geteuid())
+
     def test_discard_candidate_never_deletes_identity_or_replay_data(self):
         tool.prepare(**self.kwargs)
         replay_file = self.replay_dir / "agent-replay.sqlite3"

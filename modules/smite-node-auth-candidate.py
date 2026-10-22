@@ -170,6 +170,11 @@ def prepare(
         raise StageHold("Candidate must be beside the existing Node Compose")
     if replay_dir == identity.parent or replay_dir.is_symlink():
         raise StageHold("Replay directory may not alias identity")
+    # Fresh hosts may not have U-OPTI runtime state under /var/lib yet.
+    # Create the reviewed private hierarchy one level at a time so every new
+    # component is root-owned 0700 and any symlink/unsafe existing component
+    # still fails closed.
+    _create_private_directory(replay_dir.parent.parent)
     _create_private_directory(replay_dir.parent)
     _create_private_directory(replay_dir)
     yaml = compose_candidate(identity=identity, replay_dir=replay_dir)
