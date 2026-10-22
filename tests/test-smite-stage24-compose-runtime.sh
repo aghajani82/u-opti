@@ -16,7 +16,8 @@ chmod 0700 "$lab"
 project="stage24-${GITHUB_RUN_ID:-0}"
 node_dir="$lab/node"
 identity_dir="$lab/identities"
-replay_dir="$lab/u-opti/smite-node-security/replay"
+replay_anchor="$lab/var-lib"
+replay_dir="$replay_anchor/u-opti/smite-node-security/replay"
 base="$node_dir/docker-compose.yml"
 candidate="$node_dir/docker-compose.security-candidate.yml"
 ci_override="$lab/ci-isolation.yml"
@@ -80,12 +81,11 @@ test "$(stat -c %a "$node_dir/.env")" = 600
 baseline_sha="$(sha256sum "$base" | awk '{print $1}')"
 
 printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$lab/state/state.env"
-sudo install -d -m 0700 "$lab/identities" "$lab/u-opti" "$lab/u-opti/smite-node-security" "$replay_dir"
-# The real host anchor (/var/lib) is root-owned and not writable by other
-# users. Mirror that trust boundary while retaining traversal for the
-# unprivileged CI shell into its already-created child fixtures.
-sudo chown 0:0 "$lab"
-sudo chmod 0711 "$lab"
+sudo install -d -m 0700 "$lab/identities"
+# Mirror the production trust boundary exactly: /var/lib is an existing
+# root-owned, non-writable anchor; U-OPTI creates the three private levels
+# beneath it. Keep $lab itself runner-owned so CI can write unrelated files.
+sudo install -d -o 0 -g 0 -m 0755 "$replay_anchor"
 sudo python3 - "$identity_dir/node-identity.json" <<'PY'
 import json, os, secrets, sys
 path=sys.argv[1]
