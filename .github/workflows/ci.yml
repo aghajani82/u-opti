@@ -197,6 +197,7 @@ jobs:
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
           python3 -B tests/test-docker-3xui-xhttp-guard.py -v
+          python3 -B tests/test-uopti-kh-guard-bootstrap.py -v
 
       - name: Independent signed registry Panel Node pair pre-admission (fake Cosign only)
         shell: bash

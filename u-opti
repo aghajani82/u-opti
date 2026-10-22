@@ -71,6 +71,59 @@ case "${1:-}" in
         ;;
 esac
 
+# BEGIN: KH dynamic XHTTP guard legacy-updater compatibility
+# The previous fixed-file updater cannot download this newly introduced file.
+# Recover only this inert guard from the immutable installed source revision.
+# No Nginx config, tunnel or container is changed by this compatibility step.
+u_opti_ensure_kh_xhttp_guard_bundle() {
+    local name="docker-3xui-xhttp-guard.py"
+    local expected_blob="470ac5f9f9795a1d79f7f78c04895c71d4c632b5"
+    local target="$MODULES_PATH/$name"
+    local temp_dir=""
+    if [ -L "$target" ]; then return 1; fi
+    if [ -f "$target" ]; then
+        python3 -B - "$target" "$expected_blob" <<'PY_KH_GUARD_HASH'
+import ast, hashlib, pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != sys.argv[2]:
+    raise SystemExit(1)
+ast.parse(data.decode("utf-8"))
+PY_KH_GUARD_HASH
+        return $?
+    fi
+    [ ! -e "$target" ] || return 1
+    [[ "$BRANCH" =~ ^[a-f0-9]{40}$ ]] || return 1
+    [ -d "$MODULES_PATH" ] && [ ! -L "$MODULES_PATH" ] || return 1
+    [ "$(stat -c %u "$MODULES_PATH")" = 0 ] || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    command -v curl >/dev/null 2>&1 || return 1
+    temp_dir="$(mktemp -d)" || return 1
+    if ! curl -fsSL --retry 3 --max-time 30 "$BASE_URL/modules/$name" -o "$temp_dir/$name" ||
+       ! python3 -B - "$temp_dir/$name" "$expected_blob" <<'PY_KH_GUARD_VERIFY'
+import ast, hashlib, pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if len(data) > 65536 or hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != sys.argv[2]:
+    raise SystemExit(1)
+ast.parse(data.decode("utf-8"))
+PY_KH_GUARD_VERIFY
+    then
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+    if [ -e "$target" ] || [ -L "$target" ] ||
+       ! install -m 0644 -- "$temp_dir/$name" "$target"; then
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+    rm -rf -- "$temp_dir"
+    echo "KH dynamic XHTTP guard module verified and installed (no live changes)."
+    return 0
+}
+if ! u_opti_ensure_kh_xhttp_guard_bundle; then
+    echo "WARNING: KH XHTTP guard bundle unavailable; secured route sync remains HOLD." >&2
+fi
+# END: KH dynamic XHTTP guard legacy-updater compatibility
+
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
 source "$MODULES_PATH/time.sh"
