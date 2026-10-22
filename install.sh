@@ -140,6 +140,7 @@ MODULES=(
     "docker-3xui-certificate-multi.sh"
     "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
+    "docker-3xui-xhttp-guard.py"
     "fakesite.sh"
 )
 

@@ -644,6 +644,7 @@ print(sha)
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "docker-3xui-xhttp-guard.py"
                 "fakesite.sh"
             )
 
@@ -804,6 +805,7 @@ print(sha)
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
+                ["docker-3xui-xhttp-guard.py"]="$BASE_URL/modules/docker-3xui-xhttp-guard.py"
                 ["fakesite.sh"]="$BASE_URL/modules/fakesite.sh"
             )
 
@@ -887,6 +889,7 @@ print(sha)
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
+                ["docker-3xui-xhttp-guard.py"]="$TEMP_DIR/docker-3xui-xhttp-guard.py"
                 ["fakesite.sh"]="$TEMP_DIR/fakesite.sh"
             )
 
@@ -1156,6 +1159,7 @@ print(sha)
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "docker-3xui-xhttp-guard.py"
                 "fakesite.sh"
             )
 
@@ -1204,7 +1208,7 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"

@@ -196,6 +196,7 @@ jobs:
           bash -n modules/smite-node-pairing-wizard.sh
           python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
           python3 -B tests/test-smite-node-pairing.py -v
+          python3 -B tests/test-docker-3xui-xhttp-guard.py -v
 
       - name: Independent signed registry Panel Node pair pre-admission (fake Cosign only)
         shell: bash

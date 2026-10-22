@@ -3556,6 +3556,23 @@ docker_3xui_nginx_ssl_management() {
 }
 
 
+docker_3xui_xhttp_guard_menu() {
+    if ! docker_3xui_select_instance; then return; fi
+    local guard="$(dirname "${BASH_SOURCE[0]}")/docker-3xui-xhttp-guard.py"
+    if [ ! -f "$guard" ]; then echo "HOLD: XHTTP guard missing."; read -r -p "Press Enter..."; return; fi
+    echo "Read-only KH XHTTP route review:"
+    if ! python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --check; then
+        echo "HOLD: No changes made."
+        read -r -p "Press Enter..."; return
+    fi
+    echo "Unknown numeric ports will be denied. Only verified loopback XHTTP paths are permitted."
+    read -r -p "Apply guarded routes on this KH host? [y/N]: " answer
+    if [[ "$answer" == y || "$answer" == Y ]]; then
+        python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --apply || true
+    else echo "Cancelled without changes."; fi
+    read -r -p "Press Enter..."
+}
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -3577,11 +3594,12 @@ show_docker_3xui_menu() {
         echo "11) Sanaei 3x-UI Management"
         echo "12) Nginx / SSL Configuration"
         echo "13) Default Website / FakeSite"
+        echo "14) Sync guarded dynamic XHTTP routes"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-13]: " DOCKER_3XUI_CHOICE
+        read -rp "Please enter your selection [0-14]: " DOCKER_3XUI_CHOICE
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
 
@@ -3599,6 +3617,7 @@ show_docker_3xui_menu() {
             11) docker_3xui_sanaei_management ;;
             12) docker_3xui_nginx_ssl_management ;;
             13) docker_3xui_fakesite_management ;;
+            14) docker_3xui_xhttp_guard_menu ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
