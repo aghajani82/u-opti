@@ -81,6 +81,11 @@ baseline_sha="$(sha256sum "$base" | awk '{print $1}')"
 
 printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$lab/state/state.env"
 sudo install -d -m 0700 "$lab/identities" "$lab/private" "$replay_dir"
+# The real host anchor (/var/lib) is root-owned and not writable by other
+# users. Mirror that trust boundary while retaining traversal for the
+# unprivileged CI shell into its already-created child fixtures.
+sudo chown 0:0 "$lab"
+sudo chmod 0711 "$lab"
 sudo python3 - "$identity_dir/node-identity.json" <<'PY'
 import json, os, secrets, sys
 path=sys.argv[1]

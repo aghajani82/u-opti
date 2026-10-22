@@ -715,6 +715,10 @@ jobs:
           ref: a15c46288aae9849babc9c9358c68e46686bce9c
           path: .stage20-smite-src
           persist-credentials: false
+      - name: Use reviewed Python runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install isolated Nginx and pinned pairing runtime
         shell: bash
         run: |
