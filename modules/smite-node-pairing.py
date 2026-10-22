@@ -413,6 +413,123 @@ def _pairing_secrets() -> tuple[str, str]:
     return master, ingress
 
 
+def _ensure_panel_signed_registration_schema() -> None:
+    """Back up Panel SQLite once, then admit both signed-pairing schemas."""
+    script = r"""
+from pathlib import Path
+import os
+import sqlite3
+import stat
+
+from app.config import settings
+from app.node_pairing_store import initialize_schema
+from app.signed_node_registration import initialize_replay_schema
+
+db = Path(settings.db_path).resolve()
+if db.is_symlink() or not db.is_file():
+    raise RuntimeError("Panel database unavailable")
+
+backup = db.with_name(db.name + ".u-opti-pre-signed-registration.bak")
+if backup.exists() or backup.is_symlink():
+    item = backup.lstat()
+    if (
+        not stat.S_ISREG(item.st_mode)
+        or item.st_uid != os.geteuid()
+        or stat.S_IMODE(item.st_mode) != 0o600
+        or item.st_nlink != 1
+    ):
+        raise RuntimeError("Existing Panel migration backup is unsafe")
+else:
+    old_umask = os.umask(0o077)
+    try:
+        source = sqlite3.connect(str(db), timeout=15)
+        target = sqlite3.connect(str(backup), timeout=15)
+        try:
+            source.backup(target)
+            if target.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                raise RuntimeError("Panel migration backup integrity failed")
+        finally:
+            target.close()
+            source.close()
+    finally:
+        os.umask(old_umask)
+    os.chmod(backup, 0o600)
+
+item = backup.lstat()
+if (
+    not stat.S_ISREG(item.st_mode)
+    or item.st_uid != os.geteuid()
+    or stat.S_IMODE(item.st_mode) != 0o600
+    or item.st_nlink != 1
+    or item.st_size == 0
+):
+    raise RuntimeError("Panel migration backup admission failed")
+
+initialize_schema(db)
+initialize_replay_schema(db)
+
+with sqlite3.connect(str(db), timeout=15) as conn:
+    pairing = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type='table' AND name='smite_node_identities'"
+    ).fetchone()[0]
+    replay = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type='table' AND name='smite_node_inbound_nonces'"
+    ).fetchone()[0]
+if pairing != 1 or replay != 1:
+    raise RuntimeError("Signed Panel schema verification failed")
+
+print("PANEL_SIGNED_SCHEMA=READY")
+"""
+    result = _run(
+        ["docker", "exec", "smite-panel", "python3", "-c", script],
+        timeout=60, capture=True,
+    )
+    if result != "PANEL_SIGNED_SCHEMA=READY":
+        raise WizardHold("Panel signed schema migration admission failed")
+
+
+def _require_panel_signed_registration_schema() -> None:
+    """Read-only activation preflight: never create a missing Panel schema."""
+    script = r"""
+from pathlib import Path
+import sqlite3
+from app.config import settings
+
+db = Path(settings.db_path).resolve()
+if not db.is_file() or db.is_symlink():
+    print("PANEL_SIGNED_REGISTRATION_SCHEMA=MISSING")
+else:
+    try:
+        with sqlite3.connect(db.absolute().as_uri() + "?mode=ro", uri=True, timeout=5) as conn:
+            pairing = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='table' AND name='smite_node_identities'"
+            ).fetchone()[0]
+            replay = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='table' AND name='smite_node_inbound_nonces'"
+            ).fetchone()[0]
+        print(
+            "PANEL_SIGNED_REGISTRATION_SCHEMA=READY"
+            if pairing == 1 and replay == 1
+            else "PANEL_SIGNED_REGISTRATION_SCHEMA=MISSING"
+        )
+    except sqlite3.Error:
+        print("PANEL_SIGNED_REGISTRATION_SCHEMA=MISSING")
+"""
+    result = _run(
+        ["docker", "exec", "smite-panel", "python3", "-c", script],
+        timeout=20, capture=True,
+    )
+    if result != "PANEL_SIGNED_REGISTRATION_SCHEMA=READY":
+        raise WizardHold(
+            "Panel signed-registration replay schema is missing; "
+            "run secure Panel pairing enablement first"
+        )
+
+
 def _render_pairing_location() -> str:
     return """    # BEGIN U-OPTI SMITE SIGNED PAIRING REDEEM
     location = /api/node-pairing/redeem {
@@ -487,16 +604,9 @@ def enable_panel_field_trial(state: dict[str, str] | None = None) -> None:
     backend_before: bytes | None = None
     include_before: bytes | None = None
     try:
-        # Pairing schema is an explicit one-time migration from the reviewed image.
-        schema = _run(
-            ["docker", "exec", "smite-panel", "python3", "-c",
-             "from app.config import settings; "
-             "from app.node_pairing_store import initialize_schema; "
-             "initialize_schema(settings.db_path); print('PAIRING_SCHEMA=READY')"],
-            timeout=30, capture=True,
-        )
-        if schema != "PAIRING_SCHEMA=READY":
-            raise WizardHold("Panel pairing schema admission failed")
+        # Both migrations are required for signed Node check-in. The helper
+        # takes a private SQLite backup before the replay schema is added.
+        _ensure_panel_signed_registration_schema()
 
         updated = _env_update(panel_env_before, {
             "SMITE_NODE_PAIRING_PREVIEW_ENABLED": "true",
@@ -548,6 +658,7 @@ def enable_panel_field_trial(state: dict[str, str] | None = None) -> None:
         raise WizardHold("Panel pairing activation failed and rollback was attempted") from exc
 
     print("PANEL_PAIRING_SCHEMA=READY")
+    print("PANEL_SIGNED_REGISTRATION_REPLAY_SCHEMA=READY")
     print("PANEL_PAIRING_HTTPS_443_EXACT_PATH=READY")
     print("PANEL_PAIRING_PREVIEW=ENABLED_FIELD_TRIAL")
     print("LEGACY_NODE_REGISTRATION=DISABLED")
@@ -801,6 +912,10 @@ def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
         or values.get("PANEL_ADDRESS") != current.get("SMITE_PANEL_DOMAIN", "") + ":443"
     ):
         raise WizardHold("IR Node is not at the reviewed paused+strict HTTPS/443 baseline")
+
+    # Fail before any Panel/Node recreate if option 2 did not complete
+    # both signed-registration migrations.
+    _require_panel_signed_registration_schema()
 
     origin_before = override_before = panel_env_before = None
     node_was_applied = False

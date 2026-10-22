@@ -164,6 +164,44 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn("node_secret", location)
         self.assertNotIn("pairing_code", location)
 
+    def test_panel_signed_schema_migration_and_activation_preflight(self):
+        with patch.object(
+            pairing, "_run", return_value="PANEL_SIGNED_SCHEMA=READY"
+        ) as runner:
+            pairing._ensure_panel_signed_registration_schema()
+        command = runner.call_args.args[0]
+        self.assertEqual(command[:4], ["docker", "exec", "smite-panel", "python3"])
+        script = command[-1]
+        self.assertIn("u-opti-pre-signed-registration.bak", script)
+        self.assertIn("source.backup(target)", script)
+        self.assertIn("initialize_schema(db)", script)
+        self.assertIn("initialize_replay_schema(db)", script)
+        self.assertIn("smite_node_inbound_nonces", script)
+        self.assertNotIn("node_secret", script)
+
+        with patch.object(
+            pairing, "_run",
+            return_value="PANEL_SIGNED_REGISTRATION_SCHEMA=READY",
+        ):
+            pairing._require_panel_signed_registration_schema()
+        with patch.object(
+            pairing, "_run",
+            return_value="PANEL_SIGNED_REGISTRATION_SCHEMA=MISSING",
+        ):
+            with self.assertRaisesRegex(
+                pairing.WizardHold, "signed-registration replay schema is missing"
+            ):
+                pairing._require_panel_signed_registration_schema()
+
+        source = HELPER.read_text()
+        enable_start = source.index("def enable_panel_field_trial")
+        activate_start = source.index("def activate_ir_node_field_trial")
+        enable_body = source[enable_start:activate_start]
+        activate_body = source[activate_start:source.index("\ndef ", activate_start + 5)]
+        self.assertIn("_ensure_panel_signed_registration_schema()", enable_body)
+        self.assertIn("_require_panel_signed_registration_schema()", activate_body)
+        self.assertIn("PANEL_SIGNED_REGISTRATION_REPLAY_SCHEMA=READY", enable_body)
+
     def test_private_pairing_secret_store_never_prints_values(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
