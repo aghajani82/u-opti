@@ -85,8 +85,7 @@ class Stage9Test(unittest.TestCase):
 
     def test_prepare_creates_missing_fresh_host_replay_hierarchy(self):
         # Regression: a clean host may have none of the U-OPTI replay tree yet.
-        # Only the already-known grandparent exists; prepare must securely
-        # create the private root, security directory and replay directory.
+        # The trusted host anchor exists, while all three private levels do not.
         self.storage_root.rmdir()
         self.assertFalse(self.storage_root.exists())
         self.assertEqual(tool.prepare(**self.kwargs), "PREPARED")
@@ -99,6 +98,18 @@ class Stage9Test(unittest.TestCase):
             self.assertFalse(path.is_symlink())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
             self.assertEqual(path.stat().st_uid, os.geteuid())
+
+    def test_replay_hierarchy_rejects_untrusted_anchor(self):
+        anchor = self.replay_dir.parents[2]
+        original = stat.S_IMODE(anchor.stat().st_mode)
+        try:
+            anchor.chmod(0o777)
+            with self.assertRaises(tool.StageHold):
+                tool.prepare(**self.kwargs)
+            self.assertFalse(self.candidate.exists())
+            self.assertFalse(self.storage_root.exists() and self.replay_dir.exists())
+        finally:
+            anchor.chmod(original)
 
     def test_discard_candidate_never_deletes_identity_or_replay_data(self):
         tool.prepare(**self.kwargs)
