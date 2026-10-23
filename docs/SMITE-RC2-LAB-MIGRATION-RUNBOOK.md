@@ -1,12 +1,46 @@
 # NEXT-5.AG — Smite RC.1 to RC.2 disposable two-host rollout gate
 
-**Status (2026-10-23): operator reports both Hetzner snapshots ready. No live
-upgrade started; this is a source-only runbook in [U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48).**
+**Current status (2026-10-23, NEXT-5.AT): IR Panel RC.2 trial is running
+successfully with its original signed RC.1 local Node; this was independently
+verified with healthy image pins, effective Compose SHA256, and HTTP/HTTPS 200.
+KH is still RC.1 Node in paused/strict/managed mode, Sanaei and XHTTP
+unchanged. Operator reports both provider snapshots ready. No KH image change,
+foreign signed pairing, production rollout, stable merge or release approved.
+This remains a review runbook in [U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48).**
 
 This runbook is intentionally **not** an executable installation script. Passing
 checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
+
+## NEXT-5.AT — actual staged runtime checkpoints
+
+The original frozen RC.1 baseline below is historical and is retained for
+rollback reference. **The active runtime is now mixed**:
+
+- **IR**: `smite-panel` runs reviewed RC.2 immutable Panel digest
+  `sha256:9101898e19631d334b754ba8e956b63ab7dfaee304a8f9b954cf30a185125e8e`
+  and the local `smite-node` remains reviewed RC.1 immutable Node digest
+  `sha256:9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec`.
+  Both healthy. Combined signed Compose validation PASS and image-only
+  Panel Compose SHA256
+  `adc4dfb3031d5f2b5c007241589ed96fe9679ac2df29da62853192c7d716ca5a`,
+  signed overlay unchanged. Local `/api/status` HTTP 200 and public Panel
+  HTTPS `/api/status` 200. Initial rollout reported Panel→local IR signed HMAC
+  PASS. No live rollback occurred in this successful trial.
+- **KH**: independent NEXT-5.AT audit confirmed Smite Node RC.1 unchanged,
+  healthy and `paused + strict + managed`, exactly original Sanaei image ID
+  `sha256:6c7e73c5bc4b6d7d70866616f78d6c9866b4904defad3077c1e2b5c1c89c2ec1`
+  running, Nginx syntax PASS, XHTTP `ROUTES=1 LEGACY_ROUTE=NO`, Node port
+  8888 bound only to localhost, and `KH→IR HTTPS /api/status=200`.
+- **NEXT-5.AU** planned: **read-only** KH Node immutable image-line
+  transformation and security/backup checks. The foreign node's existing
+  pairing helper is hard-pinned to RC.1 and uses RC.1 managed-state admission:
+  never change only its constants or blindly toggle signed pairing. Do not
+  recreate the KH Node, change 3x-UI/Sanaei, Nginx, XHTTP, FRP/Backhaul, or
+  expose Node 8888 publicly until separately reviewed, tested and authorized.
+  Upgrading a paused Node image is distinct from foreign pairing or
+  activation.
 
 ## Ground truth: the frozen baseline
 
