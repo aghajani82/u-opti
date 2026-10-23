@@ -1,17 +1,16 @@
-# Proposed Smite RC.2 — foreign signed pairing release admission (review only)
+# Smite RC.2 signed images published — foreign pairing admission still HOLD
 
-> **STATUS: HOLD — NO TAG, NO GHCR PUBLISH, NO MERGE, NO HOST CHANGES.**
+> **STATUS: Smite PR18 merged · RC2 tag created · GHCR Panel+Node signed.**
 >
-> Proposed version **`v2.0.0-rc.2`** is a *review label only*, not a
-> created tag or authorized release. All live IR/KH services remain on the
-> previously reviewed RC.1 image pair. Do not substitute local CI image IDs
-> for immutable signed GHCR digest references.
+> **IR/KH installations and U-OPTI stable defaults remain UNCHANGED.**
+> The new registry pair is a nonactivating Field Trial candidate, not
+> production release approval or permission to modify live servers.
 
 ## Frozen source evidence, 2026-10-23
 
 | Scope | Immutable source / CI | State |
 |---|---|---|
-| Smite [Draft PR #18](https://github.com/aghajani82/Smite/pull/18) | HEAD `31543e2e81ea635b4eaab87f606125b4e4dd22e1` | 9/9 exact-head GitHub Actions **SUCCESS** |
+| Smite [Merged PR #18](https://github.com/aghajani82/Smite/pull/18) | HEAD `31543e2e81ea635b4eaab87f606125b4e4dd22e1` | 9/9 exact-head GitHub Actions **SUCCESS** |
 | U-OPTI [Draft PR #48](https://github.com/aghajani82/u-opti/pull/48) | HEAD at this review began `0485eb16b77ca871478e733358e52c1c359676df` | CI run [39938276746](https://github.com/aghajani82/u-opti/actions/runs/39938276746) **SUCCESS** |
 | Smite Stage15 | [run 39937249960](https://github.com/aghajani82/Smite/actions/runs/39937249960), source `31543e2e81ea635b4eaab87f606125b4e4dd22e1` | Two unpublished images and offline manifest, checksum verification, **NOT signed registry images** |
 | Smite source/current GHCR pair | `modules/smite-field-trial-candidate.json` points to RC.1 source `289f99cae8c53ba7d5b8e427bca19e5c04ebba8a` | Historical *nonactivating* record; does **not** contain KH prefix fix |
@@ -91,7 +90,7 @@ downloaded and verified archive bytes**.
 
 - The existing historical `v2.0.0-rc.1` GHCR pair cannot contain the new
   PR18 Panel fix; current KH pin is intentionally **fail-closed** for a new
-  digest. The first reviewed new digest pair does not yet exist.
+  digest. The signed RC.2 digest pair now exists in GHCR, but installer admission and the live two-host trial remain HOLD.
 - Existing IR Panel is still on the previous signed RC.1 image. Old Panel
   has no approved foreign prefix routing; U-OPTI's IR foreign approval guard
   must reject activation until a reviewed Panel image is deployed.
@@ -100,10 +99,47 @@ downloaded and verified archive bytes**.
 - Live KH ↔ IR signed acceptance, blocked public TCP/8888 from WAN,
   disallowed unprefixed Agent access, dynamic inbound preservation and
   shutdown/reboot/rollback have **not** been qualified for the new pair.
-- Source CI and offline image checksum tests **cannot establish** GHCR
-  registry signing, production usability or operator approval.
+- Source CI and offline image checks alone cannot establish registry signing.
+  [Publisher run 39966522346](https://github.com/aghajani82/Smite/actions/runs/39966522346)
+  now documents successful Cosign signing/verification of both digests.
+  This success still does not authorize production usage.
 
-**Next allowable step without explicit new publication approval:**
-review the proposed RC.2 source/contract, identify any remaining preflight
-gaps, and collect **read-only** host preparedness evidence. **Do not create
-a tag or run `publish-images.yml` until explicitly authorized.**
+**Next step (requires separate live-host approval):** review the RC.2
+upgrade/rollback/first-enrollment plan and independently reverify Cosign
+claims before any IR/KH replacement. No automatic stable release or U-OPTI
+main merge is authorized.
+
+---
+
+## Published RC.2 immutable registry pair — 2026-10-23
+
+- Smite PR18 merge commit and exact tag target:
+  `e6c3ecce81010130ae28e7d1e37ea99b31d70c28`.
+  Its tree matches 9/9-CI-green PR18 head `31543e2e81ea635b4eaab87f606125b4e4dd22e1`.
+- [Tag-only run 39966194994](https://github.com/aghajani82/Smite/actions/runs/39966194994) created
+  `v2.0.0-rc.2` with NO GitHub Release and NO deployment.
+- [Publisher run 39966522346](https://github.com/aghajani82/Smite/actions/runs/39966522346)
+  completed SUCCESS: prepare, build-panel, build-node, registry-pair-manifest.
+  Both build jobs printed `SMITE_SIGNED_REGISTRY_DIGEST_VERIFIED=panel/node`
+  after Cosign certificate/claims validation.
+- **Panel** `ghcr.io/aghajani82/smite-panel@sha256:9101898e19631d334b754ba8e956b63ab7dfaee304a8f9b954cf30a185125e8e`
+- **Node** `ghcr.io/aghajani82/smite-node@sha256:2338f101b4a1615ec966b9c6f7a3d3ff2bd3361d80956281cf40a61e7a458f78`
+- Registry pair artifact ID `12506937687`, name
+  `smite-registry-pair-e6c3ecce81010130ae28e7d1e37ea99b31d70c28`.
+  Independent ZIP SHA256: `ff4e02d022fb5a65d68096abfe483f1adfabeabb293f1f3a118671c58db074ca`.
+  Independent extracted manifest SHA256:
+  `63e3efbdec955e92deaf0a84c86cc5c8a950f48b4e0d6d301bc7f7c8354eb80b`.
+  Both hashes match the workflow logs; SHA256 was recomputed from the downloaded ZIP.
+- The exact manifest is staged separately in
+  `modules/smite-rc2-signed-registry-candidate.json`; it is
+  `activation_allowed=false`, `release_approved=false`, and NOT referenced
+  by the default U-OPTI installer. The old RC.1 candidate stays intact.
+- Important: Cosign was verified in the publisher workflow, not via a
+  separate independent live-host verification. Repeat independent Cosign
+  admission before ever replacing an image. U-OPTI's KH Node guard still
+  intentionally pins RC.1 pending a separately reviewed upgrade path.
+
+**CURRENT ADMISSION:** `RC2_GHCR_PAIR=PUBLISHED_SIGNED`,
+`REGISTRY_MANIFEST_BYTES=INDEPENDENTLY_HASH_VERIFIED`,
+`UOPTI_RC2_MANIFEST=STAGED_NONACTIVATING`, `IR_KH=UNCHANGED`,
+`UOPTI_STABLE_INSTALLER=UNCHANGED`, `NO_AUTO_DEPLOY=YES`.
