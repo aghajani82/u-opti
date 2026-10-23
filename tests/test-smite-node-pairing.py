@@ -448,6 +448,160 @@ class PreviewTests(unittest.TestCase):
         self.assertIn("ACTIVATE-KH-SIGNED-NODE", wizard)
         self.assertIn("--activate-foreign-node-field-trial", wizard)
 
+
+    def test_foreign_origin_approval_is_additive_ir_only_and_rollback_safe(self):
+        import contextlib
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            env = root / "panel.env"
+            env.write_text(
+                "SMITE_NODE_REGISTRATION_MODE=signed\n"
+                "SMITE_PANEL_AGENT_AUTH_MODE=signed\n"
+                "SMITE_NODE_PAIRING_PREVIEW_ENABLED=true\n"
+                "SMITE_SIGNED_NODE_ORIGINS_PATH="
+                "/etc/smite-panel/trusted-nodes/approved-origins.json\n"
+            )
+            env.chmod(0o600)
+            trusted = root / "trusted"
+            trusted.mkdir(mode=0o700)
+            approved = trusted / "approved-origins.json"
+            initial = {"version": 1, "nodes": {
+                "node-ir-abcdefgh": {
+                    "role": "iran",
+                    "node_name": "node-ir",
+                    "origin": "http://127.0.0.1:8888",
+                    "control_url": "http://127.0.0.1:8888/api/agent",
+                },
+            }}
+            approved.write_text(json.dumps(initial))
+            approved.chmod(0o600)
+            override = root / "docker-compose.signed-control.yml"
+            override.write_text("services: {}\n")
+            override.chmod(0o600)
+            database = root / "smite.db"
+            node_id = "11111111-2222-3333-4444-555555555555"
+            with sqlite3.connect(database) as db:
+                db.execute(
+                    "CREATE TABLE nodes "
+                    "(id TEXT, name TEXT, status TEXT, metadata TEXT)"
+                )
+                db.execute(
+                    "INSERT INTO nodes VALUES(?,?,?,?)",
+                    (node_id,"node-kh","pending",json.dumps({
+                        "role": "foreign",
+                        "node_name": "node-kh",
+                        "provisioning": "reserved_for_pairing",
+                    })),
+                )
+
+            class Response:
+                status = 200
+                def __enter__(self): return self
+                def __exit__(self, *_): return False
+                def read(self, n):
+                    assert n == 257
+                    return b'{"status":"ok","service":"smite-node"}'
+
+            class Opener:
+                def open(self, url, timeout):
+                    self_test.assertEqual(
+                        url,
+                        "https://kh.kolbe1.ir/smite-node/322983983580c8eb/",
+                    )
+                    self_test.assertEqual(timeout, 12)
+                    return Response()
+
+            self_test = self
+            good = [True]
+            seen = []
+            def local_run(cmd, **kwargs):
+                seen.append(cmd)
+                if cmd[:2] == ["docker", "inspect"]:
+                    return str(trusted)
+                if cmd[:2] == ["docker", "exec"]:
+                    return "FOREIGN_PIN=VERIFIED" if good[0] else "WRONG"
+                raise AssertionError(cmd)
+
+            current = {
+                "SMITE_ROLE": "panel-iran",
+                "SMITE_MANAGED_VERSION": "2.0.0-rc.1",
+                "SMITE_PANEL_DOMAIN": "ir.kolbe1.ir",
+                "SMITE_NODE_NAME": "node-ir",
+            }
+            arg = dict(
+                node_id=node_id, node_name="node-kh",
+                control_url="https://kh.kolbe1.ir/smite-node/322983983580c8eb",
+                state=current,
+            )
+            with (
+                patch.object(pairing, "PANEL_ENV", env),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", override),
+                patch.object(pairing, "PANEL_DB", database),
+                patch.object(pairing, "TRUSTED_NODES_DIR", trusted),
+                patch.object(pairing, "APPROVED_ORIGINS", approved),
+                patch.object(pairing, "_field_trial_gate"),
+                patch.object(pairing, "_require_panel_signed_registration_schema"),
+                patch.object(pairing, "_require_panel_foreign_transport") as panel_guard,
+                patch.object(pairing, "_run", side_effect=local_run),
+                patch.object(pairing.request, "build_opener", return_value=Opener()),
+                patch("sys.stdout", io.StringIO()) as output,
+            ):
+                pairing.approve_foreign_origin_field_trial(**arg)
+                self.assertIn("FOREIGN_ORIGIN_APPROVAL=PINNED", output.getvalue())
+                records = json.loads(approved.read_text())["nodes"]
+                self.assertEqual(records["node-ir-abcdefgh"], initial["nodes"]["node-ir-abcdefgh"])
+                self.assertEqual(records[node_id]["role"], "foreign")
+                self.assertEqual(records[node_id]["node_name"], "node-kh")
+                self.assertEqual(stat.S_IMODE(approved.stat().st_mode), 0o600)
+                pairing.approve_foreign_origin_field_trial(**arg)
+                self.assertIn("ALREADY_PINNED", output.getvalue())
+
+                # Bad path fails before any origin write, Docker call, or TLS call.
+                preserved = approved.read_bytes()
+                with self.assertRaises(pairing.WizardHold):
+                    pairing.approve_foreign_origin_field_trial(**{
+                        **arg, "control_url": "https://kh.kolbe1.ir/api/agent",
+                    })
+                self.assertEqual(approved.read_bytes(), preserved)
+
+                # Independent name cannot silently overwrite the approval.
+                with self.assertRaises(pairing.WizardHold):
+                    pairing.approve_foreign_origin_field_trial(**{
+                        **arg, "node_name": "node-foreign-changed",
+                    })
+                self.assertEqual(approved.read_bytes(), preserved)
+
+                approved.write_text(json.dumps(initial))
+                approved.chmod(0o600)
+                good[0] = False
+                with self.assertRaisesRegex(
+                    pairing.WizardHold, "original approval restored|rejected and restored",
+                ):
+                    pairing.approve_foreign_origin_field_trial(**arg)
+                self.assertEqual(json.loads(approved.read_text()), initial)
+                panel_guard.assert_called()
+            self.assertFalse(any("force-recreate" in str(x) for x in seen))
+
+    def test_foreign_approval_rejects_other_hosts_and_untrusted_urls(self):
+        good = "https://kh.kolbe1.ir/smite-node/322983983580c8eb"
+        self.assertEqual(
+            pairing._approved_foreign_control_url(good),
+            ("https://kh.kolbe1.ir:443",good),
+        )
+        for invalid in (
+            "http://kh.kolbe1.ir/smite-node/322983983580c8eb",
+            "https://kh.kolbe1.ir:8888/smite-node/322983983580c8eb",
+            "https://91.107.185.50/smite-node/322983983580c8eb",
+            "https://kh.kolbe1.ir/smite-node/../../api",
+            "https://kh.kolbe1.ir/smite-node/%33" + "22983983580c8eb",
+            "https://kh.kolbe1.ir/api/agent",
+            "https://user:pass@kh.kolbe1.ir/smite-node/322983983580c8eb",
+            good + "?token=x",
+            good + "#fragment",
+        ):
+            with self.subTest(url=invalid), self.assertRaises(pairing.WizardHold):
+                pairing._approved_foreign_control_url(invalid)
+
     def test_live_field_trial_actions_remain_explicitly_gated(self):
         with patch.object(pairing.os, "geteuid", return_value=0):
             with patch.dict(os.environ, {"UOPTI_SMITE_PAIRING_FIELD_TRIAL": ""}):
