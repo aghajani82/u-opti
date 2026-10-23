@@ -129,6 +129,40 @@ Reference: [Smite PR #18](https://github.com/aghajani82/Smite/pull/18),
    rehearsal and fresh explicit operator authorization may the rollout
    recreate reviewed Smite containers.
 
+## NEXT-5.AO — exact IR Panel-only reversible Compose edit (in-memory review)
+
+The operator's NEXT-5.AN live IR Compose admission passed all six checks:
+the original Panel RC.1 immutable image, signed registration and Agent auth,
+original `/app/data` bind mount, root-owned approved-origins `ro` mount,
+and readonly Panel `.env` all appear in the *combined* effective Compose
+(`Panel Compose + signed-control override`). No changes were made.
+
+Source-only code in `modules/smite-rc2-panel-compose-review.py` now
+computes a candidate IR Panel Compose **in memory** after checking its
+original SHA256. It permits *only* replacing exactly one complete
+`    image: ghcr.io/aghajani82/smite-panel@sha256:...` line from the frozen
+RC.1 Panel digest to the immutable Cosign-verified RC.2 Panel digest.
+It verifies an exact byte-for-byte inverse and outputs the old/new
+file SHA256. The code never writes either Compose file or changes
+running images. `tests/test-smite-rc2-panel-compose-review.py` includes
+round-trip and negative drift/duplicate mount/security downgrade tests,
+run in CI.
+
+The **target** is Panel-only. On first cutover, continue running the
+signed RC.1 local IR Node and leave KH and Sanaei untouched. Preserve
+both the existing base Compose and signed overlay; **do not switch
+SMITE_MANAGED_VERSION to RC.2** during a mixed-version Panel-only trial.
+Only a later separately reviewed, tested transaction can apply this
+candidate, with the original RC.1 image and Compose as rollback and
+live Panel→IR HMAC verification before declaring success. Never restore
+the live SQLite DB from the earlier backup merely to undo an image-only
+trial; avoid stale Replay state or WAL destruction. If a future
+migration requires a DB schema change, it needs its own recovery gate.
+
+Expected dry-run result:
+`IR_PANEL_PROPOSED_DIFF=EXACT_PANEL_IMAGE_LINE_ONLY`,
+`RC2_DEPLOYMENT_AUTHORIZED=NO`, `LIVE_CHANGES=NONE`.
+
 ## Phased trial (plan only; no authorized commands yet)
 
 **A. IR**: stage exact images with manifest and signature verification,
