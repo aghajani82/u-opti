@@ -1381,6 +1381,7 @@ def run(argv: list[str] | None = None) -> int:
     actions.add_argument("--redeem-preview", action="store_true")
     actions.add_argument("--activate-ir-node-field-trial", action="store_true")
     actions.add_argument("--activate-foreign-node-field-trial", action="store_true")
+    actions.add_argument("--approve-foreign-origin-field-trial", action="store_true")
     actions.add_argument("--rollback-node-field-trial", action="store_true")
     parser.add_argument("--state-path", type=Path, default=STATE)
     args = parser.parse_args(argv)
@@ -1421,6 +1422,22 @@ def run(argv: list[str] | None = None) -> int:
 
         if args.activate_foreign_node_field_trial:
             activate_foreign_node_field_trial(state)
+            return 0
+
+        if args.approve_foreign_origin_field_trial:
+            _field_trial_gate()
+            if state.get("SMITE_ROLE") != "panel-iran" or not sys.stdin.isatty():
+                raise WizardHold("Interactive IR Panel required for foreign approval")
+            print("FIELD TRIAL: approve one reserved KH origin on IR.")
+            confirm = input("Type APPROVE-KH-CONTROL to proceed: ").strip()
+            if confirm != "APPROVE-KH-CONTROL":
+                raise WizardHold("Cancelled; no changes")
+            node_id = input("Admin-reserved foreign Node UUID: ").strip()
+            node_name = input("Reserved foreign Node name: ").strip()
+            url = input("Approved KH HTTPS/443 control URL: ").strip()
+            approve_foreign_origin_field_trial(
+                node_id=node_id, node_name=node_name, control_url=url, state=state,
+            )
             return 0
 
         if args.rollback_node_field_trial:
