@@ -77,8 +77,9 @@ test -f "$SMITE_NODE_DIR/certs/ca.crt"
 ! grep -q '^SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 ! grep -q '^SMITE_ENGINE_INVENTORY_MODE=' "$SMITE_NODE_DIR/.env"
 grep -qF "/api/agent/status" "$SMITE_NODE_COMPOSE"
-# RC.1 Foreign Gateway must use its loopback-only /healthz, never unsigned
-# /api/agent/status or anonymous Panel discovery before signed pairing.
+# RC.1 Foreign Gateway uses loopback-only /healthz for local Node readiness,
+# but the proxied root / for transport reachability. Neither grants signed
+# /api/agent/status or anonymous Panel discovery before secure pairing.
 source "$ROOT/modules/smite-foreign-gateway.sh"
 SMITE_STATE_DIR="$TMP/state"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
@@ -113,9 +114,11 @@ curl() {
     for endpoint in "$@"; do :; done
     printf '%s\n' "$endpoint" >> "$TMP/curl-urls"
     case "$endpoint" in
-        http://127.0.0.1:8888/healthz|https://kh.example.test/smite-node/trial/healthz|\
+        http://127.0.0.1:8888/healthz|\
         http://127.0.0.1:8888/api/agent/status|https://kh.example.test/smite-node/trial/api/agent/status)
             printf '{"status":"ok"}\n' ;;
+        https://kh.example.test/smite-node/trial/)
+            printf '{"status":"ok","service":"smite-node"}\n' ;;
         *) echo "Unexpected URL: $endpoint" >&2; return 92 ;;
     esac
 }
@@ -124,7 +127,8 @@ smite_foreign_gateway_require_rc_paused
 smite_foreign_gateway_require_node
 smite_foreign_gateway_verify_local kh.example.test /smite-node/trial
 grep -Fxq 'http://127.0.0.1:8888/healthz' "$TMP/curl-urls"
-grep -Fxq 'https://kh.example.test/smite-node/trial/healthz' "$TMP/curl-urls"
+grep -Fxq 'https://kh.example.test/smite-node/trial/' "$TMP/curl-urls"
+! grep -Fxq 'https://kh.example.test/smite-node/trial/healthz' "$TMP/curl-urls"
 ! grep -Fq '/api/agent/status' "$TMP/curl-urls"
 
 # Pre-pairing RC must not query anonymous /api/nodes; use signed pairing later.
