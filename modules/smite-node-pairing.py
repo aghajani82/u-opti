@@ -1012,7 +1012,8 @@ def _approved_foreign_control_url(url: str) -> tuple[str, str]:
         not isinstance(url, str) or any(x.isspace() for x in url)
         or parts.scheme != "https" or not host or not _DOMAIN.fullmatch(host)
         or port not in (None, 443)
-        or parts.username or parts.password or parts.query or parts.fragment
+        or parts.username is not None or parts.password is not None
+        or parts.query or parts.fragment
         or not _FOREIGN_PATH.fullmatch(parts.path)
     ):
         raise WizardHold("Foreign gateway hostname, port or prefix unapproved")
