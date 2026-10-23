@@ -278,6 +278,176 @@ class PreviewTests(unittest.TestCase):
                 with self.assertRaises(pairing.WizardHold):
                     pairing._replay_artifacts_valid()
 
+    def test_foreign_gateway_preflight_trusts_only_managed_pinned_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            state = root / "foreign-gateway.env"
+            node = root / "node"
+            node.mkdir()
+            env = node / ".env"
+            compose = node / "docker-compose.yml"
+            compose.write_text("services:\n  smite-node:\n    image: signed\n")
+            values = {
+                "SMITE_FOREIGN_GATEWAY_DOMAIN": "kh.kolbe1.ir",
+                "SMITE_FOREIGN_PANEL_DOMAIN": "ir.kolbe1.ir",
+                "SMITE_FOREIGN_PANEL_SOURCE_IPV4": "91.107.174.237",
+                "SMITE_FOREIGN_CONTROL_PATH": "/smite-node/322983983580c8eb",
+                "SMITE_FOREIGN_GATEWAY_PUBLIC_PORT": "443",
+                "SMITE_FOREIGN_GATEWAY_MODE": "https-control-path",
+            }
+            def write_state(data):
+                state.write_text("".join(f"{k}={v}\n" for k,v in data.items()))
+                state.chmod(0o600)
+            write_state(values)
+            control = "https://kh.kolbe1.ir/smite-node/322983983580c8eb"
+            env.write_text(
+                "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+                "SMITE_AGENT_AUTH_MODE=strict\n"
+                "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+                "PANEL_ADDRESS=ir.kolbe1.ir:443\n"
+                f"SMITE_CONTROL_ADDRESS={control}\n"
+            )
+            env.chmod(0o600)
+            current = {
+                "SMITE_ROLE": "foreign",
+                "SMITE_MANAGED_VERSION": "2.0.0-rc.1",
+                "SMITE_PANEL_DOMAIN": "ir.kolbe1.ir",
+            }
+            seen = []
+            def run_stub(command, **kwargs):
+                seen.append(command)
+                if command[:2] == ["docker","inspect"]:
+                    return pairing._FOREIGN_NODE_IMAGE
+                if command[0] == "curl":
+                    self.assertIn("--resolve", command)
+                    self.assertIn("kh.kolbe1.ir:443:127.0.0.1", command)
+                    self.assertEqual(command[-1], control + "/")
+                    return '{"status":"ok","service":"smite-node"}'
+                raise AssertionError(command)
+            with (
+                patch.object(pairing, "STATE", root / "state.env"),
+                patch.object(pairing, "NODE_DIR", node),
+                patch.object(pairing, "NODE_COMPOSE", compose),
+                patch.object(pairing, "_run", side_effect=run_stub),
+            ):
+                self.assertEqual(
+                    pairing._foreign_gateway_preflight(current),
+                    ("ir.kolbe1.ir", "kh.kolbe1.ir", control),
+                )
+                self.assertEqual(len(seen), 2)
+
+                changed = dict(values)
+                changed["SMITE_FOREIGN_CONTROL_PATH"] = "/api/agent"
+                write_state(changed)
+                with self.assertRaises(pairing.WizardHold):
+                    pairing._foreign_gateway_preflight(current)
+                write_state(values)
+
+                env.write_text(env.read_text().replace(
+                    "SMITE_AGENT_AUTH_MODE=strict",
+                    "SMITE_AGENT_AUTH_MODE=legacy",
+                ))
+                with self.assertRaises(pairing.WizardHold):
+                    pairing._foreign_gateway_preflight(current)
+
+    def test_foreign_activation_uses_signed_only_and_rolls_back_on_failure(self):
+        current = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_CONNECTION_MODE": "standard",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.1",
+            "SMITE_NODE_NAME": "node-kh",
+            "SMITE_PANEL_DOMAIN": "ir.kolbe1.ir",
+        }
+        control = "https://kh.kolbe1.ir/smite-node/322983983580c8eb"
+        node_id = "22222222-3333-4444-5555-666666666666"
+
+        for approval in (True, False):
+            with self.subTest(signed_panel_approves=approval):
+                commands = []
+                active = [False]
+                def fake_run(command, **kwargs):
+                    commands.append(command)
+                    if command[:2] == ["docker", "compose"]:
+                        if "up" in command:
+                            active[0] = (
+                                str(pairing.NODE_SECURITY_CANDIDATE) in command
+                            )
+                        return ""
+                    if command[:2] == ["docker", "inspect"]:
+                        return "\n".join([
+                            f"SMITE_NODE_PANEL_AUTH_MODE={'signed' if active[0] else 'paused'}",
+                            "SMITE_AGENT_AUTH_MODE=strict",
+                            "SMITE_ENGINE_INVENTORY_MODE=managed",
+                        ])
+                    if command[:2] == ["python3", "-B"]:
+                        if approval:
+                            return ""
+                        raise pairing.WizardHold("Signed KH gateway not ready")
+                    raise AssertionError(command)
+
+                with (
+                    patch.object(pairing, "_field_trial_gate"),
+                    patch.object(pairing, "_foreign_gateway_preflight",
+                                 return_value=("ir.kolbe1.ir","kh.kolbe1.ir",control)),
+                    patch.object(pairing, "_identity_record", return_value=(node_id,b"a"*64)),
+                    patch.object(pairing, "_regular", return_value=b""),
+                    patch.object(pairing, "_prepare_security_candidate") as stage,
+                    patch.object(pairing, "_provision_replay_once") as replay,
+                    patch.object(pairing, "_wait_container") as wait,
+                    patch.object(pairing, "_local_signed_replay_probe") as hmac_probe,
+                    patch.object(pairing, "_run", side_effect=fake_run),
+                    patch.object(pairing.time, "sleep") as sleeper,
+                    patch("sys.stdout", io.StringIO()) as display,
+                ):
+                    if approval:
+                        pairing.activate_foreign_node_field_trial(current)
+                        self.assertIn(
+                            "KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS",
+                            display.getvalue(),
+                        )
+                        self.assertTrue(active[0])
+                        self.assertEqual(
+                            len([x for x in commands
+                                 if x[:2] == ["docker","compose"] and "up" in x]), 1,
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            pairing.WizardHold,
+                            "Node paused again",
+                        ):
+                            pairing.activate_foreign_node_field_trial(current)
+                        self.assertFalse(active[0])
+                        self.assertEqual(
+                            len([x for x in commands
+                                 if x[:2] == ["docker","compose"] and "up" in x]), 2,
+                        )
+                        self.assertEqual(sleeper.call_count, 7)
+                    stage.assert_called_once()
+                    replay.assert_called_once()
+                    hmac_probe.assert_called_once()
+                    wait.assert_called()
+                self.assertFalse(any("/api/nodes" in str(c) for c in commands))
+                self.assertFalse(any("verify=False" in str(c) for c in commands))
+
+    def test_foreign_activation_does_not_modify_panel_or_legacy_gateway(self):
+        source = HELPER.read_text()
+        activation = source.split("def activate_foreign_node_field_trial(",1)[1].split(
+            "\ndef rollback_node_to_paused_field_trial(",1
+        )[0]
+        self.assertIn("_foreign_gateway_preflight(current)", activation)
+        self.assertIn("_provision_replay_once()", activation)
+        self.assertIn("_local_signed_replay_probe()", activation)
+        self.assertIn("smite-foreign-gateway-signed-check.py", activation)
+        self.assertIn("Node paused again", activation)
+        self.assertNotIn("smite-panel", activation)
+        self.assertNotIn("systemctl reload nginx", activation)
+        self.assertNotIn("/api/nodes", activation)
+        self.assertNotIn("SMITE_AGENT_AUTH_MODE=legacy", activation)
+        wizard = (ROOT / "modules/smite-node-pairing-wizard.sh").read_text()
+        self.assertIn("Activate signed KH Node runtime", wizard)
+        self.assertIn("ACTIVATE-KH-SIGNED-NODE", wizard)
+        self.assertIn("--activate-foreign-node-field-trial", wizard)
+
     def test_live_field_trial_actions_remain_explicitly_gated(self):
         with patch.object(pairing.os, "geteuid", return_value=0):
             with patch.dict(os.environ, {"UOPTI_SMITE_PAIRING_FIELD_TRIAL": ""}):
