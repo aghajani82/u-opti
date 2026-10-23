@@ -68,11 +68,21 @@ class PanelRC2ComposeReviewTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(tool.ReviewHold):
                 tool.validate_combined_compose(cfg)
 
+    def test_rc2_requires_explicit_expected_image_and_preserves_security(self):
+        cfg = valid_effective()
+        cfg["services"]["smite-panel"]["image"] = tool.RC2_PANEL
+        with self.assertRaises(tool.ReviewHold):
+            tool.validate_combined_compose(cfg)
+        tool.validate_combined_compose(cfg, expected_image=tool.RC2_PANEL)
+        cfg["services"]["smite-panel"]["environment"]["SMITE_PANEL_AGENT_AUTH_MODE"] = "legacy"
+        with self.assertRaisesRegex(tool.ReviewHold, "Signed"):
+            tool.validate_combined_compose(cfg, expected_image=tool.RC2_PANEL)
+
     def test_unknown_running_panel_digest_is_rejected(self):
         for image in (tool.RC2_PANEL, "ghcr.io/aghajani82/smite-panel:latest"):
             cfg = valid_effective()
             cfg["services"]["smite-panel"]["image"] = image
-            with self.assertRaisesRegex(tool.ReviewHold, "RC.1"):
+            with self.assertRaisesRegex(tool.ReviewHold, "reviewed target"):
                 tool.validate_combined_compose(cfg)
 
     def test_duplicate_data_mount_is_rejected(self):
