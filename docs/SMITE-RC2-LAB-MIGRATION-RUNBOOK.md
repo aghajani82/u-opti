@@ -163,6 +163,55 @@ Expected dry-run result:
 `IR_PANEL_PROPOSED_DIFF=EXACT_PANEL_IMAGE_LINE_ONLY`,
 `RC2_DEPLOYMENT_AUTHORIZED=NO`, `LIVE_CHANGES=NONE`.
 
+## NEXT-5.AP — guarded experimental IR-only Panel transaction staged in code
+
+The operator's 2026-10-23 IR dry-run returned
+`ORIGINAL_COMPOSE=VERIFIED`,
+`PANEL_ONLY_IMAGE_CHANGE=VERIFIED`,
+`ROLLBACK_COMPOSE=REVERSIBLE`,
+`PROPOSED_SHA256=adc4dfb3031d5f2b5c007241589ed96fe9679ac2df29da62853192c7d716ca5a`,
+`FILES_MODIFIED=0`, and `RC2_ACTIVATION=NOT_PERFORMED`.
+
+In the **draft-only** module `modules/smite-rc2-ir-panel-rollout.py`:
+the default plan path verifies the exact RC.1 state, backup SHA256,
+original Panel/overlay bytes, effective signed-only Compose and local signed
+Node/Panel image health and computes only the exact reviewed SHA256. **It does
+not write files, pull Docker images, run HMAC probes or restart services.**
+It is not installed on IR or KH.
+
+The separate `--apply` code path is **not approved or run**. It is isolated
+behind a literal hostname confirmation AND
+`UOPTI_SMITE_IR_RC2_PANEL_FIELD_TRIAL=YES`, root privileges and a
+single exclusive cutover lock. It demands the already reviewed backup
+checksums and a fresh exact both-role Cosign signature admission from the
+pinned binary **before pulling** the immutable RC.2 Panel digest. It saves
+a root-only, non-overwritable RC.1 Compose copy before any live mutation.
+
+If a later explicitly authorized operator trial runs, its transaction may
+replace ONLY the Panel image line, then revalidate that the combined effective
+Compose has changed **only** the Panel image (retaining mounts, signatures,
+network, env and healthcheck). It must use both the base and signed Compose
+override, `--no-deps` and `--pull never` when recreating ONLY `smite-panel`.
+It verifies new Panel health, the KH prefix helper and actual Panel → co-located
+IR signed HMAC, and proves the IR local Node stays on the exact RC.1 image.
+It does not touch any KH service, Sanaei, XHTTP, Nginx or live SQLite files.
+
+On failure it restores the saved original Compose bytes atomically and, if
+recreation was attempted, re-creates ONLY the prior RC.1 Panel. It requires
+RC.1 health and Panel→IR signed HMAC again. If rollback cannot be proved,
+it stops with an explicit **CRITICAL** status for manual snapshot recovery,
+preserving all root-only backups and Replay/identity. It never deletes live
+SQLite WAL/SHM or replays an older nonce ledger.
+
+Offline CI mocks cover baseline, explicit consent gate, good Panel-only
+upgrade, signed environment drift, unhealthy RC.2, post-rename crash,
+rollback and inert default. This is **source-level simulation**, not a
+host-based recovery rehearsal or owner approval to apply.
+
+**Current status**: `IR_HOST_RC2_PANEL=NOT_INSTALLED`;
+`KH_RC2_NODE=NOT_INSTALLED`; `UOPTI_PR48=DRAFT`;
+`LIVE_RC2_ACTIVATION=NOT_AUTHORIZED`.
+
 ## Phased trial (plan only; no authorized commands yet)
 
 **A. IR**: stage exact images with manifest and signature verification,
