@@ -150,8 +150,8 @@ the new in-progress reviewed signed-KH-gateway source is Smite
 
 ### Remaining supply-chain and live rollout gate
 
-The only **currently admitted** reviewed registry pair in
-`modules/smite-field-trial-candidate.json` is older `v2.0.0-rc.1`,
+The older **recorded, non-activating** registry pair in
+`modules/smite-field-trial-candidate.json` is `v2.0.0-rc.1`,
 Smite source `289f99cae8c53ba7d5b8e427bca19e5c04ebba8a`.
 It is not the new PR18 Panel source; neither its Panel nor Node digest
 may be claimed to include the KH gateway-prefix fix.
