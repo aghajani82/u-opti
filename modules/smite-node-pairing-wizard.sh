@@ -24,9 +24,10 @@ smite_node_pairing_menu() {
         echo "5) Roll back Node runtime to paused + strict"
         echo "6) Show safe pairing order"
         echo "7) Activate signed KH Node runtime (foreign; reviewed Panel required)"
+        echo "8) Approve foreign KH Gateway origin on IR (Panel only)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-7]: " choice || return 0
+        read -rp "Choose [0-8]: " choice || return 0
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
 
@@ -105,6 +106,20 @@ smite_node_pairing_menu() {
                 if [ "$answer" = "ACTIVATE-KH-SIGNED-NODE" ]; then
                     UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES \
                         python3 -B "$helper" --activate-foreign-node-field-trial || :
+                else
+                    echo "Cancelled; no changes."
+                fi
+                ;;
+            8)
+                echo
+                echo "IR ONLY: requires an admin-reserved pending KH Node UUID,"
+                echo "new signed Panel image with pinned HTTPS/443 path support,"
+                echo "and verified remote TLS. This records an exact trusted"
+                echo "origin without restarting Panel or creating pairing codes."
+                read -rp "Type APPROVE-KH-PIN to continue: " answer || return 2
+                if [ "$answer" = "APPROVE-KH-PIN" ]; then
+                    UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES \
+                        python3 -B "$helper" --approve-foreign-origin-field-trial || :
                 else
                     echo "Cancelled; no changes."
                 fi
