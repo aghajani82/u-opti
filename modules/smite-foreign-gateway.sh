@@ -478,21 +478,22 @@ smite_foreign_gateway_verify_local() {
     local domain="$1" control_path="$2"
     local json="" attempt=1 health_path="/api/agent/status"
     if smite_foreign_gateway_is_clean_rc; then
-        # Transport reachability only: never claim signed Agent authorization.
-        health_path="/healthz"
+        # Transport only: /healthz is loopback-only, so proxy readiness uses /.
+        # Do not treat root HTTP 200 as signed Agent authorization.
+        health_path="/"
     fi
 
     while [ "$attempt" -le 10 ]; do
         json="$(curl --noproxy '*' -fsS --max-time 10 --resolve "${domain}:443:127.0.0.1" \
             "https://${domain}${control_path}${health_path}" 2>/dev/null || true)"
 
-        if [ -n "$json" ] && python3 - "$json" <<'PY'
+        if [ -n "$json" ] && python3 - "$json" "$health_path" <<'PY'
 import json, sys
 try:
     data = json.loads(sys.argv[1])
 except Exception:
     raise SystemExit(1)
-raise SystemExit(0 if data.get('status') == 'ok' else 1)
+raise SystemExit(0 if data.get("status") == "ok" and (sys.argv[2] != "/" or data.get("service") == "smite-node") else 1)
 PY
         then
             return 0
