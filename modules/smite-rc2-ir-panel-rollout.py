@@ -78,11 +78,27 @@ def run(args: list[str], *, timeout: int = 60) -> str:
 
 def safe_file(path: Path, *, size: int = 262144) -> bytes:
     try:
-        info = path.lstat()
-        require(stat.S_ISREG(info.st_mode) and not info.st_mode & 0o022,
-                "Unsafe file type or mode")
-        require(info.st_size <= size, "File exceeds safe limit")
-        return path.read_bytes()
+        before = path.lstat()
+        require(
+            stat.S_ISREG(before.st_mode) and before.st_uid == 0
+            and not before.st_mode & 0o022 and before.st_nlink == 1,
+            "Unsafe file type, owner, links or mode",
+        )
+        require(before.st_size <= size, "File exceeds safe limit")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as source:
+            opened = os.fstat(source.fileno())
+            require(
+                stat.S_ISREG(opened.st_mode)
+                and (opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino)
+                and opened.st_uid == 0 and opened.st_nlink == 1
+                and opened.st_size <= size,
+                "File changed during secure inspection",
+            )
+            result = source.read(size + 1)
+        require(len(result) <= size, "File grew during inspection")
+        return result
     except OSError as exc:
         raise Hold("Required file missing") from exc
 
@@ -343,10 +359,10 @@ def apply(planner, registry) -> None:
         )
         save_rollback_copy(original)
         attempted_recreate = False
-        changed_compose = False
+        # Treat a failed fsync *after* os.replace as potentially committed.
+        changed_compose = True
         try:
             change_atomically(PANEL_COMPOSE, proposed)
-            changed_compose = True
             after = read_only_config()
             planner.validate_combined_compose(after, expected_image=planner.RC2_PANEL)
             expected = json.loads(json.dumps(before))
@@ -371,8 +387,10 @@ def apply(planner, registry) -> None:
                     if attempted_recreate:
                         recreate_panel_only()
                         wait_panel_health(target_image=planner.RC1_PANEL)
-                        runtime_probe(node_id=node_id, target_image=planner.RC1_PANEL,
-                                      check_foreign_prefix=False)
+                    # No runtime-mutation was attempted in the config-only case,
+                    # but still re-prove the old signed Panel and Node.
+                    runtime_probe(node_id=node_id, target_image=planner.RC1_PANEL,
+                                  check_foreign_prefix=False)
                     verify_node_unchanged(planner)
                     rollback_ok = True
                 except Exception:
