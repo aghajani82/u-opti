@@ -67,6 +67,18 @@ def read_regular(root: Path, path: str, *, private: bool = False, limit: int = 6
         raise Hold("required managed file unavailable") from exc
 
 
+def check_regular_metadata(root: Path, path: str) -> None:
+    """Inspect large SQLite file metadata only; never read DB bytes."""
+    target = _rootpath(root, path)
+    try:
+        info = target.lstat()
+        require(stat.S_ISREG(info.st_mode), "Panel database is not a regular file")
+        require(info.st_size > 0, "Panel database is empty")
+        require(not info.st_mode & 0o022, "Panel database is group/world-writable")
+    except OSError as exc:
+        raise Hold("Panel database unavailable") from exc
+
+
 def parse_env(raw: bytes) -> dict[str, str]:
     try:
         text = raw.decode("utf-8")
@@ -174,7 +186,7 @@ def audit(role: str, *, root: Path = Path("/"), execute=run_command) -> list[str
             and panel.get("SMITE_NODE_PAIRING_PREVIEW_ENABLED") == "true",
             "IR Panel not in signed enrollment mode",
         )
-        read_regular(root, "/opt/smite/panel/data/smite.db", limit=500_000_000)
+        check_regular_metadata(root, "/opt/smite/panel/data/smite.db")
         facts.append("IR_PANEL_SIGNED_BASELINE=VERIFIED")
     else:
         node = parse_env(read_regular(root, "/opt/smite-node/.env", private=True))
