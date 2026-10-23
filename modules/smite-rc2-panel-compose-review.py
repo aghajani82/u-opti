@@ -99,6 +99,28 @@ def validate_combined_compose(doc: object) -> None:
     )
 
 
+def plan_exact_panel_image_replacement(current: bytes) -> bytes:
+    """Return proposed Compose bytes in memory; never write live files.
+
+    The only proposed change is the one reviewed Panel immutable image line.
+    Exact baseline hash and a single, whole-line image occurrence are required
+    so a second service, comment, templated image or local security setting
+    cannot be silently changed.
+    """
+    require(
+        hashlib.sha256(current).hexdigest() == KNOWN_HASHES["panel"],
+        "Panel Compose does not match approved immutable baseline",
+    )
+    old = ("    image: " + RC1_PANEL + "\n").encode("ascii")
+    new = ("    image: " + RC2_PANEL + "\n").encode("ascii")
+    require(current.count(old) == 1, "Expected Panel image line not unique")
+    proposed = current.replace(old, new, 1)
+    require(proposed != current, "Image change missing")
+    require(proposed.replace(new, old, 1) == current,
+            "Proposed change includes more than Panel immutable image")
+    return proposed
+
+
 def run_readonly(command: list[str]) -> str:
     try:
         done = subprocess.run(
@@ -122,6 +144,11 @@ def review(*, compose: Path = PANEL_COMPOSE,
         except OSError as exc:
             raise ReviewHold("Required Compose file unavailable") from exc
         require(digest == KNOWN_HASHES[label], "Reviewed Compose SHA256 changed")
+
+    # Compute an exact, reversible single-image patch in memory only.
+    baseline = compose.read_bytes()
+    proposed = plan_exact_panel_image_replacement(baseline)
+    proposed_hash = hashlib.sha256(proposed).hexdigest()
 
     raw = execute([
         "docker", "compose",
@@ -151,6 +178,10 @@ def review(*, compose: Path = PANEL_COMPOSE,
         "IR_SIGNED_COMPOSE_EFFECTIVE=VERIFIED",
         "IR_PANEL_DATABASE_AND_TRUST_MOUNTS=VERIFIED",
         "RC2_PANEL_CANDIDATE=" + RC2_PANEL,
+        "IR_PANEL_ORIGINAL_COMPOSE_SHA256=" + KNOWN_HASHES["panel"],
+        "IR_PANEL_PROPOSED_COMPOSE_SHA256=" + proposed_hash,
+        "IR_PANEL_PROPOSED_DIFF=EXACT_PANEL_IMAGE_LINE_ONLY",
+        "IR_ROLLBACK_IMAGE=" + RC1_PANEL,
         "THIS_IS_ONLY_A_READ_ONLY_MIGRATION_PLAN=YES",
         "RC2_DEPLOYMENT_AUTHORIZED=NO",
         "LIVE_CHANGES=NONE",
