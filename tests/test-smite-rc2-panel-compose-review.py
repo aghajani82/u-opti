@@ -95,7 +95,7 @@ class PanelRC2ComposeReviewTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             panel = Path(tmp) / "docker-compose.yml"
             overlay = Path(tmp) / "docker-compose.signed-control.yml"
-            panel.write_text("known panel Compose fixture")
+            panel.write_text("services:\n  smite-panel:\n    image: " + tool.RC1_PANEL + "\n")
             overlay.write_text("known signed overlay fixture")
             original = tool.KNOWN_HASHES.copy()
             tool.KNOWN_HASHES["panel"] = __import__("hashlib").sha256(panel.read_bytes()).hexdigest()
@@ -130,6 +130,44 @@ class PanelRC2ComposeReviewTest(unittest.TestCase):
             finally:
                 tool.KNOWN_HASHES.clear()
                 tool.KNOWN_HASHES.update(original)
+
+    def test_exact_panel_image_patch_is_in_memory_and_reversible(self):
+        import hashlib
+        original = (
+            "services:\n  smite-panel:\n    image: " + tool.RC1_PANEL
+            + "\n    restart: unless-stopped\n"
+        ).encode()
+        stored = tool.KNOWN_HASHES["panel"]
+        try:
+            tool.KNOWN_HASHES["panel"] = hashlib.sha256(original).hexdigest()
+            proposed = tool.plan_exact_panel_image_replacement(original)
+            self.assertIn(tool.RC2_PANEL.encode(), proposed)
+            self.assertNotIn(tool.RC1_PANEL.encode(), proposed)
+            self.assertEqual(
+                proposed.replace(tool.RC2_PANEL.encode(), tool.RC1_PANEL.encode()),
+                original,
+            )
+            self.assertEqual(
+                hashlib.sha256(original).hexdigest(),
+                tool.KNOWN_HASHES["panel"],
+            )
+        finally:
+            tool.KNOWN_HASHES["panel"] = stored
+
+    def test_exact_panel_patch_fails_closed_on_drift_or_missing_image(self):
+        import hashlib
+        original = ("services:\n    image: " + tool.RC1_PANEL + "\n").encode()
+        stored = tool.KNOWN_HASHES["panel"]
+        try:
+            tool.KNOWN_HASHES["panel"] = hashlib.sha256(original).hexdigest()
+            with self.assertRaisesRegex(tool.ReviewHold, "not unique"):
+                tool.plan_exact_panel_image_replacement(original.replace(
+                    b"    image:", b"      image:",
+                ))
+            with self.assertRaisesRegex(tool.ReviewHold, "baseline"):
+                tool.plan_exact_panel_image_replacement(original + b"# drift\n")
+        finally:
+            tool.KNOWN_HASHES["panel"] = stored
 
     def test_changed_compose_hash_holds_before_docker(self):
         with tempfile.TemporaryDirectory() as tmp:
