@@ -113,10 +113,15 @@ def plan_exact_panel_image_replacement(current: bytes) -> bytes:
     )
     old = ("    image: " + RC1_PANEL + "\n").encode("ascii")
     new = ("    image: " + RC2_PANEL + "\n").encode("ascii")
-    require(current.count(old) == 1, "Expected Panel image line not unique")
-    proposed = current.replace(old, new, 1)
+    lines = current.splitlines(keepends=True)
+    matches = [i for i, line in enumerate(lines) if line == old]
+    require(len(matches) == 1, "Expected exact full Panel image line not unique")
+    edited = lines.copy()
+    edited[matches[0]] = new
+    proposed = b"".join(edited)
     require(proposed != current, "Image change missing")
-    require(proposed.replace(new, old, 1) == current,
+    edited[matches[0]] = old
+    require(b"".join(edited) == current,
             "Proposed change includes more than Panel immutable image")
     return proposed
 
