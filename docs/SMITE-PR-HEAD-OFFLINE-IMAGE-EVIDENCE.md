@@ -106,3 +106,79 @@ tag, start or install the images under the guise of verification.
 **Status:** `INSTALL_ALLOWED=NO`,
 `ACTIVATION_GATE=HOLD`, `MAIN_MERGE=NO`,
 `RELEASE_PUBLISH=NO`, `IR_KH_UNCHANGED=YES`.
+
+
+---
+
+## New independent PR18 KH signed-gateway candidate (2026-10-23)
+
+This section supersedes historical **source/build recency** statements above,
+**not** the unchanged fail-closed release/activation policy. PR16 was merged;
+the new in-progress reviewed signed-KH-gateway source is Smite
+[Draft PR #18](https://github.com/aghajani82/Smite/pull/18).
+
+### Exact-source CI outcome
+
+- Reviewed Smite PR18 branch HEAD: \`31543e2e81ea635b4eaab87f606125b4e4dd22e1\`.
+- Nine exact-head workflows finished **SUCCESS**:
+  [Stage14 unpublished contract, run 39937249980](https://github.com/aghajani82/Smite/actions/runs/39937249980);
+  [Panel Signed NodeClient, run 39937250022](https://github.com/aghajani82/Smite/actions/runs/39937250022);
+  [Signed Agent strict commands, run 39937250314](https://github.com/aghajani82/Smite/actions/runs/39937250314);
+  [Stage12 approved origins, run 39937249999](https://github.com/aghajani82/Smite/actions/runs/39937249999);
+  [Admin API security, run 39937250092](https://github.com/aghajani82/Smite/actions/runs/39937250092);
+  [Stage10 unpublished auth images, run 39937250230](https://github.com/aghajani82/Smite/actions/runs/39937250230);
+  [Stage11 FRP/Backhaul, run 39937250013](https://github.com/aghajani82/Smite/actions/runs/39937250013);
+  [Panel trial build, run 39937250089](https://github.com/aghajani82/Smite/actions/runs/39937250089);
+  [Stage15 exact-source offline pair, run 39937249960](https://github.com/aghajani82/Smite/actions/runs/39937249960).
+- Stage15 runner confirmed
+  \`PANEL_AND_NODE_IMAGE_REVISION=EXACT_SOURCE_SHA\`,
+  \`PANEL_NODE_IMAGE_IDS_DISTINCT=YES\`,
+  \`IMAGE_SOURCE_SMOKE=PASSED\` for both roles and
+  \`OFFLINE_PREVIEW_ARCHIVES=CHECKSUM_VERIFIED\`.
+- Output artifact:
+  \`smite-stage15-offline-images-31543e2e81ea635b4eaab87f606125b4e4dd22e1\`,
+  artifact ID \`12493499940\`, uploaded ZIP size \`372997785\` bytes.
+  Build log artifact ZIP SHA256:
+  \`c4d08680cd381b63306a6c62d1b0edd29ca282d1205425e7a5c6b3e17cdf3773\`.
+  **Separately** the SHA256 of \`stage15-images.json\` reported by the runner:
+  \`af317dfb71d2c39d505627397f373eaca25065512fa17b30660d6d04be60055a\`.
+  **These are different objects.** Values are copied from GitHub Actions
+  logs, not a locally independently downloaded/verified ZIP.
+- The Panel trial image workflow uses \`push: false\` and does not deploy.
+  Stage15 reports \`IMAGE_REGISTRY_PROVENANCE=UNVERIFIED\`;
+  the images are **unpublished offline previews**.
+
+### Remaining supply-chain and live rollout gate
+
+The only **currently admitted** reviewed registry pair in
+\`modules/smite-field-trial-candidate.json\` is older \`v2.0.0-rc.1\`,
+Smite source \`289f99cae8c53ba7d5b8e427bca19e5c04ebba8a\`.
+It is not the new PR18 Panel source; neither its Panel nor Node digest
+may be claimed to include the KH gateway-prefix fix.
+
+Before enabling a foreign signed Node:
+
+1. Review and merge Smite PR18 **only after explicit operator release review**.
+   The workflow \`.github/workflows/publish-images.yml\` is separately
+   \`workflow_dispatch\` gated by owner consent, an exact existing tag
+   and matching 40-character reviewed source commit; CI success does
+   **not** invoke it automatically.
+2. Publish and independently verify **both** new Panel and Node immutable
+   registry digests, Cosign identity/source/role claims, signed tag, external
+   manifest SHA256 and exact source mapping; keep activation flags false.
+3. Prepare a reviewed U-OPTI candidate digest-pair update.
+   **Do not retain the earlier hardcoded KH Node digest in
+   \`modules/smite-node-pairing.py\` if deploying a new Node**: its
+   \`_FOREIGN_NODE_IMAGE\` guard would correctly HOLD.
+4. Validate fresh IR-only Panel upgrade, preserved local signed Node,
+   HTTPS/443 foreign approval, pending reserved foreign UUID/name,
+   KH identity/replay enrollment, signed two-way HMAC status and
+   safe paused rollback. Preserve existing KH Sanaei XHTTP and FRP/Backhaul.
+5. Only after the above passes with snapshot-backed disposable IR/KH,
+   explicitly consider Draft PR #48 and a release approval.
+
+**CURRENT STATE:** \`SMITE_PR18_CI=PASS_9_OF_9\`,
+\`OFFLINE_PAIR=BUILT_NOT_PUBLISHED\`,
+\`REGISTRY_PAIR_SIGNED=NOT_PROVEN\`,
+\`IR_KH_CHANGES=NONE\`, \`PAIRING_ACTIVATION=HOLD\`,
+\`MAIN_MERGE=NO\`, \`PRODUCTION_RELEASE=NO\`.
