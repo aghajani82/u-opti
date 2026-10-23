@@ -134,12 +134,17 @@ main merge is authorized.
   `modules/smite-rc2-signed-registry-candidate.json`; it is
   `activation_allowed=false`, `release_approved=false`, and NOT referenced
   by the default U-OPTI installer. The old RC.1 candidate stays intact.
-- Important: Cosign was verified in the publisher workflow, not via a
-  separate independent live-host verification. Repeat independent Cosign
-  admission before ever replacing an image. U-OPTI's KH Node guard still
-  intentionally pins RC.1 pending a separately reviewed upgrade path.
+- Independent [U-OPTI RC.2 signature admission run 39968212381](https://github.com/aghajani82/u-opti/actions/runs/39968212381)
+  independently verified both immutable images against Sigstore/Cosign OIDC
+  workflow identity, exact source SHA, publisher tag and panel/node role
+  claims with `PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED` and
+  `SAME_REVIEWED_SMITE_SOURCE_AND_TAG=VERIFIED`. This was a separate
+  read-only GitHub runner, NOT an IR/KH host. Reverify before live migration.
+  U-OPTI's KH Node guard still intentionally pins RC.1 pending a separately
+  reviewed upgrade path.
 
 **CURRENT ADMISSION:** `RC2_GHCR_PAIR=PUBLISHED_SIGNED`,
 `REGISTRY_MANIFEST_BYTES=INDEPENDENTLY_HASH_VERIFIED`,
 `UOPTI_RC2_MANIFEST=STAGED_NONACTIVATING`, `IR_KH=UNCHANGED`,
-`UOPTI_STABLE_INSTALLER=UNCHANGED`, `NO_AUTO_DEPLOY=YES`.
+`UOPTI_STABLE_INSTALLER=UNCHANGED`,
+`INDEPENDENT_COSIGN_SIGNATURE_CHECK=PASS`, `NO_AUTO_DEPLOY=YES`.
