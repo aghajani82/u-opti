@@ -161,6 +161,11 @@ grep -Fxq 'http://127.0.0.1:8888/api/agent/status' "$TMP/curl-urls"
 grep -Fxq 'https://kh.example.test/smite-node/trial/api/agent/status' "$TMP/curl-urls"
 ! grep -Fq '/healthz' "$TMP/curl-urls"
 
+# Gateway readiness label must match the actual public root probe, not local /healthz.
+grep -Fq 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$ROOT/modules/smite-foreign-gateway.sh"
+! grep -Fq 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_HEALTHZ_ONLY' "$ROOT/modules/smite-foreign-gateway.sh"
+grep -Fq 'root readiness only; NOT signed control' "$ROOT/modules/smite-foreign-gateway.sh"
+
 # Source-level safety invariant: clean-RC config skips legacy metadata overlay
 # and stops at pending signed pairing, not the anonymous Panel API.
 python3 - "$ROOT/modules/smite-foreign-gateway.sh" <<'PY_RC_GATE'
