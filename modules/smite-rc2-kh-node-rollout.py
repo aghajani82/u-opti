@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -131,6 +132,10 @@ def signatures(registry, planner) -> None:
         verifier.is_file() and not verifier.is_symlink(),
         "Pinned Cosign executable missing",
     )
+    # registry.verify_pair invokes "cosign" through PATH: reject PATH shadowing
+    # even if the independently pinned /usr/local/bin asset itself is intact.
+    require(shutil.which("cosign") == str(verifier),
+            "Unreviewed Cosign executable selected by PATH")
     planner.sha256_file(verifier, COSIGN_SHA)
     result = registry.verify_pair(
         manifest=HERE / "smite-rc2-signed-registry-candidate.json",
