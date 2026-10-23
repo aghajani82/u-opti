@@ -186,7 +186,7 @@ class KHNodeRolloutTests(unittest.TestCase):
             f.rollback_fail = True
             with self.assertRaisesRegex(tool.Hold, "CRITICAL"):
                 tool.apply(f.planner, object())
-            self.assertNotIn("runtime-health:rc1", f.log)
+            # The normal preflight RC.1 probe runs once; failed rollback must\n            # not create a second, falsely successful recovery probe.\n            self.assertEqual(f.log.count("runtime-health:rc1"), 1)
         self.exercise(test)
 
     def test_default_plan_never_triggers_apply(self):
