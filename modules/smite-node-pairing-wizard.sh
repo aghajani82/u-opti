@@ -23,9 +23,10 @@ smite_node_pairing_menu() {
         echo "4) Activate signed IR Node runtime"
         echo "5) Roll back Node runtime to paused + strict"
         echo "6) Show safe pairing order"
+        echo "7) Activate signed KH Node runtime (foreign; reviewed Panel required)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-6]: " choice || return 0
+        read -rp "Choose [0-7]: " choice || return 0
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
 
@@ -89,7 +90,24 @@ smite_node_pairing_menu() {
                 echo "  6. Activate signed IR runtime."
                 echo "  7. Require Node->Panel signed check-in AND Panel->Node HMAC/replay PASS."
                 echo
-                echo "KH remains untouched until the IR gate closes."
+                echo "KH remains untouched until the reviewed foreign-origin"
+                echo "approval is installed on IR and signed Panel image is updated."
+                ;;
+            7)
+                echo
+                echo "KH ONLY: requires externally approved foreign Node origin"
+                echo "on IR, newly verified signed Panel image and one-time identity."
+                echo "This command will apply the signed security overlay, create"
+                echo "durable local Replay state, and may recreate ONLY smite-node."
+                echo "Failure attempts a paused/strict Node rollback; identity and"
+                echo "Replay history are intentionally retained."
+                read -rp "Type ACTIVATE-KH-SIGNED-NODE to continue: " answer || return 2
+                if [ "$answer" = "ACTIVATE-KH-SIGNED-NODE" ]; then
+                    UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES \
+                        python3 -B "$helper" --activate-foreign-node-field-trial || :
+                else
+                    echo "Cancelled; no changes."
+                fi
                 ;;
             0)
                 return 0
