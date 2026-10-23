@@ -208,6 +208,7 @@ jobs:
           python3 -B tests/test-smite-rc2-candidate-staging.py -v
           python3 -B tests/test-smite-rc2-upgrade-preflight.py -v
           python3 -B tests/test-smite-rc2-panel-compose-review.py -v
+          python3 -B tests/test-smite-rc2-ir-panel-rollout.py -v
 
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
