@@ -128,10 +128,10 @@ def only_image_changed(before: dict, after: dict, *, source: str, target: str) -
 def signatures(registry, planner) -> None:
     verifier = Path("/usr/local/bin/cosign")
     require(
-        verifier.is_file() and not verifier.is_symlink()
-        and hashlib.sha256(read_regular(verifier, limit=40_000_000)).hexdigest() == COSIGN_SHA,
-        "Pinned Cosign executable invalid",
+        verifier.is_file() and not verifier.is_symlink(),
+        "Pinned Cosign executable missing",
     )
+    planner.sha256_file(verifier, COSIGN_SHA)
     result = registry.verify_pair(
         manifest=HERE / "smite-rc2-signed-registry-candidate.json",
         manifest_sha256=MANIFEST_SHA,
