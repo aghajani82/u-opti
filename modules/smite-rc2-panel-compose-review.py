@@ -60,13 +60,14 @@ def require(condition: bool, message: str) -> None:
         raise ReviewHold(message)
 
 
-def validate_combined_compose(doc: object) -> None:
+def validate_combined_compose(doc: object, *, expected_image: str = RC1_PANEL) -> None:
     require(isinstance(doc, dict), "effective Compose JSON invalid")
     services = doc.get("services")
     require(isinstance(services, dict), "Compose services missing")
     panel = services.get("smite-panel")
     require(isinstance(panel, dict), "Panel service missing")
-    require(panel.get("image") == RC1_PANEL, "Panel image differs from exact RC.1 baseline")
+    require(expected_image in (RC1_PANEL, RC2_PANEL), "Unreviewed Panel target")
+    require(panel.get("image") == expected_image, "Panel image differs from exact reviewed target")
     require(panel.get("container_name") == "smite-panel", "Panel service renamed")
     require(panel.get("network_mode") == "host", "Panel network mode changed")
     require(panel.get("restart") == "unless-stopped", "Panel restart policy changed")
@@ -91,11 +92,10 @@ def validate_combined_compose(doc: object) -> None:
 
     require(
         all(
-            service.get("image") != RC2_PANEL
-            for service in services.values()
-            if isinstance(service, dict)
+            name == "smite-panel" or service.get("image") != RC2_PANEL
+            for name, service in services.items() if isinstance(service, dict)
         ),
-        "RC.2 Panel unexpectedly present before cutover",
+        "RC.2 Panel unexpectedly present outside approved Panel service",
     )
 
 
