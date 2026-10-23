@@ -76,7 +76,7 @@ def state_values(path: Path = STATE) -> dict[str, str]:
         if not row or row.startswith("#") or "=" not in row:
             continue
         k, v = row.split("=", 1)
-        if k in ("SMITE_ROLE", "SMITE_CONNECTION_MODE", "SMITE_PANEL_DOMAIN", "SMITE_NODE_NAME"):
+        if k in ("SMITE_ROLE", "SMITE_CONNECTION_MODE", "SMITE_PANEL_DOMAIN", "SMITE_NODE_NAME", "SMITE_MANAGED_VERSION"):
             state[k] = v
     if state.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Only Standard HTTPS/443 mode is supported in this preview")
@@ -990,6 +990,176 @@ def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
     print("PRODUCTION_ACTIVATION=NO")
 
 
+
+# Signed KH activation is separate from IR's co-located Node workflow.
+# It MUST wait for the reviewed Panel image to support path-pinned HTTPS.
+_FOREIGN_NODE_IMAGE = (
+    "ghcr.io/aghajani82/smite-node@sha256:"
+    "9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec"
+)
+_FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
+
+
+def _foreign_gateway_preflight(current: dict[str, str]) -> tuple[str, str, str]:
+    """Read only locally provisioned Gateway metadata; never trust Node self-report."""
+    if current.get("SMITE_ROLE") != "foreign" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
+        raise WizardHold("Foreign activation requires the reviewed clean RC.1 Node")
+    gateway = STATE.parent / "foreign-gateway.env"
+    data = _env_map(_regular(gateway, mode=0o600, limit=8192))
+    domain = data.get("SMITE_FOREIGN_GATEWAY_DOMAIN", "")
+    panel = data.get("SMITE_FOREIGN_PANEL_DOMAIN", "")
+    source_ip = data.get("SMITE_FOREIGN_PANEL_SOURCE_IPV4", "")
+    path = data.get("SMITE_FOREIGN_CONTROL_PATH", "")
+    if (
+        not _DOMAIN.fullmatch(domain)
+        or panel != current.get("SMITE_PANEL_DOMAIN")
+        or not _FOREIGN_PATH.fullmatch(path)
+        or data.get("SMITE_FOREIGN_GATEWAY_PUBLIC_PORT") != "443"
+        or data.get("SMITE_FOREIGN_GATEWAY_MODE") != "https-control-path"
+    ):
+        raise WizardHold("Foreign HTTPS/443 gateway state is missing or unreviewed")
+    try:
+        import ipaddress
+        if ipaddress.ip_address(source_ip).version != 4:
+            raise ValueError()
+    except ValueError as exc:
+        raise WizardHold("Foreign Panel IPv4 allow-list is invalid") from exc
+    env = _env_map(_regular(NODE_DIR / ".env", mode=0o600, limit=64_000))
+    url = f"https://{domain}{path}"
+    if (
+        env.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
+        or env.get("SMITE_AGENT_AUTH_MODE") != "strict"
+        or env.get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
+        or env.get("PANEL_ADDRESS") != panel + ":443"
+        or env.get("SMITE_CONTROL_ADDRESS") != url
+    ):
+        raise WizardHold("Foreign Node paused/strict control metadata has changed")
+    _regular(NODE_COMPOSE, limit=256_000)
+    running = _run(
+        ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
+        capture=True, timeout=10,
+    )
+    if running != _FOREIGN_NODE_IMAGE:
+        raise WizardHold("Foreign Node image is not the reviewed signed RC.1 digest")
+    # Read-only TLS check uses the already existing Nginx gateway, not WAN:8888.
+    response = _run([
+        "curl", "--noproxy", "*", "-4", "-fSs",
+        "--max-time", "12", "--resolve", f"{domain}:443:127.0.0.1",
+        url + "/",
+    ], capture=True, timeout=18)
+    try:
+        payload = json.loads(response)
+    except (ValueError, TypeError) as exc:
+        raise WizardHold("Foreign control HTTPS readiness is not JSON") from exc
+    if payload != {"status": "ok", "service": "smite-node"}:
+        raise WizardHold("Foreign control HTTPS readiness is not approved")
+    return panel, domain, url
+
+
+def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> None:
+    """KH only; require IR approval + updated signed Panel image BEFORE use.
+
+    Never self-approve a Panel trusted origin from KH and never enable an
+    unsigned fallback. A failed signed check-in returns Node to paused mode.
+    Identity and Replay history are retained for operator reconciliation.
+    """
+    _field_trial_gate()
+    current = state_values() if state is None else state
+    panel, _domain, control_url = _foreign_gateway_preflight(current)
+    node_id, _ = _identity_record()
+    helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
+    if not helper.is_file() or helper.is_symlink():
+        raise WizardHold("Reviewed signed Gateway check helper is unavailable")
+    _regular(helper, limit=128_000)
+    node_name = current.get("SMITE_NODE_NAME", "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", node_name):
+        raise WizardHold("Foreign Node name is not approved")
+
+    # Stage and validate all independent local inputs before runtime changes.
+    _prepare_security_candidate()
+    _provision_replay_once()
+    _run([
+        "docker", "compose", "-f", str(NODE_COMPOSE),
+        "-f", str(NODE_SECURITY_CANDIDATE), "config", "--quiet",
+    ], timeout=30)
+
+    recreated = False
+    try:
+        # Even a failed compose command may have recreated the container.
+        recreated = True
+        _run([
+            "docker", "compose", "-f", str(NODE_COMPOSE),
+            "-f", str(NODE_SECURITY_CANDIDATE),
+            "up", "-d", "--no-build", "--force-recreate", "smite-node",
+        ], timeout=120)
+        _wait_container("smite-node", 90)
+        effective = _run([
+            "docker", "inspect", "-f",
+            "{{range .Config.Env}}{{println .}}{{end}}", "smite-node",
+        ], timeout=10, capture=True).splitlines()
+        if (
+            "SMITE_NODE_PANEL_AUTH_MODE=signed" not in effective
+            or "SMITE_AGENT_AUTH_MODE=strict" not in effective
+            or "SMITE_ENGINE_INVENTORY_MODE=managed" not in effective
+        ):
+            raise WizardHold("Foreign Node signed runtime did not apply")
+        _local_signed_replay_probe()
+
+        # The Panel replies READY only after signed KH check-in AND an
+        # authenticated Panel -> KH agent status. No anonymous /api/nodes.
+        verified = False
+        for attempt in range(8):
+            try:
+                _run([
+                    "python3", "-B", str(helper),
+                    "--panel-domain", panel,
+                    "--node-name", node_name,
+                    "--control-url", control_url,
+                ], timeout=25)
+                verified = True
+                break
+            except WizardHold:
+                if attempt < 7:
+                    time.sleep(4)
+        if not verified:
+            raise WizardHold("Foreign signed dual-direction verification incomplete")
+    except Exception as exc:
+        rollback_ok = not recreated
+        if recreated:
+            try:
+                _run([
+                    "docker", "compose", "-f", str(NODE_COMPOSE),
+                    "up", "-d", "--no-build", "--force-recreate", "smite-node",
+                ], timeout=120)
+                _wait_container("smite-node", 90)
+                effective = _run([
+                    "docker", "inspect", "-f",
+                    "{{range .Config.Env}}{{println .}}{{end}}", "smite-node",
+                ], timeout=10, capture=True).splitlines()
+                rollback_ok = (
+                    "SMITE_NODE_PANEL_AUTH_MODE=paused" in effective
+                    and "SMITE_AGENT_AUTH_MODE=strict" in effective
+                )
+            except Exception:
+                rollback_ok = False
+        if not rollback_ok:
+            raise WizardHold(
+                "CRITICAL: Foreign signed activation failed; paused rollback "
+                "NOT verified. Stop and inspect Node manually."
+            ) from exc
+        raise WizardHold(
+            "Foreign signed verification failed; Node paused again. "
+            "Identity and Replay retained for reconciliation."
+        ) from exc
+
+    print("KH_SIGNED_NODE_RUNTIME=ACTIVE_FIELD_TRIAL")
+    print("KH_LOCAL_HMAC_REPLAY=PASS")
+    print("KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS")
+    print("PANEL_TO_KH_SIGNED_HMAC=PASS")
+    print("LEGACY_AUTH_FALLBACK=NO")
+    print("PRODUCTION_ACTIVATION=NO")
+
+
 def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> None:
     _field_trial_gate()
     current = state_values() if state is None else state
@@ -1029,6 +1199,7 @@ def run(argv: list[str] | None = None) -> int:
     # the new explicit Field Trial gate and confirmation.
     actions.add_argument("--redeem-preview", action="store_true")
     actions.add_argument("--activate-ir-node-field-trial", action="store_true")
+    actions.add_argument("--activate-foreign-node-field-trial", action="store_true")
     actions.add_argument("--rollback-node-field-trial", action="store_true")
     parser.add_argument("--state-path", type=Path, default=STATE)
     args = parser.parse_args(argv)
@@ -1065,6 +1236,10 @@ def run(argv: list[str] | None = None) -> int:
 
         if args.activate_ir_node_field_trial:
             activate_ir_node_field_trial(state)
+            return 0
+
+        if args.activate_foreign_node_field_trial:
+            activate_foreign_node_field_trial(state)
             return 0
 
         if args.rollback_node_field_trial:
