@@ -42,6 +42,35 @@ rollback reference. **The active runtime is now mixed**:
   Upgrading a paused Node image is distinct from foreign pairing or
   activation.
 
+## NEXT-5.AU — KH Node image-only admission is plan-only
+
+The draft-only read-only tool `modules/smite-rc2-kh-node-plan.py`
+checks the original KH Node Compose SHA256
+`ab0f360f288c4659a52ec5e4f5b67afd22ec21dcc29a328d72cd8829b91eae6f`,
+computes the exact one-line image replacement from immutable RC.1 Node
+`sha256:9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec`
+to already independently signed RC.2 Node
+`sha256:2338f101b4a1615ec966b9c6f7a3d3ff2bd3361d80956281cf40a61e7a458f78`,
+then verifies a byte-for-byte inverse in memory. It checks exact RC.1
+foreign/Standard managed state, paused/strict/managed effective Compose,
+healthy running RC.1 Node, unchanged immutable Sanaei image ID and running
+status, root-private X-UI backup SHA256 + private KH config archive SHA256,
+Nginx syntax, Node 8888 loopback-only, and single valid XHTTP route.
+
+**Never run this tool with `--apply`**: it exposes **no apply mode**.
+The tool cannot write Compose, pull images, restart any container, modify
+Sanaei/XHTTP, change managed version, enroll HMAC keys, or enable foreign
+pairing. It does not independently re-run Cosign (that was previously
+confirmed by both host operators). Offline tests cover one-line
+reversibility, unsafe YAML drift, unsigned/unpaused Node, changed Sanaei
+image, unhealthy Node, public Node listener, and legacy XHTTP route.
+
+After operator KH plan PASS, create and independently test a separate
+guarded KH Node-only migration and rollback plan if warranted, then
+explicitly authorize it as a separate operation. The existing KH signed
+pairing helper still pins RC.1 and **must not** be reused for activation
+of an RC.2 image without a separately reviewed compatibility change.
+
 ## Ground truth: the frozen baseline
 
 | Host | Running | Tested controls |
