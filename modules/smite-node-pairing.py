@@ -1000,6 +1000,187 @@ _FOREIGN_NODE_IMAGE = (
 _FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
 
 
+
+def _approved_foreign_control_url(url: str) -> tuple[str, str]:
+    """Canonical operator-approved KH path; never derive it from Node metadata."""
+    try:
+        parts = parse.urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise WizardHold("Foreign HTTPS/443 control URL invalid") from exc
+    if (
+        not isinstance(url, str) or any(x.isspace() for x in url)
+        or parts.scheme != "https" or not host or not _DOMAIN.fullmatch(host)
+        or port not in (None, 443)
+        or parts.username or parts.password or parts.query or parts.fragment
+        or not _FOREIGN_PATH.fullmatch(parts.path)
+    ):
+        raise WizardHold("Foreign gateway hostname, port or prefix unapproved")
+    return f"https://{host}:443", f"https://{host}{parts.path}"
+
+
+def _require_panel_foreign_transport() -> None:
+    """Refuse IR approval until a new signed Panel image understands KH prefix."""
+    image = _run(
+        ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-panel"],
+        timeout=10, capture=True,
+    )
+    if not re.fullmatch(r"ghcr\.io/aghajani82/smite-panel@sha256:[a-f0-9]{64}", image):
+        raise WizardHold("Panel must run an immutable signed registry image")
+    check = r"""
+import inspect
+from app.signed_agent_transport import validate_foreign_gateway_prefix, signed_agent_call
+from app.node_client import NodeClient
+assert 'gateway_control_url' in inspect.signature(signed_agent_call).parameters
+assert 'pin["control_url"]' in inspect.getsource(NodeClient._signed_agent_request)
+assert validate_foreign_gateway_prefix(
+    origin="https://kh.example.net:443",
+    control_url="https://kh.example.net/smite-node/0123456789abcdef",
+) == "https://kh.example.net:443/smite-node/0123456789abcdef"
+print("PANEL_FOREIGN_HMAC_GATEWAY=READY")
+"""
+    if _run(
+        ["docker", "exec", "smite-panel", "python3", "-c", check],
+        timeout=20, capture=True,
+    ) != "PANEL_FOREIGN_HMAC_GATEWAY=READY":
+        raise WizardHold("Panel image lacks reviewed foreign path-pinned HMAC")
+
+
+def approve_foreign_origin_field_trial(
+    *, node_id: str, node_name: str, control_url: str,
+    state: dict[str, str] | None = None,
+) -> None:
+    """IR only; additive trust record, no Panel restart or unsigned fallback."""
+    _field_trial_gate()
+    current = state_values() if state is None else state
+    if current.get("SMITE_ROLE") != "panel-iran" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
+        raise WizardHold("Only clean RC.1 IR Panel may approve a foreign origin")
+    if not isinstance(node_id, str) or not _NODE_ID.fullmatch(node_id):
+        raise WizardHold("Approved foreign Node UUID invalid")
+    if (
+        not isinstance(node_name, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", node_name)
+        or node_name == current.get("SMITE_NODE_NAME")
+    ):
+        raise WizardHold("Approved foreign Node name invalid")
+    origin, approved_url = _approved_foreign_control_url(control_url)
+    panel_env = _env_map(_regular(PANEL_ENV, mode=0o600, limit=64_000))
+    if (
+        panel_env.get("SMITE_NODE_REGISTRATION_MODE") != "signed"
+        or panel_env.get("SMITE_PANEL_AGENT_AUTH_MODE") != "signed"
+        or panel_env.get("SMITE_NODE_PAIRING_PREVIEW_ENABLED") != "true"
+        or panel_env.get("SMITE_SIGNED_NODE_ORIGINS_PATH")
+            != "/etc/smite-panel/trusted-nodes/approved-origins.json"
+    ):
+        raise WizardHold("IR signed Panel origin trust is not configured")
+    _require_panel_signed_registration_schema()
+    _require_panel_foreign_transport()
+    _private_dir(TRUSTED_NODES_DIR)
+    _regular(PANEL_SECURITY_OVERRIDE, mode=0o600, limit=32_000)
+    mount = _run([
+        "docker", "inspect", "-f",
+        '{{range .Mounts}}{{if eq .Destination "/etc/smite-panel/trusted-nodes"}}{{.Source}}{{end}}{{end}}',
+        "smite-panel",
+    ], timeout=10, capture=True)
+    if mount != str(TRUSTED_NODES_DIR):
+        raise WizardHold("IR Panel approved Node directory is not mounted")
+    if PANEL_DB.is_symlink() or not PANEL_DB.is_file():
+        raise WizardHold("IR Panel pairing database unavailable")
+    try:
+        with sqlite3.connect(
+            PANEL_DB.absolute().as_uri() + "?mode=ro", uri=True, timeout=3,
+        ) as database:
+            row = database.execute(
+                "SELECT name,status,metadata FROM nodes WHERE id=?", (node_id,),
+            ).fetchone()
+        meta = json.loads(row[2]) if row else None
+    except (sqlite3.Error, ValueError, TypeError) as exc:
+        raise WizardHold("IR Panel reserved Node record invalid") from exc
+    if (
+        row is None or row[0] != node_name or row[1] != "pending"
+        or not isinstance(meta, dict)
+        or meta.get("role") != "foreign"
+        or meta.get("node_name") != node_name
+        or meta.get("provisioning") != "reserved_for_pairing"
+    ):
+        raise WizardHold("IR Panel must first reserve this exact foreign UUID/name")
+    opener = request.build_opener(
+        request.ProxyHandler({}),
+        request.HTTPSHandler(context=ssl.create_default_context()),
+        NoRedirect(),
+    )
+    try:
+        with opener.open(approved_url + "/", timeout=12) as response:
+            payload = json.loads(response.read(257))
+            if response.status != 200 or payload != {
+                "status": "ok", "service": "smite-node",
+            }:
+                raise WizardHold("KH HTTPS transport readiness not verified")
+    except (error.HTTPError, error.URLError, ValueError, ssl.SSLError, TimeoutError) as exc:
+        raise WizardHold("KH TLS gateway readiness not verified") from exc
+    if not APPROVED_ORIGINS.is_file() or APPROVED_ORIGINS.is_symlink():
+        raise WizardHold("IR trusted Node approval file missing")
+    old = _regular(APPROVED_ORIGINS, mode=0o600, limit=64_000)
+    try:
+        record = json.loads(old)
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise WizardHold("IR trusted Node records invalid") from exc
+    if (
+        not isinstance(record, dict) or set(record) != {"version", "nodes"}
+        or record["version"] != 1 or not isinstance(record["nodes"], dict)
+    ):
+        raise WizardHold("IR trusted Node store schema mismatch")
+    entries = record["nodes"]
+    desired = {
+        "role": "foreign", "node_name": node_name,
+        "origin": origin, "control_url": approved_url,
+    }
+    if node_id in entries and entries[node_id] != desired:
+        raise WizardHold("Existing foreign Node approval conflicts")
+    for other, pin in entries.items():
+        if other != node_id and not isinstance(pin, dict):
+            raise WizardHold("Existing trusted Node record invalid")
+        if other != node_id and (
+            pin.get("node_name") == node_name or pin.get("origin") == origin
+        ):
+            raise WizardHold("Foreign name/origin already approved for other Node")
+    if entries.get(node_id) == desired:
+        print("FOREIGN_ORIGIN_APPROVAL=ALREADY_PINNED")
+        return
+    entries[node_id] = desired
+    new = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(new) > 64_000:
+        raise WizardHold("Approved Node store size exceeded")
+    _atomic_write(APPROVED_ORIGINS, new, 0o600)
+    try:
+        program = r"""
+import sys
+from app.signed_node_origins import approved_node
+p=approved_node(sys.argv[1])
+assert p["role"] == "foreign"
+assert p["node_name"] == sys.argv[2]
+assert p["control_url"] == sys.argv[3]
+print("FOREIGN_PIN=VERIFIED")
+"""
+        if _run([
+            "docker", "exec", "smite-panel", "python3", "-c",
+            program, node_id, node_name, approved_url,
+        ], capture=True, timeout=20) != "FOREIGN_PIN=VERIFIED":
+            raise WizardHold("IR Panel did not accept foreign Node approval")
+    except Exception as exc:
+        try:
+            if _regular(APPROVED_ORIGINS, mode=0o600, limit=64_000) != new:
+                raise WizardHold("Concurrent trusted origin change detected")
+            _atomic_write(APPROVED_ORIGINS, old, 0o600)
+        except Exception as bad_rollback:
+            raise WizardHold("CRITICAL: IR foreign approval rollback NOT verified") from bad_rollback
+        raise WizardHold("IR foreign Node approval rejected and restored") from exc
+    print("FOREIGN_ORIGIN_APPROVAL=PINNED_FIELD_TRIAL")
+    print("PAIRING_CODE=NOT_CREATED")
+    print("PANEL_RUNTIME=UNCHANGED")
+    print("PRODUCTION_ACTIVATION=NO")
+
+
 def _foreign_gateway_preflight(current: dict[str, str]) -> tuple[str, str, str]:
     """Read only locally provisioned Gateway metadata; never trust Node self-report."""
     if current.get("SMITE_ROLE") != "foreign" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
