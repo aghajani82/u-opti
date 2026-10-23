@@ -68,6 +68,40 @@ for RC.1 -> RC.2**. `smite_install_upgrade_signed_field_trial()` is strictly
 RC.0 -> RC.1 and its rollback attempts a destructive live DB file restore,
 removing WAL/SHM files. It is not a safe RC.2 rollback.
 
+## Source-level RC.1 -> RC.2 compatibility review (2026-10-23)
+
+GitHub source comparison of Smite `289f99cae8c53ba7d5b8e427bca19e5c04ebba8a`
+(RC.1 candidate source) to `e6c3ecce81010130ae28e7d1e37ea99b31d70c28`
+(RC.2 tag) lists **five changed paths**: two runtime **Panel** modules
+(`panel/app/node_client.py` and `panel/app/signed_agent_transport.py`),
+two Panel tests, and one offline image-verification GitHub workflow.
+**No Node runtime code changes appear in that GitHub comparison.**
+
+Merged Smite PR #18 extends `signed_agent_call` by an *optional*
+`gateway_control_url`, only passed for approved `foreign` origins;
+it preserves canonical signed `/api/agent/*` HMAC targets while sending the
+HTTPS request through the exact independently approved KH prefix. Approved
+`iran` origin dispatch continues without this optional parameter.
+
+**Implication, not live proof:** a *Panel-only* RC.2 candidate change on IR
+may be the lowest-risk first cutover while retaining the already-signed
+RC.1 local Node until same-version Node compatibility and signature
+admission are confirmed. This is plausible from the source diff, **not**
+a guarantee of live binary/configuration compatibility. Keep an explicit
+hold if local check-in, Panel↔IR signed HMAC, signed override or dual
+health is degraded. Do not overwrite the existing mixed RC.1-managed state
+or assert full RC.2 completion after only a Panel image change.
+
+Node RC.2 must still be independently verified and migrated through its
+own *separate, reviewed* operation on IR/KH if chosen. In particular, the
+existing U-OPTI KH pairing helper pins the exact RC.1 Node digest and
+requires `SMITE_MANAGED_VERSION=2.0.0-rc.1`. Updating only the host version
+or only that pin would bypass transition invariants; dedicated reviewed
+RC.2 signed activation integration and tests are mandatory.
+
+Reference: [Smite PR #18](https://github.com/aghajani82/Smite/pull/18),
+[Smite RC.1→RC.2 source comparison](https://github.com/aghajani82/Smite/compare/289f99cae8c53ba7d5b8e427bca19e5c04ebba8a...e6c3ecce81010130ae28e7d1e37ea99b31d70c28).
+
 ## Stop / go before *any* live image recreation
 
 1. **BOTH**: record provider snapshot IDs/time/labels and verify both IR/KH
