@@ -160,10 +160,11 @@ class PanelRC2ComposeReviewTest(unittest.TestCase):
         stored = tool.KNOWN_HASHES["panel"]
         try:
             tool.KNOWN_HASHES["panel"] = hashlib.sha256(original).hexdigest()
+            missing_line = original.replace(b"    image:", b"      image:")
+            tool.KNOWN_HASHES["panel"] = hashlib.sha256(missing_line).hexdigest()
             with self.assertRaisesRegex(tool.ReviewHold, "not unique"):
-                tool.plan_exact_panel_image_replacement(original.replace(
-                    b"    image:", b"      image:",
-                ))
+                tool.plan_exact_panel_image_replacement(missing_line)
+            tool.KNOWN_HASHES["panel"] = hashlib.sha256(original).hexdigest()
             with self.assertRaisesRegex(tool.ReviewHold, "baseline"):
                 tool.plan_exact_panel_image_replacement(original + b"# drift\n")
         finally:
