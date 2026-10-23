@@ -133,6 +133,18 @@ class KHNodeRolloutTests(unittest.TestCase):
             ):
                 callback(fixture)
 
+    def test_path_shadowed_cosign_is_rejected_before_signing(self):
+        checker = unittest.mock.Mock()
+        registry = unittest.mock.Mock()
+        with patch.object(tool.Path, "is_file", return_value=True), \
+             patch.object(tool.Path, "is_symlink", return_value=False), \
+             patch.object(tool.shutil, "which", return_value="/tmp/unreviewed/cosign"):
+            with self.assertRaisesRegex(tool.Hold, "PATH"):
+                tool.signatures(SimpleNamespace(sha256_file=checker, RC2_NODE="rc2"),
+                                registry)
+        checker.assert_not_called()
+        registry.verify_pair.assert_not_called()
+
     def test_requires_explicit_env_optin_before_mutation(self):
         def test(f):
             with self.assertRaisesRegex(tool.Hold, "opt-in missing"):
