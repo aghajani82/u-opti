@@ -1106,7 +1106,7 @@ def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> No
         _local_signed_replay_probe()
 
         # The Panel replies READY only after signed KH check-in AND an
-        # authenticated Panel -> KH agent status. No anonymous /api/nodes.
+        # authenticated Panel -> KH agent status. No anonymous enumeration.
         verified = False
         for attempt in range(8):
             try:
