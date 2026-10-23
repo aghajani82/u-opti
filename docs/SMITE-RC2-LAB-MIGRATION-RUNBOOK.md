@@ -42,6 +42,52 @@ rollback reference. **The active runtime is now mixed**:
   Upgrading a paused Node image is distinct from foreign pairing or
   activation.
 
+## NEXT-5.AV — guarded KH Node RC.2 rollback executor staged in DRAFT only
+
+Operator ran immutable-source KH read-only plan from
+`/root/uopti-rc2-kh-gac0j2w4`. The exact original Compose SHA256
+`ab0f360f288c4659a52ec5e4f5b67afd22ec21dcc29a328d72cd8829b91eae6f`
+and in-memory proposed RC.2 Compose SHA256
+`8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e`
+matched operator evidence. The operator's report confirmed paused/strict/managed
+KH Node RC.1 healthy, Sanaei and XHTTP unchanged, both KH backup SHA256s
+verified, `KH_RC2_NODE_PLAN=PASS` and `LIVE_CHANGES=NONE`.
+No KH container has yet been recreated.
+
+The separate experimental source file
+`modules/smite-rc2-kh-node-rollout.py` has an inert default `--plan`
+and guarded `--apply` (not used or installed). Apply requires exact
+`kh.kolbe1.ir` confirmation and
+`UOPTI_SMITE_KH_RC2_NODE_FIELD_TRIAL=YES`, root ownership and exclusive
+lock, frozen old/new Compose hashes, preserved KH backup checksums and
+positive Cosign image-signature validation using the independently pinned
+`/usr/local/bin/cosign` (no PATH shadowing). Its only contemplated live
+change is the exact KH Smite Node image line and recreating the **single**
+`smite-node` service with `--no-deps --no-build --pull never`, never
+Sanaei, Nginx, XHTTP, FRP/Backhaul, or the IR Panel.
+
+It insists effective Compose JSON differs **only** in Node image, retains
+`paused + strict + managed`, and after recreation verifies the new
+immutable Node digest, Node health and loopback `/healthz`, local-only
+8888 listener, unchanged Sanaei image/status and XHTTP guard, plus KH→IR
+HTTPS Panel status. KH foreign signed Pairing remains **NOT ACTIVATED**.
+Managed version intentionally remains RC.1 during partial trial.
+
+On any failed cutover it restores original Compose bytes atomically and,
+if the Node was recreated, re-creates the original immutable RC.1 Node and
+re-verifies all guards. It never restores stale Replay history, deletes
+WAL/SHM, rotates Node identity, or changes external routing. A failed
+rollback raises **CRITICAL HOLD** instead of claiming recovery. The
+original Compose is saved `O_EXCL` in the root-private pre-RC2 KH backup
+directory. Offline mocked failure tests cover failed RC.2 health, signed
+environment drift, post-rename failure, critical failed rollback, consent
+gates and unapproved Cosign PATH shadowing; this is **not** a live
+rollback rehearsal or release approval.
+
+**Status:** KH stays on RC.1 pending source CI completion, pinned
+on-host `--plan`, and an explicit, separate operator decision to execute
+`--apply`. Production/stable and foreign Signed Pairing remain HOLD.
+
 ## NEXT-5.AU — KH Node image-only admission is plan-only
 
 The draft-only read-only tool `modules/smite-rc2-kh-node-plan.py`
