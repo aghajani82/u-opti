@@ -740,7 +740,7 @@ smite_foreign_gateway_status() {
 
     if [ -n "$domain" ] && [ -n "$control_path" ] && smite_foreign_gateway_verify_local "$domain" "$control_path" 2>/dev/null; then
         if smite_foreign_gateway_is_clean_rc; then
-            echo "Local transport: OK (healthz only; NOT signed control)"
+            echo "Local transport: OK (root readiness only; NOT signed control)"
         else
             echo "Local control  : OK"
         fi
@@ -895,7 +895,7 @@ smite_foreign_gateway_configure() {
 
     if smite_foreign_gateway_is_clean_rc; then
         echo
-        echo "FOREIGN_RC_GATEWAY_TRANSPORT=READY_HEALTHZ_ONLY"
+        echo "FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY"
         echo "FOREIGN_RC_NODE_RUNTIME=PAUSED_STRICT"
         echo "FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING"
         echo "No signed HMAC or Panel registration has been claimed."
