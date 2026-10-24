@@ -59,7 +59,7 @@ class PanelTransaction(unittest.TestCase):
             p=patch.object(tx,name,value);p.start();self.addCleanup(p.stop)
         for name,fn in (
             ("safe_dir",self.safe_dir),("safe_file",self.safe_file),
-            ("run",self.run),("inspect",self.inspect),
+            ("run",self.fake_run),("inspect",self.inspect),
             ("panel_settings",self.panel_settings),
             ("source_pin",lambda o:None),("lock",self.lock),
             ("wait_panel",self.wait_panel),
@@ -121,7 +121,7 @@ class PanelTransaction(unittest.TestCase):
             "volumes":[m.copy() for m in self.existing_mounts],
         }
 
-    def run(self,args,*,data=None,timeout=40,json_output=False):
+    def fake_run(self,args,*,data=None,timeout=40,json_output=False):
         self.calls.append((tuple(args),data))
         if args[0:3]==["docker","image","inspect"]:
             return tx.CANDIDATE_ID
