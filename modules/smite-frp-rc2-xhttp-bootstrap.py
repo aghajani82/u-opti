@@ -110,28 +110,10 @@ def lock():
 
 
 def apply():
-    # The legacy single-vhost bootstrap must never be used on real RC2.
-    # In the verified dual-vhost topology the primary Panel :8443 needs
-    # an explicit Include transaction (not merely a missing snippet file).
-    # Refuse mutation until that separate reviewed transaction is shipped.
+    # The legacy snippet-only bootstrap cannot configure RC2's separate
+    # 8443 Panel backend and 8444 KH WSS vhost correctly.
+    # No mutations until a separately reviewed Include transaction exists.
     raise Hold("DUAL_VHOST_INCLUDE_TRANSACTION_REQUIRED")
-    fd=lock()
-    try:
-        before()
-        identity=new_snippet()
-        try:
-            gate.audit()
-            nginx_test()
-        except Exception as exc:
-            remove_if_ours(identity)
-            raise Hold("XHTTP_BOOTSTRAP_FAILED_ROLLED_BACK") from exc
-        print("RC2_IR_XHTTP_SNIPPET=CREATED_VERIFIED")
-        print("SIGNED_WSS_GATE=PASS")
-        print("NGINX_SYNTAX=PASS")
-        print("NGINX_RELOAD=NOT_PERFORMED")
-        print("XHTTP_ROUTES_PUBLISHED=NONE")
-    finally:os.close(fd)
-
 
 def verify():
     gate.audit()
@@ -149,7 +131,7 @@ def main():
     try:
         if args.action=="plan":
             before()
-            print("RC2_IR_XHTTP_BOOTSTRAP_PLAN=PASS_READ_ONLY")
+            print("RC2_IR_XHTTP_BOOTSTRAP_PLAN=READ_ONLY_NOT_ACTIONABLE")
             print("SIGNED_NODE_GATE=PASS")
             print("NGINX_CHANGES=NONE")
             print("XHTTP_ROUTES_PUBLISHED=NONE")
