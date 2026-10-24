@@ -65,6 +65,7 @@ class EdgeTransaction(unittest.TestCase):
         # point to the corresponding isolated temporary map, not /etc/nginx.
         self.stream.write_text(STREAM.replace(
             "/etc/nginx/u-opti-smite-frp-sni-map.conf",str(self.map)))
+        self.initial_stream=self.stream.read_text()
         self.alt=self.nginx/"alt.conf"
         self.state=self.state_root/"wss"
         self.log=[]
@@ -111,7 +112,7 @@ class EdgeTransaction(unittest.TestCase):
         self.assertEqual(record["state"],"COMMITTED")
         self.assertEqual(record["peer_ip"],IP)
         self.assertEqual(self.tls.read_text(),BACKEND)
-        self.assertEqual(self.stream.read_text(),STREAM)
+        self.assertEqual(self.stream.read_text(),self.initial_stream)
         self.assertEqual(stat.S_IMODE(self.state.stat().st_mode),0o700)
         self.assertEqual(stat.S_IMODE(mod.JOURNAL.stat().st_mode),0o600)
         self.assertIn('location = /~!frp',self.alt.read_text())
@@ -123,7 +124,7 @@ class EdgeTransaction(unittest.TestCase):
         self.assertFalse(self.alt.exists())
         self.assertFalse(self.state.exists())
         self.assertEqual(self.tls.read_text(),BACKEND)
-        self.assertEqual(self.stream.read_text(),STREAM)
+        self.assertEqual(self.stream.read_text(),self.initial_stream)
         self.assertEqual(self.log.count(("systemctl","reload","nginx")),2)
 
     def test_wrong_pins_no_mutation(self):
