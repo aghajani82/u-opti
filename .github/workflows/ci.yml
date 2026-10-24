@@ -221,6 +221,8 @@ jobs:
           python3 -B tests/test-smite-rc2-frp-bundled-enrollment.py -v
           python3 -m py_compile modules/smite-rc2-frp-wss-plan.py tests/test-smite-rc2-frp-wss-plan.py
           python3 -B tests/test-smite-rc2-frp-wss-plan.py -v
+          python3 -m py_compile modules/smite-rc2-frp-wss-edge-plan.py tests/test-smite-rc2-frp-wss-edge-plan.py
+          python3 -B tests/test-smite-rc2-frp-wss-edge-plan.py -v
 
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
