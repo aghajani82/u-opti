@@ -170,7 +170,7 @@ class EnrollmentTrial(unittest.TestCase):
         self.assertIn('SMITE_ENGINE_INVENTORY_MODE=managed', source)
         self.assertIn('SMITE_NODE_PANEL_AUTH_MODE=signed', source)
         self.assertIn('LOCK = Path("/run/lock/u-opti-smite-engine.lock")', source)
-        self.assertIn('RC2-only', source)
+        self.assertIn('RC.2-only', source)
 
 
 if __name__ == "__main__":
