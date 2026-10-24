@@ -14,6 +14,37 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BM — foreign KH Origin pinned on IR, read-back pending
+
+Operator 2026-10-24 explicitly authorized and executed corrected
+`/root/uopti-rc2-ir-origin-fix1/smite-rc2-ir-foreign-origin-approval.py --apply`
+with both field-trial consent environment variables, a privately entered
+KH control prefix (never posted/logged), and the typed confirmation
+`APPROVE-KH-ORIGIN`. Runtime reported all prechecks PASS and then
+`FOREIGN_ORIGIN_APPROVAL=PINNED_FIELD_TRIAL`,
+`IR_FOREIGN_ORIGIN_APPROVAL=PASS`,
+`PAIRING_CODE=NOT_CREATED`, `PANEL_RUNTIME=UNCHANGED`,
+`PRODUCTION_ACTIVATION=NO`, `KH_SIGNED_PAIRING=NOT_ACTIVATED`,
+`LIVE_RESTARTS=NONE`.
+
+Unlike the failed attempt before canonicalization fix, this is a
+successful **write/readback** by the signed Panel controller.
+A separate, read-only post-apply audit is the next required gate:
+verify root-owned `0700` trust directory and `0600` file,
+**exactly** one unchanged loopback/local Iranian pin and one
+approved foreign `node-kh` pin whose Node ID matches the single
+pending `reserved_for_pairing` DB row; check HTTPS/443 canonical
+origin/control path and that `smite-panel` reads/normalizes both
+records; verify exact RC.2 Panel image healthy. Print only counts,
+fixed statuses, never Node UUID, signed key, trust JSON, private
+control URL or pairing code.
+
+**Important:** The successful Origin approval is *not*
+redemption, replay enrollment, check-in, signed runtime activation
+or production stabilization. Do not issue a one-time pairing code,
+modify KH or change a live tunnel until the independent post-apply
+trust audit PASS.
+
 ## NEXT-5.BL — corrected Origin stage and IR read-only approval plan PASS
 
 Operator 2026-10-24 staged the three corrected source-pinned modules
