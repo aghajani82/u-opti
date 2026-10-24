@@ -160,7 +160,7 @@ class RC2GatewayContract(unittest.TestCase):
     def test_bootstrap_preflight_does_not_allow_bad_nginx_backend(self):
         del self.files[self.p["snippet"]]
         self.files[self.p["backend"]] = self.backend.replace(
-            b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\\n", b"")
+            b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n", b"")
         with patch.object(gate, "read_root_file",
                           side_effect=lambda path, **kw: self.files[path]), \
              patch.object(gate, "read_root_dir", return_value=None):
