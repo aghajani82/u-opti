@@ -199,7 +199,8 @@ def get_record()->dict:
 
 def update_state(x:dict,value:str)->None:
     now=dict(x,state=value)
-    need(digest(trusted(RECORD,8192,0o600)),"RECORD_READ_FAILED")
+    need(json.loads(trusted(RECORD,8192,0o600))==x,
+         "TRANSACTION_JOURNAL_CHANGED")
     replace_known(RECORD,(json.dumps(now,sort_keys=True)+"\n").encode(),0o600)
 
 
@@ -209,6 +210,8 @@ def before()->tuple[bytes,bytes]:
     need(absent(SNIPPET),"EXISTING_XHTTP_SNIPPET_REFUSED")
     gate.audit(allow_missing_snippet=True)
     original=trusted(BACKEND,131072)
+    need(stat.S_IMODE(BACKEND.lstat().st_mode)==0o644,
+         "PANEL_BACKEND_MODE_DRIFT")
     modified=candidate(original)
     nginx_test()
     probe_panel()
@@ -242,7 +245,11 @@ def apply()->None:
         original,modified=before()
         x=tx_prepare(original,modified)
         try:
+            need(trusted(BACKEND,131072)==original and absent(SNIPPET),
+                 "LIVE_STATE_CHANGED_BEFORE_EDIT")
             write_new(SNIPPET,HEADER,0o644)
+            need(trusted(BACKEND,131072)==original,
+                 "PANEL_BACKEND_CHANGED_BEFORE_REPLACE")
             replace_known(BACKEND,modified,0o644)
             gate.audit()
             nginx_test()
