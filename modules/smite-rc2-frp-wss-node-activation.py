@@ -333,7 +333,7 @@ def signed_probe(role: str, *, enabled: bool) -> None:
     need(value == (target or "OFF"), "FRP_WSS_RUNTIME_HELPER_DRIFT")
 
 
-def prerequisite(role: str) -> tuple[dict, dict]:
+def prerequisite(role: str, *, signed: bool = False) -> tuple[dict, dict]:
     anchor()
     need(absent(OVERLAY_PATH), "WSS_OVERLAY_ALREADY_PRESENT")
     need(absent(STATE_ROOT) or absent(state_dir(role)),
@@ -364,7 +364,12 @@ def prerequisite(role: str) -> tuple[dict, dict]:
     need(without_wss(baseline) == without_wss(future),
          "COMPOSE_UNEXPECTED_SERVICE_DRIFT")
     plan.validate_preview(current, after, IMAGES[role])
-    signed_probe(role, enabled=False)
+    if signed:
+        signed_probe(role, enabled=False)
+    else:
+        # Read-only plan MUST NOT consume a signed replay nonce.
+        enrolled = load("rc2_wss_existing_enrollment", "smite-rc2-frp-bundled-enrollment.py")
+        enrolled.local_probe("ready")
     return current, source
 
 
@@ -414,7 +419,7 @@ def revert(role: str, doc: dict, *, permitted_prepared: bool) -> None:
 def apply(role: str) -> None:
     fd = lock()
     try:
-        current, proof = prerequisite(role)
+        current, proof = prerequisite(role, signed=True)
         record(role, proof, current["Id"])
         try:
             new_file(OVERLAY_PATH, WSS_OVERLAY)
