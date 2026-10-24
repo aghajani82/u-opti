@@ -1,17 +1,47 @@
 # NEXT-5.AG — Smite RC.1 to RC.2 disposable two-host rollout gate
 
-**Current status (2026-10-23, NEXT-5.AT): IR Panel RC.2 trial is running
-successfully with its original signed RC.1 local Node; this was independently
-verified with healthy image pins, effective Compose SHA256, and HTTP/HTTPS 200.
-KH is still RC.1 Node in paused/strict/managed mode, Sanaei and XHTTP
-unchanged. Operator reports both provider snapshots ready. No KH image change,
-foreign signed pairing, production rollout, stable merge or release approved.
-This remains a review runbook in [U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48).**
+**Current status (2026-10-24, NEXT-5.AX): IR Panel runs RC.2
+(independently audited after cutover), the co-located signed IR Node remains
+RC.1, and KH Node has now been upgraded to RC.2 with paused/strict/managed
+security. The KH trial itself reports Node health, loopback, Sanaei/XHTTP
+preservation and HTTPS to IR PASS. The new KH RC.2 state still needs an
+independent post-cutover read-only audit. Neither foreign signed pairing
+nor managed-state RC.2 transition has occurred. No production rollout,
+stable merge or release is approved. This remains a review runbook in
+[U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48).**
 
 This runbook is intentionally **not** an executable installation script. Passing
 checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
+
+## NEXT-5.AX — KH RC.2 Node-only field trial reported PASS
+
+On 2026-10-24, operator ran the pinned root-private KH-only
+`smite-rc2-kh-node-rollout.py --apply --confirm-kh-host kh.kolbe1.ir`
+with explicit environment opt-in and interactive `APPLY` consent.
+Its completion reported:
+
+- `KH_NODE_RC2_TRIAL=PASS`
+- `KH_NODE_SECURITY=PAUSED_STRICT_MANAGED`
+- `KH_NODE_8888=LOOPBACK_ONLY`
+- `KH_SANAEI_XHTTP=UNCHANGED`
+- `KH_TO_IR_PANEL_HTTPS=PASS`
+- `KH_NODE_COMPOSE_SHA256=8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e`
+- `KH_FOREIGN_PAIRING=NOT_ACTIVATED`
+- `MANAGED_VERSION=RC1_RETAINED_DURING_MIXED_TRIAL`
+- `NO_SQLITE_OR_REPLAY_RESTORE=YES`
+- `PRODUCTION_RELEASE_APPROVED=NO`
+
+This is **runtime executor-reported evidence**, not independent verification.
+The previously documented KH RC.1 Node health and paused checks below are
+**historical pre-cutover baselines only**. The rollout did not trigger a
+rollback, so real-host rollback success is still unproven. Before
+enrollment, independently check immutable KH Node RC.2 digest
+`sha256:2338f101b4a1615ec966b9c6f7a3d3ff2bd3361d80956281cf40a61e7a458f78`,
+healthy, paused/strict/managed, Compose, Sanaei unchanged original
+image, XHTTP guard, Node loopback and HTTPS→IR; then separately review
+foreign HMAC pairing code (still RC.1-hard-pinned).
 
 ## NEXT-5.AT — actual staged runtime checkpoints
 
