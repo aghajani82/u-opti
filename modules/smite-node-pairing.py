@@ -1170,12 +1170,17 @@ from app.signed_node_origins import approved_node
 p=approved_node(sys.argv[1])
 assert p["role"] == "foreign"
 assert p["node_name"] == sys.argv[2]
-assert p["control_url"] == sys.argv[3]
+# Panel canonicalizes HTTPS/443 with an explicit :443 for BOTH fields.
+# Compare against the exact approved normalized origin and path, not the
+# original user-entered URL whose spelling may omit the default port.
+assert p["origin"] == sys.argv[3]
+assert p["control_url"] == sys.argv[4]
 print("FOREIGN_PIN=VERIFIED")
 """
+        canonical_control = origin + parse.urlsplit(approved_url).path
         if _run([
             "docker", "exec", "smite-panel", "python3", "-c",
-            program, node_id, node_name, approved_url,
+            program, node_id, node_name, origin, canonical_control,
         ], capture=True, timeout=20) != "FOREIGN_PIN=VERIFIED":
             raise WizardHold("IR Panel did not accept foreign Node approval")
     except Exception as exc:
