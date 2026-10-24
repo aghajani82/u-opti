@@ -21,13 +21,40 @@ spec.loader.exec_module(gate)
 class RC2GatewayContract(unittest.TestCase):
     def setUp(self):
         self.p={name:Path("/test")/name for name in (
-            "state","backend","snippet","journal","overlay",
+            "state","backend","dedicated","snippet","journal","overlay",
             "state_root","journal_dir"
         )}
         self.backend=("# Managed by U-OPTI - Smite Panel TLS backend\n"
+                      "server {\n"
+                      "    listen 127.0.0.1:8443 ssl;\n"
                       "    server_name ir.kolbe1.ir;\n"
-                      "    location = /~!frp {\n        proxy_pass http://127.0.0.1:7000;\n    }\n"
-                      "    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n").encode()
+                      "    location / {\n"
+                      "        proxy_pass http://127.0.0.1:8000;\n"
+                      "    }\n"
+                      "    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n"
+                      "}\n").encode()
+        self.dedicated=(
+            "server {\n"
+            "    listen 127.0.0.1:8444 ssl;\n"
+            "    server_name ir.kolbe1.ir;\n"
+            "    location = /~!frp {\n"
+            "        proxy_pass http://127.0.0.1:7000;\n"
+            "        proxy_http_version 1.1;\n"
+            "        proxy_set_header Upgrade $http_upgrade;\n"
+            '        proxy_set_header Connection "upgrade";\n'
+            "    }\n"
+            "}\n").encode()
+        self.nginx_config=(
+            'map "$ssl_preread_server_name|$remote_addr" $uopti_frp_canary_backend {\n'
+            '    "ir.kolbe1.ir|203.0.113.20" 127.0.0.1:8444;\n'
+            '    default $uopti_smite_backend;\n'
+            '}\n'
+            'map $ssl_preread_server_name $uopti_smite_backend {\n'
+            '    default 127.0.0.1:8443;\n'
+            '}\n'
+            'server { proxy_pass $uopti_frp_canary_backend; }\n'
+            + self.dedicated.decode()
+        )
         self.snippet=b"# Managed by U-OPTI - Standard FRP XHTTP\n"
         self.node={
             "Config":{
@@ -59,6 +86,7 @@ class RC2GatewayContract(unittest.TestCase):
         self.files={
             self.p["state"]:b"SMITE_CONNECTION_MODE=standard\n",
             self.p["backend"]:self.backend,
+            self.p["dedicated"]:self.dedicated,
             self.p["snippet"]:self.snippet,
             self.p["journal"]:json.dumps(self.journal).encode(),
             self.p["overlay"]:gate.WSS_OVERLAY,
@@ -67,7 +95,7 @@ class RC2GatewayContract(unittest.TestCase):
     def check(self):
         with patch.object(gate,"read_root_file",side_effect=lambda path,**kw:self.files[path]), \
              patch.object(gate,"read_root_dir",return_value=None):
-            gate.audit(self.p,self.node,enforce_host=False)
+            gate.audit(self.p,self.node,enforce_host=False,nginx_config=self.nginx_config)
 
     def test_committed_signed_node_and_ir_gateway_pass(self):
         self.check()
@@ -130,15 +158,28 @@ class RC2GatewayContract(unittest.TestCase):
                 self.node=before
 
     def test_wrong_backend_or_nginx_include_holds(self):
-        for modified in (
-            self.backend.replace(b"location = /~!frp {",b"location = /missing {"),
-            self.backend.replace(b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n",b""),
-            self.backend.replace(b"server_name ir.kolbe1.ir;",b"server_name other.example;"),
+        for modified,reason in (
+            (self.backend.replace(b"    listen 127.0.0.1:8443 ssl;",b"    listen 0.0.0.0:8443 ssl;"),"IR_PANEL_8443_BACKEND_DRIFT"),
+            (self.backend.replace(b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n",b""),"IR_XHTTP_INCLUDE_MISSING_OR_DUPLICATED"),
+            (self.backend.replace(b"server_name ir.kolbe1.ir;",b"server_name other.example;"),"IR_PANEL_8443_BACKEND_DRIFT"),
         ):
             self.files[self.p["backend"]]=modified
-            with self.assertRaisesRegex(gate.GateHold,"IR_WSS_NGINX_BACKEND_DRIFT"):
+            with self.assertRaisesRegex(gate.GateHold,reason):
                 self.check()
         self.files[self.p["backend"]]=self.backend
+
+    def test_unreviewed_kh_wss_or_ip_mapping_holds(self):
+        self.files[self.p["dedicated"]]=self.dedicated.replace(
+            b"127.0.0.1:7000",b"0.0.0.0:7000")
+        with self.assertRaisesRegex(gate.GateHold,"IR_KH_WSS_8444_DRIFT"):
+            self.check()
+        self.files[self.p["dedicated"]]=self.dedicated
+        original=self.nginx_config
+        self.nginx_config=self.nginx_config.replace(
+            '"ir.kolbe1.ir|203.0.113.20" 127.0.0.1:8444;', "")
+        with self.assertRaisesRegex(gate.GateHold,"KH_SOURCE_ALLOWLIST_MAPPING_DRIFT"):
+            self.check()
+        self.nginx_config=original
 
     def test_snippet_header_holds(self):
         self.files[self.p["snippet"]]=b"# other managed\n"
@@ -147,26 +188,28 @@ class RC2GatewayContract(unittest.TestCase):
 
     def test_strict_gate_requires_snippet_but_bootstrap_preflight_accepts_exact_absence(self):
         del self.files[self.p["snippet"]]
-        with self.assertRaises(KeyError):
+        self.files[self.p["backend"]]=self.backend.replace(
+            b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n",b"")
+        with self.assertRaisesRegex(gate.GateHold,"IR_XHTTP_INCLUDE_MISSING_OR_DUPLICATED"):
             self.check()
-        # This tests the read-only preparation lane only, never published
-        # routing; the production gate without the flag still refuses.
-        with patch.object(gate, "read_root_file",
-                          side_effect=lambda path, **kw: self.files[path]), \
-             patch.object(gate, "read_root_dir", return_value=None):
-            gate.audit(self.p, self.node, enforce_host=False,
-                       allow_missing_snippet=True)
+        with patch.object(gate,"read_root_file",
+                          side_effect=lambda path,**kw:self.files[path]), \
+             patch.object(gate,"read_root_dir",return_value=None):
+            gate.audit(self.p,self.node,enforce_host=False,
+                       allow_missing_snippet=True,
+                       nginx_config=self.nginx_config)
 
-    def test_bootstrap_preflight_does_not_allow_bad_nginx_backend(self):
+    def test_bootstrap_preflight_rejects_bad_backend(self):
         del self.files[self.p["snippet"]]
-        self.files[self.p["backend"]] = self.backend.replace(
-            b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n", b"")
-        with patch.object(gate, "read_root_file",
-                          side_effect=lambda path, **kw: self.files[path]), \
-             patch.object(gate, "read_root_dir", return_value=None):
-            with self.assertRaisesRegex(gate.GateHold,"IR_WSS_NGINX_BACKEND_DRIFT"):
-                gate.audit(self.p, self.node, enforce_host=False,
-                           allow_missing_snippet=True)
+        self.files[self.p["backend"]]=self.backend.replace(
+            b"server_name ir.kolbe1.ir;",b"server_name bad.example;")
+        with patch.object(gate,"read_root_file",
+                          side_effect=lambda path,**kw:self.files[path]), \
+             patch.object(gate,"read_root_dir",return_value=None):
+            with self.assertRaisesRegex(gate.GateHold,"IR_PANEL_8443_BACKEND_DRIFT"):
+                gate.audit(self.p,self.node,enforce_host=False,
+                           allow_missing_snippet=True,
+                           nginx_config=self.nginx_config)
 
     def test_missing_file_refuses_without_fallback(self):
         del self.files[self.p["journal"]]
