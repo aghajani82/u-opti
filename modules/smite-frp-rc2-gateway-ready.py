@@ -88,6 +88,23 @@ def get_node() -> dict:
         raise GateHold("NODE_INSPECT_UNAVAILABLE") from exc
 
 
+def panel_root_proxy_targets(backend: str) -> list[str]:
+    """Return proxy_pass targets only from the managed Panel location /.
+
+    Additional custom locations may legitimately proxy to the same Panel.
+    Those are not evidence of drift in the Panel root upstream.
+    """
+    anchor = "    location / {\n"
+    require(backend.count(anchor) == 1, "IR_PANEL_ROOT_LOCATION_DRIFT")
+    tail = backend.split(anchor, 1)[1]
+    end = re.search(r"(?m)^    }[ \t]*(?:\n|$)", tail)
+    require(end is not None, "IR_PANEL_ROOT_LOCATION_UNCLOSED")
+    root = tail[:end.start()]
+    require("{" not in root and "}" not in root,
+            "IR_PANEL_ROOT_UNEXPECTED_NESTED_LAYOUT")
+    return re.findall(r"(?m)^[ \t]*proxy_pass[ \t]+([^;\n]+);[ \t]*$", root)
+
+
 def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
           *, enforce_host: bool = True, allow_missing_snippet: bool = False,
           nginx_config: str | None = None) -> None:
@@ -163,11 +180,11 @@ def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
             and backend.count("server_name ir.kolbe1.ir;") == 1
             and len(re.findall(r"(?m)^\s*listen\s+127\.0\.0\.1:8443\s+ssl\s*;",
                                backend)) == 1
-            and backend.count("proxy_pass http://127.0.0.1:8000;") == 1
-            and backend.count("    location / {\n") == 1
             and not re.search(r"(?m)^\s*location\s+(?:=\s*)?/~!frp\s*\{",
-                              backend),
+                               backend),
             "IR_PANEL_8443_BACKEND_DRIFT")
+    require(panel_root_proxy_targets(backend) == ["http://127.0.0.1:8000"],
+            "IR_PANEL_ROOT_PROXY_DRIFT")
 
     xhttp_include = "    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n"
     if allow_missing_snippet:
