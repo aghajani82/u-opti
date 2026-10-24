@@ -43,7 +43,8 @@ BINARIES = {
     "frps": "02b50823f330d0486f334d6aa9e448c4d0a26f553a691d167aae8358baab89ee",
 }
 TRIAL_FLAG = "UOPTI_SMITE_RC2_FRP_ENROLLMENT"
-CONFIRM = {"enroll": "ENROLL-RC2-FRP", "rollback": "ROLLBACK-RC2-FRP"}
+CONFIRM = {"enroll": "ENROLL-RC2-FRP", "rollback": "ROLLBACK-RC2-FRP",
+           "recover": "RECOVER-RC2-FRP"}
 
 
 class Hold(Exception):
@@ -271,11 +272,12 @@ def write_journal(host: str, proof: dict[str, str]) -> None:
 
 def journal(host: str) -> dict:
     directory(JOURNAL_DIR, private=True)
+    require(absent(JOURNAL_DIR / ".record.next"), "INCOMPLETE_JOURNAL_WRITE")
     doc = json.loads(regular(JOURNAL, mode=0o600))
     require(set(doc) == {"schema", "host", "state", "identity_sha256",
                          "replay_identity", "manifest_sha256"}
             and doc["schema"] == 1 and doc["host"] == host
-            and doc["state"] == "PREPARED"
+            and doc["state"] in ("PREPARED", "COMMITTED")
             and doc["manifest_sha256"] == sha(expected_manifest())
             and all(re.fullmatch(r"[a-f0-9]{64}", doc[k]) for k in
                     ("identity_sha256",)), "UNTRUSTED_JOURNAL")
@@ -316,6 +318,7 @@ def enroll(host: str) -> None:
             create_file(MANIFEST, expected_manifest())
             signed_probe("ready")
             unchanged(proof)
+            commit_journal(host)
         except Exception as exc:
             try:
                 remove_manifest(journal(host))
@@ -333,9 +336,40 @@ def enroll(host: str) -> None:
         os.close(fd)
 
 
+
+
+def commit_journal(host: str) -> None:
+    doc = journal(host)
+    require(doc["state"] == "PREPARED", "ALREADY_COMMITTED")
+    doc["state"] = "COMMITTED"
+    temp = JOURNAL_DIR / ".record.next"
+    require(absent(temp), "INCOMPLETE_JOURNAL_WRITE")
+    create_file(temp, (json.dumps(doc, sort_keys=True) + "\n").encode())
+    os.replace(temp, JOURNAL)
+    fsync_dir(JOURNAL_DIR)
+
+
+def recover(host: str) -> None:
+    """Rollback an interrupted *uncommitted* enrollment; never auto-retry."""
+    fd = lock()
+    try:
+        host_preflight(host)
+        doc = journal(host)
+        require(doc["state"] == "PREPARED", "USE_ROLLBACK_FOR_COMMITTED")
+        unchanged(doc)
+        remove_manifest(doc)
+        signed_probe("not-installed")
+        clear_journal()
+        print("RC2_FRP_INTERRUPTED_RECOVERY=PASS")
+        print("SIGNED_INVENTORY=NOT_INSTALLED")
+        print("NODE_RESTART=NO")
+    finally:
+        os.close(fd)
+
 def verify(host: str) -> None:
     host_preflight(host)
     doc = journal(host)
+    require(doc["state"] == "COMMITTED", "ENROLLMENT_NOT_COMMITTED")
     unchanged(doc)
     require(MANIFEST.is_file() and not MANIFEST.is_symlink(),
             "MANIFEST_CHANGED")
@@ -354,6 +388,7 @@ def rollback(host: str) -> None:
     try:
         host_preflight(host)
         doc = journal(host)
+        require(doc["state"] == "COMMITTED", "USE_RECOVER_FOR_INCOMPLETE")
         unchanged(doc)
         signed_probe("ready")
         remove_manifest(doc)
@@ -381,17 +416,17 @@ def plan(host: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "enroll", "verify", "rollback"))
+    parser.add_argument("action", choices=("plan", "enroll", "verify", "rollback", "recover"))
     args = parser.parse_args()
     try:
         host = os.uname().nodename.split(".")[0].lower()
-        if args.action in ("enroll", "rollback"):
+        if args.action in ("enroll", "rollback", "recover"):
             require(os.environ.get(TRIAL_FLAG) == "YES", "EXPLICIT_TRIAL_FLAG_REQUIRED")
             require(sys.stdin.isatty(), "INTERACTIVE_TERMINAL_REQUIRED")
             require(input("Type " + CONFIRM[args.action] + " to authorize: ").strip()
                     == CONFIRM[args.action], "OPERATOR_CANCELLED")
         {"plan": plan, "enroll": enroll,
-         "verify": verify, "rollback": rollback}[args.action](host)
+         "verify": verify, "rollback": rollback, "recover": recover}[args.action](host)
         return 0
     except (Hold, OSError, ValueError, KeyError, TypeError,
             subprocess.SubprocessError, json.JSONDecodeError) as exc:
