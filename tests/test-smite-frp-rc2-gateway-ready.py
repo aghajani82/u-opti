@@ -52,7 +52,7 @@ class RC2GatewayContract(unittest.TestCase):
             'map $ssl_preread_server_name $uopti_smite_backend {\n'
             '    default 127.0.0.1:8443;\n'
             '}\n'
-            'server { proxy_pass $uopti_frp_canary_backend; }\n'
+            'server {\n    proxy_pass $uopti_frp_canary_backend;\n}\n'
             + self.dedicated.decode()
         )
         self.snippet=b"# Managed by U-OPTI - Standard FRP XHTTP\n"
