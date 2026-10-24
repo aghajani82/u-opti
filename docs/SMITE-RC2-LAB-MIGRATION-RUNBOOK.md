@@ -14,6 +14,37 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BE — foreign Node reserve database gate PASS, next name-only UI step
+
+Operator IR read-only query reports `PANEL_SIGNED_SCHEMA=PASS`,
+`FOREIGN_NODE_RECORD_COUNT=0`, `FOREIGN_PENDING_RESERVATIONS=0`,
+`FOREIGN_SIGNED_ACTIVE=0`, `IR_RESERVATION_REVIEW=PASS`,
+`LIVE_CHANGES=NONE`. No existing Foreign Node reservation exists; this
+is the first controlled enrollment, not an existing identity recovery.
+
+Verified upstream Smite RC.2 Panel frontend and backend source at
+`e6c3ecce81010130ae28e7d1e37ea99b31d70c28`:
+`frontend/src/pages/Servers.tsx` secure-preview *Add Server* route
+displays **Prepare secure Foreign Node**, requires only Node name, and
+POSTs `/node-pairing/reserve` with JSON `{name}`, not legacy
+`/nodes` registration with IP/port.
+`panel/app/routers/node_pairing.py` requires authenticated admin and
+enabled pairing preview, checks unique name, and creates precisely
+`status=pending`, `metadata.role=foreign`,
+`metadata.node_name=the supplied name` and
+`metadata.provisioning=reserved_for_pairing`. It performs no call to
+KH and does not issue a pairing code or create a credential.
+
+**Next controlled action**: inspect only `SMITE_NODE_NAME` and role
+from root-managed KH state, then in IR Panel's **Servers** view use
+**Add Server** ONLY if the secure-preview modal displays
+**Prepare secure Foreign Node** with name-only entry. Submit exact
+KH managed Node name. **HOLD** if old modal requires IP/port or secure
+preview is not available. Independently check the IR Panel SQLite
+reservation count and metadata after operator action. Never paste
+short-lived pairing code or key in PR/chat, and do not issue a code,
+redeem identity, write Replay or activate signed Node yet.
+
 ## NEXT-5.BD — operator identity and Replay inventory
 
 On 2026-10-24 the operator ran read-only artifact checks on **both**
