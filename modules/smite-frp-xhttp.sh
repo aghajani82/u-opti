@@ -4,13 +4,25 @@ SMITE_FRP_XHTTP_CONF="${SMITE_FRP_XHTTP_CONF:-/etc/nginx/u-opti-smite-frp-xhttp.
 SMITE_FRP_XHTTP_BACKEND="${SMITE_GATEWAY_BACKEND_CONF:-/etc/nginx/conf.d/u-opti-smite-panel-backend.conf}"
 SMITE_FRP_XHTTP_STATE="${SMITE_STATE_FILE:-/etc/u-opti/smite/state.env}"
 SMITE_FRP_XHTTP_HELPER="${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py"
+# RC2 Node owns its signed WSS helper *inside* the immutable Node image.
+# Do NOT create a fake legacy file just to bypass this compatibility gate.
+SMITE_FRP_RC2_READY_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-frp-rc2-gateway-ready.py"
 SMITE_FRP_XHTTP_PATH_HELPER="${SMITE_FRP_XHTTP_PATH_HELPER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-frp-xhttp-paths.py}"
 SMITE_FRP_XHTTP_PATHS="${SMITE_FRP_XHTTP_PATHS:-/etc/u-opti/smite/frp-xhttp-paths.json}"
 
 smite_frp_xhttp_enabled() {
-    [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ] &&
     [ -f "$SMITE_FRP_XHTTP_STATE" ] &&
-    grep -Fxq 'SMITE_CONNECTION_MODE=standard' "$SMITE_FRP_XHTTP_STATE"
+        grep -Fxq 'SMITE_CONNECTION_MODE=standard' "$SMITE_FRP_XHTTP_STATE" ||
+        return 1
+    # Legacy Standard installations keep their original compatibility path.
+    if [ -f "$SMITE_FRP_XHTTP_HELPER" ]; then
+        return 0
+    fi
+    # RC2-only path: independently verify signed WSS Node state + immutable
+    # image, committed overlay, protected mounts and existing IR Nginx include.
+    # Fail closed: missing gate file cannot silently enable route publication.
+    [ -f "$SMITE_FRP_RC2_READY_SCRIPT" ] || return 1
+    python3 -B "$SMITE_FRP_RC2_READY_SCRIPT" >/dev/null
 }
 
 smite_frp_xhttp_include() {
