@@ -130,6 +130,10 @@ def replay_state(pairing) -> str:
                     "REPLAY_DIRECTORY_NONEMPTY")
         return "ABSENT"
     require(ready_dir, "REPLAY_DIRECTORY_MISSING")
+    for item in (marker, db):
+        require(stat.S_ISREG(item.st_mode) and item.st_uid == 0
+                and stat.S_IMODE(item.st_mode) == 0o600
+                and item.st_nlink == 1, "REPLAY_ARTIFACT_PERMISSIONS")
     require(pairing._replay_artifacts_valid(), "REPLAY_VALIDATION_FAILED")
     return "READY"
 
@@ -171,7 +175,11 @@ def runtime_snapshot(pairing):
         timeout=10, capture=True,
     )
     listeners = pairing._run(["ss", "-H", "-lnt"], timeout=10, capture=True)
-    return (image_id, started, listeners)
+    # Ignore changing kernel socket queue counters; compare exposed endpoints.
+    endpoints = tuple(sorted(fields[3] for line in listeners.splitlines()
+                             if len(fields := line.split()) >= 5
+                             and fields[0] == "LISTEN"))
+    return (image_id, started, endpoints)
 
 
 def enrollment_command(pairing):
