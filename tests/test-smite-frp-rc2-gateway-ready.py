@@ -145,6 +145,29 @@ class RC2GatewayContract(unittest.TestCase):
         with self.assertRaisesRegex(gate.GateHold,"IR_XHTTP_SNIPPET_UNTRUSTED"):
             self.check()
 
+    def test_strict_gate_requires_snippet_but_bootstrap_preflight_accepts_exact_absence(self):
+        del self.files[self.p["snippet"]]
+        with self.assertRaises(KeyError):
+            self.check()
+        # This tests the read-only preparation lane only, never published
+        # routing; the production gate without the flag still refuses.
+        with patch.object(gate, "read_root_file",
+                          side_effect=lambda path, **kw: self.files[path]), \
+             patch.object(gate, "read_root_dir", return_value=None):
+            gate.audit(self.p, self.node, enforce_host=False,
+                       allow_missing_snippet=True)
+
+    def test_bootstrap_preflight_does_not_allow_bad_nginx_backend(self):
+        del self.files[self.p["snippet"]]
+        self.files[self.p["backend"]] = self.backend.replace(
+            b"    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\\n", b"")
+        with patch.object(gate, "read_root_file",
+                          side_effect=lambda path, **kw: self.files[path]), \
+             patch.object(gate, "read_root_dir", return_value=None):
+            with self.assertRaisesRegex(gate.GateHold,"IR_WSS_NGINX_BACKEND_DRIFT"):
+                gate.audit(self.p, self.node, enforce_host=False,
+                           allow_missing_snippet=True)
+
     def test_missing_file_refuses_without_fallback(self):
         del self.files[self.p["journal"]]
         with self.assertRaises(KeyError):
