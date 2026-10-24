@@ -100,6 +100,44 @@ class RC2GatewayContract(unittest.TestCase):
     def test_committed_signed_node_and_ir_gateway_pass(self):
         self.check()
 
+    def test_multiple_legitimate_panel_proxies_outside_root_are_accepted(self):
+        # Real RC2 can serve multiple API/assets routes to the Panel.
+        # A global count == 1 would reject this otherwise valid layout.
+        extra = (
+            "    location = /healthz {\n"
+            "        proxy_pass http://127.0.0.1:8000;\n"
+            "    }\n"
+        ).encode()
+        self.files[self.p["backend"]] = self.backend.replace(
+            b"    location / {\n", extra + b"    location / {\n"
+        )
+        self.check()
+
+    def test_wrong_panel_root_proxy_refuses_even_with_good_other_location(self):
+        extra = (
+            "    location = /healthz {\n"
+            "        proxy_pass http://127.0.0.1:8000;\n"
+            "    }\n"
+        ).encode()
+        changed = self.backend.replace(
+            b"    location / {\n", extra + b"    location / {\n"
+        ).replace(b"    location / {\n"
+                  b"        proxy_pass http://127.0.0.1:8000;",
+                  b"    location / {\n"
+                  b"        proxy_pass http://127.0.0.1:9000;")
+        self.files[self.p["backend"]] = changed
+        with self.assertRaisesRegex(gate.GateHold, "IR_PANEL_ROOT_PROXY_DRIFT"):
+            self.check()
+
+    def test_duplicate_root_proxy_refuses(self):
+        self.files[self.p["backend"]] = self.backend.replace(
+            b"    location / {\n",
+            b"    location / {\n"
+            b"        proxy_pass http://127.0.0.1:8000;\n"
+        )
+        with self.assertRaisesRegex(gate.GateHold, "IR_PANEL_ROOT_PROXY_DRIFT"):
+            self.check()
+
     def test_legacy_gateway_file_not_fabricated(self):
         shell=ROUTES.read_text()
         self.assertIn('if [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ]; then',shell)
