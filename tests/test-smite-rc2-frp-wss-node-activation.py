@@ -247,6 +247,47 @@ class NodeWssTrial(unittest.TestCase):
         self.assertFalse(self.overlay.exists())
         self.assertFalse(self.state.exists())
 
+    def test_unhealthy_recreated_node_recovers_original_signed_runtime(self):
+        current, proof = module.prerequisite(HOST)
+        module.record(HOST, proof, current["Id"])
+        module.new_file(self.overlay, module.WSS_OVERLAY)
+        self.enabled = True
+        self.recreation = 1
+        original = self.runtime
+        seen = {"done": False}
+        def unhealthy_then_recovered():
+            doc = original()
+            if not seen["done"]:
+                seen["done"] = True
+                doc["State"]["Running"] = False
+                doc["State"]["Health"]["Status"] = "unhealthy"
+            return doc
+        with patch.object(module, "inspect", unhealthy_then_recovered):
+            module.recover(HOST)
+        self.assertTrue(seen["done"])
+        self.assertFalse(self.enabled)
+        self.assertEqual(self.recreation, 2)
+        self.assertFalse(self.overlay.exists())
+        self.assertFalse(self.state.exists())
+        self.assertIn("signed:ready:False", self.probes)
+
+    def test_unhealthy_original_signed_node_is_repaired_on_recovery(self):
+        current, proof = module.prerequisite(HOST)
+        module.record(HOST, proof, current["Id"])
+        module.new_file(self.overlay, module.WSS_OVERLAY)
+        original = self.runtime
+        def failed_early_recreation():
+            doc = original()
+            if self.recreation == 0:
+                doc["State"]["Running"] = False
+                doc["State"]["Health"]["Status"] = "unhealthy"
+            return doc
+        with patch.object(module, "inspect", failed_early_recreation):
+            module.recover(HOST)
+        self.assertEqual(self.recreation, 1)
+        self.assertFalse(self.enabled)
+        self.assertFalse(self.state.exists())
+
     def test_incomplete_journal_never_authorizes_retry(self):
         current, proof = module.prerequisite(HOST)
         module.record(HOST, proof, current["Id"])
