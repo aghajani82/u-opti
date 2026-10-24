@@ -29,6 +29,10 @@ def main() -> int:
     # Required before any probe or file mutation. No environment spoofed here:
     # only the parent GitHub PR job can provide the private runner lab marker.
     lifecycle.tx.admission(lab)
+    existing_frp = os.environ.get("SMITE_CI_EXISTING_FRP", "0")
+    if existing_frp not in ("0", "1"):
+        raise lifecycle.Hold("UNREVIEWED_DUAL_ENGINE_MODE")
+    dual = existing_frp == "1"
 
     def signed_probe(root: Path, phase: str) -> bool:
         if (phase not in ("ready", "absent") or
@@ -53,16 +57,29 @@ def main() -> int:
             "NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS",
             f"STRICT_NODE_DOCKER_HEALTHY_{phase.upper()}=PASS",
         )
+        if dual:
+            required += (f"SIGNED_EXISTING_FRP_{phase.upper()}_AFTER-RESTART=PASS",)
         # Never print raw stdout or stderr: they may contain HMAC test data.
         return process.returncode == 0 and all(token in stdout for token in required)
+
+    def signed_frp(root: Path, phase: str) -> bool:
+        if not dual or phase not in ("before", "with-backhaul", "after-rollback"):
+            return False
+        target = "ready" if phase == "with-backhaul" else "absent"
+        return signed_probe(root, target)
 
     try:
         result = lifecycle.run_lab_rehearsal(
             lab, stage,
             check_ready=lambda root: signed_probe(root, "ready"),
             check_absent=lambda root: signed_probe(root, "absent"),
+            check_other=signed_frp if dual else None,
         )
         assert result["PRODUCTION_ACTIVATION"] == "HOLD"
+        assert result["EXISTING_FRP_SIGNED_RUNTIME"] == (
+            "BEFORE_WITH_BACKHAUL_AND_AFTER_ROLLBACK_VERIFIED"
+            if dual else "FRP_NOT_INSTALLED"
+        )
         assert result["TRIAL_PREVIOUS_RUNTIME"] == "SIGNED_ABSENT_AFTER_RESTART_VERIFIED"
         print("OFFICIAL_BACKHAUL_LIFECYCLE_SIGNED_READY_AND_AUTO_ROLLBACK=PASS")
 
@@ -75,7 +92,8 @@ def main() -> int:
         try:
             lifecycle.run_lab_rehearsal(
                 lab, stage, check_ready=injected_failure,
-                check_absent=lambda root: signed_probe(root, "absent"))
+                check_absent=lambda root: signed_probe(root, "absent"),
+                check_other=signed_frp if dual else None)
         except lifecycle.Hold as err:
             if str(err) != "ACTIVATION_FAILED_EXACT_ROLLBACK_PROVED":
                 raise
@@ -88,6 +106,8 @@ def main() -> int:
         assert state["state"] == "NOT_INSTALLED"
         assert not (lab / "recovery-journal").exists()
         print("OFFICIAL_BACKHAUL_PREVIOUS_NODE_AND_IDENTITY_RECOVERED=PASS")
+        if dual:
+            print("OFFICIAL_BACKHAUL_EXISTING_FRP_SIGNED_THREE_PHASES=PASS")
         return 0
     except lifecycle.Hold as error:
         # Lifecycle Hold reasons are fixed internal codes, never credentials.

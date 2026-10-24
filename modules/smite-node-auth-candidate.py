@@ -71,7 +71,7 @@ def _private_directory(path: Path) -> None:
 
 
 def _create_private_directory(path: Path) -> None:
-    """Only create missing directories beneath an already-known host path."""
+    """Create one private component below an already validated parent."""
     if path.is_symlink():
         raise StageHold("Refusing symlinked private directory")
     if not path.exists():
@@ -79,6 +79,42 @@ def _create_private_directory(path: Path) -> None:
             raise StageHold("Private storage parent is missing or unsafe")
         path.mkdir(mode=0o700)
     _private_directory(path)
+
+
+def _trusted_storage_anchor(path: Path) -> None:
+    """Validate the existing host directory beneath which private state is built."""
+    try:
+        record = path.lstat()
+        mode = stat.S_IMODE(record.st_mode)
+        if (
+            not stat.S_ISDIR(record.st_mode)
+            or record.st_uid != os.geteuid()
+            or mode & 0o022
+        ):
+            raise StageHold("Replay storage anchor is unsafe")
+    except OSError as exc:
+        raise StageHold("Replay storage anchor is unavailable") from exc
+
+
+def _create_private_hierarchy(path: Path) -> None:
+    """Create three private levels below a trusted, existing host anchor.
+
+    Default production path:
+      /var/lib                    (trusted existing anchor)
+      /var/lib/u-opti             (0700)
+      /var/lib/u-opti/smite-node-security (0700)
+      .../replay                  (0700)
+    """
+    if not path.is_absolute() or len(path.parents) < 3:
+        raise StageHold("Replay storage path is not an admitted absolute layout")
+    anchor = path.parents[2]
+    _trusted_storage_anchor(anchor)
+    expected_parent = anchor
+    for component in (path.parents[1], path.parent, path):
+        if component.parent != expected_parent:
+            raise StageHold("Replay storage hierarchy is ambiguous")
+        _create_private_directory(component)
+        expected_parent = component
 
 
 def state(path: Path = STATE) -> dict[str, str]:
@@ -170,8 +206,9 @@ def prepare(
         raise StageHold("Candidate must be beside the existing Node Compose")
     if replay_dir == identity.parent or replay_dir.is_symlink():
         raise StageHold("Replay directory may not alias identity")
-    _create_private_directory(replay_dir.parent)
-    _create_private_directory(replay_dir)
+    # Fresh hosts may have none of the U-OPTI runtime tree yet.
+    # Build it only below the validated existing host anchor.
+    _create_private_hierarchy(replay_dir)
     yaml = compose_candidate(identity=identity, replay_dir=replay_dir)
     if candidate.exists() or candidate.is_symlink():
         if _checked_file(candidate, mode=0o600).decode("utf-8") == yaml:

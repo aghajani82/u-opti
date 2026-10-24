@@ -16,7 +16,8 @@ chmod 0700 "$lab"
 project="stage24-${GITHUB_RUN_ID:-0}"
 node_dir="$lab/node"
 identity_dir="$lab/identities"
-replay_dir="$lab/private/replay"
+replay_anchor="$lab/var-lib"
+replay_dir="$replay_anchor/u-opti/smite-node-security/replay"
 base="$node_dir/docker-compose.yml"
 candidate="$node_dir/docker-compose.security-candidate.yml"
 ci_override="$lab/ci-isolation.yml"
@@ -80,7 +81,11 @@ test "$(stat -c %a "$node_dir/.env")" = 600
 baseline_sha="$(sha256sum "$base" | awk '{print $1}')"
 
 printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$lab/state/state.env"
-sudo install -d -m 0700 "$lab/identities" "$lab/private" "$replay_dir"
+sudo install -d -m 0700 "$lab/identities"
+# Mirror the production trust boundary exactly: /var/lib is an existing
+# root-owned, non-writable anchor; U-OPTI creates the three private levels
+# beneath it. Keep $lab itself runner-owned so CI can write unrelated files.
+sudo install -d -o 0 -g 0 -m 0755 "$replay_anchor"
 sudo python3 - "$identity_dir/node-identity.json" <<'PY'
 import json, os, secrets, sys
 path=sys.argv[1]
@@ -157,6 +162,57 @@ sudo docker compose -f "$base" -f "$ci_override" config --quiet
 # This image is LOCAL to CI, with no tag publication or external services.
 docker build -q -f "$SMITE/node/Dockerfile" --build-arg SMITE_VERSION=2.0.0-rc.0 -t smite-node:stage15-local "$SMITE/node" >/dev/null
 
+# One-time enrollment is OFFLINE, explicit and scoped to a disposable runner.
+# Mount the host folders at the EXACT CONTAINER paths used by Smite Strict:
+# the key-bound marker must not record a host-only replay DB path.
+sudo docker run --rm --network none --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --mount "type=bind,source=$identity_dir,target=/run/smite-node-identity" \
+  --mount "type=bind,source=$replay_dir,target=/var/lib/smite-node/auth" \
+  --entrypoint python3 smite-node:stage15-local \
+  -m app.replay_enrollment \
+  --identity /run/smite-node-identity/node-identity.json \
+  --replay-db /var/lib/smite-node/auth/agent-replay.sqlite3 \
+  --confirm-first-provision > "$lab/first-enrollment.txt"
+grep -qx 'REPLAY_DB_FIRST_ENROLLMENT=PROVISIONED' "$lab/first-enrollment.txt"
+grep -qx 'SIGNED_TRAFFIC_ACTIVATION=NOT_AUTHORIZED' "$lab/first-enrollment.txt"
+sudo test -s "$identity_dir/replay-enrollment.json"
+sudo test -s "$replay_dir/agent-replay.sqlite3"
+sudo python3 - "$identity_dir/node-identity.json" "$identity_dir/replay-enrollment.json" <<'PY'
+import hashlib, hmac, json, sys
+from pathlib import Path
+identity=json.loads(Path(sys.argv[1]).read_text())
+marker=json.loads(Path(sys.argv[2]).read_text())
+node_id=identity["node_id"]
+expected=hmac.new(
+    identity["node_secret"].encode("ascii"),
+    b"smite-replay-key-binding-v1:" + node_id.encode("ascii"),
+    hashlib.sha256,
+).hexdigest()
+assert marker["node_id"]==node_id
+assert marker["replay_database"]=="/var/lib/smite-node/auth/agent-replay.sqlite3"
+assert hmac.compare_digest(marker["key_binding"], expected)
+print("STAGE24_KEY_BOUND_CONTAINER_REPLAY_MARKER=PASS")
+PY
+test "$(sudo stat -c %a "$identity_dir/replay-enrollment.json")" = 600
+test "$(sudo stat -c %a "$replay_dir/agent-replay.sqlite3")" = 600
+marker_sha="$(sudo sha256sum "$identity_dir/replay-enrollment.json" | awk '{print $1}')"
+# This preflight inspects offline host files only; it must not attempt to
+# apply Compose, import Docker state, create a DB or silently rotate keys.
+sudo python3 - "$ROOT/modules/smite-node-replay-mount-admission.py" \
+  "$lab/state/state.env" "$identity_dir/node-identity.json" \
+  "$replay_dir" "$base" "$candidate" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("kh_admission",sys.argv[1])
+module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+assert module.preflight(state=Path(sys.argv[2]),identity=Path(sys.argv[3]),
+                       replay_dir=Path(sys.argv[4]),base_compose=Path(sys.argv[5]),
+                       candidate=Path(sys.argv[6]))=="KH_PRIVATE_BIND_MOUNTS_OFFLINE_PREFLIGHT_PASS"
+PY
+echo "STAGE24_EXPLICIT_FIRST_REPLAY_ENROLLMENT=PASS"
+
+
 wait_node() {
   for attempt in $(seq 1 35); do
     # A repeatedly exited container will never recover by polling longer.
@@ -182,6 +238,28 @@ check_no_network() {
   test "$(sudo docker inspect -f '{{.HostConfig.NetworkMode}}' stage24-kh)" = none
   test "$(sudo docker inspect -f '{{.HostConfig.PortBindings}}' stage24-kh)" = "map[]"
 }
+
+# Inspect Docker's EFFECTIVE merged mount set, not just the candidate text.
+# In particular the existing node-data named volume covers /var/lib/smite-node
+# and the child private replay bind must still win at /var/lib/smite-node/auth.
+check_signed_mounts() {
+  sudo docker inspect stage24-kh --format '{{json .Mounts}}' |
+    python3 -c '
+import json,sys
+mounts=json.load(sys.stdin)
+def by_target(path):
+    found=[m for m in mounts if m["Destination"]==path]
+    assert len(found)==1, (path,"missing or conflicting mount")
+    return found[0]
+identity=by_target("/run/smite-node-identity")
+replay=by_target("/var/lib/smite-node/auth")
+parent=by_target("/var/lib/smite-node")
+assert identity["Type"]=="bind" and identity["RW"] is False
+assert replay["Type"]=="bind" and replay["RW"] is True
+assert parent["Type"]=="volume"
+print("STAGE24_NESTED_DOCKER_MOUNT_EFFECTIVE=PASS")
+'
+}
 probe() { sudo docker exec -i stage24-kh python3 - "$@" ; }
 
 # Phase A: installed paused + strict KH has no Node identity mount.
@@ -204,6 +282,7 @@ echo "STAGE24_COMPOSE_PAUSED_STRICT=PASS"
 signed up -d --force-recreate --no-build >/dev/null
 wait_node
 check_no_network
+check_signed_mounts
 probe <<'PY'
 import json,os,urllib.request,urllib.error
 from pathlib import Path
@@ -261,6 +340,7 @@ echo "STAGE29_REAL_KH_NO_ENGINE_BUNDLED_APPLY=DENIED"
 sudo test -s "$replay_dir/agent-replay.sqlite3"
 test "$(sudo stat -c %a "$replay_dir/agent-replay.sqlite3")" = 600
 test "$(sudo sha256sum "$identity_dir/node-identity.json" | awk '{print $1}')" = "$identity_sha"
+test "$(sudo sha256sum "$identity_dir/replay-enrollment.json" | awk '{print $1}')" = "$marker_sha"
 replay_sha="$(sudo sha256sum "$replay_dir/agent-replay.sqlite3" | awk '{print $1}')"
 echo "STAGE24_COMPOSE_SIGNED_READONLY_HMAC=PASS"
 
@@ -304,6 +384,53 @@ with call("d"*32) as response:
 PY
 test "$(sudo sha256sum "$identity_dir/node-identity.json" | awk '{print $1}')" = "$identity_sha"
 test "$(sha256sum "$base" | awk '{print $1}')" = "$baseline_sha"
+
 echo "STAGE24_COMPOSE_REENABLE_DURABLE_REPLAY=PASS"
+test "$(sudo sha256sum "$identity_dir/replay-enrollment.json" | awk '{print $1}')" = "$marker_sha"
+check_signed_mounts
+
+# Phase E: on a DISPOSABLE runner only, simulate losing the entire replay
+# SQLite file while retaining the independent paired identity + marker.
+# The container must NOT generate a new DB, including on force-recreate.
+signed down --remove-orphans >/dev/null
+sudo mv "$replay_dir/agent-replay.sqlite3" "$lab/held-replay-for-cleanup.sqlite3"
+test ! -e "$replay_dir/agent-replay.sqlite3"
+signed up -d --force-recreate --no-build >/dev/null
+wait_node
+check_no_network
+check_signed_mounts
+probe <<'PY'
+import urllib.error, urllib.request
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node,secret=read_identity("/run/smite-node-identity/node-identity.json")
+target="/api/agent/status"
+signature=sign_request(secret=secret,node_id=node,method="GET",target=target,
+                       body=b"",nonce="b"*32)
+request=urllib.request.Request("http://127.0.0.1:8888"+target,headers=signature)
+try: urllib.request.urlopen(request,timeout=4)
+except urllib.error.HTTPError as error: assert error.code==503,error.code
+else: raise AssertionError("Lost replay database accepted signed traffic")
+PY
+test ! -e "$replay_dir/agent-replay.sqlite3"
+test "$(sudo sha256sum "$identity_dir/replay-enrollment.json" | awk '{print $1}')" = "$marker_sha"
+# A second, explicit first-enrollment attempt MUST fail due to the marker:
+# never fabricate a blank Replay DB from the same Node identity.
+if sudo docker run --rm --network none --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --mount "type=bind,source=$identity_dir,target=/run/smite-node-identity" \
+    --mount "type=bind,source=$replay_dir,target=/var/lib/smite-node/auth" \
+    --entrypoint python3 smite-node:stage15-local \
+    -m app.replay_enrollment \
+    --identity /run/smite-node-identity/node-identity.json \
+    --replay-db /var/lib/smite-node/auth/agent-replay.sqlite3 \
+    --confirm-first-provision > "$lab/second-enrollment.txt" 2>&1; then
+  echo "HOLD: Previous Node identity was illegally re-enrolled after DB loss" >&2
+  exit 1
+fi
+grep -q '^HOLD: Replay enrollment already started' "$lab/second-enrollment.txt"
+test ! -e "$replay_dir/agent-replay.sqlite3"
+echo "STAGE24_REPLAY_VOLUME_LOSS_FAIL_CLOSED=PASS"
+echo "STAGE24_NO_BOOTSTRAP_ON_RECREATE=PASS"
 echo "STAGE24_FRP_BACKHAUL_TLS_REAL_IR_KH=NOT_TESTED"
 echo "STAGE24_HOST_NETWORK_AND_PORTS=UNTOUCHED"

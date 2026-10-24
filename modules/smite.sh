@@ -1054,6 +1054,8 @@ show_smite_menu() {
         echo
 
         read -rp "Please enter your selection [0-3]: " smite_choice
+        smite_choice="${smite_choice#"${smite_choice%%[![:space:]]*}"}"
+        smite_choice="${smite_choice%"${smite_choice##*[![:space:]]}"}"
         case "$smite_choice" in
             1) smite_show_status ;;
             2) smite_prepare_persistent_compatibility ;;

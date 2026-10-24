@@ -13,6 +13,8 @@ fi
 lab="${1:?requires isolated lab root}"
 engine="${SMITE_CI_ENGINE:-backhaul}"
 case "$engine" in backhaul|frp) ;; *) echo "HOLD: unknown CI-only engine" >&2; exit 2 ;; esac
+existing_frp="${SMITE_CI_EXISTING_FRP:-0}"
+case "$existing_frp" in 0) ;; 1) [[ "$engine" == backhaul ]] || exit 2 ;; *) exit 2 ;; esac
 case "${2:-}" in
   absent|ready) phase="$2" ;;
   *) echo "HOLD: invalid Node API trial phase" >&2; exit 2 ;;
@@ -46,7 +48,15 @@ if [[ "$engine" == "backhaul" ]]; then
     sudo test -f "$lab/node/config/engine-state/engines.json"
   else
     binary="$(sudo find "$lab/stages" -mindepth 2 -maxdepth 2 -type f -name backhaul.bin -print -quit)"
-    sudo test ! -e "$lab/node/config/engine-state/engines.json"
+    if [[ "$existing_frp" == 1 ]]; then
+      sudo test -f "$lab/node/config/engine-state/engines.json"
+    else
+      sudo test ! -e "$lab/node/config/engine-state/engines.json"
+    fi
+  fi
+  if [[ "$existing_frp" == 1 ]]; then
+    sudo test -f "$lab/installed/frp/frpc"
+    sudo test -f "$lab/installed/frp/frps"
   fi
   [[ -n "$binary" ]] && sudo test -f "$binary" || {
     echo "HOLD: Backhaul trial binary missing" >&2
@@ -80,7 +90,39 @@ with os.fdopen(fd, "w") as stream:
 PY_IDENTITY
 fi
 
+# This is an opt-in test-only migration gate, never a Node startup hook.
+# New reviewed Smite strictly refuses signed traffic until its private
+# Replay DB has been explicitly enrolled ONCE. Use a one-shot, isolated
+# container; preserve the marker on identity storage for every restart.
 image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+replay_mode="${SMITE_CI_STRICT_REPLAY_BOOTSTRAP:-0}"
+case "$replay_mode" in 0|1) ;; *) echo "HOLD: invalid CI replay mode" >&2; exit 2 ;; esac
+if [[ "$replay_mode" == 1 ]]; then
+  expected_smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
+  [[ "$(git -C "$smite" rev-parse HEAD)" == "$expected_smite_sha" ]] || {
+    echo "HOLD: reviewed strict replay Smite source SHA mismatch" >&2
+    exit 2
+  }
+  if ! sudo test -e "$lab/node-data/auth/agent-replay.sqlite3" &&
+     ! sudo test -e "$lab/node/config/identity/replay-enrollment.json"; then
+    # First enrollment only. On all later probe calls, use persisted bytes.
+    sudo docker run --rm --platform linux/amd64 --network none \
+      --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 0:0 \
+      --mount "type=bind,src=$smite/node/app,dst=/app/app,readonly" \
+      --mount "type=bind,src=$lab/node/config,dst=/etc/smite-node" \
+      --mount "type=bind,src=$lab/node-data,dst=/var/lib/smite-node" \
+      --entrypoint python "$image" -m app.replay_enrollment \
+      --identity /etc/smite-node/identity/node-identity.json \
+      --replay-db /var/lib/smite-node/auth/agent-replay.sqlite3 \
+      --confirm-first-provision >/dev/null
+    echo "SIGNED_NODE_OFFLINE_FIRST_REPLAY_ENROLLMENT=PASS"
+  fi
+  sudo test -s "$lab/node/config/identity/replay-enrollment.json"
+  sudo test -s "$lab/node-data/auth/agent-replay.sqlite3"
+  test "$(sudo stat -c %a "$lab/node/config/identity/replay-enrollment.json")" = 600
+  test "$(sudo stat -c %a "$lab/node-data/auth/agent-replay.sqlite3")" = 600
+fi
 name="uopti-managed-api-${GITHUB_RUN_ID:?}-${phase}"
 compose_mode="${SMITE_CI_COMPOSE_RECREATE:-0}"
 compose_file="$lab/smite-node-isolated-$phase.json"
@@ -106,6 +148,7 @@ if [[ "$compose_mode" == 1 ]]; then
   sudo docker compose -f "$lab/node/docker-compose.yml" config --format json |
     sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
       GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
+      SMITE_CI_EXISTING_FRP="$existing_frp" \
       python3 "$root/tests/smite-managed-backhaul-compose-fixture.py" \
       "$lab" "$phase" "${GITHUB_RUN_ID:?}" "$smite" "$compose_file" "$engine"
   sudo docker compose -p "$project" -f "$compose_file" config --quiet
@@ -155,9 +198,11 @@ wanted={"/etc/smite-node":root+"/node/config","/var/lib/smite-node":root+"/node-
         "/app/main.py":smite+"/node/main.py","/app/app":smite+"/node/app"}
 if os.environ.get("SMITE_CI_COMPOSE_RECREATE")=="1":
     expected=set(wanted)
+    dual=os.environ.get("SMITE_CI_EXISTING_FRP")=="1"
     chosen=(["/usr/local/bin/backhaul"] if engine=="backhaul"
             else ["/usr/local/bin/frpc","/usr/local/bin/frps"])
     if phase=="ready": expected.update(chosen)
+    if dual: expected.update(["/usr/local/bin/frpc","/usr/local/bin/frps"])
     relevant=[m for m in mounts if m["Destination"] in expected]
     assert {m["Destination"] for m in relevant}==expected, relevant
     for m in relevant:
@@ -165,10 +210,11 @@ if os.environ.get("SMITE_CI_COMPOSE_RECREATE")=="1":
             assert engine=="backhaul"
             assert m["Source"]==root+"/installed/backhaul" and m["RW"] is False
         elif m["Destination"] in ("/usr/local/bin/frpc","/usr/local/bin/frps"):
-            assert engine=="frp"
+            assert engine=="frp" or dual
             assert m["Source"]==root+"/installed/frp/"+m["Destination"].rsplit("/",1)[-1] and m["RW"] is False
         else: assert m["Source"]==wanted[m["Destination"]]
-    forbidden=(["/usr/local/bin/frpc","/usr/local/bin/frps"]
+    forbidden=([] if dual else
+               ["/usr/local/bin/frpc","/usr/local/bin/frps"]
                if engine=="backhaul" else ["/usr/local/bin/backhaul"])
     assert not any(m["Destination"] in forbidden for m in mounts)
 print("NODE_ACTUAL_DOCKER_MOUNTS_VERIFIED=PASS")
@@ -192,6 +238,7 @@ probe() {
   local check_mode="$1"
   sudo docker exec -i --env "EXPECTED_ENGINE_STATE=$phase" \
     --env "EXPECTED_ENGINE_NAME=$engine" \
+    --env "EXPECTED_EXISTING_FRP=$existing_frp" \
     --env "PROBE_MODE=$check_mode" "$name" python -B - <<'PY_PROBE'
 import json, os, urllib.error, urllib.request
 from app.agent_auth import read_identity
@@ -201,6 +248,7 @@ base = "http://127.0.0.1:8888"
 identity, secret = read_identity("/etc/smite-node/identity/node-identity.json")
 phase = os.environ["EXPECTED_ENGINE_STATE"]
 engine = os.environ["EXPECTED_ENGINE_NAME"]
+dual = os.environ["EXPECTED_EXISTING_FRP"] == "1"
 mode = os.environ["PROBE_MODE"]
 replay_file = "/var/lib/smite-node/auth/last-signed-request.json"
 
@@ -244,8 +292,11 @@ assert inventory["mode"] == "managed"
 assert set(inventory["engines"]) == {"backhaul", "frp", "gost", "rathole", "chisel"}
 expect = "ready" if phase == "ready" else "not-installed"
 assert inventory["engines"][engine] == expect, inventory
+if dual:
+    assert engine == "backhaul", engine
+    assert inventory["engines"]["frp"] == "ready", inventory
 assert all(state == "not-installed" for name, state in inventory["engines"].items()
-           if name != engine), inventory
+           if name != engine and not (dual and name == "frp")), inventory
 assert request("GET", endpoint, headers=headers)[0] == 401, "nonce replay accepted"
 
 if mode == "initial":
@@ -266,7 +317,8 @@ def denied_apply(core):
 # installed mode, do NOT submit an Apply that could run the executable.
 # Only absent engines must reliably reject Apply before tunnel creation.
 if engine == "backhaul":
-    denied_apply("frp")
+    if not dual:
+        denied_apply("frp")
     if phase != "ready":
         denied_apply("backhaul")
 else:
@@ -278,6 +330,8 @@ status, content = request("GET", "/api/agent/status",
 assert status == 200, (status, content[:160])
 assert json.loads(content)["active_tunnels"] == 0
 print("SIGNED_API_" + engine.upper() + "_" + phase.upper() + "_" + mode.upper() + "=PASS")
+if dual:
+    print("SIGNED_EXISTING_FRP_" + phase.upper() + "_" + mode.upper() + "=PASS")
 PY_PROBE
 }
 assert_docker_health() {

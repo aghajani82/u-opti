@@ -17,9 +17,47 @@ if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$
     exit 1
 fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
+# BEGIN: U-OPTI immutable per-operation source pin
+# Resolve once; never download a mixture of mutable branch revisions.
+u_opti_resolve_source_sha() {
+    local ref="$1" response
+    if [[ ! "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+       [[ "$ref" == *".."* ]] || [[ "$ref" == /* ]]; then
+        return 1
+    fi
+    response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "https://api.github.com/repos/aghajani82/u-opti/commits/$ref")" || return 1
+    printf '%s' "$response" | python3 -c '
+import json
+import re
+import sys
+data = json.load(sys.stdin)
+sha = data.get("sha") if isinstance(data, dict) else None
+if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+    sys.exit("UNTRUSTED_SOURCE_SHA")
+print(sha)
+'
+}
+# END: U-OPTI immutable per-operation source pin
+
 INSTALL_PATH="/usr/local/bin/u-opti"
 LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
+
+# Resume/rollback a previous interrupted install/update BEFORE new downloads
+# or package operations. Bundled rescue is not sourced through new modules.
+if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+    RESCUE="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ ! -f "$RESCUE" ] || [ -L "$RESCUE" ] ||
+       ! command -v python3 >/dev/null 2>&1 ||
+       ! python3 -B "$RESCUE" recover; then
+        echo "HOLD: Prior interrupted U-OPTI transaction requires recovery; installer stopped." >&2
+        exit 1
+    fi
+    echo "Previous interrupted U-OPTI transaction restored before installation."
+fi
 
 MODULES=(
     "system.sh"
@@ -39,6 +77,7 @@ MODULES=(
     "smite-node-local-bind.py"
     "smite-node-pairing.py"
     "smite-node-auth-candidate.py"
+    "smite-node-replay-mount-admission.py"
     "smite-auth-image-overlay-audit.py"
     "smite-stage11-overlay-review.py"
     "smite-stage12-nginx-hmac-plan.py"
@@ -47,6 +86,9 @@ MODULES=(
     "smite-panel-auth-overlay.py"
     "smite-stage15-bundle-verify.py"
     "smite-clean-image-pair.py"
+    "smite-registry-pair-admission.py"
+    "smite-field-trial-candidate.json"
+    "u-opti-update-transaction.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
     "smite-digest-migrate.sh"
@@ -68,6 +110,7 @@ MODULES=(
     "smite-managed-backhaul-control.py"
     "smite-managed-backhaul-menu.sh"
     "smite-managed-backhaul-host-gate.py"
+    "smite-managed-backhaul-host-executor.py"
     "smite-managed-engine-host-admission.py"
     "smite-managed-engine-host-plan.py"
     "smite-managed-backhaul-pair-review.py"
@@ -97,8 +140,26 @@ MODULES=(
     "docker-3xui-certificate-multi.sh"
     "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
+    "docker-3xui-xhttp-guard.py"
     "fakesite.sh"
 )
+
+# Gate legacy adoption and uncertain partially installed states BEFORE
+# the package-manager preflight or any download. Recheck after staging too.
+if [ -L "$INSTALL_PATH" ] || [ -L "$LIB_PATH" ] || [ -L "$MODULES_PATH" ]; then
+    echo "HOLD: Unsafe U-OPTI installation path (symlink)." >&2
+    exit 1
+fi
+if [ -e "$INSTALL_PATH" ]; then
+    if [ "${U_OPTI_ADOPT_EXISTING:-NO}" != "YES" ]; then
+        echo "HOLD: Existing U-OPTI requires explicit migration approval." >&2
+        echo "Use the normal Update menu for an already-supported version." >&2
+        exit 1
+    fi
+elif [ -e "$LIB_PATH/common.sh" ] || [ -e "$LIB_PATH/VERSION" ]; then
+    echo "HOLD: Incomplete prior install with no executable; review first." >&2
+    exit 1
+fi
 
 echo "======================================"
 echo "          Installing U-OPTI"
@@ -141,6 +202,14 @@ cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
 CACHE_BUST="$(date +%s%N)"
+
+# Fail closed BEFORE downloading/committing any installation files.
+if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
+    echo "HOLD: GitHub source revision could not be verified; install cancelled." >&2
+    exit 1
+fi
+BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
+echo "Source revision locked for this installation: $SOURCE_SHA"
 
 echo "Downloading VERSION..."
 curl -fsSL --retry 3 "$BASE_URL/VERSION?cb=$CACHE_BUST" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
@@ -254,31 +323,83 @@ done
 echo "Bash/Python syntax checks passed."
 
 echo
-echo "Creating directories..."
+echo "Preparing recoverable installation transaction..."
+# A new installation and the first intentional migration from an old
+# U-OPTI installation use the SAME durable backup+journal protocol. Do
+# not overwrite a pre-existing installation without explicit consent.
+if [ -e "$INSTALL_PATH" ] || [ -L "$INSTALL_PATH" ]; then
+    if [ "${U_OPTI_ADOPT_EXISTING:-NO}" != "YES" ]; then
+        echo "HOLD: Existing U-OPTI installation found. Use its regular Update menu." >&2
+        echo "Legacy first adoption requires separate backup/review and explicit opt-in." >&2
+        exit 1
+    fi
+    echo "Explicit legacy-adoption mode selected; original bytes will be journal-backed."
+elif [ -e "$LIB_PATH/VERSION" ] || [ -L "$LIB_PATH/VERSION" ] ||
+     [ -e "$LIB_PATH/common.sh" ] || [ -L "$LIB_PATH/common.sh" ]; then
+    echo "HOLD: Incomplete existing installation without executable; manual review required." >&2
+    exit 1
+fi
+
+if [ -L "$LIB_PATH" ] || [ -L "$MODULES_PATH" ]; then
+    echo "HOLD: Unsafe U-OPTI installation directory." >&2
+    exit 1
+fi
 mkdir -p "$LIB_PATH" "$MODULES_PATH"
-
-echo
-echo "Installing files..."
-cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"
-cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"
-cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do
-    cp "$TEMP_DIR/$MODULE" "$MODULES_PATH/$MODULE"
+# Persistent private backup, not volatile /tmp; all old-file bytes are saved
+# before calling apply. Missing files are represented by explicit markers.
+BACKUP_DIR="$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX")"
+backup_ok=true
+backup_items=(u-opti common.sh VERSION INSTALL_REF "${MODULES[@]}")
+for name in "${backup_items[@]}"; do
+    case "$name" in
+        u-opti) original="$INSTALL_PATH" ;;
+        common.sh) original="$LIB_PATH/common.sh" ;;
+        VERSION) original="$LIB_PATH/VERSION" ;;
+        INSTALL_REF) original="$LIB_PATH/INSTALL_REF" ;;
+        *) original="$MODULES_PATH/$name" ;;
+    esac
+    if [ -L "$original" ]; then
+        backup_ok=false
+        echo "HOLD: Unsafe symlink at $original" >&2
+        break
+    elif [ -f "$original" ]; then
+        if [ ! -O "$original" ] || [ "$(stat -c %h "$original")" -ne 1 ] ||
+           ! cp -- "$original" "$BACKUP_DIR/$name"; then
+            backup_ok=false
+            break
+        fi
+        chmod 0600 "$BACKUP_DIR/$name"
+    elif [ ! -e "$original" ]; then
+        : > "$BACKUP_DIR/.$name-was-missing"
+        chmod 0600 "$BACKUP_DIR/.$name-was-missing"
+    else
+        backup_ok=false
+        echo "HOLD: Unexpected non-file installation target: $original" >&2
+        break
+    fi
 done
 
-# Reuse the same source branch after shell logout, reboot and Update U-OPTI.
-printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new"
-mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
-chmod 0644 "$LIB_PATH/INSTALL_REF"
+if [ "$backup_ok" != true ]; then
+    echo "HOLD: Could not secure installation backup; NO live files changed." >&2
+    echo "Review preserved backup: $BACKUP_DIR" >&2
+    exit 1
+fi
+# Exact same already-downloaded, syntax-checked and SHA-pinned candidates.
+# The helper records its own rescue copy before changing the first target.
+echo "Applying staged, journal-backed installation..."
+if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
+          "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${MODULES[@]}"; then
+    echo "HOLD: Transaction incomplete; attempting safely journaled rollback." >&2
+    RESCUE="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ -f "$RESCUE" ] && [ ! -L "$RESCUE" ] &&
+       python3 -B "$RESCUE" recover; then
+        echo "Original U-OPTI files restored; backup retained at $BACKUP_DIR" >&2
+    else
+        echo "HOLD: Recovery needs operator review; backup retained at $BACKUP_DIR" >&2
+    fi
+    exit 1
+fi
 
-echo
-echo "Setting permissions..."
-chmod +x "$INSTALL_PATH" "$LIB_PATH/common.sh"
-for MODULE in "${MODULES[@]}"; do
-    chmod +x "$MODULES_PATH/$MODULE"
-done
-
-echo
 echo "======================================"
 echo "       Installation completed"
 echo "======================================"

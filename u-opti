@@ -15,6 +15,28 @@ LIB_PATH="/usr/local/lib/u-opti"
 MODULES_PATH="$LIB_PATH/modules"
 VERSION_FILE="$LIB_PATH/VERSION"
 
+# Interrupted update recovery MUST run before sourcing any module. The
+# transaction journal bundles its original recovery code, independent of
+# the concurrently upgraded module file. Unknown/tampered state HOLDS.
+if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+    RECOVERY_SCRIPT="$LIB_PATH/.uopti-update-pending/rescue.py"
+    if [ ! -f "$RECOVERY_SCRIPT" ] || [ -L "$RECOVERY_SCRIPT" ] || ! command -v python3 >/dev/null 2>&1; then
+        echo "HOLD: Interrupted U-OPTI update needs manual recovery; journal unreadable." >&2
+        exit 1
+    fi
+    if ! python3 -B "$RECOVERY_SCRIPT" recover; then
+        echo "HOLD: Could not safely recover interrupted update; no U-OPTI modules loaded." >&2
+        exit 1
+    fi
+    echo "Previous U-OPTI version restored after interrupted update."
+    # This shell is still executing the NEW program text loaded before
+    # rollback. Re-exec the restored OLD binary instead of mixing new
+    # functions with old modules.
+    exec "$INSTALL_PATH" "$@"
+    echo "HOLD: Could not relaunch restored U-OPTI executable." >&2
+    exit 1
+fi
+
 # Explicit environment selection takes priority; otherwise persist install source.
 BRANCH="${U_OPTI_BRANCH:-}"
 if [ -z "$BRANCH" ]; then
@@ -38,6 +60,69 @@ fi
 if [ -z "$VERSION" ]; then
     VERSION="0.12.0"
 fi
+
+# Non-interactive CLI metadata must return before loading feature modules or
+# entering any menu. This keeps scripted verification from being consumed as
+# menu input after a fresh install.
+case "${1:-}" in
+    --version|-V|version)
+        printf '%s\n' "$VERSION"
+        exit 0
+        ;;
+esac
+
+# BEGIN: KH dynamic XHTTP guard legacy-updater compatibility
+# The previous fixed-file updater cannot download this newly introduced file.
+# Recover only this inert guard from the immutable installed source revision.
+# No Nginx config, tunnel or container is changed by this compatibility step.
+u_opti_ensure_kh_xhttp_guard_bundle() {
+    local name="docker-3xui-xhttp-guard.py"
+    local expected_blob="470ac5f9f9795a1d79f7f78c04895c71d4c632b5"
+    local target="$MODULES_PATH/$name"
+    local temp_dir=""
+    if [ -L "$target" ]; then return 1; fi
+    if [ -f "$target" ]; then
+        python3 -B - "$target" "$expected_blob" <<'PY_KH_GUARD_HASH'
+import ast, hashlib, pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != sys.argv[2]:
+    raise SystemExit(1)
+ast.parse(data.decode("utf-8"))
+PY_KH_GUARD_HASH
+        return $?
+    fi
+    [ ! -e "$target" ] || return 1
+    [[ "$BRANCH" =~ ^[a-f0-9]{40}$ ]] || return 1
+    [ -d "$MODULES_PATH" ] && [ ! -L "$MODULES_PATH" ] || return 1
+    [ "$(stat -c %u "$MODULES_PATH")" = 0 ] || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    command -v curl >/dev/null 2>&1 || return 1
+    temp_dir="$(mktemp -d)" || return 1
+    if ! curl -fsSL --retry 3 --max-time 30 "$BASE_URL/modules/$name" -o "$temp_dir/$name" ||
+       ! python3 -B - "$temp_dir/$name" "$expected_blob" <<'PY_KH_GUARD_VERIFY'
+import ast, hashlib, pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if len(data) > 65536 or hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != sys.argv[2]:
+    raise SystemExit(1)
+ast.parse(data.decode("utf-8"))
+PY_KH_GUARD_VERIFY
+    then
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+    if [ -e "$target" ] || [ -L "$target" ] ||
+       ! install -m 0644 -- "$temp_dir/$name" "$target"; then
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+    rm -rf -- "$temp_dir"
+    echo "KH dynamic XHTTP guard module verified and installed (no live changes)."
+    return 0
+}
+if ! u_opti_ensure_kh_xhttp_guard_bundle; then
+    echo "WARNING: KH XHTTP guard bundle unavailable; secured route sync remains HOLD." >&2
+fi
+# END: KH dynamic XHTTP guard legacy-updater compatibility
 
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
@@ -123,6 +208,84 @@ if ! u_opti_ensure_standard_frp_bundle; then
 fi
 # END: U-OPTI legacy Standard FRP bundle upgrade compatibility
 
+
+# BEGIN: U-OPTI signed Field Trial bundle upgrade compatibility
+# A previous fixed-file updater cannot know module names introduced by the
+# new u-opti executable it is currently installing. On the next exec, repair
+# ONLY this inert verifier+manifest pair from the exact immutable INSTALL_REF.
+# No Docker image is pulled and no Smite service is started here.
+u_opti_ensure_signed_field_trial_bundle() {
+    local verifier="smite-registry-pair-admission.py"
+    local manifest="smite-field-trial-candidate.json"
+    local expected_manifest_sha="d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f"
+    local tmp_dir stage_dir actual_manifest complete=true
+
+    if [ ! -s "$MODULES_PATH/$verifier" ] ||
+       [ -L "$MODULES_PATH/$verifier" ] ||
+       ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$MODULES_PATH/$verifier" >/dev/null 2>&1 ||
+       ! grep -Fq 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$MODULES_PATH/$verifier"; then
+        complete=false
+    fi
+
+    if [ ! -s "$MODULES_PATH/$manifest" ] || [ -L "$MODULES_PATH/$manifest" ]; then
+        complete=false
+    else
+        actual_manifest="$(sha256sum "$MODULES_PATH/$manifest" | awk '{print $1}')" || complete=false
+        [ "$actual_manifest" = "$expected_manifest_sha" ] || complete=false
+    fi
+
+    [ "$complete" = true ] && return 0
+
+    if [[ ! "$BRANCH" =~ ^[a-f0-9]{40}$ ]]; then
+        echo "HOLD: Signed Field Trial bootstrap requires an immutable 40-char INSTALL_REF." >&2
+        return 1
+    fi
+    command -v curl >/dev/null 2>&1 || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    command -v sha256sum >/dev/null 2>&1 || return 1
+
+    tmp_dir="$(mktemp -d)" || return 1
+    if ! curl -fsSL --retry 3             "$BASE_URL/modules/$verifier?cb=$(date +%s%N)" -o "$tmp_dir/$verifier" ||
+       ! curl -fsSL --retry 3             "$BASE_URL/modules/$manifest?cb=$(date +%s%N)" -o "$tmp_dir/$manifest"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    if [ ! -s "$tmp_dir/$verifier" ] ||
+       ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$tmp_dir/$verifier" >/dev/null 2>&1 ||
+       ! grep -Fq 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$tmp_dir/$verifier" ||
+       [ "$(sha256sum "$tmp_dir/$manifest" | awk '{print $1}')" != "$expected_manifest_sha" ]; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    stage_dir="$(mktemp -d "$MODULES_PATH/.signed-field-trial-XXXXXXXX")" || {
+        rm -rf "$tmp_dir"
+        return 1
+    }
+    install -m 0755 "$tmp_dir/$verifier" "$stage_dir/$verifier" &&
+    install -m 0644 "$tmp_dir/$manifest" "$stage_dir/$manifest" || {
+        rm -rf "$tmp_dir" "$stage_dir"
+        return 1
+    }
+
+    mv -f "$stage_dir/$verifier" "$MODULES_PATH/$verifier" &&
+    mv -f "$stage_dir/$manifest" "$MODULES_PATH/$manifest" || {
+        rm -rf "$tmp_dir" "$stage_dir"
+        return 1
+    }
+
+    rm -rf "$tmp_dir" "$stage_dir"
+
+    python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$MODULES_PATH/$verifier" >/dev/null 2>&1 &&
+    [ "$(sha256sum "$MODULES_PATH/$manifest" | awk '{print $1}')" = "$expected_manifest_sha" ]
+}
+
+if ! u_opti_ensure_signed_field_trial_bundle; then
+    echo "WARNING: Signed Smite Field Trial verifier bundle is incomplete; retry Update U-OPTI from an exact SHA." >&2
+fi
+# END: U-OPTI signed Field Trial bundle upgrade compatibility
+
 # FRP Wizard extends the Smite submenu only; original Private Wizard stays untouched.
 if [ -f "$MODULES_PATH/smite-frp-wizard.sh" ]; then
     source "$MODULES_PATH/smite-frp-wizard.sh"
@@ -198,7 +361,12 @@ while true; do
     echo "0) Exit"
     echo
 
-    read -rp "Please enter your selection [0-9]: " choice
+    IFS= read -r -p "Please enter your selection [0-9]: " choice
+
+    # Trim leading/trailing whitespace (including a Windows CR) so Bitvise
+    # paste artifacts cannot turn a valid 0 into an invalid selection.
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
 
     case "$choice" in
 
@@ -239,6 +407,8 @@ while true; do
                 echo
 
                 read -rp "Please enter your selection [0-6]: " opt_choice
+                opt_choice="${opt_choice#"${opt_choice%%[![:space:]]*}"}"
+                opt_choice="${opt_choice%"${opt_choice##*[![:space:]]}"}"
 
                 case "$opt_choice" in
 
@@ -295,6 +465,8 @@ while true; do
                 echo
 
                 read -rp "Please enter your selection [0-3]: " security_choice
+                security_choice="${security_choice#"${security_choice%%[![:space:]]*}"}"
+                security_choice="${security_choice%"${security_choice##*[![:space:]]}"}"
 
                 case "$security_choice" in
 
@@ -356,6 +528,31 @@ while true; do
 
             TEMP_DIR=$(mktemp -d)
 
+# BEGIN: U-OPTI immutable per-operation source pin
+# Resolve once; never download a mixture of mutable branch revisions.
+u_opti_resolve_source_sha() {
+    local ref="$1" response
+    if [[ ! "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+       [[ "$ref" == *".."* ]] || [[ "$ref" == /* ]]; then
+        return 1
+    fi
+    response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "https://api.github.com/repos/aghajani82/u-opti/commits/$ref")" || return 1
+    printf '%s' "$response" | python3 -c '
+import json
+import re
+import sys
+data = json.load(sys.stdin)
+sha = data.get("sha") if isinstance(data, dict) else None
+if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+    sys.exit("UNTRUSTED_SOURCE_SHA")
+print(sha)
+'
+}
+# END: U-OPTI immutable per-operation source pin
+
             download_repo_file() {
                 local REPO_PATH="$1"
                 local DESTINATION="$2"
@@ -365,7 +562,7 @@ while true; do
 
                 curl -fsSL --retry 3 \
                     -H "Accept: application/vnd.github.raw+json" \
-                    "${BASE_URL}/${REPO_PATH}?ref=${BRANCH}&cb=${CACHE_BUST}" \
+                    "${UPDATE_RAW_BASE_URL}/${REPO_PATH}?cb=${CACHE_BUST}" \
                     -o "$DESTINATION"
             }
 
@@ -440,6 +637,7 @@ while true; do
                 "smite-node-local-bind.py"
                 "smite-node-pairing.py"
                 "smite-node-auth-candidate.py"
+                "smite-node-replay-mount-admission.py"
                 "smite-auth-image-overlay-audit.py"
                 "smite-stage11-overlay-review.py"
                 "smite-stage12-nginx-hmac-plan.py"
@@ -448,6 +646,9 @@ while true; do
                 "smite-panel-auth-overlay.py"
                 "smite-stage15-bundle-verify.py"
                 "smite-clean-image-pair.py"
+                "smite-registry-pair-admission.py"
+                "smite-field-trial-candidate.json"
+                "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
@@ -468,6 +669,7 @@ while true; do
                 "smite-managed-backhaul-control.py"
                 "smite-managed-backhaul-menu.sh"
                 "smite-managed-backhaul-host-gate.py"
+                "smite-managed-backhaul-host-executor.py"
                 "smite-managed-engine-host-admission.py"
                 "smite-managed-engine-host-plan.py"
                 "smite-managed-backhaul-pair-review.py"
@@ -495,12 +697,25 @@ while true; do
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "docker-3xui-xhttp-guard.py"
                 "fakesite.sh"
             )
 
             UPDATE_DEST_DIR="$MODULES_PATH"
 
             echo "Preparing update..."
+            echo
+
+            # Pin every fetched U-OPTI file to ONE reviewed GitHub commit.
+            # Retain BRANCH as the user-selected update channel for later runs.
+            if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
+                echo "HOLD: GitHub revision unavailable; update cancelled before changes." >&2
+                cleanup_update_temp
+                read -rp "Press Enter to return..."
+                continue
+            fi
+            UPDATE_RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
+            echo "Update source revision: $SOURCE_SHA"
             echo
 
             echo "Downloading VERSION..."
@@ -583,6 +798,7 @@ while true; do
                 ["smite-node-local-bind.py"]="$BASE_URL/modules/smite-node-local-bind.py"
                 ["smite-node-pairing.py"]="$BASE_URL/modules/smite-node-pairing.py"
                 ["smite-node-auth-candidate.py"]="$BASE_URL/modules/smite-node-auth-candidate.py"
+                ["smite-node-replay-mount-admission.py"]="$BASE_URL/modules/smite-node-replay-mount-admission.py"
                 ["smite-auth-image-overlay-audit.py"]="$BASE_URL/modules/smite-auth-image-overlay-audit.py"
                 ["smite-stage11-overlay-review.py"]="$BASE_URL/modules/smite-stage11-overlay-review.py"
                 ["smite-stage12-nginx-hmac-plan.py"]="$BASE_URL/modules/smite-stage12-nginx-hmac-plan.py"
@@ -591,6 +807,9 @@ while true; do
                 ["smite-panel-auth-overlay.py"]="$BASE_URL/modules/smite-panel-auth-overlay.py"
                 ["smite-stage15-bundle-verify.py"]="$BASE_URL/modules/smite-stage15-bundle-verify.py"
                 ["smite-clean-image-pair.py"]="$BASE_URL/modules/smite-clean-image-pair.py"
+                ["smite-registry-pair-admission.py"]="$BASE_URL/modules/smite-registry-pair-admission.py"
+                ["smite-field-trial-candidate.json"]="$BASE_URL/modules/smite-field-trial-candidate.json"
+                ["u-opti-update-transaction.py"]="$BASE_URL/modules/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$BASE_URL/modules/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
@@ -611,6 +830,7 @@ while true; do
                 ["smite-managed-backhaul-control.py"]="$BASE_URL/modules/smite-managed-backhaul-control.py"
                 ["smite-managed-backhaul-menu.sh"]="$BASE_URL/modules/smite-managed-backhaul-menu.sh"
                 ["smite-managed-backhaul-host-gate.py"]="$BASE_URL/modules/smite-managed-backhaul-host-gate.py"
+                ["smite-managed-backhaul-host-executor.py"]="$BASE_URL/modules/smite-managed-backhaul-host-executor.py"
                 ["smite-managed-engine-host-admission.py"]="$BASE_URL/modules/smite-managed-engine-host-admission.py"
                 ["smite-managed-engine-host-plan.py"]="$BASE_URL/modules/smite-managed-engine-host-plan.py"
                 ["smite-managed-backhaul-pair-review.py"]="$BASE_URL/modules/smite-managed-backhaul-pair-review.py"
@@ -638,6 +858,7 @@ while true; do
                 ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
+                ["docker-3xui-xhttp-guard.py"]="$BASE_URL/modules/docker-3xui-xhttp-guard.py"
                 ["fakesite.sh"]="$BASE_URL/modules/fakesite.sh"
             )
 
@@ -661,6 +882,7 @@ while true; do
                 ["smite-node-local-bind.py"]="$TEMP_DIR/smite-node-local-bind.py"
                 ["smite-node-pairing.py"]="$TEMP_DIR/smite-node-pairing.py"
                 ["smite-node-auth-candidate.py"]="$TEMP_DIR/smite-node-auth-candidate.py"
+                ["smite-node-replay-mount-admission.py"]="$TEMP_DIR/smite-node-replay-mount-admission.py"
                 ["smite-auth-image-overlay-audit.py"]="$TEMP_DIR/smite-auth-image-overlay-audit.py"
                 ["smite-stage11-overlay-review.py"]="$TEMP_DIR/smite-stage11-overlay-review.py"
                 ["smite-stage12-nginx-hmac-plan.py"]="$TEMP_DIR/smite-stage12-nginx-hmac-plan.py"
@@ -669,6 +891,9 @@ while true; do
                 ["smite-panel-auth-overlay.py"]="$TEMP_DIR/smite-panel-auth-overlay.py"
                 ["smite-stage15-bundle-verify.py"]="$TEMP_DIR/smite-stage15-bundle-verify.py"
                 ["smite-clean-image-pair.py"]="$TEMP_DIR/smite-clean-image-pair.py"
+                ["smite-registry-pair-admission.py"]="$TEMP_DIR/smite-registry-pair-admission.py"
+                ["smite-field-trial-candidate.json"]="$TEMP_DIR/smite-field-trial-candidate.json"
+                ["u-opti-update-transaction.py"]="$TEMP_DIR/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$TEMP_DIR/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
@@ -689,6 +914,7 @@ while true; do
                 ["smite-managed-backhaul-control.py"]="$TEMP_DIR/smite-managed-backhaul-control.py"
                 ["smite-managed-backhaul-menu.sh"]="$TEMP_DIR/smite-managed-backhaul-menu.sh"
                 ["smite-managed-backhaul-host-gate.py"]="$TEMP_DIR/smite-managed-backhaul-host-gate.py"
+                ["smite-managed-backhaul-host-executor.py"]="$TEMP_DIR/smite-managed-backhaul-host-executor.py"
                 ["smite-managed-engine-host-admission.py"]="$TEMP_DIR/smite-managed-engine-host-admission.py"
                 ["smite-managed-engine-host-plan.py"]="$TEMP_DIR/smite-managed-engine-host-plan.py"
                 ["smite-managed-backhaul-pair-review.py"]="$TEMP_DIR/smite-managed-backhaul-pair-review.py"
@@ -716,6 +942,7 @@ while true; do
                 ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
                 ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
                 ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
+                ["docker-3xui-xhttp-guard.py"]="$TEMP_DIR/docker-3xui-xhttp-guard.py"
                 ["fakesite.sh"]="$TEMP_DIR/fakesite.sh"
             )
 
@@ -899,7 +1126,13 @@ while true; do
             echo
             echo "Creating backup of current installation..."
 
-            BACKUP_DIR=$(mktemp -d)
+            # Durable on-disk backup: /tmp is not reliable across reboots.
+            BACKUP_DIR=$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX") || {
+                echo "HOLD: Could not reserve persistent recovery directory."
+                cleanup_update_temp
+                read -rp "Press Enter to return..."
+                continue
+            }
 
             BACKUP_FILES=(
                 "system.sh"
@@ -919,6 +1152,7 @@ while true; do
                 "smite-node-local-bind.py"
                 "smite-node-pairing.py"
                 "smite-node-auth-candidate.py"
+                "smite-node-replay-mount-admission.py"
                 "smite-auth-image-overlay-audit.py"
                 "smite-stage11-overlay-review.py"
                 "smite-stage12-nginx-hmac-plan.py"
@@ -927,6 +1161,9 @@ while true; do
                 "smite-panel-auth-overlay.py"
                 "smite-stage15-bundle-verify.py"
                 "smite-clean-image-pair.py"
+                "smite-registry-pair-admission.py"
+                "smite-field-trial-candidate.json"
+                "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
@@ -947,6 +1184,7 @@ while true; do
                 "smite-managed-backhaul-control.py"
                 "smite-managed-backhaul-menu.sh"
                 "smite-managed-backhaul-host-gate.py"
+                "smite-managed-backhaul-host-executor.py"
                 "smite-managed-engine-host-admission.py"
                 "smite-managed-engine-host-plan.py"
                 "smite-managed-backhaul-pair-review.py"
@@ -974,6 +1212,7 @@ while true; do
                 "docker-3xui.sh"
                 "docker-3xui-compat.sh"
                 "docker-3xui-nginx.sh"
+                "docker-3xui-xhttp-guard.py"
                 "fakesite.sh"
             )
 
@@ -1000,10 +1239,29 @@ while true; do
                 BACKUP_OK=false
             fi
 
+            # INSTALL_REF is now a journaled installed target, not a
+            # best-effort metadata write after the update has committed.
+            if [ -L "$LIB_PATH/INSTALL_REF" ]; then
+                echo "HOLD: Unsafe persisted update-channel symlink."
+                BACKUP_OK=false
+            elif [ -f "$LIB_PATH/INSTALL_REF" ]; then
+                if ! cp -f -- "$LIB_PATH/INSTALL_REF" "$BACKUP_DIR/INSTALL_REF" ||
+                   ! chmod 0600 "$BACKUP_DIR/INSTALL_REF"; then
+                    BACKUP_OK=false
+                fi
+            elif [ ! -e "$LIB_PATH/INSTALL_REF" ]; then
+                if ! : > "$BACKUP_DIR/.INSTALL_REF-was-missing" ||
+                   ! chmod 0600 "$BACKUP_DIR/.INSTALL_REF-was-missing"; then
+                    BACKUP_OK=false
+                fi
+            else
+                BACKUP_OK=false
+            fi
+
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
@@ -1014,7 +1272,7 @@ while true; do
             if [ ! -f "$BACKUP_DIR/u-opti" ] || \
                [ ! -f "$BACKUP_DIR/common.sh" ] || \
                [ ! -f "$BACKUP_DIR/VERSION" ] || \
-               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne "$((3 + ${#BACKUP_FILES[@]}))" ]; then
+               [ "$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)" -ne "$((4 + ${#BACKUP_FILES[@]}))" ]; then
                 BACKUP_OK=false
             fi
 
@@ -1033,81 +1291,47 @@ while true; do
             echo "Backup created successfully."
 
             echo
-            echo "Installing update..."
+            echo "Installing update using recoverable, atomic-per-file journal..."
 
+            # This helper is part of the downloaded, syntax-checked SAME SHA.
+            # It writes a durable journal + private persistent recovery copy
+            # before changing any installed bytes. Crash -> startup recovery.
             UPDATE_FAILED=false
-
-            if ! cp "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
+            if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
+                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}"; then
                 UPDATE_FAILED=true
-            fi
-
-            if ! cp "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
-                UPDATE_FAILED=true
-            fi
-
-            if ! cp "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
-                UPDATE_FAILED=true
-            fi
-
-            for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                if ! cp "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
-                    UPDATE_FAILED=true
-                fi
-            done
-
-            if [ "$UPDATE_FAILED" = "false" ]; then
-                if ! chmod +x "$INSTALL_PATH" || \
-                   ! chmod +x "$LIB_PATH/common.sh"; then
-                    UPDATE_FAILED=true
-                fi
-
-                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                    if ! chmod +x "$MODULES_PATH/$FILE"; then
-                        UPDATE_FAILED=true
-                    fi
-                done
-            fi
-
-            if [ "$UPDATE_FAILED" = "false" ]; then
-                echo
-                echo "Verifying installed files..."
-
-                if ! cmp -s "$TEMP_DIR/u-opti" "$INSTALL_PATH"; then
-                    UPDATE_FAILED=true
-                fi
-
-                if ! cmp -s "$TEMP_DIR/common.sh" "$LIB_PATH/common.sh"; then
-                    UPDATE_FAILED=true
-                fi
-
-                if ! cmp -s "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION"; then
-                    UPDATE_FAILED=true
-                fi
-
-                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                    if ! cmp -s "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
-                        UPDATE_FAILED=true
-                        break
-                    fi
-                done
             fi
 
             if [ "$UPDATE_FAILED" = "true" ]; then
                 echo
                 echo "Update failed during installation or verification."
+                RESTORE_OK=false
 
-                if ! update_failed_restore; then
-                    echo "WARNING: Restore routine returned an error."
+                if [ -e "$LIB_PATH/.uopti-update-pending" ] || [ -L "$LIB_PATH/.uopti-update-pending" ]; then
+                    # When an atomic transaction was armed, restore only with
+                    # the journal's unchanged, private helper. The old Bash
+                    # restore knows nothing about hashes or power-loss state.
+                    if [ -f "$LIB_PATH/.uopti-update-pending/rescue.py" ] &&
+                       [ ! -L "$LIB_PATH/.uopti-update-pending/rescue.py" ] &&
+                       python3 -B "$LIB_PATH/.uopti-update-pending/rescue.py" recover; then
+                        RESTORE_OK=true
+                    fi
+                elif update_failed_restore; then
+                    # Legacy fail-before-arm fallback: no transaction wrote any
+                    # installed bytes, but preserve the original restore check.
+                    RESTORE_OK=true
                 fi
 
-                if [ -f "$BACKUP_DIR/u-opti" ] && \
-                   [ -f "$BACKUP_DIR/common.sh" ] && \
-                   [ -f "$BACKUP_DIR/VERSION" ]; then
-                    echo
-                    echo "Previous version restore check completed."
+                if [ "$RESTORE_OK" = "true" ]; then
+                    echo "Previous installation restored successfully."
+                    rm -rf -- "$BACKUP_DIR"
+                else
+                    echo "CRITICAL: Automatic restore was incomplete."
+                    echo "Do not retry the update until the previous state is reviewed."
+                    echo "Recovery backup retained at:"
+                    echo "$BACKUP_DIR"
                 fi
 
-                rm -rf "$BACKUP_DIR"
                 cleanup_update_temp
 
                 echo
@@ -1132,11 +1356,6 @@ while true; do
                 read -rp "Press Enter to return..."
                 continue
             fi
-
-            # Commit the selected source only after verified file replacement.
-            printf '%s\n' "$BRANCH" > "$LIB_PATH/INSTALL_REF.new" &&
-                mv -f "$LIB_PATH/INSTALL_REF.new" "$LIB_PATH/INSTALL_REF"
-            chmod 0644 "$LIB_PATH/INSTALL_REF"
 
             rm -rf "$BACKUP_DIR"
             cleanup_update_temp

@@ -110,6 +110,31 @@ exactly that for IR/KH role mismatch, missing or untrusted secrets,
 replay permissions, nonexistent snapshot evidence, spoofed image pins,
 stale mounted overlays and rewritten HMAC targets.
 
+## Explicit IR old-key restore admission (2026-10-20)
+
+Existing U-OPTI `modules/smite-stage13-preflight.py` now accepts an
+**explicit operator-requested IR restore check** (NOT a new menu or
+automatic installer activation) via `--recovery-old-node-id` and
+`--recovery-witness-sha256`, with `--panel-database` and
+`--panel-revocation-witness` paths. It verifies Smite's exact witness
+JSON contract and externally trusted SHA against a private, quiescent,
+real Panel SQLite snapshot opened read-only. The old Node must be
+revoked with the same timestamp and have zero outstanding pairing
+codes. Missing, corrupt, unsafe, uncheckpointed or rolled-back state
+HOLDs. Missing one input, wrong role or untrusted SHA also HOLD.
+
+Only use this option with a **separately approved offline IR restore**
+after stopping both signing sides and independently retaining the
+witness SHA outside the Panel backup. A normal fresh install does not
+require an old-Node revocation witness and returns `NOT_REQUESTED`.
+A PASS means local evidence matched; it **never** authorizes starting
+signed traffic, Docker activation, restored identity adoption, or
+production release. The CLI's nonzero exit contract is unchanged.
+
+Both the KH replay marker check and this IR restore check are distinct:
+a KH pass does not prove an IR witness; one host's offline state is
+not a signed two-host restart or rollback proof.
+
 ## Remaining stage — coordinated operator-approved integration
 
 1. Review the stacked Smite/U-OPTI Draft PRs into one tested release

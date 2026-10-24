@@ -350,6 +350,10 @@ docker_install() {
         return
     fi
 
+    # /etc/os-release defines VERSION, which is also U-OPTI's global
+    # application version. Keep OS release fields function-local so this
+    # installer cannot corrupt the main-menu banner after returning.
+    local ID="" VERSION="" VERSION_ID="" PRETTY_NAME="" UBUNTU_CODENAME="" VERSION_CODENAME=""
     . /etc/os-release
 
     if [ "${ID:-}" != "ubuntu" ]; then
@@ -581,6 +585,8 @@ docker_smite_compatibility_menu() {
         echo
 
         read -rp "Please enter your selection [0-2]: " SMITE_COMPAT_CHOICE
+        SMITE_COMPAT_CHOICE="${SMITE_COMPAT_CHOICE#"${SMITE_COMPAT_CHOICE%%[![:space:]]*}"}"
+        SMITE_COMPAT_CHOICE="${SMITE_COMPAT_CHOICE%"${SMITE_COMPAT_CHOICE##*[![:space:]]}"}"
 
         case "$SMITE_COMPAT_CHOICE" in
             1)
@@ -690,6 +696,8 @@ docker_smite_management_menu() {
         echo
 
         read -rp "Please enter your selection [0-5]: " SMITE_MANAGEMENT_CHOICE
+        SMITE_MANAGEMENT_CHOICE="${SMITE_MANAGEMENT_CHOICE#"${SMITE_MANAGEMENT_CHOICE%%[![:space:]]*}"}"
+        SMITE_MANAGEMENT_CHOICE="${SMITE_MANAGEMENT_CHOICE%"${SMITE_MANAGEMENT_CHOICE##*[![:space:]]}"}"
         case "$SMITE_MANAGEMENT_CHOICE" in
             1)
                 if declare -F show_smite_install_menu >/dev/null 2>&1; then
@@ -780,6 +788,8 @@ docker_management_menu() {
         echo
 
         read -rp "Please enter your selection [0-10]: " DOCKER_CHOICE
+        DOCKER_CHOICE="${DOCKER_CHOICE#"${DOCKER_CHOICE%%[![:space:]]*}"}"
+        DOCKER_CHOICE="${DOCKER_CHOICE%"${DOCKER_CHOICE##*[![:space:]]}"}"
 
         case "$DOCKER_CHOICE" in
             1)
@@ -1022,6 +1032,8 @@ docker_smite_frp_standard_guide() {
             echo "2) KH: Foreign Node"
             echo "0) Back"
             read -rp "Choose [0-2]: " choice
+            choice="${choice#"${choice%%[![:space:]]*}"}"
+            choice="${choice%"${choice##*[![:space:]]}"}"
             case "$choice" in
                 1) role=ir; break ;;
                 2) role=kh; break ;;
@@ -1055,6 +1067,8 @@ docker_smite_frp_standard_guide() {
         echo "0) Back"
         echo
         read -rp "Choose [0-4]: " choice
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_frp_std_install "$role" ;;
             2)
@@ -1091,6 +1105,8 @@ docker_smite_management_menu() {
         echo "2) Standard FRP Test Guide (experimental)"
         echo "0) Back"
         read -rp "Choose [0-2]: " choice
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) docker_smite_frp_standard_guide ;;

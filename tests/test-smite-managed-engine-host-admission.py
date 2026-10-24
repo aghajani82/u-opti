@@ -13,13 +13,14 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "modules/smite-managed-engine-host-admission.py"
+IMAGE = "ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 spec = importlib.util.spec_from_file_location("joint_host_admission_test", SCRIPT)
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 COMPOSE = """services:
   smite-node:
-    image: ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e
+    image: ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     network_mode: host
     volumes:
       - ./config:/etc/smite-node
@@ -52,7 +53,7 @@ class SharedHostAdmission(unittest.TestCase):
         self.runtime = {
             "Name": "/smite-node",
             "State": {"Running": True},
-            "Config": {"Image": "ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e",
+            "Config": {"Image": IMAGE,
                        "Env": ["SECRET=DO_NOT_PRINT_ME"]},
             "HostConfig": {"NetworkMode": "host", "PortBindings": {}},
             "Mounts": [
@@ -73,8 +74,11 @@ class SharedHostAdmission(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def report(self, engine):
-        return gate.report(engine, self.node, runtime=self.runtime, min_bytes=4096)
+    def report(self, engine, *, expected_node_image=IMAGE):
+        return gate.report(
+            engine, self.node, runtime=self.runtime, min_bytes=4096,
+            expected_node_image=expected_node_image,
+        )
 
     def test_backhaul_and_frp_clean_core_never_grant_install(self):
         for engine in ("backhaul", "frp"):
@@ -106,7 +110,11 @@ class SharedHostAdmission(unittest.TestCase):
             self.assertEqual(r["OTHER_ENGINE"], "ENROLLED_UNVERIFIED")
             self.assertEqual(r["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
             self.assertEqual(r["REASON"], "OTHER_ENGINE_SIGNED_STATUS_REQUIRED")
+            self.assertEqual(r["LOCAL_PREFLIGHT"], "PASS_LOCAL_ONLY_INCOMPLETE")
+            self.assertEqual(r["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+            self.assertEqual(r["SIGNED_NODE_HEALTH_AND_REPLAY"], "UNVERIFIED")
             self.assertEqual(r["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(r["ACTIVATION_GATE"], "HOLD")
         with patch.object(gate, "local_state", side_effect=lambda engine, node:
                           {"state": "UNAVAILABLE", "reason": "MISSING_READONLY_MOUNT"}
                           if engine == "frp" else
@@ -131,10 +139,21 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertEqual(result["REASON"], "SAVED_TUNNELS_PRESENT")
         self.assertNotIn("DO_NOT_PRINT_ME", str(result))
 
+    def test_missing_or_mismatched_digest_pin_holds_before_engine_review(self):
+        missing = self.report("backhaul", expected_node_image=None)
+        self.assertEqual(missing["REASON"], "EXPECTED_NODE_DIGEST_REQUIRED")
+        wrong = self.report(
+            "frp",
+            expected_node_image="ghcr.io/aghajani82/smite-node@sha256:" + "b" * 64,
+        )
+        self.assertEqual(wrong["REASON"], "NODE_IMAGE_DIGEST_MISMATCH")
+        self.assertEqual(wrong["INSTALL_ALLOWED"], "NO")
+
     def test_unreviewed_image_or_published_docker_ports_are_hold(self):
         self.runtime["Config"]["Image"] = "smite-node:stage15-local"
         out = self.report("frp")
-        self.assertEqual(out["REASON"], "NODE_IMAGE_NOT_DIGEST_PINNED")
+        self.assertEqual(out["REASON"], "LOCAL_TEST_IMAGE_CANNOT_SATISFY_PIN")
+        self.runtime["Config"]["Image"] = IMAGE
         self.runtime["HostConfig"]["PortBindings"] = {"8888/tcp": [
             {"HostPort": "8888", "HostIp": "0.0.0.0"}]}
         out = self.report("backhaul")
@@ -176,7 +195,8 @@ class SharedHostAdmission(unittest.TestCase):
 
     def test_cli_real_host_probe_always_hold_even_on_missing_node(self):
         p = subprocess.run([sys.executable, str(SCRIPT), "--engine", "frp",
-                            "--node-dir", str(self.node), "--format", "json"],
+                            "--node-dir", str(self.node),
+                            "--expected-node-image", IMAGE, "--format", "json"],
                            text=True, capture_output=True, timeout=15)
         self.assertEqual(p.returncode, 2)
         parsed = json.loads(p.stdout)

@@ -12,6 +12,8 @@ while true; do
     echo "3) Show Sanaei-first installation order"
     echo "0) Back"
     read -rp "Choose [0-3]: " choice || exit 0
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
     case "$choice" in
         1)
             read -rp "FRP Xray inbound port: " fp || exit 2

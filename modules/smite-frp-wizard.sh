@@ -29,8 +29,12 @@ smite_frp_wizard_status() {
     if [ "$role" = ir ]; then
         echo "Smite panel: $(smite_frp_std_running smite-panel && echo running || echo missing)"
     fi
-    if [ -f /opt/u-opti-smite/node/frp_gateway_config.py ]; then
-        echo "Standard FRP WSS compatibility: prepared"
+    if [ "$role" = ir ] && declare -F smite_frp_xhttp_enabled >/dev/null 2>&1 &&
+       smite_frp_xhttp_enabled; then
+        echo "Standard FRP WSS compatibility: prepared (trusted IR gateway)"
+    elif [ "$role" = kh ] &&
+         [ "$(docker exec smite-node python3 -B -c 'from app.frp_gateway_config import frp_standard_wss_host; print(frp_standard_wss_host() or "OFF")' 2>/dev/null)" = "ir.kolbe1.ir" ]; then
+        echo "Standard FRP WSS compatibility: prepared (Node runtime)"
     else
         echo "Standard FRP WSS compatibility: NOT PREPARED"
     fi
@@ -449,6 +453,8 @@ smite_frp_wizard_advanced_menu() {
         echo "9) Response timing (read-only)"
         echo "0) Back"
         read -rp "Choose [0-9]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_frp_wizard_status "$role" ;;
             2) smite_frp_std_install "$role" ;;
@@ -496,6 +502,8 @@ smite_frp_wizard_menu() {
         echo "===== Select logical host role (once per menu) ====="
         echo "1) IR panel + Iran node | 2) KH foreign node | 0) Back"
         read -rp "Choose [0-2]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in 1) role=ir ;; 2) role=kh ;; *) return ;; esac
     fi
     while true; do
@@ -512,6 +520,8 @@ smite_frp_wizard_menu() {
         echo "4) Advanced - Original detailed steps and recovery"
         echo "0) Back"
         read -rp "Choose [0-4]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_frp_wizard_start_here "$role" ;;
             2) smite_frp_wizard_easy_configure "$role" ;;
@@ -535,6 +545,8 @@ docker_smite_management_menu() {
         echo "3) Standard FRP Setup Wizard (IR/KH, experimental)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) docker_smite_frp_standard_guide ;;

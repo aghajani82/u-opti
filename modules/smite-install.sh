@@ -18,6 +18,97 @@ SMITE_NODE_IMAGE="${SMITE_NODE_REPO}@${SMITE_NODE_DIGEST}"
 # images; the new Panel/Node artifact pair is never selected implicitly.
 SMITE_INSTALL_PROFILE="${SMITE_INSTALL_PROFILE:-stable}"
 
+# Exact, independently reviewed candidate used ONLY by the disposable-host
+# Field Trial. The candidate remains a prerelease and is never promoted by
+# this installer. Operator approval is separate from production approval.
+SMITE_FIELD_TRIAL_SOURCE_SHA="289f99cae8c53ba7d5b8e427bca19e5c04ebba8a"
+SMITE_FIELD_TRIAL_PUBLISH_REF="refs/tags/v2.0.0-rc.1"
+SMITE_FIELD_TRIAL_VERSION="2.0.0-rc.1"
+SMITE_FIELD_TRIAL_MANIFEST_SHA256="d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f"
+SMITE_FIELD_TRIAL_COSIGN_SHA256="c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74"
+
+SMITE_FIELD_TRIAL_PREVIOUS_VERSION="2.0.0-rc.0"
+SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE="ghcr.io/aghajani82/smite-panel@sha256:6cfaec4a961f1c03eb05c684b41c001ce73178ee20231517aafced1dc972aadb"
+SMITE_FIELD_TRIAL_PREVIOUS_NODE_IMAGE="ghcr.io/aghajani82/smite-node@sha256:bb4992698fc637719a489ec6e9a8384a5c898e9afeb6cae16fcfc41a626b482c"
+
+smite_install_clean_rc_signed_registry_selected() {
+    [ "${SMITE_RC_SIGNED_REGISTRY:-0}" = "1" ]
+}
+
+smite_install_field_trial_verify_candidate() {
+    local helper_dir verifier manifest cosign_path actual_cosign pair_result
+    local -a candidate=()
+
+    smite_install_clean_rc_signed_registry_selected || {
+        echo "HOLD: Signed registry Field Trial was not selected" >&2
+        return 1
+    }
+    [ "${SMITE_FIELD_TRIAL_APPROVED:-}" = "YES" ] || {
+        echo "HOLD: Explicit disposable-host Field Trial approval required" >&2
+        return 1
+    }
+
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+    verifier="$helper_dir/smite-registry-pair-admission.py"
+    manifest="$helper_dir/smite-field-trial-candidate.json"
+
+    [ -f "$verifier" ] && [ ! -L "$verifier" ] &&
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || {
+        echo "HOLD: Signed Field Trial verifier/manifest is missing or unsafe" >&2
+        return 1
+    }
+
+    if [ "$(sha256sum "$manifest" | awk '{print $1}')" != "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]; then
+        echo "HOLD: Signed Field Trial manifest hash mismatch" >&2
+        return 1
+    fi
+
+    command -v cosign >/dev/null 2>&1 || {
+        echo "HOLD: Pinned Cosign verifier is not installed" >&2
+        return 1
+    }
+    cosign_path="$(command -v cosign)"
+    [ -f "$cosign_path" ] && [ ! -L "$cosign_path" ] || {
+        echo "HOLD: Cosign verifier path is not a regular non-symlink file" >&2
+        return 1
+    }
+    actual_cosign="$(sha256sum "$cosign_path" | awk '{print $1}')"
+    [ "$actual_cosign" = "$SMITE_FIELD_TRIAL_COSIGN_SHA256" ] || {
+        echo "HOLD: Cosign binary does not match reviewed v3.0.6 amd64 asset" >&2
+        return 1
+    }
+
+    pair_result="$(python3 -B "$verifier"         --manifest "$manifest"         --manifest-sha256 "$SMITE_FIELD_TRIAL_MANIFEST_SHA256"         --source-sha "$SMITE_FIELD_TRIAL_SOURCE_SHA"         --publish-ref "$SMITE_FIELD_TRIAL_PUBLISH_REF")" || return 1
+    printf '%s\n' "$pair_result"
+
+    mapfile -t candidate < <(python3 - "$manifest" <<'PY_SIGNED_RC'
+import json, pathlib, sys
+doc=json.loads(pathlib.Path(sys.argv[1]).read_text())
+print(doc["images"]["panel"])
+print(doc["images"]["node"])
+print(doc["version"])
+PY_SIGNED_RC
+    )
+    [ "${#candidate[@]}" -eq 3 ] || {
+        echo "HOLD: Signed Field Trial manifest parse failed" >&2
+        return 1
+    }
+
+    SMITE_PANEL_IMAGE="${candidate[0]}"
+    SMITE_NODE_IMAGE="${candidate[1]}"
+    SMITE_UPSTREAM_VERSION="${candidate[2]}"
+
+    [ "$SMITE_UPSTREAM_VERSION" = "$SMITE_FIELD_TRIAL_VERSION" ] || {
+        echo "HOLD: Signed Field Trial version mismatch" >&2
+        return 1
+    }
+
+    echo "FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED"
+    echo "FIELD_TRIAL_OPERATOR_APPROVAL=YES"
+    echo "PRODUCTION_RELEASE_APPROVAL=NO"
+    return 0
+}
+
 smite_install_clean_rc_preflight() {
     local role="$1" mode="$2" helper_dir pair_result
     [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || {
@@ -42,12 +133,20 @@ smite_install_clean_rc_preflight() {
         echo "HOLD: Existing Smite installation detected. Clean RC is not an upgrader." >&2
         return 1
     fi
+    if smite_install_clean_rc_signed_registry_selected; then
+        smite_install_field_trial_verify_candidate || return 1
+        echo "RC_IMAGE_PROVENANCE=SIGSTORE_VERIFIED_REGISTRY_DIGESTS"
+        echo "RC_SIGNED_AUTH=PENDING_SECURE_PAIRING"
+        return 0
+    fi
+
     if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
        [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
        [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
         echo "HOLD: Trusted artifact directory, source SHA and manifest SHA required" >&2
         return 1
     fi
+
     helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     pair_result="$(python3 -B "$helper_dir/smite-clean-image-pair.py" \
         --folder "$SMITE_RC_BUNDLE_DIR" \
@@ -62,7 +161,7 @@ smite_install_clean_rc_preflight() {
     SMITE_NODE_IMAGE="smite-node:stage15-local"
     # The v0.1.7 upstream Compose is used as a known layout template;
     # the application binaries are ONLY the paired offline RC images.
-    SMITE_UPSTREAM_VERSION="2.0.0-rc.0"
+    SMITE_UPSTREAM_VERSION="2.0.0-rc.1"
     return 0
 }
 
@@ -70,6 +169,29 @@ smite_install_clean_rc_load_images() {
     local role="$1" expected_panel expected_node loaded_panel loaded_node
     local verifier_dir
     verifier_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+
+    if smite_install_clean_rc_signed_registry_selected; then
+        smite_install_field_trial_verify_candidate || return 1
+        if [ "$role" = panel-iran ]; then
+            echo "Pulling signed Panel candidate by immutable digest..."
+            docker pull "$SMITE_PANEL_IMAGE" || return 1
+            docker image inspect "$SMITE_PANEL_IMAGE" >/dev/null 2>&1 || {
+                echo "HOLD: Signed Panel digest was not retained locally" >&2
+                return 1
+            }
+        fi
+        echo "Pulling signed Node candidate by immutable digest..."
+        docker pull "$SMITE_NODE_IMAGE" || return 1
+        docker image inspect "$SMITE_NODE_IMAGE" >/dev/null 2>&1 || {
+            echo "HOLD: Signed Node digest was not retained locally" >&2
+            return 1
+        }
+        echo "CLEAN_RC_IMAGES=SIGNED_REGISTRY_DIGESTS_VERIFIED"
+        echo "CLEAN_RC_PRODUCTION_ACTIVATION=NOT_AUTHORIZED"
+        echo "CLEAN_RC_FIELD_TRIAL_ACTIVATION=OPERATOR_APPROVED"
+        return 0
+    fi
+
     # Recheck bytes at time of loading, not only at UI confirmation.
     python3 -B "$verifier_dir/smite-clean-image-pair.py" \
         --folder "$SMITE_RC_BUNDLE_DIR" \
@@ -583,11 +705,19 @@ text = path.read_text()
 if text.count("  smite-node:\n") != 1 or text.count("    healthcheck:\n") != 1:
     raise SystemExit("HOLD: Unexpected Node Compose healthcheck layout")
 reviewed = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://127.0.0.1:${NODE_API_PORT:-8888}/healthz\')"]'
-if text.count(reviewed) != 1:
-    # Require the reviewed local-only health route in strict mode.
-    # Never replace unknown or old probes with superficial liveness.
+legacy = '      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\'http://localhost:${NODE_API_PORT:-8888}/api/agent/status\')"]'
+if text.count(reviewed) == 1:
+    print("FOREIGN_RC_HEALTHCHECK=REVIEWED_LOCAL_HEALTHZ")
+elif text.count(legacy) == 1:
+    # clean-rc uses the reviewed v0.1.7 Compose only as a layout template.
+    # The signed RC Node has strict HMAC Agent auth, so its Docker healthcheck
+    # must use the dedicated loopback-only /healthz readiness route instead.
+    text = text.replace(legacy, reviewed, 1)
+    path.write_text(text)
+    print("FOREIGN_RC_HEALTHCHECK=MIGRATED_LEGACY_TO_LOCAL_HEALTHZ")
+else:
+    # Never rewrite an unknown probe/layout.
     raise SystemExit("HOLD: Reviewed local /healthz required for strict Node pairing")
-print("FOREIGN_RC_HEALTHCHECK=REVIEWED_LOCAL_HEALTHZ")
 print("FOREIGN_RC_AGENT_AUTH=STRICT_UNTIL_PAIRED")
 PY_RC_PAUSE
 }
@@ -795,7 +925,11 @@ smite_install_panel_iran() {
     echo "======================================"
     echo
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "FIELD TRIAL ONLY: signed Smite RC from immutable registry digests."
+        else
+            echo "PREVIEW ONLY: clean Smite RC from verified local Panel/Node images."
+        fi
         echo "Not a production release; no live tunneling is configured here."
     else
         echo "This installs the Smite version validated by U-OPTI: $SMITE_UPSTREAM_VERSION"
@@ -850,6 +984,8 @@ smite_install_panel_iran() {
         echo "2) Private Network"
         echo
         read -rp "Please enter your selection [1-2]: " connection_choice
+        connection_choice="${connection_choice#"${connection_choice%%[![:space:]]*}"}"
+        connection_choice="${connection_choice%"${connection_choice##*[![:space:]]}"}"
     fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
@@ -900,7 +1036,11 @@ smite_install_panel_iran() {
         echo "Private IP   : $panel_private_ip"
     fi
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "Smite profile: clean-rc (unpublished preview)"
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "Smite profile: clean-rc signed-registry Field Trial"
+        else
+            echo "Smite profile: clean-rc (unpublished preview)"
+        fi
     else
         echo "Smite version: $SMITE_UPSTREAM_VERSION"
     fi
@@ -1106,7 +1246,11 @@ smite_install_foreign_node() {
     echo "======================================"
     echo
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        if smite_install_clean_rc_signed_registry_selected; then
+            echo "FIELD TRIAL ONLY: signed Smite Node from an immutable registry digest."
+        else
+            echo "PREVIEW ONLY: clean Smite Node from a verified local RC image."
+        fi
         echo "Set the real 3x-UI inbound and tunnel only after both servers install."
     else
         echo "This installs the validated Smite node image: $SMITE_UPSTREAM_VERSION"
@@ -1167,6 +1311,8 @@ smite_install_foreign_node() {
         echo "2) Private Network"
         echo
         read -rp "Please enter your selection [1-2]: " connection_choice
+        connection_choice="${connection_choice#"${connection_choice%%[![:space:]]*}"}"
+        connection_choice="${connection_choice%"${connection_choice##*[![:space:]]}"}"
     fi
 
     if [ "$SMITE_FRP_TRIAL_ONLY" = 1 ] && [ "$connection_choice" != 1 ]; then
@@ -1475,6 +1621,140 @@ smite_install_sanaei_foreign() {
 }
 
 
+
+smite_install_field_trial_patch_compose_image() {
+    local compose_file="$1" old_image="$2" new_image="$3"
+    python3 - "$compose_file" "$old_image" "$new_image" <<'PY_RC_UPGRADE_COMPOSE'
+from pathlib import Path
+import os, stat, sys, tempfile
+path=Path(sys.argv[1]); old=sys.argv[2]; new=sys.argv[3]
+if path.is_symlink() or not path.is_file():
+    raise SystemExit("HOLD: Unsafe Smite Compose path")
+st=path.stat(); text=path.read_text()
+needle=f"    image: {old}"; replacement=f"    image: {new}"
+if text.count(needle) != 1:
+    raise SystemExit("HOLD: Existing Compose is not the exact admitted previous candidate")
+fd,tmp=tempfile.mkstemp(prefix=".uopti-rc-upgrade-",dir=path.parent)
+try:
+    with os.fdopen(fd,"w") as out:
+        out.write(text.replace(needle,replacement,1)); out.flush(); os.fsync(out.fileno())
+    os.chmod(tmp,stat.S_IMODE(st.st_mode)); os.replace(tmp,path)
+finally:
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+PY_RC_UPGRADE_COMPOSE
+}
+
+smite_install_upgrade_signed_field_trial() {
+    local answer role mode version domain panel_current node_current
+    local backup panel_bak node_bak state_bak db_bak db
+    local SMITE_INSTALL_PROFILE=clean-rc
+    local SMITE_RC_SIGNED_REGISTRY=1
+    local SMITE_FIELD_TRIAL_APPROVED=YES
+
+    clear
+    echo "======================================"
+    echo "   Upgrade Signed Smite Field Trial"
+    echo "======================================"
+    echo
+    echo "Disposable Field Trial only."
+    echo "Admitted transition: $SMITE_FIELD_TRIAL_PREVIOUS_VERSION -> $SMITE_FIELD_TRIAL_VERSION"
+    echo "Admin/2FA data, Gateway and Node configuration are preserved."
+    echo
+
+    [ "$(id -u)" -eq 0 ] || { echo "HOLD: Root required."; smite_install_pause; return; }
+    [ -f "$SMITE_STATE_FILE" ] && [ ! -L "$SMITE_STATE_FILE" ] ||
+        { echo "HOLD: Managed state missing/unsafe."; smite_install_pause; return; }
+    [ -f "$SMITE_PANEL_COMPOSE" ] && [ ! -L "$SMITE_PANEL_COMPOSE" ] &&
+    [ -f "$SMITE_NODE_COMPOSE" ] && [ ! -L "$SMITE_NODE_COMPOSE" ] ||
+        { echo "HOLD: Managed Compose files missing/unsafe."; smite_install_pause; return; }
+
+    role="$(grep -m1 '^SMITE_ROLE=' "$SMITE_STATE_FILE" | cut -d= -f2-)"
+    mode="$(grep -m1 '^SMITE_CONNECTION_MODE=' "$SMITE_STATE_FILE" | cut -d= -f2-)"
+    version="$(grep -m1 '^SMITE_MANAGED_VERSION=' "$SMITE_STATE_FILE" | cut -d= -f2-)"
+    domain="$(grep -m1 '^SMITE_PANEL_DOMAIN=' "$SMITE_STATE_FILE" | cut -d= -f2-)"
+    [ "$role" = panel-iran ] && [ "$mode" = standard ] &&
+    [ "$version" = "$SMITE_FIELD_TRIAL_PREVIOUS_VERSION" ] && [ -n "$domain" ] ||
+        { echo "HOLD: Install is not the exact rc.0 Panel+Iran Standard baseline."; smite_install_pause; return; }
+
+    panel_current="$(docker inspect -f '{{.Config.Image}}' smite-panel 2>/dev/null || true)"
+    node_current="$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null || true)"
+    [ "$panel_current" = "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE" ] &&
+    [ "$node_current" = "$SMITE_FIELD_TRIAL_PREVIOUS_NODE_IMAGE" ] ||
+        { echo "HOLD: Running images are not the exact rc.0 immutable pair."; smite_install_pause; return; }
+    smite_wait_healthy smite-panel 15 && smite_wait_healthy smite-node 15 ||
+        { echo "HOLD: Existing rc.0 containers are not healthy."; smite_install_pause; return; }
+
+    db="$SMITE_PANEL_DIR/panel/data/smite.db"
+    [ -f "$db" ] && [ ! -L "$db" ] && command -v sqlite3 >/dev/null 2>&1 ||
+        { echo "HOLD: Safe Panel DB snapshot is unavailable."; smite_install_pause; return; }
+
+    echo "Re-verifying rc.1 manifest and both immutable signatures..."
+    smite_install_field_trial_verify_candidate ||
+        { echo "HOLD: rc.1 candidate verification failed."; smite_install_pause; return; }
+
+    echo "Target Panel: $SMITE_PANEL_IMAGE"
+    echo "Target Node : $SMITE_NODE_IMAGE"
+    read -rp "Upgrade this disposable IR Field Trial to rc.1? [y/N]: " answer
+    case "$answer" in y|Y|yes|YES) ;; *) echo "Cancelled; no changes."; smite_install_pause; return ;; esac
+
+    smite_install_clean_rc_load_images panel-iran ||
+        { echo "HOLD: rc.1 pull/verification failed before changes."; smite_install_pause; return; }
+
+    backup="$(mktemp -d /var/tmp/uopti-smite-rc-upgrade.XXXXXX)" ||
+        { echo "HOLD: Rollback workspace creation failed."; smite_install_pause; return; }
+    chmod 0700 "$backup"
+    panel_bak="$backup/panel.yml"; node_bak="$backup/node.yml"
+    state_bak="$backup/state.env"; db_bak="$backup/smite.db"
+    cp -a "$SMITE_PANEL_COMPOSE" "$panel_bak" &&
+    cp -a "$SMITE_NODE_COMPOSE" "$node_bak" &&
+    cp -a "$SMITE_STATE_FILE" "$state_bak" &&
+    sqlite3 "$db" ".backup '$db_bak'" ||
+        { echo "HOLD: Complete rollback snapshot failed."; rm -rf "$backup"; smite_install_pause; return; }
+
+    if smite_install_field_trial_patch_compose_image "$SMITE_PANEL_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE" "$SMITE_PANEL_IMAGE" &&
+       smite_install_field_trial_patch_compose_image "$SMITE_NODE_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_NODE_IMAGE" "$SMITE_NODE_IMAGE" &&
+       docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null &&
+       docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null &&
+       docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel &&
+       smite_wait_healthy smite-panel 90 &&
+       docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node &&
+       smite_wait_healthy smite-node 90 &&
+       [ "$(docker inspect -f '{{.Config.Image}}' smite-panel 2>/dev/null)" = "$SMITE_PANEL_IMAGE" ] &&
+       [ "$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" = "$SMITE_NODE_IMAGE" ] &&
+       curl -fsS --max-time 10 http://127.0.0.1:8000/api/status >/dev/null &&
+       curl -fsS --max-time 10 http://127.0.0.1:8888/healthz >/dev/null &&
+       curl -fsS --max-time 15 "https://$domain/api/status" >/dev/null; then
+        sed -i "s/^SMITE_MANAGED_VERSION=$SMITE_FIELD_TRIAL_PREVIOUS_VERSION$/SMITE_MANAGED_VERSION=$SMITE_FIELD_TRIAL_VERSION/" "$SMITE_STATE_FILE"
+        if grep -Fxq "SMITE_MANAGED_VERSION=$SMITE_FIELD_TRIAL_VERSION" "$SMITE_STATE_FILE"; then
+            rm -rf "$backup"
+            echo
+            echo "SIGNED_FIELD_TRIAL_UPGRADE=PASS"
+            echo "ADMIN_2FA_DATA=PRESERVED"
+            echo "HTTPS_443_GATEWAY=PRESERVED"
+            echo "NODE_RUNTIME=PAUSED_STRICT_PENDING_PAIRING"
+            echo "PRODUCTION_ACTIVATION=NO"
+            smite_install_pause
+            return
+        fi
+    fi
+
+    echo "ROLLBACK: restoring rc.0 Compose and Panel DB..."
+    docker compose -f "$SMITE_PANEL_COMPOSE" stop smite-panel >/dev/null 2>&1 || true
+    cp -a "$panel_bak" "$SMITE_PANEL_COMPOSE"
+    cp -a "$node_bak" "$SMITE_NODE_COMPOSE"
+    cp -a "$state_bak" "$SMITE_STATE_FILE"
+    cp -a "$db_bak" "$db"
+    rm -f "$db-wal" "$db-shm"
+    docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel >/dev/null 2>&1 || true
+    docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+    smite_wait_healthy smite-panel 90 >/dev/null 2>&1 || true
+    smite_wait_healthy smite-node 90 >/dev/null 2>&1 || true
+    rm -rf "$backup"
+    echo "HOLD: rc.1 upgrade failed; rc.0 rollback was attempted."
+    smite_install_pause
+}
+
 show_smite_install_menu() {
     while true; do
         clear
@@ -1486,16 +1766,20 @@ show_smite_install_menu() {
         echo "2) Install Foreign Node"
         echo "3) Installation State"
         echo "4) Install Sanaei 3x-UI on Foreign Node"
+        echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-4]: " smite_install_choice
+        read -rp "Please enter your selection [0-5]: " smite_install_choice
+        smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
+        smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
             1) smite_install_panel_iran ;;
             2) smite_install_foreign_node ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
+            5) smite_install_upgrade_signed_field_trial ;;
             0) break ;;
             *)
                 echo

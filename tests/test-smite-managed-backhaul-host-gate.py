@@ -87,6 +87,46 @@ class ReadOnlyGate(unittest.TestCase):
         self.assertEqual(status["FRP_INSTALL_REQUIRED"], "NO")
         self.assertNotIn("DONT_PRINT", str(status))
 
+
+    def test_registry_candidate_requires_exact_external_digest_pin(self):
+        self.runtime["Config"]["Image"] = "ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.assertEqual(self.report()["HOLD_REASON"], "EXPECTED_NODE_DIGEST_REQUIRED")
+        accepted = gate.audit(
+            self.node, runtime=self.runtime, min_bytes=4096,
+            expected_node_image="ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        self.assertEqual(accepted["HOST_PREFLIGHT"], "PASS_LOCAL_ONLY_INCOMPLETE")
+        self.assertEqual(
+            accepted["IMAGE_REFERENCE_CLASS"], "OPERATOR_PINNED_DIGEST_UNATTESTED"
+        )
+        self.assertEqual(accepted["HOST_INSTALL_AUTHORIZED"], "NO")
+        mismatch = gate.audit(
+            self.node, runtime=self.runtime, min_bytes=4096,
+            expected_node_image="ghcr.io/aghajani82/smite-node@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        )
+        self.assertEqual(mismatch["HOLD_REASON"], "NODE_IMAGE_DIGEST_MISMATCH")
+        malformed = gate.audit(
+            self.node, runtime=self.runtime, min_bytes=4096,
+            expected_node_image="ghcr.io/aghajani82/smite-node:latest",
+        )
+        self.assertEqual(malformed["HOLD_REASON"], "INVALID_EXPECTED_NODE_DIGEST")
+
+    def test_old_vendor_digest_is_not_implicitly_reviewed_anymore(self):
+        self.runtime["Config"]["Image"] = (
+            "ghcr.io/zzedix/smite-node@sha256:"
+            "967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+        )
+        out = self.report()
+        self.assertEqual(out["HOLD_REASON"], "UNREVIEWED_NODE_IMAGE")
+        self.assertEqual(out["HOST_INSTALL_AUTHORIZED"], "NO")
+
+    def test_local_test_image_cannot_claim_external_registry_pin(self):
+        out = gate.audit(
+            self.node, runtime=self.runtime, min_bytes=4096,
+            expected_node_image="ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        self.assertEqual(out["HOLD_REASON"], "LOCAL_TEST_IMAGE_CANNOT_SATISFY_PIN")
+
     def test_existing_tunnels_block_recreation_even_when_engine_absent(self):
         (self.data / "tunnels.json").write_text(json.dumps({
             "live": {"core": "frp", "spec": {"mode": "client", "token": "DONT_PRINT"}}

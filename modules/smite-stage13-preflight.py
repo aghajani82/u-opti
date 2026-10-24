@@ -9,12 +9,15 @@ It never uses Docker, shell, Nginx reload, network, env secret dumps or writes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from dataclasses import dataclass
 import json
 import importlib.util
 import os
 from pathlib import Path
 import re
+import sqlite3
+from contextlib import closing
 import stat
 import sys
 
@@ -32,6 +35,8 @@ class Paths:
     replay_dir: Path = Path("/var/lib/u-opti/smite-node-security/replay")
     image_lock: Path = Path("/etc/u-opti/smite/security-image-lock.json")
     snapshot_receipt: Path = Path("/etc/u-opti/smite/snapshot-receipt.json")
+    panel_database: Path = Path("/opt/smite/data/smite.db")
+    panel_revocation_witness: Path = Path("/etc/u-opti/smite/recovery/old-node-revocation.json")
     panel_compose: Path = Path("/opt/smite/docker-compose.yml")
     approved_origins: Path = Path("/etc/smite-panel/trusted-nodes/approved-origins.json")
     nginx_vhost: Path = Path("/etc/nginx/sites-enabled/smite-secure-gateway")
@@ -242,7 +247,96 @@ def _ok_overlay_parity(p: Paths) -> None:
         raise AuditHold("security_image_overlay_parity_missing")
 
 
-def audit(role: str, p: Paths) -> list[tuple[str, str]]:
+
+def _ok_panel_restore_revocation_witness(
+    p: Paths, old_node_id: str | None, independently_trusted_sha256: str | None
+) -> None:
+    """IR-only offline recovery admission: a restored Panel DB may revive HMAC.
+
+    Exactly matches Smite's inert `recovery_snapshot_admission.py` schema.
+    Neither the witness nor its trusted digest is learned from the restored
+    Panel SQLite backup. Caller must supply BOTH original trusted inputs.
+    No install, restart, snapshot, mutation or implicit unlock is performed.
+    """
+    if (not isinstance(old_node_id, str) or not UUID.fullmatch(old_node_id)
+            or not isinstance(independently_trusted_sha256, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", independently_trusted_sha256)):
+        raise AuditHold("independent_recovery_trust_anchor_required")
+    witness = p.panel_revocation_witness
+    db = p.panel_database
+    if (not witness.is_absolute() or not db.is_absolute()
+            or witness.parent == db.parent
+            or witness.parent.is_relative_to(db.parent)
+            or db.parent.is_relative_to(witness.parent)):
+        raise AuditHold("recovery_witness_not_independent")
+    _private_dir(witness.parent)
+    _private_dir(db.parent)
+    raw = _read(witness, max_bytes=4096, private=True)
+    if hashlib.sha256(raw).hexdigest() != independently_trusted_sha256:
+        raise AuditHold("independent_recovery_witness_hash_mismatch")
+    try:
+        record = json.loads(raw)
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise AuditHold("invalid_recovery_witness") from exc
+    if (not isinstance(record, dict)
+            or set(record) != {"schema", "kind", "node_id", "revoked_at",
+                               "activation_allowed", "snapshot_restore_approved"}
+            or type(record.get("schema")) is not int or record["schema"] != 1
+            or record.get("kind") != "smite_panel_old_node_revocation_witness"
+            or record.get("node_id") != old_node_id
+            or type(record.get("revoked_at")) is not int
+            or record["revoked_at"] <= 0
+            or record.get("activation_allowed") is not False
+            or record.get("snapshot_restore_approved") is not False):
+        raise AuditHold("recovery_witness_contract_mismatch")
+
+    # Snapshot inspection must occur AFTER authorized Panel shutdown and
+    # WAL checkpoint, not against a hot DB whose changes may be in sidecars.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(db) + suffix)
+        if sidecar.is_symlink() or sidecar.exists():
+            raise AuditHold("panel_database_not_quiescent")
+    try:
+        entry = db.lstat()
+        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
+                or stat.S_IMODE(entry.st_mode) != 0o600
+                or entry.st_nlink != 1):
+            raise AuditHold("untrusted_panel_database")
+        fd = os.open(db, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino) != (entry.st_dev, entry.st_ino):
+                raise AuditHold("panel_database_changed")
+            header = stream.read(100)
+        if (len(header) < 100 or header[:16] != b"SQLite format 3\x00"
+                or header[18:20] != b"\x01\x01"):
+            raise AuditHold("panel_database_uncheckpointed")
+        with closing(sqlite3.connect(
+            db.absolute().as_uri() + "?mode=ro&immutable=1",
+            uri=True, timeout=2,
+        )) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                raise AuditHold("panel_database_corrupt")
+            result = connection.execute(
+                "SELECT revoked_at FROM smite_node_identities WHERE node_id=?",
+                (old_node_id,),
+            ).fetchall()
+            if result != [(record["revoked_at"],)]:
+                raise AuditHold("restored_old_node_key_not_revoked")
+            outstanding = connection.execute(
+                "SELECT COUNT(*) FROM smite_node_pairing_codes "
+                "WHERE node_id=? AND consumed_at IS NULL", (old_node_id,),
+            ).fetchone()
+            if outstanding != (0,):
+                raise AuditHold("restored_old_pairing_codes_active")
+    except (OSError, sqlite3.Error) as exc:
+        raise AuditHold("restored_panel_database_unverified") from exc
+
+
+def audit(role: str, p: Paths, *,
+          recovery_old_node_id: str | None = None,
+          recovery_witness_sha256: str | None = None) -> list[tuple[str, str]]:
     if role not in ("ir", "kh"):
         raise ValueError("IR or KH role required")
     checks = [
@@ -263,6 +357,23 @@ def audit(role: str, p: Paths) -> list[tuple[str, str]]:
             rows.append((key, "PASS_LOCAL_EVIDENCE"))
         except (AuditHold, UnicodeError, ValueError, TypeError):
             rows.append((key, "HOLD"))
+    # Recovery is opt-in, scoped only to IR Panel maintenance. A clean
+    # first install cannot be mistaken for a restore just because this
+    # manually supplied witness is absent. On a real RESTORE, the operator
+    # must explicitly request this review and bring an external SHA256.
+    if recovery_old_node_id is not None or recovery_witness_sha256 is not None:
+        if role != "ir":
+            rows.append(("PANEL_OLD_NODE_RESTORE_WITNESS", "HOLD"))
+        else:
+            try:
+                _ok_panel_restore_revocation_witness(
+                    p, recovery_old_node_id, recovery_witness_sha256
+                )
+                rows.append(("PANEL_OLD_NODE_RESTORE_WITNESS", "PASS_LOCAL_EVIDENCE"))
+            except (AuditHold, OSError, UnicodeError, ValueError, TypeError):
+                rows.append(("PANEL_OLD_NODE_RESTORE_WITNESS", "HOLD"))
+    else:
+        rows.append(("PANEL_OLD_NODE_RESTORE_WITNESS", "NOT_REQUESTED"))
     # No subprocess/network means these cannot be proved by this tool.
     rows.extend((
         ("IMAGE_REGISTRY_ATTESTATION", "UNVERIFIED"),
@@ -282,9 +393,13 @@ def main() -> int:
     for field in Paths.__dataclass_fields__:
         parser.add_argument("--" + field.replace("_", "-"),
                             type=Path, default=getattr(Paths(), field))
+    parser.add_argument("--recovery-old-node-id", default=None)
+    parser.add_argument("--recovery-witness-sha256", default=None)
     args = parser.parse_args()
     p = Paths(**{name: getattr(args, name) for name in Paths.__dataclass_fields__})
-    rows = audit(args.role, p)
+    rows = audit(args.role, p,
+                 recovery_old_node_id=args.recovery_old_node_id,
+                 recovery_witness_sha256=args.recovery_witness_sha256)
     for name, result in rows:
         print(f"{name}={result}")
     hold = any(status == "HOLD" for _, status in rows)

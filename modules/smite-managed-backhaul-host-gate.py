@@ -22,10 +22,10 @@ MAX_INSPECT_BYTES = 1024 * 1024
 MAX_TUNNELS_BYTES = 256 * 1024
 MIN_FREE_BYTES = 256 * 1024 * 1024
 NAME = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
-KNOWN_NODE_IMAGES = {
-    "smite-node:stage15-local",
-    "ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e",
-}
+LOCAL_TEST_IMAGE = "smite-node:stage15-local"
+REVIEWED_NODE_DIGEST = re.compile(
+    r"^ghcr\.io/aghajani82/smite-node@sha256:[a-f0-9]{64}$"
+)
 PRIVATE_PROFILES = {"managed", "strict"}
 NO_PROOF = "UNVERIFIED_MANUAL_OR_SEPARATE_SIGNED_TEST"
 
@@ -100,8 +100,15 @@ def read_only_docker_inspect(*, name: str = "smite-node", runner=subprocess.run)
     return parsed[0]
 
 
-def check_runtime(report: dict, *, node_dir: Path) -> tuple[str, Path]:
-    """Inspect exact container identity and its persistent mounts."""
+def check_runtime(report: dict, *, node_dir: Path,
+                  expected_node_image: str | None = None) -> tuple[str, Path, str]:
+    """Inspect exact container identity and an externally pinned Node digest.
+
+    Production-like registry images are never trusted from Docker metadata
+    alone. The caller must supply the exact independently reviewed immutable
+    ghcr.io/aghajani82/smite-node@sha256:... reference. This local equality
+    check is NOT cryptographic registry verification and never authorizes use.
+    """
     if (report.get("Name") != "/smite-node" or
             not isinstance(report.get("State"), dict)
             or report["State"].get("Running") is not True):
@@ -111,8 +118,22 @@ def check_runtime(report: dict, *, node_dir: Path) -> tuple[str, Path]:
     if not isinstance(config, dict) or not isinstance(host, dict):
         raise GateHold("DOCKER_METADATA_INCOMPLETE")
     image = config.get("Image")
-    if image not in KNOWN_NODE_IMAGES:
+    if not isinstance(image, str):
         raise GateHold("UNREVIEWED_NODE_IMAGE")
+    if image == LOCAL_TEST_IMAGE:
+        if expected_node_image is not None:
+            raise GateHold("LOCAL_TEST_IMAGE_CANNOT_SATISFY_PIN")
+        image_class = "LOCAL_TAG_UNATTESTED"
+    else:
+        if REVIEWED_NODE_DIGEST.fullmatch(image) is None:
+            raise GateHold("UNREVIEWED_NODE_IMAGE")
+        if expected_node_image is None:
+            raise GateHold("EXPECTED_NODE_DIGEST_REQUIRED")
+        if REVIEWED_NODE_DIGEST.fullmatch(expected_node_image) is None:
+            raise GateHold("INVALID_EXPECTED_NODE_DIGEST")
+        if image != expected_node_image:
+            raise GateHold("NODE_IMAGE_DIGEST_MISMATCH")
+        image_class = "OPERATOR_PINNED_DIGEST_UNATTESTED"
     if host.get("NetworkMode") != "host":
         raise GateHold("UNEXPECTED_NODE_NETWORK")
     if host.get("PortBindings"):
@@ -152,7 +173,7 @@ def check_runtime(report: dict, *, node_dir: Path) -> tuple[str, Path]:
             not node_dir.joinpath("config").is_dir() or
             not data_path.is_dir()):
         raise GateHold("INVALID_PERSISTENT_VOLUMES")
-    return image, data_path
+    return image, data_path, image_class
 
 
 def tunnel_count(data_dir: Path) -> int:
@@ -175,7 +196,8 @@ def tunnel_count(data_dir: Path) -> int:
 
 
 def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
-          min_bytes: int = MIN_FREE_BYTES) -> dict[str, str]:
+          min_bytes: int = MIN_FREE_BYTES,
+          expected_node_image: str | None = None) -> dict[str, str]:
     """No mutable actions and no secret-bearing result strings."""
     result = {
         "NODE_ROLE": "HOLD",
@@ -211,13 +233,12 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
             raise GateHold("UNTRUSTED_NODE_COMPOSE")
         result["COMPOSE_SHA256"] = hashlib.sha256(compose.encode("utf-8")).hexdigest()
         node_report = runtime if runtime is not None else read_only_docker_inspect(runner=runner)
-        image, data_dir = check_runtime(node_report, node_dir=node)
+        _image, data_dir, image_class = check_runtime(
+            node_report, node_dir=node, expected_node_image=expected_node_image
+        )
         result["DOCKER_NODE"] = "RUNNING_REVIEWED_IMAGE"
         result["PERSISTENT_DATA"] = "LOCAL_NAMED_VOLUME_CONFIRMED"
-        result["IMAGE_REFERENCE_CLASS"] = (
-            "LOCAL_TAG_UNATTESTED" if image == "smite-node:stage15-local"
-            else "REVIEWED_DIGEST_UNATTESTED"
-        )
+        result["IMAGE_REFERENCE_CLASS"] = image_class
         count = tunnel_count(data_dir)
         result["PERSISTED_TUNNELS"] = "ZERO" if count == 0 else "EXISTING_DO_NOT_RESTART"
         try:
@@ -241,9 +262,13 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
 def main() -> int:
     p = argparse.ArgumentParser(description="Backhaul host preflight READ ONLY; never authorizes installation")
     p.add_argument("--node-dir", type=Path, default=Path("/opt/smite-node"))
+    p.add_argument(
+        "--expected-node-image",
+        help="Exact independently reviewed ghcr.io/aghajani82/smite-node@sha256:... ref",
+    )
     p.add_argument("--format", choices=("text", "json"), default="text")
     args = p.parse_args()
-    report = audit(args.node_dir)
+    report = audit(args.node_dir, expected_node_image=args.expected_node_image)
     report["BACKHAUL_ACTIVATION_GATE"] = "HOLD"
     if args.format == "json":
         # Explicit, bounded, secret-free report. No raw Docker inspect,

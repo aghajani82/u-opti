@@ -69,14 +69,29 @@ but their roles must still be separately `IR` and `KH`.
 ## Step 2 — Independently collect read-only, redacted reports
 
 Only if you **already have the experimental modules installed** on two
-approved *disposable* hosts (this is not a command to install them):
+approved *disposable* hosts (this is not a command to install them).
+
+Before running this gate with a future registry candidate, obtain the exact
+**Node immutable digest reference** from the independently verified
+Panel+Node registry-pair review. Do **not** copy the digest from the host's
+own Docker metadata and do not derive it from a mutable tag. Store it only
+as a shell variable for this read-only comparison; the gate does not verify
+Cosign or the registry itself.
+
+Example variable shape only (the placeholder is intentionally invalid):
+
+```bash
+# TARGET: BOTH DISPOSABLE TEST SERVERS — VALUE COPIED FROM INDEPENDENT REVIEW
+VERIFIED_NODE_IMAGE='ghcr.io/aghajani82/smite-node@sha256:<64-lowercase-hex>'
+```
 
 **IR — disposable Iran-role test VPS, read only**
 
 ```bash
 # TARGET: IR TEST SERVER — READ ONLY
 sudo python3 -B /usr/local/lib/u-opti/modules/smite-managed-backhaul-host-gate.py \
-  --node-dir /opt/smite-node --format json
+  --node-dir /opt/smite-node \
+  --expected-node-image "$VERIFIED_NODE_IMAGE" --format json
 ```
 
 **KH — disposable foreign-role test VPS, read only**
@@ -84,7 +99,8 @@ sudo python3 -B /usr/local/lib/u-opti/modules/smite-managed-backhaul-host-gate.p
 ```bash
 # TARGET: KH TEST SERVER — READ ONLY
 sudo python3 -B /usr/local/lib/u-opti/modules/smite-managed-backhaul-host-gate.py \
-  --node-dir /opt/smite-node --format json
+  --node-dir /opt/smite-node \
+  --expected-node-image "$VERIFIED_NODE_IMAGE" --format json
 ```
 
 A correct report always contains `"HOST_INSTALL_AUTHORIZED":"NO"` and
@@ -97,6 +113,16 @@ The report contains a limited set of status codes and a Compose SHA256:
 passwords or identity keys**. Do not send raw Docker inspection output,
 `.env` content, full `docker compose config`, node-identity JSON or
 snapshot-provider account credentials.
+
+For a production-like candidate the gate now refuses every registry image
+unless Docker reports the **exact** externally supplied
+`ghcr.io/aghajani82/smite-node@sha256:...` reference. The retired
+`ghcr.io/zzedix/smite-node` digest is no longer implicitly trusted.
+The redacted report labels a matching value
+`OPERATOR_PINNED_DIGEST_UNATTESTED`: equality with an operator-supplied
+digest is local evidence only, not proof of a valid Cosign signature. A
+local `smite-node:stage15-local` image remains accepted only for disposable
+CI/lab inspection and cannot satisfy the real two-host pair review.
 
 The gate recognizes Smite's real config **bind** mount at
 `./config:/etc/smite-node` AND its durable **named Docker volume**

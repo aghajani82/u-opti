@@ -144,6 +144,89 @@ class Stage13PreflightTest(unittest.TestCase):
                     "FRP_BACKHAUL_XHTTP_REAL_TRAFFIC"):
             self.assertEqual(results[key], "UNVERIFIED")
 
+
+    def test_ir_operator_restore_witness_rejects_prior_active_key_backup(self):
+        import dataclasses
+        import hashlib
+        import sqlite3
+        import shutil
+
+        panel_dir = self.p.state.parent / "private-panel-db"
+        proof_dir = self.p.state.parent / "external-witness"
+        panel_dir.mkdir(mode=0o700)
+        proof_dir.mkdir(mode=0o700)
+        db = panel_dir / "panel.db"
+        witness = proof_dir / "old-node.json"
+        old_id = "eeeeeeee-1111-2222-3333-444444444444"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE smite_node_identities "
+                         "(node_id TEXT PRIMARY KEY, revoked_at INTEGER)")
+            conn.execute("CREATE TABLE smite_node_pairing_codes "
+                         "(node_id TEXT, consumed_at INTEGER)")
+            conn.execute("INSERT INTO smite_node_identities VALUES (?, NULL)",
+                         (old_id,))
+        db.chmod(0o600)
+        before = self.p.state.parent / "old-unrevoked-copy.db"
+        shutil.copy2(db, before)
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE smite_node_identities SET revoked_at=1234567890 "
+                         "WHERE node_id=?", (old_id,))
+        doc = {
+            "schema": 1, "kind": "smite_panel_old_node_revocation_witness",
+            "node_id": old_id, "revoked_at": 1234567890,
+            "activation_allowed": False, "snapshot_restore_approved": False,
+        }
+        witness.write_text(json.dumps(doc, sort_keys=True))
+        witness.chmod(0o600)
+        trusted = hashlib.sha256(witness.read_bytes()).hexdigest()
+        p = dataclasses.replace(self.p, panel_database=db,
+                                panel_revocation_witness=witness)
+        state = p.state.read_text()
+        nginx = p.nginx_vhost.read_text()
+        p.state.write_text("SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\n")
+        p.nginx_vhost.write_text(
+            "server { listen 443 ssl;\n"
+            " location ^~ /api/node-control/ {\n"
+            " proxy_pass http://127.0.0.1:8000;\n }\n}\n"
+        )
+        def review(sha=trusted):
+            return dict(gate.audit("ir", p, recovery_old_node_id=old_id,
+                                   recovery_witness_sha256=sha))
+        try:
+            result = review()
+            self.assertEqual(result["PANEL_OLD_NODE_RESTORE_WITNESS"],
+                             "PASS_LOCAL_EVIDENCE")
+            self.assertEqual(result["AUTH_ACTIVATION"], "BLOCKED")
+            self.assertEqual(review("f" * 64)["PANEL_OLD_NODE_RESTORE_WITNESS"],
+                             "HOLD")
+            self.assertEqual(dict(gate.audit("kh", p, recovery_old_node_id=old_id,
+                                             recovery_witness_sha256=trusted))[
+                             "PANEL_OLD_NODE_RESTORE_WITNESS"], "HOLD")
+            db.unlink()
+            shutil.copy2(before, db)
+            self.assertEqual(review()["PANEL_OLD_NODE_RESTORE_WITNESS"], "HOLD")
+            with sqlite3.connect(db) as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT revoked_at FROM smite_node_identities WHERE node_id=?",
+                    (old_id,)).fetchone(), (None,))
+            db.unlink()
+            self.assertEqual(review()["PANEL_OLD_NODE_RESTORE_WITNESS"], "HOLD")
+            self.assertFalse(db.exists())
+            self.assertEqual(dict(gate.audit("ir", p))[
+                "PANEL_OLD_NODE_RESTORE_WITNESS"], "NOT_REQUESTED")
+        finally:
+            p.state.write_text(state)
+            p.nginx_vhost.write_text(nginx)
+
+    def test_partial_operator_recovery_inputs_fail_closed(self):
+        for old, digest in (("eeeeeeee-1111-2222-3333-444444444444", None),
+                            (None, "f" * 64)):
+            report = dict(gate.audit("ir", self.p,
+                                     recovery_old_node_id=old,
+                                     recovery_witness_sha256=digest))
+            self.assertEqual(report["PANEL_OLD_NODE_RESTORE_WITNESS"], "HOLD")
+            self.assertEqual(report["AUTH_ACTIVATION"], "BLOCKED")
+
     def test_wrong_role_private_mode_and_missing_identity_hold(self):
         self.assertEqual(self.result("ir")["STANDARD_ROLE"], "HOLD")
         self.p.state.write_text("SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=private\n")

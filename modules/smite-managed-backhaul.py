@@ -122,7 +122,46 @@ def _core_preflight(node_dir: Path) -> tuple[bytes, dict]:
     config = node_dir / "config"
     if config.is_symlink() or not config.is_dir():
         raise Hold("Missing or unsafe Node config mount")
-    return compose, _existing_manifest(config)
+    engines = _existing_manifest(config)
+    # Never enroll Backhaul on top of a partially installed or untrusted FRP.
+    # FRP is OPTIONAL: zero FRP mounts and no registry entry are fine.
+    # When FRP is already enrolled, its two independently pinned binaries
+    # must still match the existing read-only mounts and registry, otherwise
+    # touching shared Compose would turn a broken baseline into a fake pass.
+    frp_targets = {"frpc": "/usr/local/bin/frpc", "frps": "/usr/local/bin/frps"}
+    frp_mount_lines = {
+        name: [line.strip() for line in text.splitlines()
+               if line.strip().startswith("- ") and target in line]
+        for name, target in frp_targets.items()
+    }
+    frp_record = engines.get("frp")
+    if frp_record is None:
+        if any(frp_mount_lines.values()):
+            raise Hold("Unenrolled FRP binary mount: repair before Backhaul")
+    else:
+        if set(frp_record) != {"sha256", "server_sha256"}:
+            raise Hold("Existing FRP requires both verified role binaries")
+        for name, target in frp_targets.items():
+            lines = frp_mount_lines[name]
+            if len(lines) != 1 or not lines[0].endswith(f":{target}:ro"):
+                raise Hold("Incomplete or writable FRP mount blocks Backhaul")
+            source = lines[0][2:].removesuffix(f":{target}:ro")
+            binary = Path(source)
+            if (not binary.is_absolute() or binary.is_symlink()
+                    or not binary.is_file()):
+                raise Hold("Existing FRP binary missing or unsafe")
+            meta = binary.lstat()
+            if (not stat.S_ISREG(meta.st_mode)
+                    or meta.st_uid != os.geteuid() or meta.st_nlink != 1
+                    or stat.S_IMODE(meta.st_mode) & 0o022
+                    or not (stat.S_IMODE(meta.st_mode) & 0o111)
+                    or meta.st_size > MAX_BINARY_BYTES):
+                raise Hold("Existing FRP binary permissions untrusted")
+            expected = (frp_record["sha256"] if name == "frpc"
+                        else frp_record["server_sha256"])
+            if hashlib.sha256(_file(binary, max_size=MAX_BINARY_BYTES)).hexdigest() != expected:
+                raise Hold("Existing FRP binary digest mismatch")
+    return compose, engines
 
 
 def _verified_binary(archive: Path, trusted_sha: str) -> bytes:
@@ -197,7 +236,7 @@ def prepare(node_dir: Path, archive: Path, stage_root: Path,
         "CANDIDATE_ONLY=YES\n"
         "NODE_RESTARTED=NO\n"
         "ENGINE_ENROLLED=NO\n"
-        "FRP_INSTALLED=NO\n"
+        f"FRP_INSTALLED={'YES' if 'frp' in engines else 'NO'}\n"
         "PUBLIC_PORTS_CHANGED=NO\n"
         f"ARCHIVE_SHA256={digest}\n"
         f"BACKHAUL_BINARY_SHA256={binary_sha}\n"
@@ -282,6 +321,25 @@ def verify(stage: Path, *, official_only: bool = True) -> bool:
         staged = _file(stage / "backhaul.bin", max_size=MAX_BINARY_BYTES)
         if (staged != archived or
                 info.get("BACKHAUL_BINARY_SHA256") != hashlib.sha256(staged).hexdigest()):
+            return False
+        # Metadata must describe the actual staged engine inventory.
+        # Recomputing editable SHA256SUMS must never make an inaccurate
+        # "FRP not installed" claim acceptable as a verified stage.
+        declaration = json.loads(_file(stage / "engines.candidate.json", max_size=8192))
+        if (not isinstance(declaration, dict)
+                or set(declaration) != {"schema", "engines"}
+                or declaration["schema"] != 1
+                or not isinstance(declaration["engines"], dict)
+                or "backhaul" not in declaration["engines"]
+                or declaration["engines"]["backhaul"] != {
+                    "sha256": hashlib.sha256(staged).hexdigest()
+                }
+                or not set(declaration["engines"]).issubset(ENGINE_NAMES)
+                or info.get("FRP_INSTALLED") != (
+                    "YES" if "frp" in declaration["engines"] else "NO")
+                or info.get("ENGINE_ENROLLED") != "NO"
+                or info.get("NODE_RESTARTED") != "NO"
+                or info.get("PUBLIC_PORTS_CHANGED") != "NO"):
             return False
         # Local SHA256SUMS is mutable: bind the proposed Compose override
         # to the exact reviewed read-only mount, not its editable checksum.

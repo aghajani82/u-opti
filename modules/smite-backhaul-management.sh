@@ -84,18 +84,17 @@ smite_bh_preflight() {
             [ -s "$SMITE_BH_OVERLAYS/panel/$f" ] || {
                 echo "ERROR: Missing Panel overlay $f" >&2; return 1; }
         done
-        for f in 3080 56053; do
+        # This is an OFFLINE candidate: FRP and any KH XHTTP data port
+        # must NOT be prerequisites during the engine preparation step.
+        for f in 3080; do
             if ss -lntH | grep -Eq ":$f[[:space:]]"; then
-                echo "ERROR: IR reserved port $f in use" >&2; return 1
+                echo "ERROR: IR reserved Backhaul control port $f in use" >&2
+                return 1
             fi
         done
-        ss -lntH | grep -Eq '127\.0\.0\.1:7000[[:space:]]' || {
-            echo "ERROR: FRP controller unexpectedly absent" >&2; return 1; }
     elif [ "$role" = kh ]; then
         ! ss -lntH | grep -Eq ':13080[[:space:]]' || {
             echo "ERROR: KH bridge port already in use" >&2; return 1; }
-        ss -lntH | grep -Eq '127\.0\.0\.1:56053[[:space:]]' || {
-            echo "ERROR: KH Xray port missing" >&2; return 1; }
     else
         echo "ERROR: Invalid role" >&2; return 1
     fi
@@ -142,8 +141,15 @@ smite_bh_prepare() {
             { rm -rf -- "$stage"; return 1; }
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-control 3080 \
             > "$stage/candidate/nginx/ir-control.conf" || { rm -rf -- "$stage"; return 1; }
-        bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-ir-xhttp 56053 /56053/www kh.kolbe1.ir \
-            > "$stage/candidate/nginx/ir-xhttp.conf" || { rm -rf -- "$stage"; return 1; }
+        # No port/path fabricated during install. After setting KH Sanaei
+        # inbound, render a dynamic XHTTP route in the separate route menu.
+        cat > "$stage/candidate/nginx/IR-XHTTP-NOT-CONFIGURED.txt" <<'EOF_XHTTP'
+XHTTP ROUTE NOT CONFIGURED.
+After KH Sanaei/3x-UI installation, use the dedicated tunnel menu for
+the actual inbound port, XHTTP path and KH upstream hostname.
+This is a note, NOT an Nginx include or a usable route.
+FRP is NOT required for independent Backhaul offline preparation.
+EOF_XHTTP
     else
         bash "$SMITE_BH_DIR/smite-backhaul-standard.sh" --render-kh-bridge ir.kolbe1.ir 13080 \
             > "$stage/candidate/nginx/kh-bridge.conf" || { rm -rf -- "$stage"; return 1; }
@@ -165,7 +171,8 @@ EOF
     (cd "$stage" && find original candidate -type f -print0 | sort -z |
         xargs -0 sha256sum > SHA256SUMS) || { rm -rf -- "$stage"; return 1; }
     smite_bh_verify_stage "${stage##*/}" || { rm -rf -- "$stage"; return 1; }
-    echo "PREPARED: ${stage##*/} ($role). Live FRP, Nginx, Smite and Xray unchanged."
+    echo "PREPARED: ${stage##*/} ($role). FRP not required; KH inbound port/path deferred."
+    echo "CANDIDATE_ONLY=YES (no live tunnels, routes, Docker or FRP changed)."
 }
 
 smite_bh_discard_unused() {
@@ -203,6 +210,8 @@ smite_bh_management_menu() {
         echo "5) Discard UNUSED candidate ID"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_bh_status ;;
             2) role="$(smite_bh_role)" && smite_bh_preflight "$role" ;;
@@ -232,6 +241,8 @@ docker_smite_advanced_menu() {
         echo "3) Legacy Backhaul offline preparation (NOT installer)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_frp_standard_guide ;;
             2) smite_frp_wizard_menu ;;
@@ -249,29 +260,58 @@ docker_smite_management_menu() {
         echo "======================================"
         echo "          Smite Management"
         echo "======================================"
-        echo "1) Private Network Wizard"
-        echo "2) Tunnel Management (FRP / Backhaul / Rathole)"
-        echo "3) Status & Diagnostics"
-        echo "4) Advanced & Legacy Tools"
-        echo "5) Independent Engines (Backhaul review)"
+        echo "1) Install Smite Components"
+        echo "2) 443 Gateway (auto-detect Panel / Foreign)"
+        echo "3) Tunnel Management (FRP / Backhaul / Rathole)"
+        echo "4) Status & Diagnostics"
+        echo "5) Private Network Wizard"
+        echo "6) Advanced & Legacy Tools"
+        echo "7) Independent Engines (Backhaul review)"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-7]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
-            1) docker_smite_open_setup_wizard ;;
-            2) if declare -F smite_tw_menu >/dev/null 2>&1; then
+            1)
+                if declare -F show_smite_install_menu >/dev/null 2>&1; then
+                    show_smite_install_menu
+                else
+                    echo "HOLD: Smite installer module is missing."
+                fi
+                ;;
+            2)
+                role="$(smite_bh_role 2>/dev/null || true)"
+                if [ "$role" = "ir" ]; then
+                    if declare -F show_smite_gateway_menu >/dev/null 2>&1; then
+                        show_smite_gateway_menu
+                    else
+                        echo "HOLD: Smite Panel gateway module is missing."
+                    fi
+                elif [ "$role" = "kh" ]; then
+                    if declare -F show_smite_foreign_gateway_menu >/dev/null 2>&1; then
+                        show_smite_foreign_gateway_menu
+                    else
+                        echo "HOLD: Smite Foreign gateway module is missing."
+                    fi
+                else
+                    echo "HOLD: Install Smite Core first so the gateway role can be detected."
+                fi
+                ;;
+            3) if declare -F smite_tw_menu >/dev/null 2>&1; then
                    smite_tw_menu
                else
                    echo "Tunnel Wizard missing; update U-OPTI from main first."
                fi ;;
-            3) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
+            4) if declare -F smite_tw_choose_role >/dev/null 2>&1 &&
                   declare -F twcc_menu >/dev/null 2>&1; then
                    role="$(smite_tw_choose_role)" || continue
                    twcc_menu "$role"
                else
                    echo "Status module missing; update U-OPTI from main first."
                fi ;;
-            4) docker_smite_advanced_menu ;;
-            5)
+            5) docker_smite_open_setup_wizard ;;
+            6) docker_smite_advanced_menu ;;
+            7)
                 if [ -s "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh" ]; then
                     # Separate from FRP-dependent legacy Backhaul sidecar.
                     source "$SMITE_BH_DIR/smite-managed-backhaul-menu.sh"

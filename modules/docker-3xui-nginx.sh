@@ -838,36 +838,9 @@ EOF_PANEL_PATH
     #   /PORT/PATH
     #
     # gRPC traffic is forwarded directly with grpc_pass.
-    location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
-        client_max_body_size 0;
-
-        client_body_timeout 1d;
-        proxy_read_timeout 1d;
-        proxy_send_timeout 1d;
-
-        proxy_http_version 1.1;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-
-        proxy_socket_keepalive on;
-
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        proxy_redirect off;
-
-        if (\$content_type ~* "^application/grpc") {
-            grpc_pass grpc://127.0.0.1:\$fwdport;
-            break;
-        }
-
-        proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
-    }
+    # U-OPTI secure XHTTP routing: only reviewed active loopback inbounds.
+    include /etc/nginx/u-opti-3xui-xhttp-$DOCKER_3XUI_NGINX_DOMAIN/*.conf;
+    location ~ ^/[0-9]+/ { return 404; }
 }
 EOF_CONF
 
@@ -1487,31 +1460,9 @@ server {
         proxy_redirect off;
     }
 
-    location ~ ^/(?<fwdport>[0-9]+)/(?<fwdpath>.*)$ {
-        client_max_body_size 0;
-        client_body_timeout 1d;
-        proxy_read_timeout 1d;
-        proxy_send_timeout 1d;
-
-        proxy_http_version 1.1;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_socket_keepalive on;
-
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_redirect off;
-
-        if (\$content_type ~* "^application/grpc") {
-            grpc_pass grpc://127.0.0.1:\$fwdport;
-            break;
-        }
-
-        proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
-    }
+    # U-OPTI secure XHTTP routing: only reviewed active loopback inbounds.
+    include /etc/nginx/u-opti-3xui-xhttp-$DOCKER_3XUI_CUSTOM_DOMAIN/*.conf;
+    location ~ ^/[0-9]+/ { return 404; }
 }
 EOF_CONF
             ;;

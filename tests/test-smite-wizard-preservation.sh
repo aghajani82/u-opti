@@ -4,7 +4,10 @@
 # Smite installer now has one reviewed, default-OFF clean-rc addition.
 # The pinned installer also auto-selects Standard *only* in clean-rc mode.
 # Stable image pull/overlay isolation is checked separately by
-# tests/test-smite-clean-install.sh; its new Git blob SHA is pinned here.
+# tests/test-smite-clean-install.sh. During the final Field Trial, the only
+# intentional changes to docker.sh and smite-install.sh are numeric menu-input
+# normalization (CR/whitespace trimming); their reviewed blob SHAs are pinned
+# here so any further wizard drift still fails closed.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -23,8 +26,8 @@ while read -r expected file; do
     fi
     echo "PRESERVED: $file"
 done <<'BASELINE'
-f71a00a9f465e5beb9ac5eedd86f175caaeeb80d modules/docker.sh
-f41af3088d21a506c3f3a0e4e4c2bb85be4e27b1 modules/smite-install.sh
+9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
+7ee9a7bd4ad1e435eea0f9ff58a66504cd09d911 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
@@ -33,4 +36,4 @@ d2c9f5a799545179e74e0edba1816d9751eec8ac modules/smite-setup-progress-actions.sh
 57a5430c925c3cd0f9993926be33f0ba0beacca5 modules/smite-setup-progress-ui.sh
 1ae5f900a0018170658a8f69220e316ff9faf80a modules/smite-setup-progress-compact-ui.sh
 BASELINE
-echo 'PASS: Existing independent wizards unchanged; revised Smite clean RC installer pinned and stable regression tested'
+echo 'PASS: Existing independent wizards pinned; reviewed Field Trial menu-normalization blobs accepted'

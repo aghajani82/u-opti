@@ -93,6 +93,67 @@ if smite_install_clean_rc_preflight foreign standard >/dev/null 2>&1; then
     echo "FAIL: accepted wrong expected manifest SHA" >&2; exit 1
 fi
 
+# Signed-registry Field Trial: exact vendored manifest + real admission helper,
+# with Cosign mocked only inside this isolated regression.
+grep -q 'smite-registry-pair-admission.py' "$ROOT/u-opti"
+grep -q 'smite-field-trial-candidate.json' "$ROOT/u-opti"
+grep -q 'smite-registry-pair-admission.py' "$ROOT/install.sh"
+grep -q 'smite-field-trial-candidate.json' "$ROOT/install.sh"
+[ "$(/usr/bin/sha256sum "$ROOT/modules/smite-field-trial-candidate.json" | awk '{print $1}')" = \
+  "d364bd48ee12288ae67dc0e6c15fcc9d15e43ae73cf82c3c33da242890b4f65f" ]
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/cosign" <<'PY_COSIGN'
+#!/usr/bin/env python3
+import json, sys
+args=sys.argv[1:]
+ref=args[-1]
+role="panel" if "smite-panel@" in ref else "node"
+digest=ref.split("@",1)[1]
+source=next(x.split("=",1)[1] for x in args if x.startswith("smite_source_sha="))
+print(json.dumps([{
+    "critical":{"type":"cosign container image signature",
+                "image":{"docker-manifest-digest":digest}},
+    "optional":{"smite_source_sha":source,"smite_role":role}
+}]))
+PY_COSIGN
+chmod 0700 "$TMP/bin/cosign"
+OLD_PATH="$PATH"
+PATH="$TMP/bin:$PATH"
+sha256sum() {
+    if [ "$1" = "$TMP/bin/cosign" ]; then
+        printf '%s  %s\n' "$SMITE_FIELD_TRIAL_COSIGN_SHA256" "$1"
+    else
+        /usr/bin/sha256sum "$@"
+    fi
+}
+SMITE_RC_SIGNED_REGISTRY=1
+SMITE_FIELD_TRIAL_APPROVED=YES
+MOCK_WRONG_PANEL_ID=0
+# Signed registry is a separate source path. It must NOT inherit or require
+# the old Stage15 local bundle/source/manifest variables.
+unset SMITE_RC_BUNDLE_DIR SMITE_RC_SOURCE_SHA SMITE_RC_MANIFEST_SHA256
+: > "$TMP/docker-calls.log"
+smite_install_clean_rc_preflight panel-iran standard >"$TMP/signed-preflight.log"
+grep -q 'PANEL_NODE_IMMUTABLE_DIGEST_SIGNATURES=VERIFIED' "$TMP/signed-preflight.log"
+grep -q 'FIELD_TRIAL_SIGNED_REGISTRY=VERIFIED' "$TMP/signed-preflight.log"
+[ "$SMITE_PANEL_IMAGE" = "ghcr.io/aghajani82/smite-panel@sha256:90b5c99af6066e0c94fd1232ecdcd77d24478b65953f4f33fad32d6fbe803f7e" ]
+[ "$SMITE_NODE_IMAGE" = "ghcr.io/aghajani82/smite-node@sha256:9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec" ]
+smite_install_pull_images true >"$TMP/signed-pull.log"
+grep -Fq "pull $SMITE_PANEL_IMAGE" "$TMP/docker-calls.log"
+grep -Fq "pull $SMITE_NODE_IMAGE" "$TMP/docker-calls.log"
+! grep -q '^load$' "$TMP/docker-calls.log"
+grep -q 'CLEAN_RC_IMAGES=SIGNED_REGISTRY_DIGESTS_VERIFIED' "$TMP/signed-pull.log"
+
+SMITE_FIELD_TRIAL_APPROVED=NO
+if smite_install_clean_rc_preflight foreign standard >/dev/null 2>&1; then
+    echo "FAIL: signed Field Trial accepted without explicit approval" >&2; exit 1
+fi
+SMITE_FIELD_TRIAL_APPROVED=YES
+SMITE_RC_SIGNED_REGISTRY=0
+unset -f sha256sum
+PATH="$OLD_PATH"
+
 SMITE_INSTALL_PROFILE=stable
 SMITE_NODE_IMAGE="ghcr.io/zzedix/smite-node@sha256:$(python3 -c 'print("b"*64)')"
 : > "$TMP/docker-calls.log"
@@ -141,4 +202,21 @@ grep -q 'Invalid connection mode' "$TMP/stable-kh.log"
 [ ! -e "$SMITE_STATE_FILE" ]
 [ ! -e "$SMITE_PANEL_COMPOSE" ]
 [ ! -e "$SMITE_NODE_COMPOSE" ]
+# Existing signed Field Trial upgrade admits ONLY the exact reviewed rc.0 image line.
+mkdir -p "$TMP/upgrade"
+cat > "$TMP/upgrade/panel.yml" <<EOF_UPGRADE
+services:
+  smite-panel:
+    image: $SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE
+EOF_UPGRADE
+smite_install_field_trial_patch_compose_image     "$TMP/upgrade/panel.yml"     "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE"     "ghcr.io/aghajani82/smite-panel@sha256:$(python3 -c 'print("9"*64)')"
+grep -Fq 'image: ghcr.io/aghajani82/smite-panel@sha256:' "$TMP/upgrade/panel.yml"
+if smite_install_field_trial_patch_compose_image     "$TMP/upgrade/panel.yml"     "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE"     "ghcr.io/aghajani82/smite-panel@sha256:$(python3 -c 'print("8"*64)')" >/dev/null 2>&1; then
+    echo "FAIL: upgrade helper accepted a non-rc.0 Compose baseline" >&2
+    exit 1
+fi
+grep -Fq '5) Upgrade signed Field Trial candidate (existing IR)' "$ROOT/modules/smite-install.sh"
+grep -Fq 'ROLLBACK: restoring rc.0 Compose and Panel DB' "$ROOT/modules/smite-install.sh"
+grep -Fq 'ADMIN_2FA_DATA=PRESERVED' "$ROOT/modules/smite-install.sh"
+
 echo "CLEAN_FRESH_PROFILE_TESTS=PASSED"

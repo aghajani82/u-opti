@@ -265,6 +265,8 @@ twcc_menu() {
         printf '%s\n' '  4) Refresh local snapshot'
         printf '%s\n' '  0) Back'
         read -rp '  Choose [0-4]: ' choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) twcc_open_backhaul "$role" ;;
             2) twcc_open_frp "$role" ;;

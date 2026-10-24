@@ -90,7 +90,7 @@ def compare(ir: dict, kh: dict) -> dict[str, str]:
             report["PERSISTENT_DATA"] == "LOCAL_NAMED_VOLUME_CONFIRMED",
             report["PERSISTED_TUNNELS"] == "ZERO",
             report["DISK_SPACE"] == "MINIMUM_AVAILABLE",
-            report.get("IMAGE_REFERENCE_CLASS") == "REVIEWED_DIGEST_UNATTESTED",
+            report.get("IMAGE_REFERENCE_CLASS") == "OPERATOR_PINNED_DIGEST_UNATTESTED",
             SAFE_SHA.fullmatch(report.get("COMPOSE_SHA256", "")) is not None,
         ))
 

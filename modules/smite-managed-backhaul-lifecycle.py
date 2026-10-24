@@ -67,6 +67,7 @@ def _unchanged_protected_data(root: Path, tunnels: str | None,
 def run_lab_rehearsal(root: Path, stage: Path, *,
                       check_ready: Callable[[Path], bool],
                       check_absent: Callable[[Path], bool],
+                      check_other: Callable[[Path, str], bool] | None = None,
                       inject: str | None = None) -> dict[str, str]:
     """Proof callback MUST verify signed inventory and restart, not a status string.
 
@@ -85,6 +86,21 @@ def run_lab_rehearsal(root: Path, stage: Path, *,
             raise Hold("ENGINE_MUST_START_ABSENT")
         ctl.verified_candidate(stage)
         tx.candidate(root, stage)  # Double-check exact Compose+manifest binding.
+        # A second engine is OPTIONAL. If already enrolled, the test must
+        # prove its signed health BEFORE the Backhaul mutation, AFTER the
+        # Backhaul restart, and AFTER exact rollback. Local SHA/mount
+        # inspection is never a substitute for signed runtime evidence.
+        manifest_at_start = ctl.package._existing_manifest(node / "config")
+        other_present = "frp" in manifest_at_start
+        if other_present:
+            if check_other is None:
+                raise Hold("EXISTING_FRP_SIGNED_PROOF_REQUIRED")
+            try:
+                prior_signed = check_other(root, "before") is True
+            except Exception:
+                prior_signed = False
+            if not prior_signed:
+                raise Hold("EXISTING_FRP_PRIOR_SIGNED_RUNTIME_NOT_VERIFIED")
         tunnels_before = _saved_tunnel_digest(root)
         identity_before = _identity_digest(root)
         compose_before = tx.checked(compose, max_size=131072)
@@ -102,6 +118,13 @@ def run_lab_rehearsal(root: Path, stage: Path, *,
                 raise Hold("PROTECTED_NODE_DATA_CHANGED")
             if check_ready(root) is not True:
                 raise Hold("SIGNED_READY_AND_RESTART_PROOF_FAILED")
+            if other_present:
+                try:
+                    other_ready = check_other(root, "with-backhaul") is True
+                except Exception:
+                    other_ready = False
+                if not other_ready:
+                    raise Hold("EXISTING_FRP_AFTER_BACKHAUL_NOT_VERIFIED")
             ready_ok = True
         except Exception:
             # The exact error is intentionally not reflected to operator logs.
@@ -134,12 +157,23 @@ def run_lab_rehearsal(root: Path, stage: Path, *,
             previous_runtime_ok = False
         if not previous_runtime_ok:
             raise Hold("PREVIOUS_SIGNED_NODE_RUNTIME_NOT_RESTORED")
+        if other_present:
+            try:
+                other_restored = check_other(root, "after-rollback") is True
+            except Exception:
+                other_restored = False
+            if not other_restored:
+                raise Hold("EXISTING_FRP_AFTER_ROLLBACK_NOT_VERIFIED")
         if failure is not None or not ready_ok:
             raise Hold("ACTIVATION_FAILED_EXACT_ROLLBACK_PROVED")
         return {
             "TRIAL_INSTALL": "SIGNED_READY_AFTER_RESTART_VERIFIED",
             "TRIAL_ROLLBACK": "BYTES_AND_MODES_RESTORED",
             "TRIAL_PREVIOUS_RUNTIME": "SIGNED_ABSENT_AFTER_RESTART_VERIFIED",
+            "EXISTING_FRP_SIGNED_RUNTIME": (
+                "BEFORE_WITH_BACKHAUL_AND_AFTER_ROLLBACK_VERIFIED"
+                if other_present else "FRP_NOT_INSTALLED"
+            ),
             "LIVE_HOST_INSTALL": "NEVER_ATTEMPTED",
             "PRODUCTION_ACTIVATION": "HOLD",
         }

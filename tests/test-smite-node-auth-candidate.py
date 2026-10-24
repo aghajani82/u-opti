@@ -83,6 +83,34 @@ class Stage9Test(unittest.TestCase):
         self.assertNotIn("docker compose up", yaml)
         self.assertEqual(json.loads(self.identity.read_text())["node_secret"], "a" * 64)
 
+    def test_prepare_creates_missing_fresh_host_replay_hierarchy(self):
+        # Regression: a clean host may have none of the U-OPTI replay tree yet.
+        # The trusted host anchor exists, while all three private levels do not.
+        self.storage_root.rmdir()
+        self.assertFalse(self.storage_root.exists())
+        self.assertEqual(tool.prepare(**self.kwargs), "PREPARED")
+        for path in (
+            self.storage_root,
+            self.replay_dir.parent,
+            self.replay_dir,
+        ):
+            self.assertTrue(path.is_dir())
+            self.assertFalse(path.is_symlink())
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+            self.assertEqual(path.stat().st_uid, os.geteuid())
+
+    def test_replay_hierarchy_rejects_untrusted_anchor(self):
+        anchor = self.replay_dir.parents[2]
+        original = stat.S_IMODE(anchor.stat().st_mode)
+        try:
+            anchor.chmod(0o777)
+            with self.assertRaises(tool.StageHold):
+                tool.prepare(**self.kwargs)
+            self.assertFalse(self.candidate.exists())
+            self.assertFalse(self.storage_root.exists() and self.replay_dir.exists())
+        finally:
+            anchor.chmod(original)
+
     def test_discard_candidate_never_deletes_identity_or_replay_data(self):
         tool.prepare(**self.kwargs)
         replay_file = self.replay_dir / "agent-replay.sqlite3"
@@ -143,21 +171,29 @@ class Stage9Test(unittest.TestCase):
             tool.prepare(**self.kwargs)
         self.assertFalse(self.candidate.exists())
 
-    def test_no_live_docker_activation_and_packaging(self):
+    def test_candidate_remains_inert_and_live_activation_is_separately_gated(self):
         candidate_src = MODULE.read_text()
         for forbidden in (
             "subprocess.run(", "subprocess.Popen(", "os.system(",
             "docker compose -f", "systemctl restart", "docker restart",
         ):
             self.assertNotIn(forbidden, candidate_src)
+
         wrapper = (ROOT / "modules/smite-node-pairing-wizard.sh").read_text()
-        self.assertIn("--preflight", wrapper)
-        self.assertIn("--prepare", wrapper)
-        self.assertIn("--discard", wrapper)
-        self.assertIn("PREPARE-AUTH-ONLY", wrapper)
-        self.assertIn("DISCARD-CANDIDATE", wrapper)
+        self.assertIn("--enable-panel-field-trial", wrapper)
+        self.assertIn("--activate-ir-node-field-trial", wrapper)
+        self.assertIn("--rollback-node-field-trial", wrapper)
+        self.assertIn("UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES", wrapper)
+        self.assertNotIn("node_secret", wrapper)
+        self.assertNotIn("pairing_code", wrapper)
+
+        # Stage9 remains packaged as the reviewed inert Compose generator;
+        # the live controller may invoke it only after explicit Field Trial admission.
         for name in ("install.sh", "u-opti"):
             self.assertIn("smite-node-auth-candidate.py", (ROOT / name).read_text())
+        controller = (ROOT / "modules/smite-node-pairing.py").read_text()
+        self.assertIn('CANDIDATE_HELPER = Path(__file__).with_name("smite-node-auth-candidate.py")', controller)
+        self.assertIn("Explicit disposable-host Field Trial pairing approval required", controller)
 
 
 if __name__ == "__main__":
