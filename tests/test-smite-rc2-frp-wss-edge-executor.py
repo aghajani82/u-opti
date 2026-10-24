@@ -61,6 +61,10 @@ class EdgeTransaction(unittest.TestCase):
         self.tls=self.nginx/"backend.conf";self.tls.write_text(BACKEND)
         self.stream=self.nginx/"stream.conf";self.stream.write_text(STREAM)
         self.map=self.nginx/"map.conf";self.map.write_text(MAP)
+        # The planner resolves the active include path; the fake stream must
+        # point to the corresponding isolated temporary map, not /etc/nginx.
+        self.stream.write_text(STREAM.replace(
+            "/etc/nginx/u-opti-smite-frp-sni-map.conf",str(self.map)))
         self.alt=self.nginx/"alt.conf"
         self.state=self.state_root/"wss"
         self.log=[]
