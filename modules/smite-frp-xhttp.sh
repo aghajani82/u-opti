@@ -15,7 +15,7 @@ smite_frp_xhttp_enabled() {
         grep -Fxq 'SMITE_CONNECTION_MODE=standard' "$SMITE_FRP_XHTTP_STATE" ||
         return 1
     # Legacy Standard installations keep their original compatibility path.
-    if [ -f "$SMITE_FRP_XHTTP_HELPER" ]; then
+    if [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ]; then
         return 0
     fi
     # RC2-only path: independently verify signed WSS Node state + immutable
