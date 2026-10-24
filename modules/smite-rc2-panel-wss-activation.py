@@ -326,6 +326,10 @@ def backup_db(doc):
     need(absent(DATABASE_BACKUP),"EXISTING_DB_BACKUP")
     # Reads a transactionally consistent online SQLite snapshot. No service
     # stop and no direct writes into the live database.
+    # Create the sensitive backup with restrictive permissions from the
+    # first byte, not chmod-after-create (which exposes a brief 0644 window).
+    fd=os.open(DATABASE_BACKUP,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
+    os.close(fd)
     source=sqlite3.connect(database.as_uri()+"?mode=ro",uri=True,timeout=12)
     try:
         target=sqlite3.connect(str(DATABASE_BACKUP),timeout=12)
