@@ -400,15 +400,43 @@ def revert(role: str, doc: dict, *, permitted_prepared: bool) -> None:
     else:
         need(permitted_prepared, "COMMITTED_OVERLAY_MISSING")
     runtime = inspect()
-    signed_health(runtime, role, enabled=env(runtime).get("SMITE_FRP_STANDARD_WSS") == "1")
-    # If Node was never recreated, no need to restart a healthy signed Node.
-    if env(runtime).get("SMITE_FRP_STANDARD_WSS") == "1":
+    # Recovery must remain possible if docker up replaced the Node container
+    # but the resulting process is STOPPED or UNHEALTHY. Do not require
+    # health until AFTER recreating the known original signed Compose set.
+    need(runtime.get("Config", {}).get("Image") == IMAGES[role],
+         "RECOVERY_NODE_IMAGE_DRIFT")
+    settings = env(runtime)
+    for key, expected in {
+        "SMITE_NODE_PANEL_AUTH_MODE": "signed",
+        "SMITE_AGENT_AUTH_MODE": "strict",
+        "SMITE_ENGINE_INVENTORY_MODE": "managed",
+    }.items():
+        need(settings.get(key) == expected, "RECOVERY_SIGNED_POLICY_DRIFT")
+    need(settings.get("PANEL_ADDRESS", "").endswith(":443"),
+         "RECOVERY_PANEL_ADDRESS_DRIFT")
+    mounts = {m.get("Destination"): m for m in runtime.get("Mounts", [])}
+    need({"/etc/smite-node", "/run/smite-node-identity",
+          "/var/lib/smite-node/auth"} <= set(mounts),
+         "RECOVERY_SIGNED_MOUNT_DRIFT")
+    need(mounts["/etc/smite-node"].get("Source") == str(NODE / "config")
+         and mounts["/etc/smite-node"].get("RW") is True
+         and mounts["/run/smite-node-identity"].get("RW") is False
+         and mounts["/var/lib/smite-node/auth"].get("RW") is True,
+         "RECOVERY_SIGNED_VOLUME_DRIFT")
+    original_files = {str(BASE), str(SIGNED)}
+    active_files = compose_names(runtime)
+    need(active_files in (original_files, original_files | {str(OVERLAY_PATH)}),
+         "RECOVERY_COMPOSE_SET_DRIFT")
+    node_healthy = (runtime.get("State", {}).get("Running") is True
+                    and runtime.get("State", {}).get("Health", {}).get("Status")
+                    == "healthy")
+    wss_active = settings.get("SMITE_FRP_STANDARD_WSS") == "1"
+    # A failed recreation might leave a half-running Node even when the
+    # old Compose labels survive. Repair it with BOTH reviewed overlays.
+    must_recreate = wss_active or not node_healthy or active_files != original_files
+    if must_recreate:
         recreate(False)
-        check_runtime(role, False)
-    else:
-        # A failed Compose command may have changed container labels even
-        # without enabling WSS. Require exact original signed Compose set.
-        check_runtime(role, False)
+    check_runtime(role, False)
     if not absent(OVERLAY_PATH):
         OVERLAY_PATH.unlink()
         fsync_dir(NODE)
