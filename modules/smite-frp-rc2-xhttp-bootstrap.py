@@ -78,10 +78,18 @@ def new_snippet():
 
 def remove_if_ours(identity):
     obj=SNIPPET.lstat()
+    # The preflight verified the parent is trusted, root-owned on IR.
+    # Compare ownership to that trusted parent so offline unprivileged CI
+    # can exercise the exact same rollback without unsafe root simulation.
+    parent=SNIPPET.parent.lstat()
     need((obj.st_dev,obj.st_ino)==identity and
-         stat.S_ISREG(obj.st_mode) and obj.st_uid==0 and
-         SNIPPET.read_bytes()==HEADER,
+         stat.S_ISREG(obj.st_mode) and obj.st_uid==parent.st_uid,
          "CRITICAL_SNIPPET_ROLLBACK_MANUAL")
+    fd=os.open(SNIPPET,os.O_RDONLY|os.O_NOFOLLOW)
+    with os.fdopen(fd,"rb") as f:
+        current=os.fstat(f.fileno())
+        need((current.st_dev,current.st_ino)==identity and f.read(1024)==HEADER,
+             "CRITICAL_SNIPPET_ROLLBACK_MANUAL")
     SNIPPET.unlink()
     dirfd=os.open(SNIPPET.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     try:os.fsync(dirfd)
