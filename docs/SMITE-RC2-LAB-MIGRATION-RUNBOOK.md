@@ -1,19 +1,47 @@
 # NEXT-5.AG — Smite RC.1 to RC.2 disposable two-host rollout gate
 
-**Current status (2026-10-24, NEXT-5.AX): IR Panel runs RC.2
-(independently audited after cutover), the co-located signed IR Node remains
-RC.1, and KH Node has now been upgraded to RC.2 with paused/strict/managed
-security. The KH trial itself reports Node health, loopback, Sanaei/XHTTP
-preservation and HTTPS to IR PASS. The new KH RC.2 state still needs an
-independent post-cutover read-only audit. Neither foreign signed pairing
-nor managed-state RC.2 transition has occurred. No production rollout,
-stable merge or release is approved. This remains a review runbook in
+**Current status (2026-10-24, NEXT-5.AY): IR Panel RC.2 and its
+co-located signed IR Node RC.1 passed independent post-cutover checks.
+KH Node RC.2 independently passed all 11 post-cutover health, image,
+security, Sanaei, XHTTP, Nginx, loopback and KH-to-IR HTTPS checks.
+KH foreign signed pairing is still PAUSED and not yet activated; no
+managed-state RC.2 transition has occurred. Neither production rollout,
+stable merge nor release is approved. This remains a review runbook in
 [U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48).**
 
 This runbook is intentionally **not** an executable installation script. Passing
 checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
+
+## NEXT-5.AY — independent KH RC.2 post-cutover PASS; foreign pairing gate
+
+The operator's read-only KH audit after `--apply` confirmed:
+`COMPOSE_SHA256=PASS`, `COMPOSE_RC2_IMAGE=PASS`,
+`COMPOSE_SECURITY=PASS`, `NODE_RC2_HEALTH=PASS`,
+`RUNTIME_SECURITY=PASS`, `SANAEI_UNCHANGED=PASS`,
+`NODE_LOOPBACK=PASS`, `NGINX=PASS`,
+`XHTTP_GUARD=PASS`, `KH_NODE_HEALTH_HTTP=PASS`,
+`KH_TO_IR_HTTPS=PASS`, `KH_RC2_INDEPENDENT_AUDIT=PASS`,
+`LIVE_CHANGES=NONE`. Running KH Node pinned digest:
+`sha256:2338f101b4a1615ec966b9c6f7a3d3ff2bd3361d80956281cf40a61e7a458f78`.
+
+**Remaining source compatibility HOLD:** current
+`modules/smite-node-pairing.py` still pins
+`_FOREIGN_NODE_IMAGE` to immutable **RC.1** while KH runs RC.2.
+Its foreign activation path calls `_foreign_gateway_preflight` which
+must therefore refuse the present KH RC.2 runtime. The IR approval
+function currently requires `SMITE_MANAGED_VERSION=2.0.0-rc.1` and
+the RC.2 Panel's foreign path-pinned HMAC support check is broad rather
+than tied to the exact reviewed RC.2 image. Do not simply replace a
+constant or bypass that check. A separate version-aware rollout admission,
+positive/negative signed Gateway tests, exact identity/replay preservation,
+explicit origin pinning and safe paused rollback are necessary before
+foreign signed pairing is attempted.
+
+**Next operator step:** read-only KH gateway metadata / localhost TLS
+readiness inspection. This does not reserve identities, approve origins,
+generate pairing tokens or enable signed traffic.
 
 ## NEXT-5.AX — KH RC.2 Node-only field trial reported PASS
 
