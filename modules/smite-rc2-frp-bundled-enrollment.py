@@ -337,6 +337,8 @@ def verify(host: str) -> None:
     host_preflight(host)
     doc = journal(host)
     unchanged(doc)
+    require(MANIFEST.is_file() and not MANIFEST.is_symlink(),
+            "MANIFEST_CHANGED")
     require(sha(regular(MANIFEST, mode=0o600)) == doc["manifest_sha256"],
             "MANIFEST_CHANGED")
     directory(MANIFEST_DIR, private=True)
