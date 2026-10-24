@@ -28,7 +28,7 @@ from urllib import error, request
 HERE = Path(__file__).resolve().parent
 PAIRING = HERE / "smite-node-pairing.py"
 ADMISSION = HERE / "smite-rc2-foreign-pairing-admission.py"
-PAIRING_BLOB = "db6b9e60041cb6e86c69a92f438816ed351e9f8a"
+PAIRING_BLOB = "861e2735f76bb0b3947ab89e0b0bc28fde31c52c"
 ADMISSION_BLOB = "67d4621b88c6f795573e60b5014c9d64bd6521bc"
 KH_HOST = "https://kh.kolbe1.ir"
 URL_RULE = re.compile(r"^https://kh\.kolbe1\.ir/smite-node/[A-Za-z0-9_-]{16,80}$")
