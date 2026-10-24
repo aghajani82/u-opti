@@ -229,6 +229,9 @@ jobs:
           python3 -B tests/test-smite-rc2-frp-wss-node-activation.py -v
           python3 -m py_compile modules/smite-rc2-panel-wss-activation.py tests/test-smite-rc2-panel-wss-activation.py
           python3 -B tests/test-smite-rc2-panel-wss-activation.py -v
+          python3 -m py_compile modules/smite-frp-rc2-gateway-ready.py tests/test-smite-frp-rc2-gateway-ready.py
+          bash -n modules/smite-frp-xhttp.sh
+          python3 -B tests/test-smite-frp-rc2-gateway-ready.py -v
 
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
