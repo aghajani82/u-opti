@@ -238,6 +238,8 @@ jobs:
           python3 -B tests/test-smite-frp-rc2-xhttp-include-transaction.py -v
           python3 -m py_compile modules/smite-frp-rc2-xhttp-module-upgrade.py tests/test-smite-frp-rc2-xhttp-module-upgrade.py
           python3 -B tests/test-smite-frp-rc2-xhttp-module-upgrade.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-publish-45121.py tests/test-smite-frp-rc2-xhttp-publish-45121.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-publish-45121.py -v
 
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
