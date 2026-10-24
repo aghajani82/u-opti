@@ -97,7 +97,7 @@ class NodeWssTrial(unittest.TestCase):
                 return Helper(self)
             raise AssertionError(filename)
         for name, value in (("lock", fake_lock), ("load", load),
-                            ("inspect", self.runtime), ("run", self.run),
+                            ("inspect", self.runtime), ("run", self.fake_run),
                             ("wait_health", self.wait_health),
                             ("signed_probe", self.signed_probe)):
             patcher = patch.object(module, name, value)
@@ -146,7 +146,7 @@ class NodeWssTrial(unittest.TestCase):
             ],
         }
 
-    def run(self, argv, *, input_text=None, timeout=35):
+    def fake_run(self, argv, *, input_text=None, timeout=35):
         self.events.append(tuple(argv))
         if argv[0:2] == ["docker", "compose"] and "config" in argv:
             enabled = "-" in argv and input_text is not None
