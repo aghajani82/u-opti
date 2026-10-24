@@ -406,7 +406,9 @@ def revert(role: str, doc: dict, *, permitted_prepared: bool) -> None:
         recreate(False)
         check_runtime(role, False)
     else:
-        signed_probe(role, enabled=False)
+        # A failed Compose command may have changed container labels even
+        # without enabling WSS. Require exact original signed Compose set.
+        check_runtime(role, False)
     if not absent(OVERLAY_PATH):
         OVERLAY_PATH.unlink()
         fsync_dir(NODE)
