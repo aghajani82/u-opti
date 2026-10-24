@@ -140,7 +140,21 @@ class KHRedemptionTests(unittest.TestCase):
             self.helper.IDENTITY_DIR=directory
             self.helper.IDENTITY_FILE=directory/"node-identity.json"
             self.helper.REPLAY_DB=root/"replay.db"
-            with self.assertRaisesRegex(redeemer.Hold, "IDENTITY_OR_REPLAY_ALREADY_EXISTS"):
+            # CI runner is non-root; emulate the required root-owned
+            # identity directory metadata without touching machine ownership.
+            original_lstat = Path.lstat
+            def private_lstat(p):
+                value = original_lstat(p)
+                if p == directory:
+                    from types import SimpleNamespace
+                    return SimpleNamespace(
+                        st_mode=value.st_mode, st_uid=0,
+                    )
+                return value
+            with patch.object(Path, "lstat", private_lstat), \
+                 self.assertRaisesRegex(
+                     redeemer.Hold, "IDENTITY_OR_REPLAY_ALREADY_EXISTS",
+                 ):
                 redeemer.empty_secure_store(self.helper)
 
 
