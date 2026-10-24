@@ -14,6 +14,35 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BL — corrected Origin stage and IR read-only approval plan PASS
+
+Operator 2026-10-24 staged the three corrected source-pinned modules
+under `/root/uopti-rc2-ir-origin-fix1` using exact Git commit
+`793c5a2dcb8157bdbf4e4d759741961e43c2555e` with
+`SOURCE_VERIFIED` for each file. The corrected wrapper/controller
+and admission Git blobs were independently checked. In-container
+`PANEL_CANONICAL_443=PASS` confirms the Smite RC.2 Panel inserts
+canonical `:443` as expected, and `IR_CORRECTED_STAGING=PASS`.
+The corrected interactive `--plan` then passed
+`IR_RC2_PANEL_ADMISSION`, `NODE_KH_RESERVATION`,
+`KH_PRIVATE_TLS443_READINESS`,
+`IR_FOREIGN_ORIGIN_PLAN=PASS_READ_ONLY`; it emitted
+`ORIGIN_APPROVAL=NOT_APPLIED` and `LIVE_CHANGES=NONE`.
+All code tests and independent signed registry workflow on current
+draft head were SUCCESS after the source correction.
+
+With the earlier post-HOLD audit showing one preserved Iran origin,
+zero foreign origins and an intact pending reservation, the
+*separately authorized* next step is one controlled IR-only
+`--apply` using these **new corrected staged files** and dual
+explicit opt-in plus operator typed `APPROVE-KH-ORIGIN` confirmation.
+If any HOLD occurs, do NOT blindly repeat it: re-audit the root-private
+trust store as previously documented. Following a successful apply,
+run a separate read-only verification for one Iranian pin and exactly
+one pinned KH origin, with the DB reservation still pending. No
+pairing-code issue, KH secret/replay creation or runtime activation
+is authorized at this stage.
+
 ## NEXT-5.BK — IR read-only after-HOLD Trust Store recovered
 
 Operator ran a read-only root IR post-failure audit on 2026-10-24.
