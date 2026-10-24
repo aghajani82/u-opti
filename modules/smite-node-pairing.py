@@ -997,6 +997,16 @@ _FOREIGN_NODE_IMAGE = (
     "ghcr.io/aghajani82/smite-node@sha256:"
     "9099262bb0d5fc8b737269f3e6dc16831a1d3e8b536b7b95ba131129ed06a7ec"
 )
+# A separate opt-in RC.2 lane; the existing RC.1 lane stays immutable.
+_FOREIGN_NODE_IMAGE_RC2 = (
+    "ghcr.io/aghajani82/smite-node@sha256:"
+    "2338f101b4a1615ec966b9c6f7a3d3ff2bd3361d80956281cf40a61e7a458f78"
+)
+_FOREIGN_PANEL_IMAGE_RC2 = (
+    "ghcr.io/aghajani82/smite-panel@sha256:"
+    "9101898e19631d334b754ba8e956b63ab7dfaee304a8f9b954cf30a185125e8e"
+)
+_FOREIGN_RC2_COMPOSE_SHA = "8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e"
 _FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
 
 
@@ -1026,8 +1036,8 @@ def _require_panel_foreign_transport() -> None:
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-panel"],
         timeout=10, capture=True,
     )
-    if not re.fullmatch(r"ghcr\.io/aghajani82/smite-panel@sha256:[a-f0-9]{64}", image):
-        raise WizardHold("Panel must run an immutable signed registry image")
+    if image != _FOREIGN_PANEL_IMAGE_RC2:
+        raise WizardHold("Panel must run the exact reviewed signed RC.2 image")
     check = r"""
 import inspect
 from app.signed_agent_transport import validate_foreign_gateway_prefix, signed_agent_call
@@ -1182,8 +1192,12 @@ print("FOREIGN_PIN=VERIFIED")
     print("PRODUCTION_ACTIVATION=NO")
 
 
-def _foreign_gateway_preflight(current: dict[str, str]) -> tuple[str, str, str]:
-    """Read only locally provisioned Gateway metadata; never trust Node self-report."""
+def _foreign_gateway_preflight(
+    current: dict[str, str], *, expected_image: str = _FOREIGN_NODE_IMAGE,
+) -> tuple[str, str, str]:
+    """Read only managed Gateway metadata; RC.2 requires additional admission."""
+    if expected_image not in (_FOREIGN_NODE_IMAGE, _FOREIGN_NODE_IMAGE_RC2):
+        raise WizardHold("Foreign activation target is not a reviewed signed image")
     if current.get("SMITE_ROLE") != "foreign" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
         raise WizardHold("Foreign activation requires the reviewed clean RC.1 Node")
     gateway = STATE.parent / "foreign-gateway.env"
@@ -1221,9 +1235,35 @@ def _foreign_gateway_preflight(current: dict[str, str]) -> tuple[str, str, str]:
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
         capture=True, timeout=10,
     )
-    if running != _FOREIGN_NODE_IMAGE:
-        raise WizardHold("Foreign Node image is not the reviewed signed RC.1 digest")
-    # Read-only TLS check uses the already existing Nginx gateway, not WAN:8888.
+    if running != expected_image:
+        raise WizardHold("Foreign Node image differs from the exact approved digest")
+    if expected_image == _FOREIGN_NODE_IMAGE_RC2:
+        # Refuse a one-line image pin swap unless *all* paused/strict managed
+        # effective Compose settings stay identical to reviewed RC.2 baseline.
+        original = _regular(NODE_COMPOSE, limit=256_000)
+        if hashlib.sha256(original).hexdigest() != _FOREIGN_RC2_COMPOSE_SHA:
+            raise WizardHold("Foreign RC.2 Compose SHA256 differs from reviewed trial")
+        raw = _run([
+            "docker", "compose", "-f", str(NODE_COMPOSE),
+            "config", "--format", "json",
+        ], capture=True, timeout=30)
+        try:
+            service = json.loads(raw)["services"]["smite-node"]
+            if (
+                service.get("image") != _FOREIGN_NODE_IMAGE_RC2
+                or service.get("network_mode") != "host"
+                or service.get("environment", {}).get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
+                or service["environment"].get("SMITE_AGENT_AUTH_MODE") != "strict"
+                or service["environment"].get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
+            ):
+                raise WizardHold("Foreign RC.2 effective Compose security has drifted")
+        except (KeyError, ValueError, TypeError) as exc:
+            raise WizardHold("Foreign RC.2 effective Compose invalid") from exc
+        if _run([
+            "docker", "inspect", "-f", "{{.State.Health.Status}}", "smite-node",
+        ], capture=True, timeout=10) != "healthy":
+            raise WizardHold("Foreign RC.2 Node is not healthy")
+    # Read-only TLS check uses existing Nginx gateway, not WAN:8888.
     response = _run([
         "curl", "--noproxy", "*", "-4", "-fSs",
         "--max-time", "12", "--resolve", f"{domain}:443:127.0.0.1",
@@ -1238,7 +1278,9 @@ def _foreign_gateway_preflight(current: dict[str, str]) -> tuple[str, str, str]:
     return panel, domain, url
 
 
-def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> None:
+def activate_foreign_node_field_trial(
+    state: dict[str, str] | None = None, *, reviewed_rc2: bool = False,
+) -> None:
     """KH only; require IR approval + updated signed Panel image BEFORE use.
 
     Never self-approve a Panel trusted origin from KH and never enable an
@@ -1247,7 +1289,28 @@ def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> No
     """
     _field_trial_gate()
     current = state_values() if state is None else state
-    panel, _domain, control_url = _foreign_gateway_preflight(current)
+    if reviewed_rc2:
+        # In addition to the frozen exact image, every independently reviewed
+        # RC.2 safety check must still pass before *any* pairing mutation.
+        if os.environ.get("UOPTI_SMITE_RC2_FOREIGN_PAIRING_FIELD_TRIAL") != "YES":
+            raise WizardHold("Explicit RC.2 foreign activation consent missing")
+        gate = Path(__file__).with_name("smite-rc2-foreign-pairing-admission.py")
+        if not gate.is_file() or gate.is_symlink():
+            raise WizardHold("RC.2 foreign read-only admission module unavailable")
+        _regular(gate, limit=128_000)
+        if _run([
+            "python3", "-B", str(gate), "--role", "KH",
+        ], capture=True, timeout=90).splitlines()[-3:] != [
+            "RC2_FOREIGN_PAIRING_ADMISSION=PASS_READ_ONLY",
+            "FOREIGN_PAIRING=NOT_ACTIVATED",
+            "LIVE_CHANGES=NONE",
+        ]:
+            raise WizardHold("RC.2 foreign read-only admission failed")
+        panel, _domain, control_url = _foreign_gateway_preflight(
+            current, expected_image=_FOREIGN_NODE_IMAGE_RC2,
+        )
+    else:
+        panel, _domain, control_url = _foreign_gateway_preflight(current)
     node_id, _ = _identity_record()
     helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
     if not helper.is_file() or helper.is_symlink():
@@ -1272,7 +1335,8 @@ def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> No
         _run([
             "docker", "compose", "-f", str(NODE_COMPOSE),
             "-f", str(NODE_SECURITY_CANDIDATE),
-            "up", "-d", "--no-build", "--force-recreate", "smite-node",
+            "up", "-d", "--no-build", "--no-deps", "--pull", "never",
+            "--force-recreate", "smite-node",
         ], timeout=120)
         _wait_container("smite-node", 90)
         effective = _run([
@@ -1311,7 +1375,8 @@ def activate_foreign_node_field_trial(state: dict[str, str] | None = None) -> No
             try:
                 _run([
                     "docker", "compose", "-f", str(NODE_COMPOSE),
-                    "up", "-d", "--no-build", "--force-recreate", "smite-node",
+                    "up", "-d", "--no-build", "--no-deps", "--pull", "never",
+                    "--force-recreate", "smite-node",
                 ], timeout=120)
                 _wait_container("smite-node", 90)
                 effective = _run([
@@ -1382,6 +1447,8 @@ def run(argv: list[str] | None = None) -> int:
     actions.add_argument("--redeem-preview", action="store_true")
     actions.add_argument("--activate-ir-node-field-trial", action="store_true")
     actions.add_argument("--activate-foreign-node-field-trial", action="store_true")
+    # Separate explicit RC.2 lane; never switch the existing RC.1 wizard silently.
+    actions.add_argument("--activate-foreign-node-rc2-field-trial", action="store_true")
     actions.add_argument("--approve-foreign-origin-field-trial", action="store_true")
     actions.add_argument("--rollback-node-field-trial", action="store_true")
     parser.add_argument("--state-path", type=Path, default=STATE)
@@ -1423,6 +1490,9 @@ def run(argv: list[str] | None = None) -> int:
 
         if args.activate_foreign_node_field_trial:
             activate_foreign_node_field_trial(state)
+            return 0
+        if args.activate_foreign_node_rc2_field_trial:
+            activate_foreign_node_field_trial(state, reviewed_rc2=True)
             return 0
 
         if args.approve_foreign_origin_field_trial:
