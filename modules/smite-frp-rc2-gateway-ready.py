@@ -264,11 +264,12 @@ def main() -> int:
         audit(allow_missing_snippet=args.bootstrap_preflight)
         if args.bootstrap_preflight:
             print("RC2_IR_FRP_XHTTP_BOOTSTRAP=PASS_READ_ONLY")
+            print("XHTTP_INCLUDE=ABSENT_PENDING_TRANSACTION")
         else:
             print("RC2_IR_FRP_XHTTP_GATE=PASS_READ_ONLY")
+            print("XHTTP_INCLUDE=VERIFIED")
         print("SIGNED_WSS_NODE=VERIFIED")
         print("STANDARD_FRP_GATEWAY=VERIFIED")
-        print("NGINX_FRP_INCLUDE=VERIFIED")
         print("LIVE_CHANGES=NONE")
         return 0
     except (GateHold, OSError, KeyError, TypeError,
