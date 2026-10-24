@@ -519,6 +519,18 @@ class PreviewTests(unittest.TestCase):
                 if cmd[:2] == ["docker", "inspect"]:
                     return str(trusted)
                 if cmd[:2] == ["docker", "exec"]:
+                    # Regression: approved_node() returns normalized :443
+                    # in both origin and control_url even if user pasted
+                    # the HTTPS URL without an explicit default port.
+                    self.assertEqual(
+                        cmd[8], "https://kh.kolbe1.ir:443",
+                    )
+                    self.assertEqual(
+                        cmd[9],
+                        "https://kh.kolbe1.ir:443/smite-node/322983983580c8eb",
+                    )
+                    self.assertIn('assert p["origin"] == sys.argv[3]', cmd[5])
+                    self.assertIn('assert p["control_url"] == sys.argv[4]', cmd[5])
                     return "FOREIGN_PIN=VERIFIED" if good[0] else "WRONG"
                 raise AssertionError(cmd)
 
