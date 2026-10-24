@@ -110,6 +110,11 @@ def lock():
 
 
 def apply():
+    # The legacy single-vhost bootstrap must never be used on real RC2.
+    # In the verified dual-vhost topology the primary Panel :8443 needs
+    # an explicit Include transaction (not merely a missing snippet file).
+    # Refuse mutation until that separate reviewed transaction is shipped.
+    raise Hold("DUAL_VHOST_INCLUDE_TRANSACTION_REQUIRED")
     fd=lock()
     try:
         before()
