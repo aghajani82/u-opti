@@ -14,6 +14,48 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BO — KH secure one-time code redemption readiness PASS
+
+Operator 2026-10-24 performed the KH read-only RC.2 identity
+preflight: KH_ROOT_HOST, managed `foreign`/Standard/
+`node-kh`/RC.1-state, private HTTPS/443 gateway metadata,
+paused/strict/managed environment, exact KH RC.2 Node image
+healthy, exact Compose SHA256, `KH_SIGNED_IDENTITY=NOT_STAGED`,
+`KH_REPLAY_STATE=NOT_PROVISIONED`, and
+`KH_TO_IR_HTTPS443=PASS`.
+Terminal result `KH_ENROLLMENT_PREFLIGHT=PASS_READ_ONLY`,
+`PAIRING_CODE=NOT_ISSUED_BY_THIS_CHECK`,
+`NODE_RUNTIME=PAUSED`, `LIVE_CHANGES=NONE`.
+
+The next stage is **not** immediate code issuance. Add and review
+a **separate KH-only** `modules/smite-rc2-kh-credential-redeem.py`
+controller with `--plan` / `--redeem` modes:
+  * Root-only KH, full exact SHA1 Git blob verification of both the
+    pre-existing reviewed U-OPTI pairing controller and its independently
+    audited KH RC.2 admission module.
+  * `--plan` validates KH RC.2 container/inbound/TLS while paused,
+    the absent identity and replay, and fixed HTTPS Panel redemption
+    endpoint. **No write, network credential POST or code consumption**.
+  * `--redeem` must have two explicit environment opt-ins and typed
+    operator confirmation, create only the root-private credential
+    directory, then prompt for reserved Node ID **and 10-minute code
+    as hidden input**. It delegates verified HTTPS no-proxy/no-redirect
+    one-shot POST to the existing Pairing controller and stores a 0600
+    identity with `O_EXCL` and fsync. Check identity without showing
+    ID or secret. No Replay DB, signed runtime switch, Node reload
+    or tunnel/Nginx changes.
+  * On any HOLD after code issuance, stop: the Panel may have
+    atomically consumed the code even if local storage failed.
+    Audit Panel identity state and KH local file before deciding to
+    reissue. Never copy the code, UUID, control path or credential
+    to PR/chat/logs.
+
+Operator must first download this thin controller and its pinned
+dependencies from exact reviewed Draft branch commit, verify each
+Git blob, and execute **only --plan**; issue no code yet. CI's
+negative safety regression tests must pass before distributing the
+procedure. Do not use the old RC.1 foreign activation menu.
+
 ## NEXT-5.BN/BO — independent IR trust audit PASS; KH redemption preparation next
 
 NEXT-5.BN operator evidence dated 2026-10-24: independent IR
