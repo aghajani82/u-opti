@@ -14,6 +14,42 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BA/BB — independent Panel transport and version-aware admission
+
+**Operator result (IR, 2026-10-24):**
+`IR_RC2_FOREIGN_HMAC_REVIEW=PASS`, covering reviewed IR RC.2 Panel
+digest and healthy state, unchanged healthy signed local IR RC.1 Node,
+exact base/signed-overlay Compose SHA256, positive approved Foreign
+gateway prefix, HMAC signed-agent target preservation, root-approved
+origin pinning, TLS no downgrade, and rejection of five unapproved
+gateway URLs. `FOREIGN_PAIRING=NOT_ACTIVATED` and
+`LIVE_CHANGES=NONE`. These assertions inspect running application
+code and example URL behavior; they are **not** a live cross-host HMAC.
+
+**Operator result (KH, NEXT-5.AZ):** exact reviewed KH RC.2 Node image
+and `paused + strict + managed`; private gateway metadata and
+localhost TLS/443 prefixed readiness JSON all PASS. No foreign
+enrollment, Pairing or Gateway configuration change occurred.
+
+A new `modules/smite-rc2-foreign-pairing-admission.py` is a
+strictly **read-only** command with `--role IR` or `--role KH`.
+It checks the mixed-version topology and managed RC.1 state,
+signed Panel trust mount and reviewed RC.2 transport (IR), paused
+RC.2 Node, exact private Gateway prefix, immutable Sanaei,
+single XHTTP route and TLS/443 (KH). The companion offline negative
+tests reject unsigned Panel mode, writable Panel trust mount,
+unpaused Node, malformed Gateway prefix, changed managed version,
+changed Sanaei image, and duplicate environment keys. This tool
+offers **no apply mode**; a PASS only admits further source review,
+not pairing or activation. The old RC.1-hard-pinned foreign activation
+helper remains blocked and unchanged.
+
+**Next:** run the new admission read-only on IR and KH from one pinned
+reviewed source commit. Then design, test, and separately authorize
+a safe RC.2-aware foreign approval/pairing/activation transaction
+that keeps HMAC keys and replay stores intact and can restore KH
+to paused mode. Do not use the legacy RC.1 image gate for RC.2.
+
 ## NEXT-5.AY — independent KH RC.2 post-cutover PASS; foreign pairing gate
 
 The operator's read-only KH audit after `--apply` confirmed:
