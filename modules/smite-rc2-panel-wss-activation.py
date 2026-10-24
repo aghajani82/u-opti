@@ -195,7 +195,7 @@ def image_and_mounts(obj,enabled):
     need(DESTINATIONS.issubset(mounts),"PANEL_SECURITY_MOUNTS_MISSING")
     need(all(mounts[d]["Type"]=="bind" for d in DESTINATIONS),
          "PANEL_VOLUME_TYPE_DRIFT")
-    return {d:(mounts[d]["Source"],mounts[d].get("RW")) for d in sorted(DESTINATIONS)}
+    return {d:[mounts[d]["Source"],mounts[d].get("RW")] for d in sorted(DESTINATIONS)}
 
 
 def env_metadata(obj):
@@ -421,6 +421,11 @@ def apply():
             print("DB_BACKUP_RETAINED=YES")
             print("TUNNEL_REAPPLY=NOT_PERFORMED")
         except Exception as exc:
+            # A backup failure must not attempt a destructive recovery: no
+            # Compose overlay has yet been written, and the original Panel
+            # has not been recreated. Keep PREPARED for operator examination.
+            if absent(OVERLAY):
+                raise Hold("PANEL_BACKUP_PREPARATION_HOLD_NO_RESTART") from exc
             try:restore(journal())
             except Exception as recovery:
                 raise Hold("CRITICAL_MANUAL_PANEL_RECOVERY_REQUIRED") from recovery
