@@ -186,6 +186,17 @@ print("SIGNED_FRP_INVENTORY=PASS")
 '''
 
 
+
+def local_probe(expected: str) -> None:
+    source = (
+        "from app.engine_inventory import engine_inventory; "
+        "doc=engine_inventory(); "
+        "print(doc['mode'] + ':' + doc['engines']['frp'])"
+    )
+    response = run(["docker", "exec", "smite-node", "python3",
+                    "-B", "-c", source])
+    require(response == "managed:" + expected, "LOCAL_INVENTORY_FAILED")
+
 def binary_attestation() -> None:
     result = json.loads(run(["docker", "exec", "smite-node",
                              "python3", "-B", "-c", BINARY_CHECK]))
@@ -206,21 +217,27 @@ def host_preflight(host: str) -> dict[str, str]:
     directory(CONFIG)
     regular(CANDIDATE, mode=0o600, limit=131072)
     identity = regular(IDENTITY, mode=0o600)
-    replay = regular(REPLAY, mode=0o600, limit=80 * 1024 * 1024)
+    regular(REPLAY, mode=0o600, limit=80 * 1024 * 1024)
+    replay_inode = REPLAY.lstat()
     directory(IDENTITY.parent, private=True)
     directory(REPLAY.parent, private=True)
     immutable_runtime(host)
     binary_attestation()
     tunnels = CONFIG / "tunnels.json"
     require(absent(tunnels), "SAVED_TUNNELS_REQUIRE_REVIEW")
-    return {"identity_sha256": sha(identity), "replay_sha256": sha(replay)}
+    return {"identity_sha256": sha(identity),
+            "replay_identity": str(replay_inode.st_dev) + ":" + str(replay_inode.st_ino)}
 
 
 def unchanged(expected: dict[str, str]) -> None:
     require(sha(regular(IDENTITY, mode=0o600)) == expected["identity_sha256"],
             "IDENTITY_CHANGED")
-    require(sha(regular(REPLAY, mode=0o600, limit=80 * 1024 * 1024))
-            == expected["replay_sha256"], "REPLAY_CHANGED")
+    # Signed reads legitimately append nonces to the persistent replay DB.
+    # Require identity of the same durable inode, not byte-for-byte contents.
+    regular(REPLAY, mode=0o600, limit=80 * 1024 * 1024)
+    st = REPLAY.lstat()
+    require(str(st.st_dev) + ":" + str(st.st_ino)
+            == expected["replay_identity"], "REPLAY_STORAGE_REPLACED")
     require(absent(CONFIG / "tunnels.json"), "TUNNELS_CHANGED")
 
 
@@ -256,12 +273,14 @@ def journal(host: str) -> dict:
     directory(JOURNAL_DIR, private=True)
     doc = json.loads(regular(JOURNAL, mode=0o600))
     require(set(doc) == {"schema", "host", "state", "identity_sha256",
-                         "replay_sha256", "manifest_sha256"}
+                         "replay_identity", "manifest_sha256"}
             and doc["schema"] == 1 and doc["host"] == host
             and doc["state"] == "PREPARED"
             and doc["manifest_sha256"] == sha(expected_manifest())
             and all(re.fullmatch(r"[a-f0-9]{64}", doc[k]) for k in
-                    ("identity_sha256", "replay_sha256")), "UNTRUSTED_JOURNAL")
+                    ("identity_sha256",)), "UNTRUSTED_JOURNAL")
+    require(re.fullmatch(r"[0-9]+:[0-9]+", doc["replay_identity"]),
+            "UNTRUSTED_JOURNAL")
     return doc
 
 
@@ -322,9 +341,10 @@ def verify(host: str) -> None:
             "MANIFEST_CHANGED")
     directory(MANIFEST_DIR, private=True)
     signed_probe("ready")
-    print("RC2_FRP_VERIFY=PASS_READ_ONLY")
+    print("RC2_FRP_VERIFY=PASS_SIGNED")
     print("NODE_RESTART=NO")
-    print("LIVE_CHANGES=NONE")
+    print("CONFIG_CHANGES=NONE")
+    print("SIGNED_PROBE=REPLAY_NONCE_RECORDED")
 
 
 def rollback(host: str) -> None:
@@ -347,8 +367,12 @@ def plan(host: str) -> None:
     host_preflight(host)
     require(absent(JOURNAL_DIR) and absent(MANIFEST_DIR) and
             absent(MANIFEST), "EXISTING_ENGINE_STATE")
-    signed_probe("not-installed")
-    print("RC2_FRP_PLAN=PASS_READ_ONLY")
+    # A signed inventory request consumes a durable replay nonce; keep
+    # the operator's --plan strictly read-only and defer signed proof to
+    # the separately authorized enrollment action.
+    local_probe("not-installed")
+    print("RC2_FRP_PLAN=PASS_LOCAL_READ_ONLY")
+    print("SIGNED_PROBE=PENDING_ENROLLMENT")
     print("NODE_RESTART=NO")
     print("LIVE_CHANGES=NONE")
 
