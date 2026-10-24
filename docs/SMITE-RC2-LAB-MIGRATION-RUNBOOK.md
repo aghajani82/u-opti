@@ -14,6 +14,38 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BK — IR read-only after-HOLD Trust Store recovered
+
+Operator ran a read-only root IR post-failure audit on 2026-10-24.
+All checks PASS: `TRUST_PERMISSIONS`, `TRUST_SCHEMA`,
+`IR_LOCAL_PIN_PRESERVED`, `FOREIGN_PIN_COUNT_SAFE`,
+`PANEL_DATABASE`, `NODE_KH_STILL_PENDING`,
+`PANEL_ORIGIN_READBACK`, `PANEL_RC2_HEALTH`.
+The authoritative observed state is `IR_TRUST_LOCAL_COUNT=1`,
+`IR_TRUST_FOREIGN_COUNT=0`, `FOREIGN_ORIGIN_STATE=ABSENT`,
+`IR_AFTER_HOLD_AUDIT=PASS_READ_ONLY`, `LIVE_CHANGES=NONE`.
+
+This establishes that no partial foreign trust record persisted,
+that the original IR trust record remains and can be read by RC.2
+Panel, and that the exact `node-kh` reservation still waits for
+pairing. It is **consistent with successful file restoration after
+the approval false-negative**; no need to delete/recreate the
+reservation, run manual rollback or reset identity/replay. The
+root cause source fix adds exact normalized origin/control comparison
+with `:443`. GitHub CI and independent signed registry check
+both SUCCESS on `793c5a2dcb8157bdbf4e4d759741961e43c2555e`.
+
+**Next step:** download into a **new** root-private staging
+directory pinned to commit
+`793c5a2dcb8157bdbf4e4d759741961e43c2555e` and
+verify all three Git blob hashes, then execute only
+`smite-rc2-ir-foreign-origin-approval.py --plan`.
+Operator must provide KH control prefix via interactive hidden
+input, never in logs/chat. A new explicitly authorized `--apply`
+requires that read-only plan PASS and must happen separately.
+Do not reuse the stale pre-fix staged executable, or print
+private trust JSON, UUIDs, pairing codes or HMAC credentials.
+
 ## NEXT-5.BJ — Origin approval HOLD after operator confirmation
 
 On 2026-10-24 the IR operator used the pinned three-file stage and
