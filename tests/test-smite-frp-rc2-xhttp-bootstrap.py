@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for one-time RC2 IR XHTTP Nginx snippet bootstrap."""
+"""Offline checks that obsolete single-vhost XHTTP apply remains fail-closed."""
 import importlib.util
 import os
 from pathlib import Path
@@ -39,23 +39,22 @@ class SnippetBootstrap(unittest.TestCase):
         bootstrap.before()
         self.assertFalse(self.path.exists())
 
-    def test_one_time_create_exact_header_and_mode(self):
-        bootstrap.apply()
-        self.assertEqual(self.path.read_bytes(),bootstrap.HEADER)
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode),0o644)
-        with self.assertRaisesRegex(bootstrap.Hold,"EXISTING_XHTTP_SNIPPET"):
+    def test_old_single_vhost_apply_is_disabled_for_dual_vhost(self):
+        with self.assertRaisesRegex(bootstrap.Hold,"DUAL_VHOST_INCLUDE_TRANSACTION_REQUIRED"):
             bootstrap.apply()
+        self.assertFalse(self.path.exists())
 
-    def test_nginx_test_failure_rolls_back_own_new_file(self):
-        with patch.object(bootstrap,"nginx_test",side_effect=bootstrap.Hold("NGINX_SYNTAX_CHECK_FAILED")):
-            with self.assertRaisesRegex(bootstrap.Hold,"XHTTP_BOOTSTRAP_FAILED_ROLLED_BACK"):
+    def test_disabled_apply_does_not_call_nginx_or_create_snippet(self):
+        with patch.object(bootstrap,"nginx_test",side_effect=AssertionError("unsafe invocation")), \
+             patch.object(bootstrap,"new_snippet",side_effect=AssertionError("unsafe write")):
+            with self.assertRaisesRegex(bootstrap.Hold,"DUAL_VHOST_INCLUDE_TRANSACTION_REQUIRED"):
                 bootstrap.apply()
         self.assertFalse(self.path.exists())
 
-    def test_signed_gate_failure_does_not_create_snippet(self):
+    def test_disabled_apply_cannot_bypass_failed_signed_gate(self):
         with patch.object(bootstrap.gate,"audit",
                           side_effect=bootstrap.gate.GateHold("SIGNED_WSS_NODE_DRIFT")):
-            with self.assertRaisesRegex(bootstrap.gate.GateHold,"SIGNED_WSS_NODE_DRIFT"):
+            with self.assertRaisesRegex(bootstrap.Hold,"DUAL_VHOST_INCLUDE_TRANSACTION_REQUIRED"):
                 bootstrap.apply()
         self.assertFalse(self.path.exists())
 
