@@ -29,8 +29,12 @@ smite_frp_wizard_status() {
     if [ "$role" = ir ]; then
         echo "Smite panel: $(smite_frp_std_running smite-panel && echo running || echo missing)"
     fi
-    if [ -f /opt/u-opti-smite/node/frp_gateway_config.py ]; then
-        echo "Standard FRP WSS compatibility: prepared"
+    if [ "$role" = ir ] && declare -F smite_frp_xhttp_enabled >/dev/null 2>&1 &&
+       smite_frp_xhttp_enabled; then
+        echo "Standard FRP WSS compatibility: prepared (trusted IR gateway)"
+    elif [ "$role" = kh ] &&
+         [ "$(docker exec smite-node python3 -B -c 'from app.frp_gateway_config import frp_standard_wss_host; print(frp_standard_wss_host() or "OFF")' 2>/dev/null)" = "ir.kolbe1.ir" ]; then
+        echo "Standard FRP WSS compatibility: prepared (Node runtime)"
     else
         echo "Standard FRP WSS compatibility: NOT PREPARED"
     fi
