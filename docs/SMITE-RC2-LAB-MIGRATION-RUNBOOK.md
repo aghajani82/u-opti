@@ -14,6 +14,39 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BD — operator identity and Replay inventory
+
+On 2026-10-24 the operator ran read-only artifact checks on **both**
+test hosts after RC.2 pre-admission:
+
+- **IR:** `IR_TRUST_STORE=READY`,
+  `IR_FOREIGN_ORIGIN_COUNT=0`, `IR_PANEL_DB=PRESENT`.
+- **KH:** `KH_SIGNED_IDENTITY=NOT_STAGED`,
+  `KH_REPLAY_DB=NOT_PROVISIONED`,
+  `KH_REPLAY_MARKER=NOT_PROVISIONED`.
+- **Both:** `FOREIGN_PAIRING=NOT_ACTIVATED`,
+  `LIVE_CHANGES=NONE`.
+
+The missing KH identity and Replay store are an expected unpaired
+initial state, not damaged state and not grounds for replay reset or
+unsigned legacy fallback. Zero IR approved Foreign origins does **not**
+establish whether the Panel already contains an admin-reserved pending
+foreign Node record. The exact next gate is a **read-only Panel DB check**
+for schema and foreign pending-reservation counts. No Node UUID,
+secret or pairing code should be echoed into logs or support chats.
+
+Intended stage order after all gates: (1) confirm Panel signed schema and
+reserve an exact foreign Node UUID/name through approved Panel workflow,
+(2) separately approve the specific KH TLS/443 control origin on IR
+without changing the local Node, (3) issue a short-lived one-time
+pairing code, (4) redeem on KH over verified HTTPS to write root-owned
+0600 identity once, (5) provision identity-bound Replay marker/DB once,
+(6) opt in to KH RC.2-only signed activation with a separately verified
+paused/strict/managed rollback and a true dual-direction HMAC check.
+Individual stages require independent authorization; the old RC.1
+wizard option 7 must not be used against KH RC.2. Production release
+and stable merge remain disallowed.
+
 ## NEXT-5.BC — dual-host RC.2 foreign admission PASS and isolated code lane
 
 Operator independently ran `smite-rc2-foreign-pairing-admission.py`
