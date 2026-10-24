@@ -90,6 +90,22 @@ class NodeWssTrial(unittest.TestCase):
             self.addCleanup(patcher.stop)
         def fake_lock():
             return os.open(self.lockfile, os.O_RDWR | os.O_CREAT, 0o600)
+        def fixture_dir(path, private=False):
+            info = path.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                raise module.Hold("UNTRUSTED_DIRECTORY")
+            bits = stat.S_IMODE(info.st_mode)
+            if bits != 0o700 if private else bool(bits & 0o022):
+                raise module.Hold("WRONG_DIRECTORY_MODE")
+        def fixture_read(path, limit=1024*1024, mode=None):
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or path.is_symlink():
+                raise module.Hold("UNTRUSTED_FILE")
+            if mode is not None and stat.S_IMODE(info.st_mode) != mode:
+                raise module.Hold("WRONG_FILE_MODE")
+            if info.st_size > limit:
+                raise module.Hold("FILE_TOO_LARGE")
+            return path.read_bytes()
         def load(name, filename):
             if filename == "smite-rc2-frp-wss-plan.py":
                 return plan
@@ -97,6 +113,7 @@ class NodeWssTrial(unittest.TestCase):
                 return Helper(self)
             raise AssertionError(filename)
         for name, value in (("lock", fake_lock), ("load", load),
+                            ("directory", fixture_dir), ("trusted", fixture_read),
                             ("inspect", self.runtime), ("run", self.fake_run),
                             ("wait_health", self.wait_health),
                             ("signed_probe", self.signed_probe)):
