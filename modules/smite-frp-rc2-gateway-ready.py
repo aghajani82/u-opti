@@ -87,7 +87,8 @@ def get_node() -> dict:
 
 
 def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
-          *, enforce_host: bool = True) -> None:
+          *, enforce_host: bool = True,
+          allow_missing_snippet: bool = False) -> None:
     if enforce_host:
         require(os.geteuid() == 0
                 and os.uname().nodename.split(".")[0].lower() == "ir",
@@ -152,20 +153,37 @@ def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
             "NODE_SIGNED_MOUNTS_DRIFT")
 
     backend = read_root_file(p["backend"], max_bytes=131072).decode("utf-8")
-    snippet = read_root_file(p["snippet"], max_bytes=131072).decode("utf-8")
     require(backend.startswith("# Managed by U-OPTI - Smite Panel TLS backend\n")
             and backend.count("server_name ir.kolbe1.ir;") == 1
             and backend.count("location = /~!frp {") == 1
             and backend.count("    include /etc/nginx/u-opti-smite-frp-xhttp.conf;") == 1,
             "IR_WSS_NGINX_BACKEND_DRIFT")
-    require(snippet.startswith("# Managed by U-OPTI - Standard FRP XHTTP\n"),
-            "IR_XHTTP_SNIPPET_UNTRUSTED")
+    # A brand-new RC2 XHTTP gateway has a pre-existing Nginx include that
+    # points at the *not-yet-created* managed snippet. Permit this exact
+    # absence ONLY for an explicit read-only bootstrap check. The normal
+    # readiness gate used by sync/timer remains strict and fail-closed.
+    snippet_path = p["snippet"]
+    if (allow_missing_snippet and not snippet_path.exists()
+            and not snippet_path.is_symlink()):
+        read_root_dir(snippet_path.parent)
+    else:
+        snippet = read_root_file(snippet_path, max_bytes=131072).decode("utf-8")
+        require(snippet.startswith("# Managed by U-OPTI - Standard FRP XHTTP\n"),
+                "IR_XHTTP_SNIPPET_UNTRUSTED")
 
 
 def main() -> int:
     try:
-        audit()
-        print("RC2_IR_FRP_XHTTP_GATE=PASS_READ_ONLY")
+        import argparse
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--bootstrap-preflight", action="store_true",
+                            help="Check trusted RC2 state before creation of the missing Nginx snippet")
+        args = parser.parse_args()
+        audit(allow_missing_snippet=args.bootstrap_preflight)
+        if args.bootstrap_preflight:
+            print("RC2_IR_FRP_XHTTP_BOOTSTRAP=PASS_READ_ONLY")
+        else:
+            print("RC2_IR_FRP_XHTTP_GATE=PASS_READ_ONLY")
         print("SIGNED_WSS_NODE=VERIFIED")
         print("STANDARD_FRP_GATEWAY=VERIFIED")
         print("NGINX_FRP_INCLUDE=VERIFIED")
