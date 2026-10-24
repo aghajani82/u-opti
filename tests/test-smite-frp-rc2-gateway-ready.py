@@ -74,7 +74,7 @@ class RC2GatewayContract(unittest.TestCase):
 
     def test_legacy_gateway_file_not_fabricated(self):
         shell=ROUTES.read_text()
-        self.assertIn('if [ -f "$SMITE_FRP_XHTTP_HELPER" ]; then',shell)
+        self.assertIn('if [ -f "${SMITE_OVERLAY_DIR:-/opt/u-opti-smite}/node/frp_gateway_config.py" ]; then',shell)
         self.assertIn('python3 -B "$SMITE_FRP_RC2_READY_SCRIPT" >/dev/null',shell)
         self.assertIn('smite_frp_xhttp_stage_path()',shell)
         self.assertNotIn('touch "$SMITE_FRP_XHTTP_HELPER"',shell)
