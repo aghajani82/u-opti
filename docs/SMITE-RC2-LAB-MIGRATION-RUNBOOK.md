@@ -14,6 +14,44 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BJ — Origin approval HOLD after operator confirmation
+
+On 2026-10-24 the IR operator used the pinned three-file stage and
+`UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES`
+`UOPTI_SMITE_IR_RC2_ORIGIN_APPROVAL=YES`
+with `smite-rc2-ir-foreign-origin-approval.py --apply` and typed the
+exact interactive confirmation `APPROVE-KH-ORIGIN`. All prep checks
+passed (`IR_RC2_PANEL_ADMISSION`, `NODE_KH_RESERVATION`,
+`KH_PRIVATE_TLS443_READINESS`). The wrapper then emitted
+`IR_FOREIGN_ORIGIN_APPROVAL=HOLD` and
+`DO_NOT_REPEAT_AFTER_PARTIAL_FAILURE=YES` without an underlying cause.
+**Do not assume success, nor blindly retry --apply.**
+No Pairing code, credential redemption, Replay or KH activation is
+known to have occurred.
+
+**Source-rooted likely regression:** reviewed Smite Panel RC.2
+`approved_node` normalizes the HTTPS gateway `origin` to
+`https://kh.kolbe1.ir:443` and the `control_url` to
+`https://kh.kolbe1.ir:443/smite-node/<private-prefix>`. The
+existing U-OPTI approval helper saved the operator-validated control
+URL without explicit default port and then compared raw string
+`p["control_url"] == sys.argv[3]`; this rejects an otherwise
+authorized, equivalent normalized Panel read-back and triggers its
+restoration path.
+
+The draft controller has been corrected to compare BOTH exact
+canonical `p["origin"]` and `p["control_url"]` against reviewed
+normalized origin/path. Its IR wrapper pinned source Git blob SHA1
+has been advanced to the corrected controller, and the old
+foreign approval unit test now reproduces the explicit :443
+read-back regression. This is **source-only** pending CI and
+separate operator approval; no command may be rerun on IR until
+a **read-only after-HOLD trust-state forensic audit** checks
+the preserved Iranian trusted record, number/status of foreign
+origin records, private file ownership/permissions, pending DB
+reservation, and unchanged Panel image. In particular, do not
+generate a second pairing code or perform destructive rollback.
+
 ## NEXT-5.BG/BH — verified reservation, foreign Origin read-only readiness
 
 Operator 2026-10-24 independently verified the first admin-reserved
