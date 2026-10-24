@@ -14,6 +14,49 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BG/BH — verified reservation, foreign Origin read-only readiness
+
+Operator 2026-10-24 independently verified the first admin-reserved
+`node-kh` database row: `FOREIGN_NODE_COUNT=1`,
+`NODE_NAME=node-kh`, `NODE_STATUS=PENDING`,
+`RESERVATION_MODE=SIGNED`, `IR_FOREIGN_RESERVATION=PASS`,
+`LIVE_CHANGES=NONE`. The pairing code has not been issued.
+
+Operator's IR pre-approval review confirmed:
+`PANEL_DATABASE=PASS`, `PAIRING_SCHEMA=PASS`,
+`SINGLE_FOREIGN_RESERVATION=PASS`, `NODE_KH_PENDING=PASS`,
+`TRUST_FILE_SECURITY=PASS`, `TRUST_SCHEMA=PASS`,
+`TRUST_BASELINE=PASS`, `PANEL_RC2_RUNTIME=PASS`,
+`TRUST_STORE_MOUNT=PASS`, `IR_TO_KH_PUBLIC_TLS443=PASS`,
+`IR_FOREIGN_ORIGIN_PREFLIGHT=PASS`,
+`ORIGIN_APPROVAL=NOT_APPLIED`, `PAIRING_CODE=NOT_CREATED`,
+`LIVE_CHANGES=NONE`.
+The public TLS check confirms reachability, not the exact private
+KH control path. **Foreign trust remains unmodified.**
+
+A new draft-only
+`modules/smite-rc2-ir-foreign-origin-approval.py` provides separate
+`--plan` and `--apply`. Both require root on IR, interactive
+terminal, pinned-source SHA1 verification for the controller and
+read-only admission, exact pending `node-kh` and existing signed
+IR local-node trusted record, exact reviewed RC.2 Panel transport,
+and the operator-entered KH HTTPS/443 control prefix. The private
+prefix is obtained on KH from its locally root-owned gateway metadata
+and must be copied **only between operator-controlled terminals**,
+not posted to this PR or support chat. IR receives it by hidden
+`getpass` prompt, validates exact host/path, performs CA-validated
+no-proxy/no-redirect readiness GET against the exact prefix and
+does not display the prefix or foreign Node ID.
+
+`--plan` makes zero live changes. A future **separate** `--apply`
+also requires both `UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES` and
+`UOPTI_SMITE_IR_RC2_ORIGIN_APPROVAL=YES`, plus interactive
+`APPROVE-KH-ORIGIN` confirmation; only then it delegates the
+additive origin write and read-back/rollback to the previously
+reviewed pairing controller. It must not issue a code, redeem an
+identity, provision Replay or activate the KH Node. Stop on any
+HOLD/CRITICAL. No production approval.
+
 ## NEXT-5.BE — foreign Node reserve database gate PASS, next name-only UI step
 
 Operator IR read-only query reports `PANEL_SIGNED_SCHEMA=PASS`,
