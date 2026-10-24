@@ -97,6 +97,7 @@ class EnrollmentTrial(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(mod.MANIFEST_DIR.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(mod.MANIFEST.stat().st_mode), 0o600)
         self.assertEqual(mod.journal("kh")["replay_identity"], self.replay_key())
+        self.assertEqual(mod.journal("kh")["state"], "COMMITTED")
         mod.verify("kh")
         self.assertEqual(self.calls[-1], "ready")
         mod.rollback("kh")
@@ -153,6 +154,36 @@ class EnrollmentTrial(unittest.TestCase):
             mod.rollback("kh")
         self.assertTrue(mod.JOURNAL.is_file())
         self.assertTrue(mod.MANIFEST.is_file())
+
+    def test_interrupted_after_journal_is_recoverable_without_retry(self):
+        proof = {
+            "identity_sha256": hashlib.sha256(self.identity.read_bytes()).hexdigest(),
+            "replay_identity": self.replay_key(),
+        }
+        mod.write_journal("kh", proof)
+        self.assertEqual(mod.journal("kh")["state"], "PREPARED")
+        with self.assertRaisesRegex(mod.Hold, "PREVIOUS_ENROLLMENT_PRESENT"):
+            mod.enroll("kh")
+        mod.recover("kh")
+        self.assertFalse(mod.JOURNAL_DIR.exists())
+        self.assertFalse(mod.MANIFEST.exists())
+        self.assertEqual(self.calls, ["not-installed"])
+
+    def test_interrupted_after_manifest_is_recovered_and_committed_is_protected(self):
+        proof = {
+            "identity_sha256": hashlib.sha256(self.identity.read_bytes()).hexdigest(),
+            "replay_identity": self.replay_key(),
+        }
+        mod.write_journal("kh", proof)
+        mod.create_private(mod.MANIFEST_DIR)
+        mod.create_file(mod.MANIFEST, mod.expected_manifest())
+        mod.recover("kh")
+        self.assertFalse(mod.MANIFEST_DIR.exists())
+        self.assertFalse(mod.JOURNAL_DIR.exists())
+        mod.enroll("kh")
+        with self.assertRaisesRegex(mod.Hold, "USE_ROLLBACK_FOR_COMMITTED"):
+            mod.recover("kh")
+        self.assertTrue(mod.MANIFEST.exists())
 
     def test_missing_engine_manifest_must_not_fake_ready(self):
         mod.enroll("kh")
