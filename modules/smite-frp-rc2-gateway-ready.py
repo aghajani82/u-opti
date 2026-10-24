@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -26,6 +27,7 @@ NODE_FILES = {
 WSS_OVERLAY = (b"services:\n  smite-node:\n    environment:\n"
                b"      - SMITE_FRP_STANDARD_WSS=1\n")
 ORIGIN = "/etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
+DEDICATED = "/etc/nginx/conf.d/u-opti-smite-panel-kh-wss.conf"
 SNIPPET = "/etc/nginx/u-opti-smite-frp-xhttp.conf"
 STATE = "/etc/u-opti/smite/state.env"
 JOURNAL = "/var/lib/u-opti/smite-rc2-frp-wss-node/ir/record.json"
@@ -87,15 +89,16 @@ def get_node() -> dict:
 
 
 def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
-          *, enforce_host: bool = True,
-          allow_missing_snippet: bool = False) -> None:
+          *, enforce_host: bool = True, allow_missing_snippet: bool = False,
+          nginx_config: str | None = None) -> None:
     if enforce_host:
         require(os.geteuid() == 0
                 and os.uname().nodename.split(".")[0].lower() == "ir",
                 "IR_ROOT_ONLY")
     p = paths or {
         "state": Path(STATE), "backend": Path(ORIGIN),
-        "snippet": Path(SNIPPET), "journal": Path(JOURNAL),
+        "dedicated": Path(DEDICATED), "snippet": Path(SNIPPET),
+        "journal": Path(JOURNAL),
         "overlay": Path(OVERLAY),
         "state_root": Path(JOURNAL).parent.parent,
         "journal_dir": Path(JOURNAL).parent,
@@ -153,15 +156,77 @@ def audit(paths: dict[str, Path] | None = None, runtime: dict | None = None,
             "NODE_SIGNED_MOUNTS_DRIFT")
 
     backend = read_root_file(p["backend"], max_bytes=131072).decode("utf-8")
+    dedicated = read_root_file(p["dedicated"], max_bytes=131072).decode("utf-8")
+    # In RC2 these are TWO distinct TLS servers. The signed KH-WSS vhost
+    # is isolated on 8444; the 8443 panel server must not duplicate /~!frp.
     require(backend.startswith("# Managed by U-OPTI - Smite Panel TLS backend\n")
             and backend.count("server_name ir.kolbe1.ir;") == 1
-            and backend.count("location = /~!frp {") == 1
-            and backend.count("    include /etc/nginx/u-opti-smite-frp-xhttp.conf;") == 1,
-            "IR_WSS_NGINX_BACKEND_DRIFT")
-    # A brand-new RC2 XHTTP gateway has a pre-existing Nginx include that
-    # points at the *not-yet-created* managed snippet. Permit this exact
-    # absence ONLY for an explicit read-only bootstrap check. The normal
-    # readiness gate used by sync/timer remains strict and fail-closed.
+            and len(re.findall(r"(?m)^\s*listen\s+127\.0\.0\.1:8443\s+ssl\s*;",
+                               backend)) == 1
+            and backend.count("proxy_pass http://127.0.0.1:8000;") == 1
+            and backend.count("    location / {\n") == 1
+            and not re.search(r"(?m)^\s*location\s+(?:=\s*)?/~!frp\s*\{",
+                              backend),
+            "IR_PANEL_8443_BACKEND_DRIFT")
+
+    xhttp_include = "    include /etc/nginx/u-opti-smite-frp-xhttp.conf;\n"
+    if allow_missing_snippet:
+        require(backend.count(xhttp_include) == 0
+                and "u-opti-smite-frp-xhttp.conf;" not in backend,
+                "XHTTP_BACKEND_NOT_PRISTINE")
+    else:
+        require(backend.count(xhttp_include) == 1,
+                "IR_XHTTP_INCLUDE_MISSING_OR_DUPLICATED")
+
+    # Dedicated KH-WSS is already carrying the IR hostname for allowlisted
+    # KH-source clients; never attempt to insert this route into 8443.
+    require(len(re.findall(r"(?m)^\s*server\s*\{", dedicated)) == 1
+            and len(re.findall(r"(?m)^\s*listen\s+127\.0\.0\.1:8444\s+ssl\s*;",
+                               dedicated)) == 1
+            and len(re.findall(r"(?m)^\s*server_name\s+ir\.kolbe1\.ir\s*;",
+                               dedicated)) == 1
+            and len(re.findall(r"(?m)^\s*location\s+=\s+/~!frp\s*\{",
+                               dedicated)) == 1
+            and len(re.findall(r"(?m)^\s*proxy_pass\s+http://127\.0\.0\.1:7000\s*;",
+                               dedicated)) == 1
+            and re.search(r"(?m)^\s*proxy_http_version\s+1\.1\s*;",
+                          dedicated)
+            and re.search(r"(?mi)^\s*proxy_set_header\s+Upgrade\s+\$http_upgrade\s*;",
+                          dedicated)
+            and re.search(r'(?mi)^\s*proxy_set_header\s+Connection\s+(?:"upgrade"|\$connection_upgrade)\s*;',
+                          dedicated),
+            "IR_KH_WSS_8444_DRIFT")
+
+    # Verify Nginx's LIVE loaded topology without printing addresses,
+    # certificates, or environment values. A 502 WS probe alone does not
+    # establish the exact SNI/source allowlist route.
+    if nginx_config is None:
+        result = subprocess.run(["nginx", "-T"], capture_output=True,
+                                text=True, timeout=30, check=True)
+        nginx_config = result.stdout
+    require(len(nginx_config) < 4 * 1024 * 1024,
+            "NGINX_TOPOLOGY_TOO_LARGE")
+    wss_matches = re.findall(
+        r"(?m)^\s*location\s+=\s+/~!frp\s*\{", nginx_config)
+    require(len(wss_matches) == 1
+            and "127.0.0.1:8443;" in nginx_config
+            and 'map "$ssl_preread_server_name|$remote_addr" $uopti_frp_canary_backend {'
+            in nginx_config
+            and re.search(r"(?m)^\s*default\s+\$uopti_smite_backend\s*;",
+                          nginx_config)
+            and re.search(r"(?m)^\s*proxy_pass\s+\$uopti_frp_canary_backend\s*;",
+                          nginx_config),
+            "IR_NGINX_STREAM_LAYOUT_DRIFT")
+    rows = re.findall(
+        r'(?m)^\s*"ir\.kolbe1\.ir\|((?:\d{1,3}\.){3}\d{1,3})"\s+127\.0\.0\.1:8444\s*;',
+        nginx_config)
+    require(len(rows) == 1, "KH_SOURCE_ALLOWLIST_MAPPING_DRIFT")
+    import ipaddress
+    require(isinstance(ipaddress.IPv4Address(rows[0]), ipaddress.IPv4Address),
+            "INVALID_KH_SOURCE_IP")
+
+    # An absent managed snippet is supported ONLY by the explicit, no-write
+    # bootstrap lane. Regular runtime and route sync must refuse absence.
     snippet_path = p["snippet"]
     if (allow_missing_snippet and not snippet_path.exists()
             and not snippet_path.is_symlink()):
