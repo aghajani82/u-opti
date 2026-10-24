@@ -14,6 +14,54 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BC — dual-host RC.2 foreign admission PASS and isolated code lane
+
+Operator independently ran `smite-rc2-foreign-pairing-admission.py`
+from pinned, Git-blob-verified source commit
+`9e69d08c2972627ac3e996bd73a52bdeb74e1cf8`:
+
+- **IR**: `IR_PANEL_RC2_SIGNED=PASS`,
+  `IR_LOCAL_NODE_RC1=UNCHANGED`,
+  `IR_TRUST_MOUNT=READ_ONLY`,
+  `IR_FOREIGN_PATH_HMAC_POLICY=PASS`, `IR_HTTPS_STATUS=PASS`.
+- **KH**: `KH_NODE_RC2_PAUSED=PASS`,
+  `KH_GATEWAY_TLS443=PASS`, `KH_SANAEI_XHTTP=UNCHANGED`,
+  `KH_TO_IR_HTTPS=PASS`,
+  `KH_FOREIGN_SIGNED_RUNTIME=NOT_ACTIVATED`.
+- Both: `RC2_FOREIGN_PAIRING_ADMISSION=PASS_READ_ONLY`,
+  `FOREIGN_PAIRING=NOT_ACTIVATED`, `LIVE_CHANGES=NONE`.
+  These are two independently executed local read-only audits, not a
+  successfully enrolled cross-host HMAC pair.
+
+**Draft-only source correction:** legacy pairing's
+`--activate-foreign-node-field-trial` continues to use original
+immutable RC.1 gate. A separately named
+`--activate-foreign-node-rc2-field-trial` option has been added to
+`modules/smite-node-pairing.py`; it is NOT part of the deployed server
+wizard, and MUST NOT be executed at this stage. It requires the
+pre-existing root-only Field Trial gate plus distinct explicit
+`UOPTI_SMITE_RC2_FOREIGN_PAIRING_FIELD_TRIAL=YES` opt-in. Before any
+runtime mutation it reruns the exact immutable RC.2 dual-host
+read-only admission **on KH**, checks that the KH Node digest equals
+the approved RC.2 digest, KH Node base Compose SHA256 exactly equals
+`8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e`,
+effective Compose still has `paused + strict + managed` auth, the
+running Node is healthy, and HTTPS/443 Gateway returns the required
+readiness document. The IR approval guard now explicitly requires
+the reviewed immutable RC.2 Panel image rather than any other
+well-formed image digest.
+
+The activation algorithm retains its signed HMAC + Replay checks,
+foreign Gateway signature validation, and paused-mode rollback.
+Recreate command was limited to `smite-node` with `--no-deps` and
+`--pull never`. Offline tests cover distinct RC.1/RC.2 gates,
+missing consent and missing independent admission, immutable image/
+Compose drift, rejection of unreviewed IR Panel images and no
+Sanaei/Panel changes from KH. A green CI is **not** real Pairing proof;
+identity reservation, exact foreign trust approval, one-time pairing
+credential, replay history and failure-recovery procedure still need
+operator-driven staged checks and a separate explicit live decision.
+
 ## NEXT-5.BA/BB — independent Panel transport and version-aware admission
 
 **Operator result (IR, 2026-10-24):**
