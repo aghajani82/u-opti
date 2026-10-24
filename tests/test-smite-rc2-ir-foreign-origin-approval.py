@@ -124,7 +124,7 @@ class OriginTests(unittest.TestCase):
                 "version":1,"nodes":{"local":{"role":"iran"},
                   "foreign":{"role":"foreign","node_name":"node-kh"}}
             }).encode()
-            with self.assertRaisesRegex(origin.Hold, "ORIGIN_BASELINE_DRIFT"):
+            with self.assertRaisesRegex(origin.Hold, "TRUST_BASELINE_DRIFT"):
                 origin.reserved_node(pairing)
 
 
