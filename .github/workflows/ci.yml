@@ -232,6 +232,8 @@ jobs:
           python3 -m py_compile modules/smite-frp-rc2-gateway-ready.py tests/test-smite-frp-rc2-gateway-ready.py
           bash -n modules/smite-frp-xhttp.sh
           python3 -B tests/test-smite-frp-rc2-gateway-ready.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-bootstrap.py tests/test-smite-frp-rc2-xhttp-bootstrap.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-bootstrap.py -v
 
       - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
         shell: bash
