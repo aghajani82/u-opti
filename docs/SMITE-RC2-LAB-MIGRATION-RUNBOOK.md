@@ -14,6 +14,45 @@ checks or collecting snapshots is **not** authorization to alter the hosts or
 to release U-OPTI stable. Always label interactive commands with their target
 server role (IR / KH / BOTH).
 
+## NEXT-5.BN/BO — independent IR trust audit PASS; KH redemption preparation next
+
+NEXT-5.BN operator evidence dated 2026-10-24: independent IR
+read-only audit PASS for the exact root-private `0700` trust
+directory and `0600` origins JSON, **exactly two** approved pins
+(`IR_TRUST_LOCAL_COUNT=1` and `IR_TRUST_FOREIGN_COUNT=1`),
+local IR localhost loopback origin/control preserved, foreign
+`node-kh` canonical HTTPS/443 path verified, foreign pin Node
+ID equals the single `pending`/`reserved_for_pairing` DB row,
+both entries accepted by `approved_node()` inside the running
+healthy RC.2 Panel, and its trust mount unchanged. Summary:
+`IR_ORIGIN_POSTAPPLY=PASS_READ_ONLY`,
+`PAIRING_ACTIVATION=NOT_PERFORMED`, `LIVE_CHANGES=NONE`.
+Foreign Origin trust step is now **CLOSED/PASS**.
+**Never repeat origin --apply**; no recovery is needed.
+
+NEXT-5.BO (not yet executed): confirm **KH read-only**
+Node v2.0.0-rc.2 immutable digest/Compose SHA256, `foreign`
+managed role/name `node-kh`, retained RC.1 state, `paused`
+Panel auth / `strict` Agent auth / `managed` inventory, its
+root-owned gateway metadata and private control path, healthy
+Node, unchanged empty root-private identity and replay state,
+and CA-validated KH -> IR HTTPS/443 reachability. Report
+only fixed status/counts, no secrets, Node UUIDs, or
+private control-prefix details. Do NOT issue a short-lived
+one-time code until the KH security enrollment client is
+reviewed/staged and the operator is ready to redeem
+immediately in an interactive private KH terminal.
+
+Once these gates pass, the approved operator workflow is:
+authenticated IR Panel Foreign Nodes `node-kh`
+`Pair (preview)` generates a single 10-minute code;
+operator transfers the code and reserved Node ID privately to
+KH, enters code in a hidden prompt into the reviewed Node
+redeemer (once only), then validates root-owned `0600` saved
+identity; **no KH Signed runtime activation or replay
+provisioning as part of code redemption**. Signed activation
+and rollback require their own later consent and checks.
+
 ## NEXT-5.BM — foreign KH Origin pinned on IR, read-back pending
 
 Operator 2026-10-24 explicitly authorized and executed corrected
