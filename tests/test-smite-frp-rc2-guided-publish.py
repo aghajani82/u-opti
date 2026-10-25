@@ -162,7 +162,9 @@ class TestRC2GuidedPublisher(unittest.TestCase):
         self.assertNotIn("docker compose up",contents)
         self.assertNotIn("docker compose down",contents)
         self.assertNotIn("systemctl restart",contents)
-        self.assertIn("PUBLISH-IR-FRP-",contents)
+        self.assertIn("code=f",contents)
+        self.assertIn("-IR-FRP-{port}",contents)
+        self.assertIn("INTERACTIVE_TTY_REQUIRED",contents)
         self.assertIn("ENGINE_LOCK_BUSY",contents)
 
 
