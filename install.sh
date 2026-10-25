@@ -96,6 +96,7 @@ MODULES=(
     "smite-gateway.sh"
     "smite-frp-xhttp.sh"
     "smite-frp-xhttp-paths.py"
+    "smite-frp-rc2-guided-publish.py"
     "smite-frp-wizard.sh"
     "smite-profile-first.py"
     "smite-profile-first-menu.sh"
@@ -245,6 +246,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
         smite-frp-xhttp-paths.py) LABEL="Smite FRP Custom XHTTP Path Registry" ;;
+        smite-frp-rc2-guided-publish.py) LABEL="Signed RC2 FRP XHTTP Guided Publisher" ;;
         smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
         smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
@@ -291,6 +293,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_smite_gateway_menu()' "$TEMP_DIR/smite-gateway.sh" || \
    ! grep -q 'smite_frp_wizard_menu()' "$TEMP_DIR/smite-frp-wizard.sh" || \
    ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
+   ! grep -q 'def inspection(' "$TEMP_DIR/smite-frp-rc2-guided-publish.py" || \
    ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
    ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
    ! grep -q 'def validate(' "$TEMP_DIR/smite-profile-first.py" || \
