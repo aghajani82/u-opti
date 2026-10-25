@@ -71,3 +71,19 @@ Smite [draft PR #20](https://github.com/aghajani82/Smite/pull/20), branch `featu
 Observed IR diagnostic: Signed Agent `POST /api/agent/tunnels/apply` HTTP 200=1 and HTTP 500=2, 401/403/409/503=0, FRPS bind collision regex count=4 within recent uncorrelated 3-hour log window. This strongly supports duplicate bind as the failure category, although per-attempt ID correlation was not performed.
 
 **Unfinished, release-blocking**: trusted live owner/lease validation; signed client-only child creation and removal; durable allocation/recovery concurrency and restart; simple UI explicit owner selection; isolated IR/KH dual-port field trial; gated /49328/sso Nginx publisher; owner-approved merge. Do NOT use a simulated shared-parent marker with the old FRP Apply path, and do NOT Reapply All.
+
+
+## NEXT-6.BS development result — 2026-10-25
+
+Smite [draft PR #20](https://github.com/aghajani82/Smite/pull/20) at commit `28cca9c3318ca2d2344b53f4d2789f131bd9f8d2` now contains the **code-level shared-FRPS child lifecycle**, on the branch only, **not deployed**:
+
+- Strict `GET /api/agent/frp/owners` signed-only endpoint checks owner FrpAdapter process PID against `127.0.0.1:7000` LISTEN and includes remote proxy listeners. `NodeClient.get_verified_frps_owners` uses trusted origin, authenticated GET, no legacy fallback.
+- `FrpProxyLease` table enforces `UNIQUE(iran_node_id, remote_port)` for shared child ports. Owner 45121 remains independent, active, and untouched; child spec `shared_frps_owner` is explicit and has no stored owner token.
+- `panel/app/frp_shared_lifecycle.py` validates live owner, IR+KH pair, owner's token, unique single TCP port 127.0.0.1 target; dispatches **only a signed KH frpc client Apply**. It never does a second FRPS server Apply to IR. Failed/uncertain client Apply retains its lease. A successful FRPC start remains `pending` until the signed IR owner endpoint confirms the remote port listener. `verify-proxy` updates status with no FRP start/stop. Remove calls only KH signed Remove, releases lease after success, never deletes FRPS owner.
+- Smite operator Add Tunnel UI allows choosing existing FRPS; per-row `Verify` button; Reapply All with shared children HOLD; owner edits/deletion and FRPS collision safety guarded before destructive operations, including AdapterManager.
+- Sanitized signed Node HTTP status replaces generic undiagnosable error; no response bodies or tokens echoed.
+- New dedicated GitHub Action `Smite RC2 FRPS Singleton Admission (offline)` **success** at latest observed head. All 12 workflows listed, 11 were completed/success and one Stage15 image workflow still running as this entry was authored. Offline temporary SQLite shared child Create/Reapply/Remove/Pending→Active Verify tests PASS in that dedicated workflow.
+
+**Important unresolved field preflight:** Current Smite legacy error row `trial-frp-49328` persists from an independent FRPS attempt. New fail-closed lease/proxy admission can block reuse of its port until safe reconciliation and owner-approved cleanup/adoption. Do NOT silently delete, overwrite, or repurpose it. An external copy of the tested Node image is not yet approved. No live VPS updates, no Main merges, no U-OPTI route /49328/sso publish, and no Grandoptical changes.
+
+**Next release gate:** complete all CI and security review; verify exact immutable image digests; separate IR/KH snapshot baseline; safe reconciliation of legacy error 49328 without touching 45121; staged signed shared child trial; verify IR loopback listener 49328; only then guarded Nginx XHTTP publish and real user traffic.
