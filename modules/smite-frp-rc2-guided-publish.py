@@ -215,7 +215,7 @@ def inspection(port):
     saved=registry.get(str(port))
     need(isinstance(saved,str),"SELECTED_PORT_NOT_SAVED")
     chk=execute(["python3","-B",str(HELPER),"check",str(port),saved])
-    need(saved.startswith(f"/{port}/") and not saved.endswith("/"),
+    need(1<len(saved)<=255 and saved.startswith("/") and not saved.endswith("/"),
          "INVALID_SELECTED_PATH")
     current=trusted_read(SNIPPET,131072,0o644)
     new=state_render()
@@ -269,7 +269,7 @@ def load_record(port):
          and set(doc)=={"schema","state","port","path","before","after"}
          and doc["schema"]==1 and doc["port"]==port
          and doc["state"] in ("PREPARED","COMMITTED","ROLLED_BACK")
-         and re.fullmatch(r"/[0-9]+/[A-Za-z0-9_/-]+",doc["path"])
+         and re.fullmatch(r"/[A-Za-z0-9_/-]+",doc["path"])
          and all(re.fullmatch(r"[a-f0-9]{64}",doc[k]) for k in ("before","after")),
          "INVALID_PUBLISH_JOURNAL")
     backup=trusted_read(root/"snippet.before.conf",131072,0o600)
