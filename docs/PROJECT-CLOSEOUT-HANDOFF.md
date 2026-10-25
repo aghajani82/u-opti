@@ -5,7 +5,9 @@
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
 
-> **Phase 1–2 update (2026-10-25):** The existing beginner FRP wizard now has a guarded **4) PUBLISH** action for a dynamic already-applied port; installer/updater packaging and offline CI tests added. It preserves existing XHTTP routes, uses signed gate, explicit shared lock and private rollback journal; does **not** enable timer or touch current IR/KH. Canonical new acceptance checklist: [SMITE-RC2-FRP-XHTTP-WIZARD-ACCEPTANCE.md](SMITE-RC2-FRP-XHTTP-WIZARD-ACCEPTANCE.md). Provider snapshots and second-port live trial remain operator-pending. PR #48 stays draft; no main merge.\n\n## 2026-10-25 — IR/KH signed RC2 FRP/XHTTP **real-client success** (LAB ONLY)
+> **Phase 1–2 update (2026-10-25):** The existing beginner FRP wizard now has a guarded **4) PUBLISH** action for a dynamic already-applied port; installer/updater packaging and offline CI tests added. It preserves existing XHTTP routes, uses signed gate, explicit shared lock and private rollback journal; does **not** enable timer or touch current IR/KH. Canonical new acceptance checklist: [SMITE-RC2-FRP-XHTTP-WIZARD-ACCEPTANCE.md](SMITE-RC2-FRP-XHTTP-WIZARD-ACCEPTANCE.md). Provider snapshots and second-port live trial remain operator-pending. PR #48 stays draft; no main merge.
+
+## 2026-10-25 — IR/KH signed RC2 FRP/XHTTP **real-client success** (LAB ONLY)
 
 **Operator verified an actual VLESS/XHTTP client connection through IR public domain `ir.kolbe1.ir:443` to the KH 3x-ui inbound over the signed FRP/WSS single-443 gateway.** The existing Smite `trial-frp-45121` tunnel was reapplied once (no duplicate created), then the client connected successfully. **This confirms functional lab traffic, not persistence through reboot, novice install UX, or release readiness.**
 
