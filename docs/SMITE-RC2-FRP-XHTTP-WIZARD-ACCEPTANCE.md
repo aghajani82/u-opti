@@ -40,6 +40,8 @@ The existing Standard FRP Beginner Wizard is extended with a new **4) PUBLISH** 
 
 **Known limitation:** The new module is deliberately a **manual per-port opt-in publisher** for signed RC2; it does NOT yet implement startup/after-Reapply self-healing, automatic daemon/timer reconciliation, fresh signed image distribution, or all-provider portability. Those must pass separate reboot/recovery field trials and security tests. The previous port-45121 one-shot file stays as an auditable lab transaction (not an installer default).
 
+**Latest operator report:** Generic signed guided publisher staged temporarily from pinned source and ran `status --port 45121`: `REVIEWED_WIZARD_MODULE=PASS`, `FRP_GUIDED_ROUTE_STATUS=ALREADY_PUBLISHED`, `SELECTED_PORT=45121`, `SAVED_PATH=/45121/www`, `IR_SIGNED_GATE=PASS`, `FRP_GUIDED_AUDIT=PASS_READ_ONLY`, `NGINX_RELOAD=NOT_PERFORMED`, `TUNNEL_REAPPLY=NOT_PERFORMED`, `LIVE_CONFIG_CHANGES=NONE`. User reports snapshot taken, but exact independent IR/KH provider snapshots have not been inspected. Existing real client traffic was confirmed over `ir.kolbe1.ir:443` via Nginx→FRP WSS tunnel→KH Xray; Backhaul is **not** in this active flow. The temporary generic publisher read-only check did not itself change routes.
+
 ## Acceptance before final release
 
 - [x] Real VLESS/XHTTP client through IR domain working
@@ -48,8 +50,8 @@ The existing Standard FRP Beginner Wizard is extended with a new **4) PUBLISH** 
 - [x] Beginner wizard updated and installer/updater file manifests integrated on PR branch
 - [x] Latest verified feature HEAD CI and independent signed verification SUCCESS (`3df7d67c16307050ca9b423da4acc0f40fd75218`; both completed/success)
 - [x] Both IR/KH secret-free post-success runtime audits returned `BASELINE_AUDIT=PASS_READ_ONLY`, `LIVE_CHANGES=NONE` (operator report, 2026-10-25)
-- [ ] Provider snapshots of both IR and KH explicitly confirmed by operator
-- [ ] New generic publisher read-only `status --port 45121` on IR confirms `ALREADY_PUBLISHED`
+- [x] Operator reports provider snapshot(s) captured after successful client traffic; **confirm distinct IR and KH snapshot entries before any reboot or write**, since provider snapshot metadata not independently audited
+- [x] New generic publisher read-only `status --port 45121` on IR confirms `ALREADY_PUBLISHED` (`FRP_GUIDED_AUDIT=PASS_READ_ONLY`, `LIVE_CONFIG_CHANGES=NONE`)
 - [ ] Reboot / replay / recovery trials preserve route and signed trust on disposable machines
 - [ ] New *different port and arbitrary custom Path* end-to-end client PASS without affecting first port
 - [ ] Coordinated rotation of exposed FRP token, with recovery plan and re-test
