@@ -308,8 +308,8 @@ smite_frp_wizard_start_here() {
         echo "KH FOUNDATION COMPLETE. NEXT: Install KH Docker Sanaei from Docker Management."
     fi
     echo "If PROFILE FIRST was saved on IR: create/apply matching FRP TCP"
-    echo "server tunnel in Smite UI; the guarded timer automatically publishes"
-    echo "that saved XHTTP Path after Apply (NOT before)."
+    echo "server tunnel in Smite UI; publish it through FRP option 4 on IR (Signed RC2)."
+    echo "Do not activate the global sync timer during the field trial."
     echo "Without PROFILE FIRST: use FRP option 2 to save PORT + PATH first."
     echo "FRP option 2 also permits an explicitly confirmed manual override."
     echo "Finally, use FRP option 3 VERIFY on IR."
@@ -375,7 +375,7 @@ smite_frp_wizard_easy_configure() {
     fi
     echo "IR can SAVE a safe pending profile before any Smite UI tunnel exists."
     echo "The XHTTP Nginx route activates ONLY after the corresponding FRP"
-    echo "server tunnel is applied and the route sync timer publishes it."
+    echo "server tunnel is applied and option 4 explicitly publishes it."
     read -rp "Save this IR port/path (or update an applied tunnel)? [y/N]: " answer || return
     case "$answer" in y|Y|yes|YES) ;; *)
         echo "No change. IR FRP profile not saved."
@@ -385,7 +385,7 @@ smite_frp_wizard_easy_configure() {
         echo "HOLD: IR FRP profile not accepted or published. Check local status."
         smite_frp_wizard_pause; return 2
     fi
-    echo "NEXT: Apply FRP TCP in Smite UI, then option 3 VERIFY on IR."
+    echo "NEXT: Apply FRP TCP in Smite UI, then option 4 PUBLISH and option 3 VERIFY on IR."
     echo "Saving a pending profile is NOT proof of HTTPS/VLESS connectivity."
     smite_frp_wizard_pause
 }
@@ -435,6 +435,77 @@ smite_frp_wizard_easy_verify() {
     echo "Test real v2rayN FRP + Backhaul traffic, then separate reboots."
     smite_frp_wizard_pause
     [ "$handler_ok" = 1 ]
+}
+
+# Signed RC2 beginner path: one already-applied FRP TCP port at a time.
+# Never secretly enable the global sync timer or publish another port.
+smite_frp_wizard_easy_publish() {
+    local role="$1" port="" status="" answer=""
+    local publisher="/usr/local/lib/u-opti/modules/smite-frp-rc2-guided-publish.py"
+    echo "===== IR FRP XHTTP - PUBLISH APPLIED TUNNEL (SIGNED RC2) ====="
+    if [ "$role" != ir ]; then
+        echo "KH GUIDE ONLY: route publication belongs to the IR gateway."
+        smite_frp_wizard_pause
+        return 2
+    fi
+    smite_frp_wizard_ready "$role" || { smite_frp_wizard_pause; return 2; }
+    if [ ! -s "$publisher" ]; then
+        echo "HOLD: Reviewed signed RC2 route publisher not installed."
+        echo "No Nginx, FRP or Node changes were made."
+        smite_frp_wizard_pause
+        return 2
+    fi
+    read -rp "Existing applied Smite FRP forwarded port [1024-65535]: " port || return 2
+    if [[ ! "$port" =~ ^[1-9][0-9]{3,4}$ ]] ||
+       [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+        echo "HOLD: Invalid FRP forwarded port."
+        smite_frp_wizard_pause
+        return 2
+    fi
+    echo "Checking Signed WSS gate, saved Path, Node state, existing"
+    echo "Nginx routes, loopback listeners and HTTPS health. No secrets printed."
+    if ! status="$(python3 -B "$publisher" status --port "$port")"; then
+        echo "HOLD: Signed route readiness check failed."
+        smite_frp_wizard_pause
+        return 2
+    fi
+    printf '%s\n' "$status"
+    if grep -Fxq 'FRP_GUIDED_ROUTE_STATUS=ALREADY_PUBLISHED' <<< "$status"; then
+        python3 -B "$publisher" verify --port "$port" || {
+            echo "HOLD: Published path verification failed."
+            smite_frp_wizard_pause
+            return 2
+        }
+        echo "Already published. No Nginx reload or tunnel Reapply."
+        smite_frp_wizard_pause
+        return 0
+    fi
+    python3 -B "$publisher" plan --port "$port" || {
+        echo "HOLD: Cannot publish this profile; no changes."
+        smite_frp_wizard_pause
+        return 2
+    }
+    echo "Only this applied port will be published; existing routes preserved."
+    read -rp "Publish this IR XHTTP route with journal + rollback? [y/N]: " answer || return 2
+    case "$answer" in y|Y|yes|YES) ;; *)
+        echo "No changes. Route remains pending."
+        smite_frp_wizard_pause
+        return 0 ;;
+    esac
+    # The Python transaction requires a SECOND exact per-port TTY grant.
+    UOPTI_RC2_IR_FRP_GUIDED_PUBLISH_TRIAL=YES \
+        python3 -B "$publisher" apply --port "$port" || {
+            echo "HOLD: Publishing was not verified. Review the journal; do NOT repeat."
+            smite_frp_wizard_pause
+            return 2
+        }
+    python3 -B "$publisher" verify --port "$port" || {
+        echo "HOLD: Post-apply verification failed. Inspect state before reuse."
+        smite_frp_wizard_pause
+        return 2
+    }
+    echo "IR route published. Test a REAL VLESS/XHTTP client separately."
+    smite_frp_wizard_pause
 }
 
 smite_frp_wizard_advanced_menu() {
@@ -512,21 +583,23 @@ smite_frp_wizard_menu() {
         echo "      Standard FRP EASY SETUP"
         echo "======================================"
         echo "This server: $role | Smite: $(smite_frp_wizard_mode_label)"
-        echo "With saved PROFILE FIRST: Smite UI FRP TCP Apply triggers auto-route sync."
+        echo "Signed RC2: save profile, Apply FRP in Smite UI, then option 4 PUBLISH on IR."
         echo "Option 2 remains for explicit profile changes or recovery."
         echo "1) START HERE - Install/check Smite + HTTPS Gateway"
         echo "2) PORT + PATH - Save IR profile before Smite tunnel"
         echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"
-        echo "4) Advanced - Original detailed steps and recovery"
+        echo "4) PUBLISH - Active FRP XHTTP route (Signed RC2, IR only)
+        echo "5) Advanced - Original detailed steps and recovery"
         echo "0) Back"
-        read -rp "Choose [0-4]: " choice || return
+        read -rp "Choose [0-5]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_frp_wizard_start_here "$role" ;;
             2) smite_frp_wizard_easy_configure "$role" ;;
             3) smite_frp_wizard_easy_verify "$role" ;;
-            4) smite_frp_wizard_advanced_menu "$role" ;;
+            4) smite_frp_wizard_easy_publish "$role" ;;
+            5) smite_frp_wizard_advanced_menu "$role" ;;
             0) return ;;
             *) echo "Invalid selection."; sleep 1 ;;
         esac
