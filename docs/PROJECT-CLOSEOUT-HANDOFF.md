@@ -1,9 +1,35 @@
 # جمع کردن پروژه و تکمیل آن — U-OPTI × Smite | PROJECT CLOSEOUT & CHAT HANDOFF
 
 > **Source of truth / مرجع ادامه کار:** [U-OPTI Issue #47 — CLOSEOUT TRACKER](https://github.com/aghajani82/u-opti/issues/47)  
-> **Last reviewed:** 2026-10-21  
+> **Last reviewed:** 2026-10-25  
 > **Purpose:** Every new ChatGPT conversation must read this file **and Issue #47 including its latest comments**, compare the current GitHub state, then resume outstanding work. This file is a continuity guide, **not a claim of production readiness**.  
 > **Project state:** `INTEGRATION / NOT RELEASE READY`. `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` for experimental Smite RC.
+
+## 2026-10-25 — IR/KH signed RC2 FRP/XHTTP **real-client success** (LAB ONLY)
+
+**Operator verified an actual VLESS/XHTTP client connection through IR public domain \`ir.kolbe1.ir:443\` to the KH 3x-ui inbound over the signed FRP/WSS single-443 gateway.** The existing Smite \`trial-frp-45121\` tunnel was reapplied once (no duplicate created), then the client connected successfully. **This confirms functional lab traffic, not persistence through reboot, novice install UX, or release readiness.**
+
+| Gate | Live observation |
+|---|---|
+| IR/KH signed Nodes | \`node-ir\` and \`node-kh\` both Connected; panel IP=N/A tolerated by RC2 ipless WSS candidate |
+| Existing FRP tunnel | \`trial-frp-45121\` Active, IR \`127.0.0.1:7000\` and \`127.0.0.1:45121\` listening; Node tunnel state persisted |
+| KH Sanaei inbound | VLESS transport \`xhttp\`, port \`45121\` bound loopback only, path \`/45121/www\`, internal security none |
+| IR XHTTP path | Root-only \`0600\` registry saves \`45121 -> /45121/www\`; IR Nginx panel backend \`:8443\` managed include publishes exact route and subpath proxying only to \`127.0.0.1:45121\` |
+| Real client | **PASS** using Iran domain; operator also did one single-tunnel Reapply and confirmed connection |
+| Publication | Reviewed one-shot \`modules/smite-frp-rc2-xhttp-publish-45121.py\` executed \`apply\` -> **COMMITTED**, then independent \`verify\` -> **PASS_READ_ONLY**; Panel HTTPS and Nginx syntax PASS; sync timer **not started** |
+| GitHub | U-OPTI [draft #48](https://github.com/aghajani82/u-opti/pull/48) on \`feature/uopti-smite-closeout-integration-20261019\`; exact reviewed pre-handoff HEAD \`c5c6ae010db6b7452fc1178cbf0f6407add51972\`, CI **SUCCESS**, Independent Signed Registry Admission **SUCCESS**; **not merged**. PR currently targets an intermediate Smite integration feature branch, not U-OPTI \`main\`. |
+| Safety | No change to production Grandoptical, no KH network mutations in publish step, no automatic FRP retry or timer enable. A FRP token appeared in earlier screenshot; **rotate both sides with coordinated plan before production; do not share secrets**. |
+
+**Outstanding for closeout (ordered):**
+1. Capture secret-safe, read-only IR/KH **post-success baseline**, check loopback-only listeners, expected Nginx route, Signed policies and one-tunnel identity; verify negative/unknown paths stay denied. No restart/reboot yet.
+2. Establish **safe persistence/reconciliation across tunnel Reapply / Node and Nginx restarts** without losing \`/45121/www\` or accidentally publishing an unknown port; decide on an opt-in guarded sync timer with shared lock, explicit idempotency, and rollback. The current trial uses a **one-shot port-specific publisher**, not a finished general-purpose install path.
+3. Move successful flow into **simple U-OPTI Smite/FRP wizard**, with a Profile-First path/port, single action, clear validation, expandable advanced diagnostics and no hidden dependencies to Backhaul; add offline tests and installation/update packaging.
+4. Rotate previously exposed FRP token in a coordinated and rollback-safe manner, after verifying both sides; never print tokens/UUIDs.
+5. Repeat fresh-install + restart/rollback acceptance on disposable snapshot IR/KH, verify independent Backhaul and FRP paths and no regressions, then close Issue #47 gates. Final owner-approved merge/release **only after** all acceptance gates pass; \`main\` remains untouched until authorized.
+
+**Resume instruction:** Read latest PR #48 and Issue #47 comments before relying on previous snapshots; maintain \`IR/KH/BOTH\` command labels, fail-closed read-only-first approach and Grandoptical no-touch policy.
+
+---
 
 ## GATE 1 CLOSED — REAL SIGNED GHCR CANDIDATE VERIFIED — 2026-10-21
 
