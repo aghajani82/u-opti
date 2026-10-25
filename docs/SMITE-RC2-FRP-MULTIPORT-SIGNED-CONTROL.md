@@ -55,3 +55,19 @@ Retrieve ONLY counts of HTTP status responses for `POST /api/agent/tunnels/apply
 - [ ] Owner-approved merge to main and release; Grandoptical never touched
 
 Related: [U-OPTI draft PR #48](https://github.com/aghajani82/u-opti/pull/48), [project Issue #47](https://github.com/aghajani82/u-opti/issues/47).
+
+
+## Development milestone — 2026-10-25 (unmerged, uninstalled)
+
+Smite [draft PR #20](https://github.com/aghajani82/Smite/pull/20), branch `feature/smite-rc2-frp-singleton-multiport-20261025`, now includes an **offline admission and collision-prevention slice**, not the live shared-proxy implementation:
+
+- `panel/app/frp_shared_server.py`: explicit, side-effect-free parent FRPS / child single-port proxy planning. Requires owner identity, port exclusivity, token continuity, loopback target; emits a child-client-only plan without server re-Apply.
+- `panel/app/frp_server_admission.py` and its guard in the managed Create/Edit/Apply endpoints: duplicate independent FRPS owners on the same node/control port are rejected **before** DB mutation or signed Apply; the shared child marker remains HOLD until a complete reviewed lifecycle is wired. Managed owner deletion refuses known dependents.
+- `node/app/frp_singleton_guard.py` integrated into `FrpAdapter.apply`: socket-listener inspection of signed WSS control port 7000 rejects a second frps **before** token-bearing file writes, subprocess start or stopping another existing tunnel. Fail-closed on unknown listener state.
+- Node and Panel full tunnel spec log messages (potentially containing FRP credentials) were redacted.
+- Offline regression files: `tests/test_frp_shared_server_planner.py`, `tests/test_frp_exclusive_server_admission.py`, `tests/test_frp_singleton_guard.py`; dedicated GitHub Actions `.github/workflows/frp-singleton-admission.yml`. CI was **in progress** when this entry was written; no passing claim.
+- This code is **not live** and does **not activate 49328**. The currently working first FRPS and client remain unchanged; no deployment/merge.
+
+Observed IR diagnostic: Signed Agent `POST /api/agent/tunnels/apply` HTTP 200=1 and HTTP 500=2, 401/403/409/503=0, FRPS bind collision regex count=4 within recent uncorrelated 3-hour log window. This strongly supports duplicate bind as the failure category, although per-attempt ID correlation was not performed.
+
+**Unfinished, release-blocking**: trusted live owner/lease validation; signed client-only child creation and removal; durable allocation/recovery concurrency and restart; simple UI explicit owner selection; isolated IR/KH dual-port field trial; gated /49328/sso Nginx publisher; owner-approved merge. Do NOT use a simulated shared-parent marker with the old FRP Apply path, and do NOT Reapply All.
