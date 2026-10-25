@@ -21,6 +21,9 @@ Operator independently verified a working VLESS/XHTTP client using `ir.kolbe1.ir
 
 **Before any planned reboot/recreation:** Collect read-only, redacted Node health, TLS, listener binding, route checks; confirm snapshots and consoles exist; then plan a separate opt-in restore/restart test. No automatic restart here.
 
+
+**Post-success operator read-only baseline (2026-10-25):** IR `SMITE_NODE_RUNNING`, `NGINX_SYNTAX`, `XHTTP_45121_LOOPBACK`, `FRPS_7000_LOOPBACK`, `SMITE_PANEL_RUNNING`, `XHTTP_ROUTES`, `FRP_TUNNEL_STATE_PRESENT`, `AUTO_SYNC_DISABLED` all PASS; KH `SMITE_NODE_RUNNING`, `NGINX_SYNTAX`, `XHTTP_45121_LOOPBACK`, `KH_XRAY_XHTTP_PROFILE` all PASS. Both conclude `BASELINE_AUDIT=PASS_READ_ONLY` and `LIVE_CHANGES=NONE`. **Snapshots have NOT been confirmed by the operator.** Before any write/reboot/second tunnel, operator must take provider snapshots of both hosts and have console access.
+
 ## Gate 2 — Integrate dynamic XHTTP route publishing into simple U-OPTI menu
 
 The existing Standard FRP Beginner Wizard is extended with a new **4) PUBLISH** action. Advanced moves to option 5; existing foundation, PORT+PATH stage and VERIFY remain. No new competing menu.
@@ -43,7 +46,8 @@ The existing Standard FRP Beginner Wizard is extended with a new **4) PUBLISH** 
 - [x] One-route reviewed IR Nginx publication COMMITTED and VERIFY PASS
 - [x] New generic per-port publisher implemented on PR branch, with offline tests
 - [x] Beginner wizard updated and installer/updater file manifests integrated on PR branch
-- [ ] Latest PR HEAD CI and independent signed verification SUCCESS
+- [x] Latest verified feature HEAD CI and independent signed verification SUCCESS (`3df7d67c16307050ca9b423da4acc0f40fd75218`; both completed/success)
+- [x] Both IR/KH secret-free post-success runtime audits returned `BASELINE_AUDIT=PASS_READ_ONLY`, `LIVE_CHANGES=NONE` (operator report, 2026-10-25)
 - [ ] Provider snapshots of both IR and KH explicitly confirmed by operator
 - [ ] New generic publisher read-only `status --port 45121` on IR confirms `ALREADY_PUBLISHED`
 - [ ] Reboot / replay / recovery trials preserve route and signed trust on disposable machines
