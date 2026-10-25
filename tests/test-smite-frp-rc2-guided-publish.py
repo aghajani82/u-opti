@@ -46,7 +46,7 @@ class TestRC2GuidedPublisher(unittest.TestCase):
         self.snippet=self.tmp/"snippet.conf"
         self.txroot=self.tmp/"records"
         self.existing=block(45121,"/45121/www")
-        self.next=block(45678,"/45678/test")
+        self.next=block(45678,"/assets/v1/connect")
         self.before=(gp.HEADER+self.existing).encode()
         self.after=(gp.HEADER+self.existing+self.next).encode()
         self.snippet.write_bytes(self.before)
@@ -69,7 +69,7 @@ class TestRC2GuidedPublisher(unittest.TestCase):
         gp.BACKEND.write_text(gp.INCLUDE)
         self.patch("REGISTRY",self.tmp/"registry")
         gp.REGISTRY.write_text(json.dumps({"45121":"/45121/www",
-                                           "45678":"/45678/test"}))
+                                           "45678":"/assets/v1/connect"}))
         self.patch("execute",self.fake_execute)
 
     def patch(self,name,value):
@@ -85,11 +85,11 @@ class TestRC2GuidedPublisher(unittest.TestCase):
         self.assertEqual(list(gp.parse_blocks(self.before)),[45121])
         got=gp.parse_blocks(self.after)
         self.assertEqual(list(got),[45121,45678])
-        self.assertEqual(got[45678][0],"/45678/test")
+        self.assertEqual(got[45678][0],"/assets/v1/connect")
 
     def test_preflight_preserves_existing_and_adds_only_selected_port(self):
         path,old,new,changed=gp.inspection(45678)
-        self.assertEqual(path,"/45678/test")
+        self.assertEqual(path,"/assets/v1/connect")
         self.assertTrue(changed)
         self.assertEqual(old,self.before)
         self.assertEqual(new,self.after)
