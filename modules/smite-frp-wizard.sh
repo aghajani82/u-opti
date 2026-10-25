@@ -588,7 +588,7 @@ smite_frp_wizard_menu() {
         echo "1) START HERE - Install/check Smite + HTTPS Gateway"
         echo "2) PORT + PATH - Save IR profile before Smite tunnel"
         echo "3) VERIFY - XHTTP, client settings and real-traffic checklist"
-        echo "4) PUBLISH - Active FRP XHTTP route (Signed RC2, IR only)
+        echo "4) PUBLISH - Active FRP XHTTP route (Signed RC2, IR only)"
         echo "5) Advanced - Original detailed steps and recovery"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
