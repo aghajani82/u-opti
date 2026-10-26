@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import sys
 import tempfile
 import unittest
@@ -254,6 +255,7 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
             "smite-rc5-xhttp-signed-intent.py",
             "smite-rc5-xhttp-bridge-install.py",
             "smite-rc5-xhttp-bridge-admission.py",
+            "smite-rc5-xhttp-broker-provision.py",
         )
         for module in required_runtime:
             with self.subTest(module=module):
