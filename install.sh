@@ -97,8 +97,8 @@ MODULES=(
     "smite-frp-xhttp.sh"
     "smite-frp-xhttp-paths.py"
     # Exact reviewed Smite worker inputs, copied from feature HEAD 5540799300cab7dff89a81a1bfbde7d777c87d85.
-    "smite-rc5-xhttp-nginx-route.py"
-    "smite-rc5-xhttp-nginx-plan.py"
+    "smite-xhttp-nginx-route"
+    "smite_xhttp_nginx_plan.py"
     "smite-frp-rc2-guided-publish.py"
     "smite-frp-wizard.sh"
     "smite-profile-first.py"
@@ -249,8 +249,8 @@ for MODULE in "${MODULES[@]}"; do
         smite-gateway.sh) LABEL="Smite 443 Gateway" ;;
         smite-frp-xhttp.sh) LABEL="Smite Standard FRP XHTTP Automatic Routes" ;;
         smite-frp-xhttp-paths.py) LABEL="Smite FRP Custom XHTTP Path Registry" ;;
-        smite-rc5-xhttp-nginx-route.py) LABEL="Pinned Smite XHTTP route worker" ;;
-        smite-rc5-xhttp-nginx-plan.py) LABEL="Pinned Smite XHTTP route planner" ;;
+        smite-xhttp-nginx-route) LABEL="Pinned Smite XHTTP route worker" ;;
+        smite_xhttp_nginx_plan.py) LABEL="Pinned Smite XHTTP route planner" ;;
         smite-frp-rc2-guided-publish.py) LABEL="Signed RC2 FRP XHTTP Guided Publisher" ;;
         smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
