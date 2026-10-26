@@ -151,7 +151,14 @@ def _approved_grant(child: str):
         "schema", "ir_node", "kh_node", "owner", "child", "lease",
         "port", "path", "owner_proof_sha256", "kh_inventory_sha256",
     }
-    item = _json(_file(GRANTS / f"{child}.json", mode=0o600), fields)
+    grant_path = GRANTS / f"{child}.json"
+    try:
+        grant_path.lstat()
+    except FileNotFoundError as exc:
+        raise BrokerHold("ROOT_OPERATOR_GRANT_REQUIRED") from exc
+    except OSError as exc:
+        raise BrokerHold("BROKER_GRANT_UNAVAILABLE") from exc
+    item = _json(_file(grant_path, mode=0o600), fields)
     if type(item["schema"]) is not int or item["schema"] != 1 or item["child"] != child:
         raise BrokerHold("UNAPPROVED_GRANT")
     contract = _contract_module()
@@ -299,6 +306,14 @@ def serve() -> None:
                         result = process(_receive(connection),
                                          peer_uid=uid, peer_gid=gid)
                         response = result
+                    except BrokerHold as exc:
+                        # Expose only this pre-transaction state to the Node so
+                        # the Panel can guide a separate root approval. Other
+                        # broker details remain private and ambiguous failures
+                        # are never converted into retryable instructions.
+                        response = ("HOLD_ROOT_OPERATOR_GRANT_REQUIRED"
+                                    if str(exc) == "ROOT_OPERATOR_GRANT_REQUIRED"
+                                    else "HOLD")
                     except Exception:
                         response = "HOLD"
                     connection.sendall((response + "\n").encode("ascii"))

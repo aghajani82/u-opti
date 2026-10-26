@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 import subprocess
@@ -27,6 +28,9 @@ LEDGER_MODULE = "smite-rc5-xhttp-nonce-ledger.py"
 HELPER_MODULE = "smite-xhttp-nginx-route"
 PLANNER_MODULE = "smite_xhttp_nginx_plan.py"
 SERVICE_NAME = "u-opti-smite-xhttp-broker.service"
+IDENT = re.compile(r"[A-Za-z0-9_-]{8,128}\Z")
+HASH = re.compile(r"[a-f0-9]{64}\Z")
+GRANT_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\Z")
 
 
 class ProvisionHold(RuntimeError):
@@ -389,12 +393,156 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
     }
 
 
+def _grant_context(root: Path) -> Path:
+    """Require the existing private broker grant directory without creating it."""
+    _check_root(root)
+    if root == Path("/"):
+        if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
+            raise ProvisionHold("IR_ROOT_ONLY")
+    etc = root / "etc/u-opti/smite"
+    grants = etc / "route-grants"
+    for path in (etc, grants):
+        try:
+            item = path.lstat()
+        except OSError as exc:
+            raise ProvisionHold("BROKER_GRANT_DIRECTORY_MISSING") from exc
+        if (not stat.S_ISDIR(item.st_mode) or item.st_uid != 0
+                or stat.S_IMODE(item.st_mode) != 0o700):
+            raise ProvisionHold("BROKER_GRANT_DIRECTORY_UNTRUSTED")
+    return grants
+
+
+def _checked_grant(data: dict[str, object], *, confirmed_child: str) -> dict[str, object]:
+    fields = {
+        "ir_node", "kh_node", "owner", "child", "lease", "port", "path",
+        "owner_proof_sha256", "kh_inventory_sha256",
+    }
+    if not isinstance(data, dict) or set(data) != fields:
+        raise ProvisionHold("BROKER_GRANT_SCHEMA_MISMATCH")
+    if (type(data["child"]) is not str or data["child"] != confirmed_child
+            or not IDENT.fullmatch(data["child"])):
+        raise ProvisionHold("BROKER_GRANT_CHILD_CONFIRMATION_MISMATCH")
+    for name in ("ir_node", "kh_node", "owner", "lease"):
+        if type(data[name]) is not str or not IDENT.fullmatch(data[name]):
+            raise ProvisionHold("BROKER_GRANT_INVALID_IDENTITY")
+    port = data["port"]
+    route = data["path"]
+    if (type(port) is not int or not 1024 <= port <= 65535 or port == 7000
+            or type(route) is not str or len(route) > 128
+            or not GRANT_PATH.fullmatch(route) or not route.startswith(f"/{port}/")):
+        raise ProvisionHold("BROKER_GRANT_INVALID_ROUTE")
+    for name in ("owner_proof_sha256", "kh_inventory_sha256"):
+        if type(data[name]) is not str or not HASH.fullmatch(data[name]):
+            raise ProvisionHold("BROKER_GRANT_INVALID_EVIDENCE_HASH")
+    # Stable ordering and exact schema are part of the local root grant file.
+    return {name: data[name] for name in (
+        "ir_node", "kh_node", "owner", "child", "lease", "port", "path",
+        "owner_proof_sha256", "kh_inventory_sha256",
+    )}
+
+
+def install_grant(data: dict[str, object], *, confirmed_child: str,
+                  root: Path = Path("/")) -> dict[str, str]:
+    """Install one human-approved per-child grant; never derive it from a request.
+
+    The root operator must first compare the IDs, selected inbound and evidence
+    hashes with current authenticated Signed IR/KH results and the active Panel
+    lease. This local CLI records that separate approval; it does not claim to
+    cryptographically verify remote evidence on behalf of the operator.
+    """
+    grants = _grant_context(root)
+    grant = _checked_grant(data, confirmed_child=confirmed_child)
+    target = grants / f"{grant['child']}.json"
+    encoded = (json.dumps(grant, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    _write_new(target, encoded, 0o600)
+    return {
+        "TRUSTED_GRANT": "INSTALLED_ROOT_OPERATOR_APPROVED",
+        "GRANT_CHILD": str(grant["child"]),
+        "EVIDENCE_VERIFICATION": "OPERATOR_ASSERTED",
+        "LIVE_ROUTE_CHANGE": "NO",
+    }
+
+
+def revoke_grant(child: str, *, root: Path = Path("/")) -> dict[str, str]:
+    """Remove one exact root-owned child grant after explicit local approval."""
+    if type(child) is not str or not IDENT.fullmatch(child):
+        raise ProvisionHold("BROKER_GRANT_INVALID_CHILD")
+    grants = _grant_context(root)
+    target = grants / f"{child}.json"
+    try:
+        info = target.lstat()
+    except OSError as exc:
+        raise ProvisionHold("BROKER_GRANT_NOT_FOUND") from exc
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+        raise ProvisionHold("BROKER_GRANT_FILE_UNTRUSTED")
+    try:
+        target.unlink()
+        dir_fd = os.open(grants, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError as exc:
+        raise ProvisionHold("BROKER_GRANT_REVOKE_FAILED") from exc
+    return {
+        "TRUSTED_GRANT": "REVOKED",
+        "GRANT_CHILD": child,
+        "LIVE_ROUTE_CHANGE": "NO",
+    }
+
+
+def _interactive_grant() -> tuple[dict[str, object], str]:
+    print("Before approving, independently verify the current Signed IR FRPS owner,\n"
+          "Signed KH XHTTP inbound and active unique Panel lease. This root-only\n"
+          "approval is per child; the broker will not create grants from requests.")
+    fields = ("ir_node", "kh_node", "owner", "child", "lease", "port", "path")
+    values: dict[str, object] = {}
+    for name in fields:
+        answer = input(f"{name}: ").strip()
+        if name == "port" and answer.isascii() and answer.isdecimal():
+            values[name] = int(answer)
+        else:
+            values[name] = answer
+    child = values["child"]
+    confirmation = input(f"Type APPROVE {child} to install this root grant: ").strip()
+    if confirmation != f"APPROVE {child}":
+        raise ProvisionHold("BROKER_GRANT_APPROVAL_NOT_CONFIRMED")
+    port = values["port"]
+    if type(port) is not int:
+        raise ProvisionHold("BROKER_GRANT_INVALID_ROUTE")
+    # These canonical hashes match the Panel's selected-owner and selected-
+    # inbound evidence projections. Their input facts remain operator-entered
+    # after review of current authenticated Signed Node results.
+    owner_facts = {
+        "tunnel_id": values["owner"], "control_port": 7000,
+        "proxy_port": port,
+    }
+    inbound_facts = {
+        "port": port, "listen": "127.0.0.1", "protocol": "vless",
+        "network": "xhttp", "path": values["path"], "enabled": True,
+    }
+    values["owner_proof_sha256"] = hashlib.sha256(json.dumps(
+        owner_facts, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    ).encode("ascii")).hexdigest()
+    values["kh_inventory_sha256"] = hashlib.sha256(json.dumps(
+        inbound_facts, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+        allow_nan=False,
+    ).encode("ascii")).hexdigest()
+    return values, child  # type: ignore[return-value]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare the IR-only Smite route broker")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--peer-gid", type=int)
     mode.add_argument("--activate-existing", action="store_true",
                       help="Enable and start an already provisioned IR broker")
+    mode.add_argument("--approve-grant", action="store_true",
+                      help="Interactively install one separately root-approved child grant")
+    mode.add_argument("--revoke-grant", metavar="CHILD_ID",
+                      help="Interactively revoke one exact child grant")
     parser.add_argument("--confirm-local-root", action="store_true")
     args = parser.parse_args()
     if not args.confirm_local_root:
@@ -403,6 +551,20 @@ def main() -> int:
     try:
         if args.activate_existing:
             result = activate()
+        elif args.approve_grant:
+            if not sys.stdin.isatty():
+                raise ProvisionHold("BROKER_GRANT_REQUIRES_INTERACTIVE_ROOT_TTY")
+            values, child = _interactive_grant()
+            result = install_grant(values, confirmed_child=child)
+        elif args.revoke_grant:
+            if not sys.stdin.isatty():
+                raise ProvisionHold("BROKER_GRANT_REQUIRES_INTERACTIVE_ROOT_TTY")
+            confirmation = input(
+                f"Type REVOKE {args.revoke_grant} to remove this root grant: "
+            ).strip()
+            if confirmation != f"REVOKE {args.revoke_grant}":
+                raise ProvisionHold("BROKER_GRANT_REVOKE_NOT_CONFIRMED")
+            result = revoke_grant(args.revoke_grant)
         elif args.peer_gid is not None:
             result = provision(peer_gid=args.peer_gid)
         else:

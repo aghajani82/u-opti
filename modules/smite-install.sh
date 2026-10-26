@@ -738,6 +738,53 @@ smite_install_clean_rc_broker_panel_mount() {
     python3 -B "$helper" panel "$compose_file" --peer-gid "$SMITE_UOPTI_BROKER_GID"
 }
 
+smite_install_clean_rc_broker_start_node_forwarding() {
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || return 0
+    local module_dir helper activation_output
+    [ -n "${SMITE_UOPTI_BROKER_GID:-}" ] || {
+        echo "HOLD: IR Broker peer GID was not prepared." >&2
+        return 1
+    }
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    helper="$module_dir/smite-rc5-xhttp-broker-provision.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || {
+        echo "HOLD: Root Broker activation helper is not staged." >&2
+        return 1
+    }
+    if ! activation_output="$(python3 -B "$helper" --activate-existing --confirm-local-root 2>&1)" ||
+       ! grep -qx 'SERVICE_ACTIVATION=PASS_ACTIVE_PERSISTENT' <<< "$activation_output" ||
+       ! grep -qx 'TRUSTED_GRANTS=UNCHANGED' <<< "$activation_output" ||
+       ! grep -qx 'LIVE_ROUTE_CHANGE=NO' <<< "$activation_output"; then
+        echo "HOLD: Root Broker activation did not pass its systemd/socket checks." >&2
+        grep -E '^(HOLD|SERVICE_|BROKER_SOCKET|TRUSTED_GRANTS|LIVE_ROUTE_CHANGE)=' <<< "$activation_output" >&2 || true
+        return 1
+    fi
+    echo "$activation_output"
+
+    helper="$module_dir/smite-rc5-xhttp-broker-compose.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
+    python3 -B "$helper" node-env "$SMITE_NODE_DIR/.env" --enabled true || return 1
+    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+       ! smite_wait_healthy smite-node 90 ||
+       ! docker exec smite-node python -c 'import os,socket,stat; p="/run/u-opti/smite/xhttp-broker.sock"; g=int(os.environ["SMITE_UOPTI_BROKER_GID"]); s=os.stat(p); assert os.environ["SMITE_UOPTI_ROUTE_BROKER_ENABLED"]=="true"; assert os.geteuid()==0 and os.getegid()==g; assert stat.S_ISSOCK(s.st_mode) and s.st_uid==0 and s.st_gid==g and stat.S_IMODE(s.st_mode)==0o660; c=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); c.settimeout(2); c.connect(p); c.close()'; then
+        echo "HOLD: Broker socket forwarding verification failed; pausing Node forwarding." >&2
+        python3 -B "$helper" node-env "$SMITE_NODE_DIR/.env" --enabled false >/dev/null 2>&1 || {
+            echo "CRITICAL: Could not disable Node Broker forwarding; manual review required." >&2
+            return 1
+        }
+        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+           ! smite_wait_healthy smite-node 90; then
+            echo "CRITICAL: Node rollback health is unconfirmed; Broker forwarding is disabled on disk." >&2
+            return 1
+        fi
+        return 1
+    fi
+    echo "NODE_BROKER_FORWARDING=PASS_SOCKET_PEER_ATTESTED"
+    echo "BROKER_TRUSTED_GRANTS=NONE_ROUTE_APPLY_HOLD"
+    return 0
+}
+
 
 # A fresh Foreign Node is intentionally started without any Panel
 # registration until per-Node HMAC identity + TLS/443 gateway are admitted.
@@ -1238,6 +1285,14 @@ smite_install_panel_iran() {
     if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
         return
+    fi
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_broker_start_node_forwarding; then
+            echo "ERROR: Root Broker/Node channel did not pass verification."
+            smite_install_pause
+            return
+        fi
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then

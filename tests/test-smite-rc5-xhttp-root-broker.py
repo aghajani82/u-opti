@@ -446,6 +446,135 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                                         "BROKER_SYSTEMD_VERIFICATION_FAILED"):
                 provisioner.activate(root=root, runner=failed_status)
 
+    def test_root_operator_grant_install_and_revoke_are_exact_and_durable(self):
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_grant_approval_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-grant-approval-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            grants = root / "etc/u-opti/smite/route-grants"
+            grants.mkdir(parents=True, mode=0o700)
+            grants.chmod(0o700)
+            (root / "etc/u-opti/smite").chmod(0o700)
+            proposal = {
+                "ir_node": "node-ir-0001", "kh_node": "node-kh-0001",
+                "owner": "trial-frp-45121", "child": "trial-frp-49328",
+                "lease": "lease-49328-00001", "port": 49328,
+                "path": "/49328/sso", "owner_proof_sha256": "a" * 64,
+                "kh_inventory_sha256": "b" * 64,
+            }
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_GRANT_CHILD_CONFIRMATION_MISMATCH"):
+                provisioner.install_grant(
+                    proposal, confirmed_child="trial-frp-45121", root=root,
+                )
+            self.assertEqual(list(grants.iterdir()), [])
+
+            result = provisioner.install_grant(
+                proposal, confirmed_child=proposal["child"], root=root,
+            )
+            target = grants / "trial-frp-49328.json"
+            self.assertEqual(result["TRUSTED_GRANT"], "INSTALLED_ROOT_OPERATOR_APPROVED")
+            self.assertEqual(result["EVIDENCE_VERIFICATION"], "OPERATOR_ASSERTED")
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            stored = json.loads(target.read_text())
+            self.assertEqual(stored, proposal)
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_TARGET_EXISTS_REQUIRES_REVIEW"):
+                provisioner.install_grant(
+                    proposal, confirmed_child=proposal["child"], root=root,
+                )
+            self.assertEqual(json.loads(target.read_text()), proposal)
+
+            revoked = provisioner.revoke_grant(proposal["child"], root=root)
+            self.assertEqual(revoked["TRUSTED_GRANT"], "REVOKED")
+            self.assertFalse(target.exists())
+
+    def test_root_operator_grant_rejects_bad_route_hashes_and_untrusted_directory(self):
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_grant_rejection_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+        proposal = {
+            "ir_node": "node-ir-0001", "kh_node": "node-kh-0001",
+            "owner": "trial-frp-45121", "child": "trial-frp-49328",
+            "lease": "lease-49328-00001", "port": 49328,
+            "path": "/49328/sso", "owner_proof_sha256": "a" * 64,
+            "kh_inventory_sha256": "b" * 64,
+        }
+        for changes, expected in (
+            ({"port": 7000}, "BROKER_GRANT_INVALID_ROUTE"),
+            ({"path": "/49328/../../etc"}, "BROKER_GRANT_INVALID_ROUTE"),
+            ({"kh_inventory_sha256": "bad"}, "BROKER_GRANT_INVALID_EVIDENCE_HASH"),
+        ):
+            bad = {**proposal, **changes}
+            with self.subTest(expected=expected, changes=changes):
+                with self.assertRaisesRegex(provisioner.ProvisionHold, expected):
+                    provisioner._checked_grant(bad, confirmed_child=proposal["child"])
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-grant-dir-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            grants = root / "etc/u-opti/smite/route-grants"
+            grants.mkdir(parents=True, mode=0o755)
+            grants.chmod(0o755)
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_GRANT_DIRECTORY_UNTRUSTED"):
+                provisioner.install_grant(
+                    proposal, confirmed_child=proposal["child"], root=root,
+                )
+
+    def test_interactive_root_approval_builds_panel_compatible_evidence_digests(self):
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_grant_prompt_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+        answers = iter((
+            "node-ir-0001", "node-kh-0001", "trial-frp-45121",
+            "trial-frp-49328", "lease-49328-00001", "49328", "/49328/sso",
+            "APPROVE trial-frp-49328",
+        ))
+        with patch("builtins.input", side_effect=lambda _prompt: next(answers)):
+            grant, child = provisioner._interactive_grant()
+        self.assertEqual(child, "trial-frp-49328")
+        owner_facts = {"tunnel_id": "trial-frp-45121", "control_port": 7000,
+                       "proxy_port": 49328}
+        inbound_facts = {"port": 49328, "listen": "127.0.0.1",
+                         "protocol": "vless", "network": "xhttp",
+                         "path": "/49328/sso", "enabled": True}
+        digest = lambda value: hashlib.sha256(json.dumps(
+            value, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")).hexdigest()
+        self.assertEqual(grant["owner_proof_sha256"], digest(owner_facts))
+        self.assertEqual(grant["kh_inventory_sha256"], digest(inbound_facts))
+
+    def test_interactive_root_approval_requires_exact_child_phrase(self):
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_grant_prompt_hold_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+        answers = iter((
+            "node-ir-0001", "node-kh-0001", "trial-frp-45121",
+            "trial-frp-49328", "lease-49328-00001", "49328", "/49328/sso",
+            "APPROVE some-other-child",
+        ))
+        with patch("builtins.input", side_effect=lambda _prompt: next(answers)):
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_GRANT_APPROVAL_NOT_CONFIRMED"):
+                provisioner._interactive_grant()
+
 
 if __name__ == "__main__":
     unittest.main()

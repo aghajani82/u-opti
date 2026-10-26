@@ -7,6 +7,7 @@ on:
       - 'modules/smite-rc5-xhttp-nonce-ledger.py'
       - 'modules/smite-rc5-xhttp-root-broker.py'
       - 'modules/smite-rc5-xhttp-broker-compose.py'
+      - 'modules/smite-rc5-xhttp-broker-provision.py'
       - 'modules/smite-rc5-xhttp-sanaei-mount.py'
       - 'modules/smite-install.sh'
       - 'install.sh'
@@ -38,6 +39,7 @@ jobs:
         run: |
           python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py modules/smite-rc5-xhttp-nonce-ledger.py modules/smite-rc5-xhttp-root-broker.py
           python3 -m py_compile modules/smite-rc5-xhttp-broker-compose.py
+          python3 -m py_compile modules/smite-rc5-xhttp-broker-provision.py
           python3 -m py_compile modules/smite-rc5-xhttp-sanaei-mount.py
           python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py tests/test-smite-rc5-xhttp-root-broker.py tests/test-smite-rc5-xhttp-broker-compose.py
           python3 -m py_compile tests/test-smite-rc5-xhttp-sanaei-mount.py

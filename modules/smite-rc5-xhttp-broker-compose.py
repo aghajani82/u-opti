@@ -108,15 +108,69 @@ def verify_node(path: Path, peer_gid: int) -> None:
         raise ComposeHold("BROKER_KEY_MUST_NOT_BE_MOUNTED_IN_NODE")
 
 
+def set_node_broker_enabled(path: Path, enabled: bool) -> None:
+    """Atomically toggle only the IR Node's root-broker forwarding flag."""
+    if type(enabled) is not bool:
+        raise ComposeHold("INVALID_NODE_BROKER_STATE")
+    raw, mode = _read(path)
+    if mode != 0o600:
+        raise ComposeHold("UNTRUSTED_NODE_ENV")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise ComposeHold("UNREADABLE_NODE_ENV") from exc
+    key = "SMITE_UOPTI_ROUTE_BROKER_ENABLED"
+    lines = text.splitlines(keepends=True)
+    found = 0
+    updated = []
+    for line in lines:
+        content = line.rstrip("\r\n")
+        if content.startswith(key + "="):
+            found += 1
+            if content not in (f"{key}=false", f"{key}=true"):
+                raise ComposeHold("INVALID_NODE_BROKER_STATE")
+            updated.append(f"{key}={'true' if enabled else 'false'}\n")
+        else:
+            updated.append(line)
+    if found != 1:
+        raise ComposeHold("NODE_BROKER_FLAG_MISSING_OR_DUPLICATE")
+    fd, temp_name = tempfile.mkstemp(prefix=".smite-broker-node-env-", dir=path.parent)
+    temp = Path(temp_name)
+    try:
+        os.fchown(fd, os.geteuid(), os.getegid())
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb", closefd=True) as stream:
+            stream.write("".join(updated).encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("panel", "node"))
-    parser.add_argument("compose", type=Path)
-    parser.add_argument("--peer-gid", type=int, required=True)
+    parser.add_argument("operation", choices=("panel", "node", "node-env"))
+    parser.add_argument("compose", type=Path, help="Compose file or Node .env for node-env")
+    parser.add_argument("--peer-gid", type=int)
+    parser.add_argument("--enabled", choices=("true", "false"))
     args = parser.parse_args()
     try:
-        if not 1 <= args.peer_gid < 65536:
+        if args.operation == "node-env":
+            if args.enabled is None or args.peer_gid is not None:
+                raise ComposeHold("NODE_BROKER_STATE_ARGUMENTS_INVALID")
+            set_node_broker_enabled(args.compose, args.enabled == "true")
+            print("NODE_BROKER_FORWARDING=" + ("ENABLED" if args.enabled == "true" else "DISABLED"))
+            return 0
+        if args.peer_gid is None or not 1 <= args.peer_gid < 65536:
             raise ComposeHold("INVALID_BROKER_PEER_GID")
+        if args.enabled is not None:
+            raise ComposeHold("UNEXPECTED_NODE_BROKER_STATE")
         if args.operation == "panel":
             prepare_panel(args.compose)
             print("PANEL_BROKER_KEY_MOUNT=PASS_READ_ONLY")

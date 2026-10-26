@@ -94,15 +94,58 @@ class BrokerComposeTests(unittest.TestCase):
             with self.assertRaisesRegex(helper.ComposeHold, "INVALID_BROKER_PEER_GID"):
                 helper.verify_node(path, gid)
 
-    def test_existing_installer_keeps_broker_inert_and_packages_helper(self):
+    def test_node_broker_enablement_changes_only_one_private_env_key(self):
+        with tempfile.TemporaryDirectory(prefix="broker-node-env-") as raw:
+            path = Path(raw) / ".env"
+            path.write_text(
+                "NODE_ROLE=iran\nSMITE_UOPTI_ROUTE_BROKER_ENABLED=false\n"
+                "SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock\n"
+            )
+            path.chmod(0o600)
+            helper.set_node_broker_enabled(path, True)
+            first = path.read_text()
+            self.assertIn("SMITE_UOPTI_ROUTE_BROKER_ENABLED=true\n", first)
+            self.assertEqual(first.count("SMITE_UOPTI_ROUTE_BROKER_ENABLED="), 1)
+            self.assertIn("SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock", first)
+            helper.set_node_broker_enabled(path, True)
+            self.assertEqual(path.read_text(), first)
+            helper.set_node_broker_enabled(path, False)
+            self.assertIn("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false\n", path.read_text())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_node_broker_enablement_rejects_missing_duplicate_and_unsafe_env(self):
+        for contents, expected in (
+            ("NODE_ROLE=iran\n", "NODE_BROKER_FLAG_MISSING_OR_DUPLICATE"),
+            ("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false\nSMITE_UOPTI_ROUTE_BROKER_ENABLED=false\n",
+             "NODE_BROKER_FLAG_MISSING_OR_DUPLICATE"),
+            ("SMITE_UOPTI_ROUTE_BROKER_ENABLED=yes\n", "INVALID_NODE_BROKER_STATE"),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as raw:
+                path = Path(raw) / ".env"
+                path.write_text(contents)
+                path.chmod(0o600)
+                before = path.read_bytes()
+                with self.assertRaisesRegex(helper.ComposeHold, expected):
+                    helper.set_node_broker_enabled(path, True)
+                self.assertEqual(path.read_bytes(), before)
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / ".env"
+            path.write_text("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false\n")
+            path.chmod(0o644)
+            with self.assertRaisesRegex(helper.ComposeHold, "UNTRUSTED_NODE_ENV"):
+                helper.set_node_broker_enabled(path, True)
+
+    def test_installer_starts_inert_broker_then_attests_node_socket(self):
         installer = (ROOT / "modules/smite-install.sh").read_text()
         package = (ROOT / "install.sh").read_text()
         self.assertIn('"smite-rc5-xhttp-broker-compose.py"', package)
         self.assertIn("smite_install_clean_rc_broker_prepare", installer)
         self.assertIn("smite_install_clean_rc_broker_panel_mount", installer)
         self.assertIn("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false", installer)
-        self.assertIn("BROKER_SERVICE=NOT_ENABLED", installer)
-        self.assertIn("BROKER_TRUSTED_GRANTS=NONE", installer)
+        self.assertIn("smite_install_clean_rc_broker_start_node_forwarding", installer)
+        self.assertIn("--activate-existing --confirm-local-root", installer)
+        self.assertIn("BROKER_TRUSTED_GRANTS=NONE_ROUTE_APPLY_HOLD", installer)
+        self.assertIn("NODE_BROKER_FORWARDING=PASS_SOCKET_PEER_ATTESTED", installer)
 
 
 if __name__ == "__main__":
