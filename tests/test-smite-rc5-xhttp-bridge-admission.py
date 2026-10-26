@@ -41,6 +41,7 @@ stream {
     }
     server {
         listen 443;
+        listen [::]:443;
         ssl_preread on;
         proxy_pass $uopti_frp_canary_backend;
     }
