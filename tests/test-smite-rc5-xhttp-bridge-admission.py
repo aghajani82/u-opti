@@ -103,6 +103,19 @@ class BridgeAdmissionTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(tx.BridgeHold):
                 self.plan(**item)
 
+    def test_optional_internal_14443_probe_is_supported_without_retargeting_443(self):
+        probe = b"""
+    server {
+        listen 127.0.0.1:14443;
+        ssl_preread on;
+        proxy_pass $uopti_frp_canary_backend;
+    }
+"""
+        more = STREAM.replace(b"    server {\n        listen 443;", probe +
+                              b"    server {\n        listen 443;")
+        result = self.plan(stream=more)
+        self.assertEqual(result.original, BACKEND)
+
     def test_sni_drift_and_bypass_refused(self):
         for item in (
             {"stream": STREAM.replace(b"listen 443;", b"listen 8443;")},
@@ -147,7 +160,7 @@ class BridgeAdmissionTests(unittest.TestCase):
         source = {
             tx.BACKEND: BACKEND, tx.STREAM: STREAM,
             tx.SNI_MAP: SNI_MAP, tx.LEGACY: LEGACY,
-            tx.STATE: b"SMITE_PANEL_DOMAIN=ir.kolbe1.ir\n",
+            tx.STATE: b"SMITE_PANEL_DOMAIN=ir.kolbe1.ir\nSMITE_CONNECTION_MODE=standard\n",
         }
         dump = "".join(f"# configuration file {p}:\n" for p in (
             tx.BACKEND, tx.STREAM, tx.SNI_MAP, tx.LEGACY
@@ -177,7 +190,7 @@ class BridgeAdmissionTests(unittest.TestCase):
         source = {
             tx.BACKEND: BACKEND, tx.STREAM: STREAM,
             tx.SNI_MAP: SNI_MAP, tx.LEGACY: LEGACY,
-            tx.STATE: b"SMITE_PANEL_DOMAIN=ir.kolbe1.ir\n",
+            tx.STATE: b"SMITE_PANEL_DOMAIN=ir.kolbe1.ir\nSMITE_CONNECTION_MODE=standard\n",
         }
         with (patch.object(tx.os, "geteuid", return_value=0),
               patch.object(tx.os, "uname") as uname,
