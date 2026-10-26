@@ -188,6 +188,9 @@ class IntentContractTests(unittest.TestCase):
         seen = frozenset({"d" * 32})
         result = self.authorize(seen_nonces=seen)
         self.assertEqual(result.nonce, "c" * 32)
+        # Shared fixed wire vector: Smite Panel issuer must produce this MAC.
+        self.assertEqual(json.loads(signed(self.msg))["mac"],
+                         "84f4ff3cf88f3479b00057efb6cbe3bced8dca53743b947045a6738d19dcc30e")
         self.assertEqual(seen, frozenset({"d" * 32}))
         # AuthenticatedIntent is not an authorization to execute root steps.
         with self.assertRaises(Exception):
