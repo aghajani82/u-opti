@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Existing non-Smite wizard/Private Network sources stay pinned. The user
-# explicitly selected fresh IR/KH rebuilds over legacy migration, so the
-# Smite installer now has one reviewed, default-OFF clean-rc addition.
+# explicitly selected fresh IR/KH rebuilds over legacy migration. The Smite
+# installer now has reviewed clean-RC broker/mount integration paths; pin its
+# accepted full source blob below so later wizard drift still fails closed.
 # The pinned installer also auto-selects Standard *only* in clean-rc mode.
 # Stable image pull/overlay isolation is checked separately by
 # tests/test-smite-clean-install.sh. During the final Field Trial, the only
@@ -27,7 +28,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-7ee9a7bd4ad1e435eea0f9ff58a66504cd09d911 modules/smite-install.sh
+b374673129a1825c63576d05c4f08b502ad3c7d0 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
