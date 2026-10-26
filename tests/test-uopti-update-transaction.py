@@ -22,11 +22,12 @@ spec = importlib.util.spec_from_file_location("uopti_recovery_test_real", HELPER
 txn = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(txn)
 
-MODULES = ["alpha.sh", "new.py"]
+MODULES = ["alpha.sh", "new.py", "smite-rc5-xhttp-root-broker.py"]
 OLD = {"u-opti": b"#!/bin/bash\necho OLD\n",
        "common.sh": b"# shared old\n",
        "VERSION": b"0.16.7\n",
-       "alpha.sh": b"echo prior alpha\n"}
+       "alpha.sh": b"echo prior alpha\n",
+       "smite-rc5-xhttp-root-broker.py": b"def old_broker(): pass\n"}
 NEW = {"u-opti": (
         b'#!/bin/bash\n'
         b'if [ -e "$LIB_PATH/.uopti-update-pending" ]; then\n'
@@ -39,7 +40,8 @@ NEW = {"u-opti": (
        "common.sh": b"# shared new\n",
        "VERSION": b"0.17.0\n",
        "alpha.sh": b"echo upgraded alpha\n",
-       "new.py": b"print('new')\n"}
+       "new.py": b"print('new')\n",
+       "smite-rc5-xhttp-root-broker.py": b"def serve(): pass\n"}
 
 
 class DurableUpdaterTests(unittest.TestCase):
@@ -177,7 +179,7 @@ class DurableUpdaterTests(unittest.TestCase):
             self.assertEqual(self.destinations[name].read_bytes(), value)
             self.assertEqual(
                 stat.S_IMODE(self.destinations[name].stat().st_mode),
-                0o644 if name == "VERSION" else 0o755,
+                0o644 if name in ("VERSION", "smite-rc5-xhttp-root-broker.py") else 0o755,
             )
         self.assertFalse((self.lib/txn.TXN_NAME).exists())
         self.assertFalse((self.lib/txn.DONE_NAME).exists())
@@ -222,7 +224,7 @@ class DurableUpdaterTests(unittest.TestCase):
             "    if done.exists(): os._exit(92)\n"
             "    return original(done)\n"
             "m._clear_finished=fail_finished\n"
-            "m.apply(stage,backup,['alpha.sh','new.py'],lib=lib,install=install)\n"
+            "m.apply(stage,backup,['alpha.sh','new.py','smite-rc5-xhttp-root-broker.py'],lib=lib,install=install)\n"
         )
         self.assertEqual(result.returncode, 92, result.stderr)
         self.assertFalse((self.lib/txn.TXN_NAME).exists())
