@@ -121,7 +121,7 @@ def prepare_node(path: Path, peer_gid: int) -> None:
     if text.count(marker) != 1:
         raise ComposeHold("UNREVIEWED_NODE_COMPOSE_LAYOUT")
     start = text.index(marker)
-    next_service = re.search(r"^  [A-Za-z0-9_-]+:\\s*$", text[start + len(marker):], re.M)
+    next_service = re.search(r"^  [A-Za-z0-9_-]+:\s*$", text[start + len(marker):], re.M)
     end = start + len(marker) + next_service.start() if next_service else len(text)
     block = text[start:end]
     if "/route-broker.key" in block:
