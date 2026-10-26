@@ -275,6 +275,7 @@ def plan() -> admission.BridgePlan:
     host_gate()
     require(absent(TX_DIR) and absent(JOURNAL),
             "EXISTING_TX_REQUIRES_REVIEW")
+    require(absent(BRIDGE) and absent(ROUTE_DIR), "BRIDGE_ALREADY_PRESENT")
     result = admission.audit_read_only()
     require(trusted_file(BACKEND, mode=0o644) == result.original,
             "BACKEND_CHANGED")
