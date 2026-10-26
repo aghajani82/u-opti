@@ -151,6 +151,11 @@ def _approved_grant(child: str):
 
 
 def _verify_helper(config: dict) -> None:
+    # Prevent a non-root user from replacing a previously hashed executable
+    # between verification and exec. The trusted worker directory is static.
+    _dir(HELPER.parent, mode=0o755)
+    if HELPER.parent != PLANNER.parent:
+        raise BrokerHold("HELPER_PACKAGE_SPLIT")
     for path, digest_field in (
         (HELPER, "helper_sha256"), (PLANNER, "planner_sha256")
     ):
