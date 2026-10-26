@@ -398,7 +398,8 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
     _ensure_peer_group(peer_gid, runner)
 
     commands = (
-        ("daemon-reload",), ("enable", SERVICE_NAME), ("start", SERVICE_NAME),
+        ("daemon-reload",), ("enable", SERVICE_NAME),
+        ("reset-failed", SERVICE_NAME), ("start", SERVICE_NAME),
     )
     for args in commands:
         try:
