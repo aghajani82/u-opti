@@ -138,6 +138,21 @@ def nginx_reload() -> None:
     command(["/usr/bin/systemctl", "reload", "nginx"])
 
 
+def verify_effective_bridge() -> None:
+    # A successful nginx -t alone does not establish that the correct HTTPS
+    # backend included this bridge. nginx -T must load each reviewed file.
+    code, config = admission._run([NGINX, "-T"])
+    require(code == 0, "EFFECTIVE_NGINX_UNAVAILABLE")
+    for path in (BACKEND, BRIDGE, admission.LEGACY, admission.STREAM,
+                 admission.SNI_MAP):
+        require(config.count(f"# configuration file {path}:") == 1,
+                "EXPECTED_NGINX_FILE_NOT_EFFECTIVE")
+    require(config.count(admission.INCLUDE.decode().strip()) == 1,
+            "EFFECTIVE_BRIDGE_INCLUDE_MISMATCH")
+    require(config.count(BRIDGE_BYTES.decode().strip()) == 1,
+            "EFFECTIVE_ROUTE_DIRECTORY_INCLUDE_MISMATCH")
+
+
 def probe_panel(domain: str) -> None:
     # Validate TLS and host routing via actual localhost public 443 (no -k).
     args = [
@@ -300,7 +315,9 @@ def apply() -> None:
                     "BACKEND_CHANGED_BEFORE_COMMIT")
             replace_file(BACKEND, result.candidate, 0o644)
             nginx_test()
+            verify_effective_bridge()
             nginx_reload()
+            verify_effective_bridge()
             probe_panel(result.domain)
             require(trusted_file(BACKEND, mode=0o644) == result.candidate
                     and trusted_file(BRIDGE, mode=0o644) == BRIDGE_BYTES,
@@ -328,6 +345,8 @@ def verify() -> None:
             "BRIDGE_CONTENT_DRIFT")
     trusted_dir(ROUTE_DIR, mode=0o700)
     nginx_test()
+    verify_effective_bridge()
+    probe_panel(record["domain"])
     # This verification does not assert route existence or client traffic.
     print("RESULT=PASS_BRIDGE_VERIFY_READ_ONLY")
     print("LEGACY_XHTTP_FILE=UNCHANGED_BY_INSTALLER")
