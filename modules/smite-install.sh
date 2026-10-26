@@ -782,6 +782,7 @@ smite_install_node_files() {
     local backhaul_address="${6:-}"
     local connection_mode="${7:-standard}"
     local broker_compose_helper=""
+    local empty_sanaei_dir="/var/lib/u-opti/smite-sanaei-empty"
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || return 1
 
@@ -858,6 +859,23 @@ EOF_RC_IR_BROKER
             [ -f "$broker_compose_helper" ] && [ ! -L "$broker_compose_helper" ] || return 1
             python3 -B "$broker_compose_helper" node "$SMITE_NODE_COMPOSE" \
                 --peer-gid "$SMITE_UOPTI_BROKER_GID" || return 1
+        elif [ "$node_role" = foreign ]; then
+            mkdir -p "$(dirname "$empty_sanaei_dir")" || return 1
+            if [ -e "$empty_sanaei_dir" ] || [ -L "$empty_sanaei_dir" ]; then
+                [ -d "$empty_sanaei_dir" ] && [ ! -L "$empty_sanaei_dir" ] &&
+                [ "$(stat -c '%u:%a' "$empty_sanaei_dir" 2>/dev/null)" = "0:700" ] &&
+                [ -z "$(find "$empty_sanaei_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] || {
+                    echo "HOLD: Default empty Sanaei mount directory is unsafe or not empty." >&2
+                    return 1
+                }
+            else
+                mkdir -m 0700 "$empty_sanaei_dir" || return 1
+                chown 0:0 "$empty_sanaei_dir" || return 1
+            fi
+            cat >> "$SMITE_NODE_DIR/.env" <<EOF_RC_KH_SANAEI
+SMITE_SANAEI_DB_HOST_PATH=$empty_sanaei_dir
+SMITE_SANAEI_INVENTORY_ENABLED=false
+EOF_RC_KH_SANAEI
         fi
         echo "NODE_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
         if [ "$node_role" = foreign ]; then
@@ -1635,7 +1653,8 @@ smite_install_foreign_node() {
 }
 
 smite_install_sanaei_foreign() {
-    local current_role=""
+    local current_role="" helper selected="" backup="" choice="" index=""
+    local -a instance_ids=() usable_ids=()
 
     clear
     echo "======================================"
@@ -1671,20 +1690,127 @@ smite_install_sanaei_foreign() {
         return
     fi
 
-    echo "Smite Foreign Node detected."
-    echo
-    echo "Launching the existing U-OPTI 3x-UI Multi-Instance installer..."
-    echo
-    echo "The normal U-OPTI rules remain active:"
-    echo "  - Multi-instance allocation"
-    echo "  - Nginx / SSL"
-    echo "  - Hidden Web Base Path"
-    echo "  - Panel Listen IP: 127.0.0.1"
-    echo "  - Subscription / API / Metrics compatibility"
-    echo
-    sleep 2
+    if [ "$SMITE_INSTALL_PROFILE" != clean-rc ]; then
+        echo "Smite Foreign Node detected."
+        echo
+        echo "Launching the existing U-OPTI 3x-UI Multi-Instance installer..."
+        echo
+        echo "The normal U-OPTI rules remain active:"
+        echo "  - Multi-instance allocation"
+        echo "  - Nginx / SSL"
+        echo "  - Hidden Web Base Path"
+        echo "  - Panel Listen IP: 127.0.0.1"
+        echo "  - Subscription / API / Metrics compatibility"
+        echo
+        sleep 2
+        docker_3xui_install
+        return
+    fi
 
-    docker_3xui_install
+    if [ ! -f "$SMITE_NODE_COMPOSE" ] || [ -L "$SMITE_NODE_COMPOSE" ] ||
+       [ ! -f "$SMITE_NODE_DIR/.env" ] || [ -L "$SMITE_NODE_DIR/.env" ]; then
+        echo "HOLD: Clean-RC Foreign Node Compose and environment are required." >&2
+        smite_install_pause
+        return
+    fi
+
+    # The existing Sanaei installer relaunches U-OPTI when it completes.
+    # On the next visit this same action discovers the registered instance and
+    # installs the approved read-only database mount into the KH Node.
+    if ! declare -F docker_3xui_load_instance >/dev/null 2>&1 ||
+       ! docker_3xui_load_instance >/dev/null 2>&1; then
+        echo "HOLD: U-OPTI multi-instance registry is unavailable." >&2
+        smite_install_pause
+        return
+    fi
+    mapfile -t instance_ids < <(docker_3xui_instance_registered_ids 2>/dev/null || true)
+    for index in "${instance_ids[@]}"; do
+        if docker_3xui_instance_load_state "$index" >/dev/null 2>&1 &&
+           [ -s "$DOCKER_3XUI_INSTANCE_DIR/db/x-ui.db" ] &&
+           [ ! -L "$DOCKER_3XUI_INSTANCE_DIR/db/x-ui.db" ]; then
+            usable_ids+=("$index")
+        fi
+    done
+
+    if [ "${#usable_ids[@]}" -eq 0 ]; then
+        echo "No registered Sanaei database was found for this KH Node."
+        echo "Launching the existing U-OPTI Sanaei installer."
+        echo "After installation returns to U-OPTI, open this option again to"
+        echo "connect its database to the read-only Smite inventory mount."
+        smite_install_pause
+        docker_3xui_install
+        return
+    fi
+
+    if [ "${#usable_ids[@]}" -eq 1 ]; then
+        selected="${usable_ids[0]}"
+    else
+        echo "Registered Sanaei instances with an available database:"
+        for index in "${!usable_ids[@]}"; do
+            printf '%s) Instance %s\n' "$((index + 1))" "${usable_ids[$index]}"
+        done
+        read -r -p "Select the Sanaei instance for this KH Node: " choice
+        [[ "$choice" =~ ^[0-9]+$ ]] &&
+        [ "$choice" -ge 1 ] && [ "$choice" -le "${#usable_ids[@]}" ] || {
+            echo "HOLD: Invalid Sanaei instance selection." >&2
+            smite_install_pause
+            return
+        }
+        selected="${usable_ids[$((choice - 1))]}"
+    fi
+
+    if ! docker_3xui_instance_load_state "$selected" >/dev/null 2>&1; then
+        echo "HOLD: Selected Sanaei instance state is unavailable." >&2
+        smite_install_pause
+        return
+    fi
+    helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-rc5-xhttp-sanaei-mount.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || {
+        echo "HOLD: Sanaei mount verifier is not staged." >&2
+        smite_install_pause
+        return
+    }
+    backup="$SMITE_NODE_DIR/.env.pre-sanaei-mount-$(date +%Y%m%d%H%M%S).bak"
+    cp -a "$SMITE_NODE_DIR/.env" "$backup" || {
+        echo "HOLD: Could not retain the Node environment rollback copy." >&2
+        smite_install_pause
+        return
+    }
+    if ! python3 -B "$helper" \
+        --instance-id "$selected" \
+        --node-env "$SMITE_NODE_DIR/.env" \
+        --node-compose "$SMITE_NODE_COMPOSE" \
+        --confirm-foreign-node; then
+        rm -f "$backup"
+        smite_install_pause
+        return
+    fi
+
+    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+       ! smite_wait_healthy smite-node 90 ||
+       ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'; then
+        echo "HOLD: Read-only Sanaei mount did not pass container verification; restoring Node configuration." >&2
+        cp -a "$backup" "$SMITE_NODE_DIR/.env" || {
+            echo "CRITICAL: Restore failed; backup retained at $backup" >&2
+            smite_install_pause
+            return
+        }
+        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+           ! smite_wait_healthy smite-node 90; then
+            echo "CRITICAL: Node rollback health is unconfirmed; backup retained at $backup" >&2
+            smite_install_pause
+            return
+        fi
+        rm -f "$backup"
+        smite_install_pause
+        return
+    fi
+    rm -f "$backup"
+    echo "KH_SANAEI_INVENTORY=PASS_READ_ONLY_SCHEMA"
+    echo "KH_NODE_RECREATE=PASS_HEALTHY"
+    echo "KH_CLIENT_IDENTIFIERS=NOT_READ"
+    smite_install_pause
 }
 
 

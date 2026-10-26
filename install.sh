@@ -102,6 +102,7 @@ MODULES=(
     "smite-rc5-xhttp-root-broker.py"
     "smite-rc5-xhttp-broker-provision.py"
     "smite-rc5-xhttp-broker-compose.py"
+    "smite-rc5-xhttp-sanaei-mount.py"
     "smite-rc5-xhttp-nonce-ledger.py"
     "smite-rc5-xhttp-signed-intent.py"
     "smite-rc5-xhttp-bridge-install.py"
@@ -261,6 +262,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-rc5-xhttp-root-broker.py) LABEL="Smite XHTTP local broker (staged only)" ;;
         smite-rc5-xhttp-broker-provision.py) LABEL="Smite XHTTP broker provision/activation helper (staged)" ;;
         smite-rc5-xhttp-broker-compose.py) LABEL="Smite XHTTP clean-install Compose admission helper" ;;
+        smite-rc5-xhttp-sanaei-mount.py) LABEL="Smite KH Sanaei read-only inventory mount helper" ;;
         smite-rc5-xhttp-nonce-ledger.py) LABEL="Smite XHTTP durable replay ledger" ;;
         smite-rc5-xhttp-signed-intent.py) LABEL="Smite XHTTP signed intent contract" ;;
         smite-rc5-xhttp-bridge-install.py) LABEL="Smite XHTTP bridge verifier" ;;
