@@ -302,6 +302,9 @@ if [ -s "$MODULES_PATH/smite-backhaul-management.sh" ] &&
    [ -s "$MODULES_PATH/smite-backhaul-panel-patch.py" ]; then
     source "$MODULES_PATH/smite-backhaul-management.sh"
 fi
+if [ -s "$MODULES_PATH/smite-clean-ir-resume.sh" ]; then
+    source "$MODULES_PATH/smite-clean-ir-resume.sh"
+fi
 source "$MODULES_PATH/docker-3xui-instance.sh"
 source "$MODULES_PATH/docker-3xui-certificate-multi.sh"
 source "$MODULES_PATH/docker-3xui-nginx.sh"
@@ -666,6 +669,7 @@ print(sha)
                 "smite-profile-first-menu.sh"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
+                "smite-clean-ir-resume.sh"
                 "smite-tunnel-wizard.sh"
                 "smite-tunnel-control-center.sh"
                 "smite-managed-backhaul.py"
@@ -838,6 +842,7 @@ print(sha)
                 ["smite-profile-first-menu.sh"]="$BASE_URL/modules/smite-profile-first-menu.sh"
                 ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
+                ["smite-clean-ir-resume.sh"]="$BASE_URL/modules/smite-clean-ir-resume.sh"
                 ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
                 ["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"
                 ["smite-managed-backhaul.py"]="$BASE_URL/modules/smite-managed-backhaul.py"
@@ -933,6 +938,7 @@ print(sha)
                 ["smite-profile-first-menu.sh"]="$TEMP_DIR/smite-profile-first-menu.sh"
                 ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
                 ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
+                ["smite-clean-ir-resume.sh"]="$TEMP_DIR/smite-clean-ir-resume.sh"
                 ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
                 ["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"
                 ["smite-managed-backhaul.py"]="$TEMP_DIR/smite-managed-backhaul.py"
@@ -1215,6 +1221,7 @@ print(sha)
                 "smite-profile-first-menu.sh"
                 "smite-frp-wizard.sh"
                 "smite-backhaul-management.sh"
+                "smite-clean-ir-resume.sh"
                 "smite-tunnel-wizard.sh"
                 "smite-tunnel-control-center.sh"
                 "smite-managed-backhaul.py"

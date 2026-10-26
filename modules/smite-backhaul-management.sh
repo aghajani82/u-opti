@@ -267,8 +267,9 @@ docker_smite_management_menu() {
         echo "5) Private Network Wizard"
         echo "6) Advanced & Legacy Tools"
         echo "7) Independent Engines (Backhaul review)"
+        echo "8) Resume interrupted clean-RC IR test install"
         echo "0) Back"
-        read -rp "Choose [0-7]: " choice || return
+        read -rp "Choose [0-8]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
@@ -318,6 +319,13 @@ docker_smite_management_menu() {
                     smite_managed_bh_menu
                 else
                     echo "HOLD: Independent Backhaul module is missing."
+                fi
+                ;;
+            8)
+                if declare -F smite_install_resume_clean_ir >/dev/null 2>&1; then
+                    smite_install_resume_clean_ir
+                else
+                    echo "HOLD: Clean IR recovery module is missing; update U-OPTI first."
                 fi
                 ;;
             0) return ;;
