@@ -248,6 +248,17 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
                 "0c007ca049b95227588d2e4847020a53d5d0c155d28dc537341367a783d81c19",
         }
         installer = (root / "install.sh").read_text()
+        required_runtime = (
+            "smite-rc5-xhttp-root-broker.py",
+            "smite-rc5-xhttp-nonce-ledger.py",
+            "smite-rc5-xhttp-signed-intent.py",
+            "smite-rc5-xhttp-bridge-install.py",
+            "smite-rc5-xhttp-bridge-admission.py",
+        )
+        for module in required_runtime:
+            with self.subTest(module=module):
+                self.assertTrue((root / "modules" / module).is_file())
+                self.assertIn(f'"{module}"', installer)
         for relative, digest in expected.items():
             with self.subTest(relative=relative):
                 path = root / relative
