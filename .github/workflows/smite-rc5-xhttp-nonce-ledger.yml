@@ -5,8 +5,10 @@ on:
     paths:
       - 'modules/smite-rc5-xhttp-signed-intent.py'
       - 'modules/smite-rc5-xhttp-nonce-ledger.py'
+      - 'modules/smite-rc5-xhttp-root-broker.py'
       - 'tests/test-smite-rc5-xhttp-signed-intent.py'
       - 'tests/test-smite-rc5-xhttp-nonce-ledger.py'
+      - 'tests/test-smite-rc5-xhttp-root-broker.py'
       - 'docs/SMITE-RC5-XHTTP-ROOT-REPLAY-LEDGER.md'
       - '.github/workflows/smite-rc5-xhttp-nonce-ledger.yml'
   push:
@@ -27,9 +29,11 @@ jobs:
           python-version: '3.11'
       - name: Compile immutable intent and independent ledger
         run: |
-          python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py modules/smite-rc5-xhttp-nonce-ledger.py
-          python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py
+          python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py modules/smite-rc5-xhttp-nonce-ledger.py modules/smite-rc5-xhttp-root-broker.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py tests/test-smite-rc5-xhttp-root-broker.py
       - name: Strict HMAC schema and signature regression
         run: python3 -B tests/test-smite-rc5-xhttp-signed-intent.py -v
       - name: Root-owned replay state, missing-DB HOLD, restart and concurrent uniqueness
         run: sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py -v
+      - name: Verify local broker peer restrictions, replay consumption and scoped worker dispatch
+        run: sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py -v
