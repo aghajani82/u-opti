@@ -50,6 +50,8 @@ if [[ ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$BRANCH" == *".."* ]] || [[ "$
     echo "ERROR: Invalid persisted U-OPTI source branch/ref: $BRANCH" >&2
     exit 1
 fi
+# Keep every lazily loaded wizard/helper on the same installed source ref.
+export U_OPTI_BRANCH="$BRANCH"
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$BRANCH"
 
