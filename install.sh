@@ -100,6 +100,7 @@ MODULES=(
     "smite-xhttp-nginx-route"
     "smite_xhttp_nginx_plan.py"
     "smite-rc5-xhttp-root-broker.py"
+    "smite-rc5-xhttp-broker-provision.py"
     "smite-rc5-xhttp-nonce-ledger.py"
     "smite-rc5-xhttp-signed-intent.py"
     "smite-rc5-xhttp-bridge-install.py"
@@ -257,6 +258,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-xhttp-nginx-route) LABEL="Pinned Smite XHTTP route worker" ;;
         smite_xhttp_nginx_plan.py) LABEL="Pinned Smite XHTTP route planner" ;;
         smite-rc5-xhttp-root-broker.py) LABEL="Smite XHTTP local broker (staged only)" ;;
+        smite-rc5-xhttp-broker-provision.py) LABEL="Smite XHTTP inert broker provisioner" ;;
         smite-rc5-xhttp-nonce-ledger.py) LABEL="Smite XHTTP durable replay ledger" ;;
         smite-rc5-xhttp-signed-intent.py) LABEL="Smite XHTTP signed intent contract" ;;
         smite-rc5-xhttp-bridge-install.py) LABEL="Smite XHTTP bridge verifier" ;;
