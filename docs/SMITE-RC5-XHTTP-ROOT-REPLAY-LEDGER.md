@@ -10,14 +10,14 @@ This milestone adds `modules/smite-rc5-xhttp-nonce-ledger.py`, a **root-only, of
 
 An **offline-only** `authenticate_and_consume` helper verifies the HMAC message against an independently supplied `TrustedGrant` then consumes the nonce atomically. If an attacker sends a validly signed but unauthorized request, the root grant mismatches and the ledger is not consumed. On re-delivery, duplicate nonce fails even after reopening the DB or with concurrent workers.
 
-## Security obligations still OPEN before any privileged broker
+## Broker service readiness and remaining authorization gate
 
-- **No root IPC endpoint or process was added.** This is a local library, not a running signed bridge between Smite Panel and U-OPTI. The user-facing Add Inbound action still cannot auto-write Nginx.
-- **Provisioning:** A reviewed U-OPTI installer must explicitly create a dedicated private directory and one ledger per unique root broker identity. A dedicated HMAC broker key must be provisioned separately from the existing Smite Agent secret; never accept key/config from unauthenticated callers. Do not auto-initialize on any network request, error, reinstall or restore.
+- **The Root Broker and Node UDS forwarder are staged, but Panel-to-Broker authorization is not operational.** The user-facing Add Inbound action still cannot auto-write Nginx: there is no independently sourced TrustedGrant flow or safe key delivery to Panel.
+- **Provisioning:** The U-OPTI helper explicitly creates the private root-owned directory, dedicated HMAC key, broker identity, empty TrustedGrant directory, one durable ledger, pinned worker/planner, and a systemd unit. Provisioning itself remains inert. A separate `--activate-existing --confirm-local-root` action verifies these inputs, enables/starts the IR-only service, and confirms the persistent systemd state and exact Unix socket owner/mode. The service uses bounded systemd restart-on-failure policy; activation does not mount a key into Panel/Node, create grants, or change Nginx.
 - **Independent authorization:** The future root broker must derive its `TrustedGrant` independently from validated Signed IR owner proof, Signed KH inventory, durable unique child lease and host FRPS runtime; never construct it from the incoming HMAC body, an unverified Panel UI field or a raw file path.
 - **Replay atomicity:** The future broker must hold its approved host transaction lock while consuming the nonce and recording the route action's unique operation ID, before any host mutation. The ledger records *nonce consumed*, not success of a Nginx operation. A crash **after consumption** requires audited journal/reconciliation, not resending another signed Apply automatically.
 - **Persistence and restore:** A local SQLite ledger cannot detect a coordinated rollback of the ledger *and* independently stored broker identity/key, a cloned VM snapshot, or root compromise. A separately anchored restore epoch/quarantine protocol must be designed before any real deployment. Nonces are deliberately not garbage collected; once capacity is reached, the broker must HOLD pending audited migration.
-- **IPC:** Future Unix domain transport requires real `SO_PEERCRED` verification and allowlisted IR signed Node identity with least-privilege process isolation; no broad sudoers command, HTTP root endpoint, generic shell command, container write mount or untrusted import.
+- **IPC:** The local broker verifies Unix `SO_PEERCRED` and checks the dedicated Node UID/GID, but deployment must still confirm the exact opt-in Node socket mount and Panel signed-intent path. No broad sudoers command, HTTP root endpoint, generic shell command, container write mount or untrusted import is allowed.
 - **Nginx transaction:** Keep existing `45121` and `49328` routes unchanged. Only a separately owned include file per new inbound can be created after approved bridge, `nginx -t`, reload, rollback journal, signed owner and proxy listener proof.
 - **Host trial:** Unit/CI SUCCESS is not a test on IR/KH. The first deployment test must use separate disposable fresh IR/KH snapshots plus a third Sanaei XHTTP inbound and real TLS 443 client traffic. Avoid touching Grandoptical.
 
@@ -29,6 +29,6 @@ The number of GitHub workflows is growing. Before the next release candidate: in
 
 1. Root ledger + offline security CI (this PR).
 2. Exact root-owned key/bootstrap/restore quarantine, independently sourced TrustedGrant and local peer authentication.
-3. Authorized root broker transaction state machine and idempotent recovery tied to U-OPTI's managed Nginx snippets; this must be reviewed with the existing bridge installer.
+3. Independently approved `TrustedGrant` creation from validated Signed IR owner proof, Signed KH inventory, unique child lease, and host FRPS runtime. The service may be active with an empty grant directory, but every route stays HOLD until that separate authorization path is implemented and verified.
 4. Signed Node orchestration + KH read-only 3x-ui mount + simple FRP wizard.
 5. Clean disposable dual-VPS installation, third inbound real client test, signed compatible RC pair, explicit release approval.

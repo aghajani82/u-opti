@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""One-time inert provisioner for the IR U-OPTI route broker.
+"""Provision and explicitly activate the IR U-OPTI route broker.
 
 Installs a dedicated key, empty TrustedGrant directory, durable nonce ledger,
-pinned local worker/planner, root-owned config, and a systemd unit. It NEVER
-creates grants from requests, enables/starts systemd, mounts secrets into the
-Panel/Node, or changes Nginx. A missing grant keeps every route request HOLD.
+pinned local worker/planner, root-owned config, and a systemd unit. Provisioning
+is inert; a separate explicit activation enables the persistent service. Neither
+mode creates grants from requests, mounts secrets into Panel/Node, or changes
+Nginx. A missing grant keeps every route request HOLD.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import subprocess
 import sys
 
 HELPER_SHA256 = "acb66752f6aa8600f1c45a7d68f46006b0d4d26c55330925bd35359d3ca868e6"
@@ -130,7 +132,10 @@ ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/{BROKER_MODULE} --se
 RuntimeDirectory=u-opti/smite
 RuntimeDirectoryMode=0750
 UMask=0077
-Restart=no
+Restart=on-failure
+RestartSec=3s
+StartLimitIntervalSec=60s
+StartLimitBurst=3
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
@@ -138,6 +143,7 @@ ProtectSystem=full
 ReadWritePaths=/etc/nginx/smite-xhttp-routes
 ReadWritePaths=/var/lib/u-opti/smite-xhttp-broker
 ReadWritePaths=/run/lock/u-opti-smite-engine.lock
+ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock
 ReadWritePaths=/run/u-opti/smite
 ReadWritePaths=/var/log/nginx
 
@@ -263,16 +269,145 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
     }
 
 
+def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]:
+    """Enable and start the prepared IR broker without creating grants/routes."""
+    _check_root(root)
+    if root == Path("/"):
+        if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
+            raise ProvisionHold("IR_ROOT_ONLY")
+    elif runner is subprocess.run:
+        raise ProvisionHold("ACTIVATION_TEST_ROOT_REQUIRES_MOCKED_RUNNER")
+
+    etc = root / "etc/u-opti/smite"
+    state = root / "var/lib/u-opti/smite-xhttp-broker"
+    config_path = etc / "route-broker.json"
+    key_path = etc / "route-broker.key"
+    grants = etc / "route-grants"
+    ledger = state / "nonce.db"
+    service = root / "etc/systemd/system" / SERVICE_NAME
+    sock_dir = root / "run/u-opti/smite"
+
+    def trusted_file(path: Path, mode: int, max_size: int) -> bytes:
+        try:
+            before = path.lstat()
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                    or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != mode
+                    or not 0 < before.st_size <= max_size):
+                raise ProvisionHold("BROKER_ACTIVATION_INPUT_UNTRUSTED")
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                opened = os.fstat(fd)
+                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                    raise ProvisionHold("BROKER_ACTIVATION_INPUT_CHANGED")
+                raw = os.read(fd, max_size + 1)
+            finally:
+                os.close(fd)
+            if len(raw) != before.st_size:
+                raise ProvisionHold("BROKER_ACTIVATION_INPUT_CHANGED")
+            return raw
+        except OSError as exc:
+            raise ProvisionHold("BROKER_ACTIVATION_INPUT_MISSING") from exc
+
+    config_raw = trusted_file(config_path, 0o600, 4096)
+    key = trusted_file(key_path, 0o600, 64)
+    trusted_file(ledger, 0o600, 64 * 1024 * 1024)
+    unit = trusted_file(service, 0o644, 8192).decode("ascii", "strict")
+    try:
+        config = json.loads(config_raw)
+    except (UnicodeError, ValueError, TypeError) as exc:
+        raise ProvisionHold("BROKER_ACTIVATION_CONFIG_INVALID") from exc
+    peer_gid = config.get("peer_gid") if isinstance(config, dict) else None
+    if (len(key) != 32 or not isinstance(config, dict)
+            or set(config) != {"schema", "instance_id", "peer_uid", "peer_gid",
+                               "helper_sha256", "planner_sha256"}
+            or type(config.get("schema")) is not int or config["schema"] != 1
+            or type(config.get("peer_uid")) is not int or config["peer_uid"] != 0
+            or type(peer_gid) is not int or not 1 <= peer_gid < 65536
+            or config.get("helper_sha256") != HELPER_SHA256
+            or config.get("planner_sha256") != PLANNER_SHA256
+            or f"Group={peer_gid}\n" not in unit
+            or "User=root\n" not in unit
+            or "Restart=on-failure\n" not in unit
+            or f"ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/{BROKER_MODULE} --serve\n" not in unit
+            or "NoNewPrivileges=yes\n" not in unit
+            or "ProtectSystem=full\n" not in unit):
+        raise ProvisionHold("BROKER_ACTIVATION_CONFIG_INVALID")
+    helper = trusted_file(root / "usr/local/libexec" / HELPER_MODULE, 0o755, 1024 * 1024)
+    planner = trusted_file(root / "usr/local/libexec" / PLANNER_MODULE, 0o755, 1024 * 1024)
+    broker_module = trusted_file(
+        root / "usr/local/lib/u-opti/modules" / BROKER_MODULE, 0o644, 1024 * 1024
+    )
+    if (hashlib.sha256(helper).hexdigest() != HELPER_SHA256
+            or hashlib.sha256(planner).hexdigest() != PLANNER_SHA256
+            or b"def serve()" not in broker_module):
+        raise ProvisionHold("BROKER_ACTIVATION_PINNED_INPUT_MISMATCH")
+    for path in (etc, grants, state):
+        try:
+            item = path.lstat()
+        except OSError as exc:
+            raise ProvisionHold("BROKER_ACTIVATION_DIRECTORY_MISSING") from exc
+        if (not stat.S_ISDIR(item.st_mode) or item.st_uid != 0
+                or stat.S_IMODE(item.st_mode) != 0o700):
+            raise ProvisionHold("BROKER_ACTIVATION_DIRECTORY_UNTRUSTED")
+
+    commands = (
+        ("daemon-reload",), ("enable", SERVICE_NAME), ("start", SERVICE_NAME),
+    )
+    for args in commands:
+        try:
+            result = runner(["systemctl", *args], check=False,
+                            capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ProvisionHold("BROKER_SYSTEMD_COMMAND_FAILED") from exc
+        if result.returncode != 0:
+            raise ProvisionHold("BROKER_SYSTEMD_COMMAND_FAILED")
+    for args, expected in ((("is-enabled", SERVICE_NAME), "enabled"),
+                           (("is-active", SERVICE_NAME), "active")):
+        try:
+            result = runner(["systemctl", *args], check=False,
+                            capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED") from exc
+        if result.returncode != 0 or result.stdout.strip() != expected:
+            raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED")
+    try:
+        directory = sock_dir.lstat()
+        sock = (sock_dir / "xhttp-broker.sock").lstat()
+    except OSError as exc:
+        raise ProvisionHold("BROKER_SOCKET_NOT_READY") from exc
+    if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0
+            or directory.st_gid != peer_gid or stat.S_IMODE(directory.st_mode) != 0o750
+            or not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 0
+            or sock.st_gid != peer_gid or stat.S_IMODE(sock.st_mode) != 0o660):
+        raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
+    return {
+        "SERVICE_ACTIVATION": "PASS_ACTIVE_PERSISTENT",
+        "SERVICE_ENABLED": "YES",
+        "BROKER_SOCKET": "READY",
+        "TRUSTED_GRANTS": "UNCHANGED",
+        "LIVE_ROUTE_CHANGE": "NO",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare the IR-only Smite route broker")
-    parser.add_argument("--peer-gid", required=True, type=int)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--peer-gid", type=int)
+    mode.add_argument("--activate-existing", action="store_true",
+                      help="Enable and start an already provisioned IR broker")
     parser.add_argument("--confirm-local-root", action="store_true")
     args = parser.parse_args()
     if not args.confirm_local_root:
         print("HOLD_EXPLICIT_LOCAL_ROOT_CONFIRMATION_REQUIRED")
         return 2
     try:
-        result = provision(peer_gid=args.peer_gid)
+        if args.activate_existing:
+            result = activate()
+        elif args.peer_gid is not None:
+            result = provision(peer_gid=args.peer_gid)
+        else:
+            print("HOLD_SELECT_PROVISION_OR_ACTIVATION")
+            return 2
     except Exception as exc:
         reason = str(exc) if isinstance(exc, ProvisionHold) else "BROKER_PROVISION_FAILED"
         print(f"HOLD_{reason}")

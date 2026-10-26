@@ -261,6 +261,7 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertTrue((root / "modules" / module).is_file())
                 self.assertIn(f'"{module}"', installer)
+        self.assertIn("broker provision/activation helper (staged)", installer)
         for relative, digest in expected.items():
             with self.subTest(relative=relative):
                 path = root / relative
@@ -329,8 +330,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                              provisioner.PLANNER_SHA256)
             unit = service.read_text()
             self.assertIn("Group=1348", unit)
-            self.assertIn("Restart=no", unit)
+            self.assertIn("Restart=on-failure", unit)
             self.assertIn("NoNewPrivileges=yes", unit)
+            self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
 
             key_before = (etc / "route-broker.key").read_bytes()
@@ -355,6 +357,92 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             with self.assertRaises(provisioner.ProvisionHold):
                 provisioner.provision(peer_gid=0, root=root, source_dir=repo / "modules")
             self.assertEqual(list(root.iterdir()), [])
+
+    def test_explicit_activation_enables_persistent_unit_and_verifies_socket(self):
+        repo = Path(__file__).resolve().parents[1]
+        source_dir = repo / "modules"
+        provisioner_path = source_dir / "smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_activation_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            target_modules = root / "usr/local/lib/u-opti/modules"
+            target_modules.mkdir(parents=True, mode=0o755)
+            target_modules.chmod(0o755)
+            broker_target = target_modules / "smite-rc5-xhttp-root-broker.py"
+            broker_target.write_bytes((source_dir / broker_target.name).read_bytes())
+            broker_target.chmod(0o644)
+            provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                                  instance_id=INSTANCE)
+
+            calls = []
+            def fake_systemctl(argv, **kwargs):
+                calls.append(tuple(argv[1:]))
+                action = argv[1]
+                if action == "start":
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+                if action == "is-enabled":
+                    return SimpleNamespace(returncode=0, stdout="enabled\n", stderr="")
+                if action == "is-active":
+                    return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            sock_dir = root / "run/u-opti/smite"
+            sock = sock_dir / "xhttp-broker.sock"
+            original_lstat = Path.lstat
+            def lstat_with_mocked_service_socket(path):
+                if path == sock_dir:
+                    return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750,
+                                           st_uid=0, st_gid=PEER_GID)
+                if path == sock:
+                    return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660,
+                                           st_uid=0, st_gid=PEER_GID)
+                return original_lstat(path)
+            with patch.object(Path, "lstat", lstat_with_mocked_service_socket):
+                result = provisioner.activate(root=root, runner=fake_systemctl)
+            self.assertEqual(result["SERVICE_ACTIVATION"], "PASS_ACTIVE_PERSISTENT")
+            self.assertEqual(result["TRUSTED_GRANTS"], "UNCHANGED")
+            self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
+            self.assertEqual(calls, [
+                ("daemon-reload",), ("enable", provisioner.SERVICE_NAME),
+                ("start", provisioner.SERVICE_NAME),
+                ("is-enabled", provisioner.SERVICE_NAME),
+                ("is-active", provisioner.SERVICE_NAME),
+            ])
+            self.assertEqual(list((root / "etc/u-opti/smite/route-grants").iterdir()), [])
+            self.assertEqual(list((root / "etc/nginx").glob("**/*")) if
+                             (root / "etc/nginx").exists() else [], [])
+
+    def test_activation_holds_if_systemd_does_not_confirm_active(self):
+        repo = Path(__file__).resolve().parents[1]
+        source_dir = repo / "modules"
+        provisioner_path = source_dir / "smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_activation_hold_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-hold-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            target_modules = root / "usr/local/lib/u-opti/modules"
+            target_modules.mkdir(parents=True, mode=0o755)
+            target_modules.chmod(0o755)
+            broker_target = target_modules / "smite-rc5-xhttp-root-broker.py"
+            broker_target.write_bytes((source_dir / broker_target.name).read_bytes())
+            broker_target.chmod(0o644)
+            provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                                  instance_id=INSTANCE)
+            def failed_status(argv, **kwargs):
+                output = "failed\n" if argv[1] == "is-active" else "enabled\n"
+                return SimpleNamespace(returncode=0, stdout=output, stderr="")
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_SYSTEMD_VERIFICATION_FAILED"):
+                provisioner.activate(root=root, runner=failed_status)
 
 
 if __name__ == "__main__":
