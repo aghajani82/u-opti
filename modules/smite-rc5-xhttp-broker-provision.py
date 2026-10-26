@@ -47,14 +47,24 @@ def _check_root(root: Path) -> None:
 def _ensure_dir(root: Path, relative: str, mode: int) -> Path:
     target = root / relative
     current = root
-    for part in Path(relative).parts:
+    parts = Path(relative).parts
+    for index, part in enumerate(parts):
         current = current / part
+        final = index == len(parts) - 1
+        wanted = mode if final else 0o755
+        existed = current.exists() or current.is_symlink()
         try:
-            current.mkdir(mode=0o755)
+            current.mkdir(mode=wanted)
         except FileExistsError:
             pass
         except OSError as exc:
             raise ProvisionHold("BROKER_DIRECTORY_CREATE_FAILED") from exc
+        if not existed:
+            try:
+                os.chmod(current, wanted, follow_symlinks=False)
+            except OSError as exc:
+                raise ProvisionHold("BROKER_DIRECTORY_MODE_SET_FAILED") from exc
+            _CREATED_DIRS.add(current)
         try:
             item = current.lstat()
         except OSError as exc:
@@ -63,21 +73,9 @@ def _ensure_dir(root: Path, relative: str, mode: int) -> Path:
             raise ProvisionHold("UNTRUSTED_BROKER_DIRECTORY")
         if item.st_mode & 0o022:
             raise ProvisionHold("BROKER_DIRECTORY_WRITABLE_BY_OTHERS")
-    try:
-        final = target.lstat()
-    except OSError as exc:
-        raise ProvisionHold("BROKER_DIRECTORY_UNAVAILABLE") from exc
-    if stat.S_IMODE(final.st_mode) != mode:
-        if final.st_nlink < 1:
-            raise ProvisionHold("BROKER_DIRECTORY_INVALID")
-        # Only a directory created by this invocation may be chmod'd.
-        # Existing wrong-mode paths are never silently repaired.
-        if target not in _CREATED_DIRS:
+        if final and stat.S_IMODE(item.st_mode) != mode:
             raise ProvisionHold("BROKER_DIRECTORY_MODE_MISMATCH")
     return target
-
-
-_CREATED_DIRS: set[Path] = set()
 
 
 def _write_new(path: Path, data: bytes, mode: int) -> None:
@@ -223,8 +221,13 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
     )
     if any(p.exists() or p.is_symlink() for p in targets):
         raise ProvisionHold("BROKER_PARTIAL_OR_EXISTING_STATE_REQUIRES_REVIEW")
-    if not module_target.is_file() or module_target.is_symlink():
-        raise ProvisionHold("BROKER_MODULE_NOT_STAGED")
+    try:
+        module_stat = module_target.lstat()
+    except OSError as exc:
+        raise ProvisionHold("BROKER_MODULE_NOT_STAGED") from exc
+    if (not stat.S_ISREG(module_stat.st_mode) or module_stat.st_uid != 0
+            or module_stat.st_mode & 0o022):
+        raise ProvisionHold("BROKER_MODULE_NOT_TRUSTED")
 
     key = secrets.token_bytes(32)
     config = {
