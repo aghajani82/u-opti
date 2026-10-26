@@ -38,7 +38,7 @@ sudo chown 0:0 "$lab/stages"
 sudo chmod 0700 "$lab/stages"
 url="https://github.com/Musixal/Backhaul/releases/download/v0.7.2/backhaul_linux_amd64.tar.gz"
 expected="57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
-curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' "$url" -o "$lab/backhaul.tar.gz"
+curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 --proto '=https' --proto-redir '=https' "$url" -o "$lab/backhaul.tar.gz"
 printf '%s  %s\n' "$expected" "$lab/backhaul.tar.gz" | sha256sum -c -
 sudo python3 "$root/modules/smite-managed-backhaul.py" prepare \
   --node-dir "$lab/node" --archive "$lab/backhaul.tar.gz" \
