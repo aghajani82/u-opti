@@ -8,6 +8,17 @@ TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 export SMITE_INSTALL_PROFILE=clean-rc
 source "$ROOT/modules/smite-install.sh"
+# This is a disposable install-state fixture, not an IR host. Broker root
+# provisioning and Compose mount admission have separate dedicated tests.
+smite_install_clean_rc_broker_prepare() {
+    SMITE_UOPTI_BROKER_GID=39100
+    return 0
+}
+smite_install_clean_rc_broker_panel_mount() { return 0; }
+python3() {
+    if [[ " $* " == *"smite-rc5-xhttp-broker-compose.py"* ]]; then return 0; fi
+    command python3 "$@"
+}
 SMITE_PANEL_DIR="$TMP/ir/panel"
 SMITE_NODE_DIR="$TMP/ir/node"
 SMITE_PANEL_COMPOSE="$SMITE_PANEL_DIR/docker-compose.yml"

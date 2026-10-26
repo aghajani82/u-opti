@@ -41,6 +41,9 @@ export SMITE_INSTALL_PROFILE=clean-rc
 # Smite source replaces only the upstream Compose download; a clean
 # Core install MUST NOT invoke FRP preparation or Compose injection.
 source "$ROOT/modules/smite-install.sh"
+# The CI runner is unprivileged; model the production root ownership step in
+# this disposable Compose fixture. Ownership admission has separate tests.
+if [ "$(id -u)" -ne 0 ]; then chown() { return 0; }; fi
 SMITE_NODE_IMAGE="smite-node:stage15-local"
 SMITE_NODE_DIR="$node_dir"
 SMITE_NODE_COMPOSE="$base"

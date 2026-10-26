@@ -7,6 +7,9 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/fresh/node" "$TMP/fresh/node/certs" "$TMP/fresh/node/config"
 export SMITE_INSTALL_PROFILE=clean-rc
 source "$ROOT/modules/smite-install.sh"
+# The CI runner is unprivileged; model the production root ownership step in
+# this disposable fixture. The mount verifier separately tests trusted owners.
+if [ "$(id -u)" -ne 0 ]; then chown() { return 0; }; fi
 SMITE_NODE_IMAGE="smite-node:stage15-local"
 SMITE_NODE_DIR="$TMP/fresh/node"
 SMITE_NODE_COMPOSE="$SMITE_NODE_DIR/docker-compose.yml"
