@@ -1,6 +1,6 @@
 # U-OPTI × Smite — Auto XHTTP route integration and release gates (2026-10-26)
 
-**Status:** integration contract / design checkpoint **only**. No live install, update, restart, merge to `main`, release version bump, or change to existing working inbounds is authorized.
+**Status (2026-10-26):** signed Node-to-local-broker forwarding, per-child root approval, KH read-only Sanaei inventory, existing FRP wizard route submission and clean-RC broker bootstrap are implemented on the development branches; GitHub CI passed on current heads. This remains source-only: no real clean dual-VPS install or third-inbound client test has been performed. The root grant CLI reports operator-asserted evidence and does not cryptographically re-fetch remote proofs. No live install, update, restart, merge to `main`, release version bump, or change to existing working inbounds is authorized.
 
 **Related Smite handoff:** [FRPS multiport closeout](https://github.com/aghajani82/Smite/blob/feature/smite-rc2-frp-singleton-multiport-20261025/docs/FRP-SINGLETON-MULTIPORT-FIELD-CLOSEOUT-2026-10-26.md). Smite feature HEAD has an offline route planner ([PR #27](https://github.com/aghajani82/Smite/pull/27)), signed KH inbound inventory ([PR #26](https://github.com/aghajani82/Smite/pull/26)) and **root-only local Nginx transaction helper** ([PR #29](https://github.com/aghajani82/Smite/pull/29)), which is **not wired to an authorized Agent/Panel flow** and not yet part of a signed release.
 
@@ -55,3 +55,11 @@ U-OPTI's legacy FRP XHTTP renderer must not delete or overwrite the Smite-owned 
 **بله، U-OPTI باید برای نصب خودکار امن Nginx و اتصالش به Smite به‌روزرسانی بشود، اما اول کدنویسی و تست، بعد آپدیت سرورها.** اگر همین الان U-OPTI سرورهای IR/KH را آپدیت کنیم، مشکلِ نداشتن اتصال امن ویزارد Smite به Nginx حل نمی‌شود و احتمال تداخل با دو مسیر سالم وجود دارد.
 
 هدف نهایی: نصب U-OPTI/Smite و اتصال Nodeها، انتخاب FRP در پنل، انتخاب اینباند سنایی، ساخت یک FRPC جدید روی KH و یک مسیر تاییدشده روی Nginx ایران پشت 443، بدون FRPS دوم و بدون دستور دستی برای هر اینباند.
+
+
+## 2026-10-26 source implementation checkpoint
+
+- U-OPTI [PR #48](https://github.com/aghajani82/u-opti/pull/48), head `f872ce07c78fbe2d8654c61bde31780a54b8b976`: 16/16 general CI jobs plus the five triggered focused workflows passed.
+- Smite [PR #32](https://github.com/aghajani82/Smite/pull/32), head `c0c93506016a784e3d2a5103941084b72910a9da`: all 12 workflows triggered for this commit passed.
+- Root authorization remains per-child and operator-asserted. Missing authorization holds before nonce consumption; uncertain broker outcomes are not retried.
+- Remaining acceptance is a clean disposable dual-Ubuntu trial with a third real KH XHTTP inbound and a real TLS/443 VLESS client, followed by reboot/reconnect and rollback checks. No production or current trial host deployment is claimed.

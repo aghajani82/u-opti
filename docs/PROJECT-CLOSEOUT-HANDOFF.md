@@ -485,3 +485,22 @@ MAIN / IR / KH / RELEASE: UNCHANGED (or exact operator-authorized details)
 - If network/CI unavailable, note unverified status instead of claiming tests passed.
 
 **Keep this file and Issue #47 synchronized as the project is consolidated.**
+
+
+## 2026-10-26 — Source and CI closeout checkpoint
+
+The remaining integration code for the existing FRP → KH XHTTP → IR Nginx route flow is implemented on the current development branches. No new tunnel engine, operator menu or workflow was added.
+
+- **U-OPTI PR #48 head:** `f872ce07c78fbe2d8654c61bde31780a54b8b976`. GitHub CI: **16/16 jobs PASS** (run 40310890180); all five focused broker/intent/bridge workflows triggered by the change also passed.
+- **Smite PR #32 head:** `c0c93506016a784e3d2a5103941084b72910a9da`. All **12/12 workflows triggered for this head PASS**, including Signed Agent, Panel route lifecycle, operator UI, and paired offline image build.
+- The current FRP wizard creates an active shared child, offers the authenticated KH XHTTP inventory, and submits one route registration. A missing grant is returned before nonce consumption and shows a root-only per-child approval command; no ambiguous result is retried automatically.
+- Clean-RC install stages and activates the root service, then opts the IR Node into its read-only Unix socket only after peer/mode/connectivity checks. Failure disables forwarding and recreates the Node. KH Sanaei inventory is opt-in and read-only.
+- Per-child grant approval is intentionally an interactive root operation. Its output is `EVIDENCE_VERIFICATION=OPERATOR_ASSERTED`; the operator must compare current Signed IR owner proof, Signed KH inventory and the active unique lease. Remote evidence is not independently fetched by the grant CLI.
+
+### CI inventory review
+
+The development heads contain **7 U-OPTI** and **23 Smite** workflow files. No workflow was added for this milestone. Trigger overlap exists: U-OPTI's bridge admission checks are repeated inside the bridge transaction workflow, and its standalone signed-intent test is also run by the replay-ledger workflow. Smite has broader path overlaps across UI, pairing, agent, image and release workflows. These runs cover different gates and check names; no deletion or trigger rewrite was justified without branch-protection/required-check verification. Keep all current gates for this trial.
+
+### Remaining release gate
+
+CI and isolated installation fixtures do not prove a fresh two-host Ubuntu installation or real client traffic. Still required: disposable IR + KH from zero, a newly created third KH XHTTP inbound with its real path, automatic route creation, verified VLESS/XHTTP traffic over TLS/443, then reboot/reconnect and failure/rollback checks. Preserve existing `45121` and `49328`. No `main`, RC5 tag, IR/KH host, or Grandoptical change was made. Keep promotion and rollout on HOLD until that trial is reviewed.
