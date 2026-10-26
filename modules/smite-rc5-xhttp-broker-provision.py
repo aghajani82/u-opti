@@ -120,7 +120,6 @@ def _service_unit(peer_gid: int) -> bytes:
 Description=U-OPTI Smite local XHTTP route broker
 ConditionHost=ir*
 After=local-fs.target
-Before=smite-node.service
 
 [Service]
 Type=simple
