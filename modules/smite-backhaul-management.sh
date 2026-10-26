@@ -322,10 +322,19 @@ docker_smite_management_menu() {
                 fi
                 ;;
             8)
+                # The recovery module is normally sourced by the main CLI.
+                # Load it here as a fallback for existing installs whose
+                # updater fetched the menu before the new module.
+                if ! declare -F smite_install_resume_clean_ir >/dev/null 2>&1 &&
+                   [ -s "$SMITE_BH_DIR/smite-clean-ir-resume.sh" ]; then
+                    source "$SMITE_BH_DIR/smite-clean-ir-resume.sh"
+                fi
                 if declare -F smite_install_resume_clean_ir >/dev/null 2>&1; then
                     smite_install_resume_clean_ir
                 else
                     echo "HOLD: Clean IR recovery module is missing; update U-OPTI first."
+                    echo "Expected module: $SMITE_BH_DIR/smite-clean-ir-resume.sh"
+                    read -rp "Press Enter to return..."
                 fi
                 ;;
             0) return ;;
