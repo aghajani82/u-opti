@@ -254,7 +254,11 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
                 self.assertIn(f'"{Path(relative).name}"', installer)
 
-        worker = (root / "modules/smite-xhttp-nginx-route").read_text()
+        worker_path = root / "modules/smite-xhttp-nginx-route"
+        planner_path = root / "modules/smite_xhttp_nginx_plan.py"
+        compile(worker_path.read_text(), str(worker_path), "exec")
+        compile(planner_path.read_text(), str(planner_path), "exec")
+        worker = worker_path.read_text()
         self.assertIn("from smite_xhttp_nginx_plan import", worker)
         self.assertIn('parser.add_argument("--port"', worker)
         self.assertIn('parser.add_argument("--path"', worker)
