@@ -6,9 +6,14 @@ on:
       - 'modules/smite-rc5-xhttp-signed-intent.py'
       - 'modules/smite-rc5-xhttp-nonce-ledger.py'
       - 'modules/smite-rc5-xhttp-root-broker.py'
+      - 'modules/smite-rc5-xhttp-broker-compose.py'
+      - 'modules/smite-install.sh'
+      - 'install.sh'
+      - 'u-opti'
       - 'tests/test-smite-rc5-xhttp-signed-intent.py'
       - 'tests/test-smite-rc5-xhttp-nonce-ledger.py'
       - 'tests/test-smite-rc5-xhttp-root-broker.py'
+      - 'tests/test-smite-rc5-xhttp-broker-compose.py'
       - 'docs/SMITE-RC5-XHTTP-ROOT-REPLAY-LEDGER.md'
       - '.github/workflows/smite-rc5-xhttp-nonce-ledger.yml'
   push:
@@ -30,10 +35,13 @@ jobs:
       - name: Compile immutable intent and independent ledger
         run: |
           python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py modules/smite-rc5-xhttp-nonce-ledger.py modules/smite-rc5-xhttp-root-broker.py
-          python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py tests/test-smite-rc5-xhttp-root-broker.py
+          python3 -m py_compile modules/smite-rc5-xhttp-broker-compose.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py tests/test-smite-rc5-xhttp-root-broker.py tests/test-smite-rc5-xhttp-broker-compose.py
       - name: Strict HMAC schema and signature regression
         run: python3 -B tests/test-smite-rc5-xhttp-signed-intent.py -v
       - name: Root-owned replay state, missing-DB HOLD, restart and concurrent uniqueness
         run: sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py -v
       - name: Verify local broker peer restrictions, replay consumption and scoped worker dispatch
         run: sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py -v
+      - name: Inert clean-install key and socket Compose admission
+        run: python3 -B tests/test-smite-rc5-xhttp-broker-compose.py -v

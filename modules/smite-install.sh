@@ -646,6 +646,11 @@ smite_install_panel_files() {
         return 1
     fi
 
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        smite_install_clean_rc_broker_prepare || return 1
+        smite_install_clean_rc_broker_panel_mount "$SMITE_PANEL_COMPOSE" || return 1
+    fi
+
     smite_install_core_optional_frp_prepare "$SMITE_PANEL_COMPOSE" smite-panel || return 1
 
     cat > "$SMITE_PANEL_DIR/.env" <<EOF_ENV
@@ -675,6 +680,9 @@ SMITE_PANEL_AGENT_AUTH_MODE=signed
 SMITE_NODE_PAIRING_PREVIEW_ENABLED=false
 SMITE_ENGINE_MANAGEMENT_MODE=managed
 EOF_RC_PANEL_AUTH
+        cat >> "$SMITE_PANEL_DIR/.env" <<'EOF_RC_BROKER_KEY'
+SMITE_UOPTI_ROUTE_BROKER_KEY_PATH=/run/secrets/smite-uopti-xhttp-broker.key
+EOF_RC_BROKER_KEY
         echo "PANEL_RC_LEGACY_MACHINE_REGISTRATION=DISABLED"
     fi
     chmod 0600 "$SMITE_PANEL_DIR/.env" || return 1
@@ -685,6 +693,49 @@ EOF_RC_PANEL_AUTH
     }
 
     return 0
+}
+
+# The disposable IR install stages the dedicated Broker key for the Panel,
+# while leaving the service inactive and all per-child TrustedGrants empty.
+# Node reaches the UDS only after a later explicit activation/reconciliation.
+smite_install_clean_rc_broker_prepare() {
+    [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || return 0
+    local module_dir gid helper candidate
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    helper="$module_dir/smite-rc5-xhttp-broker-provision.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || {
+        echo "HOLD: Clean RC Broker provisioner is not staged." >&2
+        return 1
+    }
+    gid=""
+    for candidate in $(seq 39100 39999); do
+        if ! getent group "$candidate" >/dev/null 2>&1; then
+            gid="$candidate"
+            break
+        fi
+    done
+    [ -n "$gid" ] || { echo "HOLD: No dedicated Broker peer GID available." >&2; return 1; }
+    python3 -B "$helper" --peer-gid "$gid" --confirm-local-root || return 1
+    SMITE_UOPTI_BROKER_GID="$gid"
+    echo "BROKER_PROVISIONING=PASS_INERT"
+    echo "BROKER_SERVICE=NOT_ENABLED"
+    echo "BROKER_TRUSTED_GRANTS=NONE"
+    echo "NODE_BROKER_FORWARDING=DISABLED"
+}
+
+smite_install_clean_rc_broker_panel_mount() {
+    local compose_file="$1" module_dir="" helper=""
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    helper="$module_dir/smite-rc5-xhttp-broker-compose.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || {
+        echo "HOLD: Clean RC Broker Compose helper is not staged." >&2
+        return 1
+    }
+    [ -n "${SMITE_UOPTI_BROKER_GID:-}" ] || {
+        echo "HOLD: Clean RC Broker GID was not prepared." >&2
+        return 1
+    }
+    python3 -B "$helper" panel "$compose_file" --peer-gid "$SMITE_UOPTI_BROKER_GID"
 }
 
 
@@ -730,6 +781,7 @@ smite_install_node_files() {
     local control_address="${5:-}"
     local backhaul_address="${6:-}"
     local connection_mode="${7:-standard}"
+    local broker_compose_helper=""
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || return 1
 
@@ -792,6 +844,21 @@ SMITE_NODE_PANEL_AUTH_MODE=paused
 SMITE_AGENT_AUTH_MODE=strict
 SMITE_ENGINE_INVENTORY_MODE=managed
 EOF_RC_AUTH
+        if [ "$node_role" = iran ]; then
+            [ -n "${SMITE_UOPTI_BROKER_GID:-}" ] || {
+                echo "HOLD: IR Broker peer GID was not prepared." >&2
+                return 1
+            }
+            cat >> "$SMITE_NODE_DIR/.env" <<EOF_RC_IR_BROKER
+SMITE_UOPTI_BROKER_GID=$SMITE_UOPTI_BROKER_GID
+SMITE_UOPTI_ROUTE_BROKER_ENABLED=false
+SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock
+EOF_RC_IR_BROKER
+            broker_compose_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-rc5-xhttp-broker-compose.py"
+            [ -f "$broker_compose_helper" ] && [ ! -L "$broker_compose_helper" ] || return 1
+            python3 -B "$broker_compose_helper" node "$SMITE_NODE_COMPOSE" \
+                --peer-gid "$SMITE_UOPTI_BROKER_GID" || return 1
+        fi
         echo "NODE_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
         if [ "$node_role" = foreign ]; then
             echo "FOREIGN_RC_PAIRING=PENDING_NO_OUTBOUND_REGISTRATION"
