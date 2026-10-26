@@ -117,7 +117,7 @@ def prepare_node(path: Path, peer_gid: int) -> None:
         text = raw.decode("utf-8")
     except UnicodeError as exc:
         raise ComposeHold("UNREADABLE_COMPOSE_CANDIDATE") from exc
-    marker = "  smite-node:\\n"
+    marker = "  smite-node:\n"
     if text.count(marker) != 1:
         raise ComposeHold("UNREVIEWED_NODE_COMPOSE_LAYOUT")
     start = text.index(marker)
@@ -127,18 +127,18 @@ def prepare_node(path: Path, peer_gid: int) -> None:
     if "/route-broker.key" in block:
         raise ComposeHold("BROKER_KEY_MUST_NOT_BE_MOUNTED_IN_NODE")
     user_lines = re.findall(r"^    user:.*$", block, re.M)
-    if user_lines and user_lines != [NODE_USER.rstrip("\\n")]:
+    if user_lines and user_lines != [NODE_USER.rstrip("\n")]:
         raise ComposeHold("CONFLICTING_NODE_BROKER_USER")
     mount_lines = [line for line in block.splitlines(keepends=True)
                    if "/run/u-opti/smite" in line]
     if mount_lines and mount_lines != [NODE_SOCKET_MOUNT]:
         raise ComposeHold("CONFLICTING_NODE_BROKER_MOUNT")
-    if block.count("    volumes:\\n") != 1:
+    if block.count("    volumes:\n") != 1:
         raise ComposeHold("UNREVIEWED_NODE_VOLUME_LAYOUT")
-    config_mount = "      - ./config:/etc/smite-node\\n"
+    config_mount = "      - ./config:/etc/smite-node\n"
     if block.count(config_mount) != 1:
         raise ComposeHold("UNREVIEWED_NODE_CONFIG_MOUNT")
-    container_anchor = "    container_name: smite-node\\n"
+    container_anchor = "    container_name: smite-node\n"
     if not user_lines and block.count(container_anchor) != 1:
         raise ComposeHold("UNREVIEWED_NODE_CONTAINER_LAYOUT")
     updated = text
