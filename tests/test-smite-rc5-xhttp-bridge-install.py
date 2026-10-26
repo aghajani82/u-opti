@@ -85,6 +85,7 @@ class BridgeInstallTests(unittest.TestCase):
             patch.object(tx.admission, "audit_read_only", return_value=self.plan_obj),
             patch.object(tx, "nginx_test", side_effect=lambda: self.log.append("TEST")),
             patch.object(tx, "nginx_reload", side_effect=mock_reload),
+            patch.object(tx, "verify_effective_bridge", side_effect=lambda: self.log.append("EFFECTIVE")),
             patch.object(tx, "probe_panel", side_effect=lambda domain:
                          self.log.append("TLS_" + domain)),
         ]
@@ -166,6 +167,29 @@ class BridgeInstallTests(unittest.TestCase):
         with self.assertRaises(tx.Hold):
             tx.rollback()
         self.assertTrue(self.bridge.exists())
+
+    def test_effective_nginx_requires_real_bridge_include_and_all_sources(self):
+        config = "".join(
+            f"# configuration file {p}:\n"
+            for p in (self.backend, self.bridge, tx.admission.LEGACY,
+                      tx.admission.STREAM, tx.admission.SNI_MAP)
+        )
+        config += tx.admission.INCLUDE.decode()
+        config += tx.BRIDGE_BYTES.decode()
+
+        with patch.object(tx.admission, "_run", return_value=(0, config)):
+            # Stop mocking only this method: test the actual effective gate.
+            with patch.object(tx, "verify_effective_bridge", wraps=tx.verify_effective_bridge):
+                tx.verify_effective_bridge()
+        for bad in (
+            config.replace(tx.admission.INCLUDE.decode(), ""),
+            config.replace(f"# configuration file {self.bridge}:\n", ""),
+            config.replace(tx.BRIDGE_BYTES.decode(), ""),
+        ):
+            with self.subTest(bad=bad), patch.object(tx.admission, "_run", return_value=(0, bad)):
+                with patch.object(tx, "verify_effective_bridge", wraps=tx.verify_effective_bridge):
+                    with self.assertRaises(tx.Hold):
+                        tx.verify_effective_bridge()
 
     def test_manual_only_cli_never_calls_apply_or_rollback_without_approval(self):
         with patch.object(sys, "argv", ["program", "apply"]), patch.dict(os.environ, {}, clear=True):
