@@ -278,5 +278,82 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
         self.assertIn("RESULT=PASS_LOCAL_NGINX_ROUTE_CREATED", worker)
 
 
+class InertBrokerProvisioningTests(unittest.TestCase):
+    def test_provisions_root_owned_inert_files_without_enabling_service(self):
+        import importlib.util
+
+        repo = Path(__file__).resolve().parents[1]
+        source_dir = repo / "modules"
+        provisioner_path = source_dir / "smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_provisioner_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-provision-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            target_modules = root / "usr/local/lib/u-opti/modules"
+            target_modules.mkdir(parents=True, mode=0o755)
+            target_modules.chmod(0o755)
+            broker_target = target_modules / "smite-rc5-xhttp-root-broker.py"
+            broker_target.write_bytes((source_dir / broker_target.name).read_bytes())
+            broker_target.chmod(0o644)
+
+            result = provisioner.provision(
+                peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                instance_id=INSTANCE,
+            )
+            etc = root / "etc/u-opti/smite"
+            state = root / "var/lib/u-opti/smite-xhttp-broker"
+            grants = etc / "route-grants"
+            helper = root / "usr/local/libexec/smite-xhttp-nginx-route"
+            planner = root / "usr/local/libexec/smite_xhttp_nginx_plan.py"
+            service = root / "etc/systemd/system/u-opti-smite-xhttp-broker.service"
+
+            self.assertEqual(result["BROKER_PROVISIONING"], "PASS_INERT")
+            self.assertEqual(result["TRUSTED_GRANTS"], "NONE")
+            self.assertEqual(result["SERVICE_UNIT"], "INSTALLED_NOT_ENABLED")
+            self.assertEqual(result["SERVICE_START"], "NOT_PERFORMED")
+            self.assertEqual(result["NODE_ENABLEMENT"], "NOT_PERFORMED")
+            self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
+            self.assertEqual(list(grants.iterdir()), [])
+            self.assertEqual(len((etc / "route-broker.key").read_bytes()), 32)
+            self.assertEqual(stat.S_IMODE((etc / "route-broker.key").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((etc / "route-broker.json").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((state / "nonce.db").stat().st_mode), 0o600)
+            self.assertEqual(hashlib.sha256(helper.read_bytes()).hexdigest(),
+                             provisioner.HELPER_SHA256)
+            self.assertEqual(hashlib.sha256(planner.read_bytes()).hexdigest(),
+                             provisioner.PLANNER_SHA256)
+            unit = service.read_text()
+            self.assertIn("Group=1348", unit)
+            self.assertIn("Restart=no", unit)
+            self.assertIn("NoNewPrivileges=yes", unit)
+            self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
+
+            key_before = (etc / "route-broker.key").read_bytes()
+            with self.assertRaises(provisioner.ProvisionHold):
+                provisioner.provision(
+                    peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                    instance_id=INSTANCE,
+                )
+            self.assertEqual((etc / "route-broker.key").read_bytes(), key_before)
+
+    def test_bad_peer_gid_holds_before_any_filesystem_change(self):
+        import importlib.util
+
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_provisioner_gid_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-bad-gid-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            with self.assertRaises(provisioner.ProvisionHold):
+                provisioner.provision(peer_gid=0, root=root, source_dir=repo / "modules")
+            self.assertEqual(list(root.iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()
