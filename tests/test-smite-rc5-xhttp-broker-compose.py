@@ -42,6 +42,14 @@ NODE = """services:
 """
 
 
+NODE_BASE = """services:
+  smite-node:
+    image: node:test
+    container_name: smite-node
+    volumes:
+      - ./config:/etc/smite-node
+"""
+
 class BrokerComposeTests(unittest.TestCase):
     def temp(self, contents: str, *, symlink: bool = False) -> Path:
         directory = tempfile.TemporaryDirectory()
@@ -94,6 +102,29 @@ class BrokerComposeTests(unittest.TestCase):
             with self.assertRaisesRegex(helper.ComposeHold, "INVALID_BROKER_PEER_GID"):
                 helper.verify_node(path, gid)
 
+    def test_node_prepare_adds_and_validates_readonly_broker_peer_mount(self):
+        path = self.temp(NODE_BASE)
+        before_mode = path.stat().st_mode & 0o777
+        helper.prepare_node(path, 39100)
+        first = path.read_text()
+        self.assertIn(helper.NODE_USER, first)
+        self.assertIn(helper.NODE_SOCKET_MOUNT, first)
+        helper.verify_node(path, 39100)
+        helper.prepare_node(path, 39100)
+        self.assertEqual(path.read_text(), first)
+        self.assertEqual(path.stat().st_mode & 0o777, before_mode)
+
+    def test_node_prepare_rejects_conflicting_user_without_mutation(self):
+        conflicting = NODE_BASE.replace(
+            "    container_name: smite-node\\n",
+            "    container_name: smite-node\\n    user: 1000:1000\\n",
+        )
+        path = self.temp(conflicting)
+        before = path.read_bytes()
+        with self.assertRaisesRegex(helper.ComposeHold, "CONFLICTING_NODE_BROKER_USER"):
+            helper.prepare_node(path, 39100)
+        self.assertEqual(path.read_bytes(), before)
+
     def test_node_broker_enablement_changes_only_one_private_env_key(self):
         with tempfile.TemporaryDirectory(prefix="broker-node-env-") as raw:
             path = Path(raw) / ".env"
@@ -142,6 +173,7 @@ class BrokerComposeTests(unittest.TestCase):
         self.assertIn("smite_install_clean_rc_broker_prepare", installer)
         self.assertIn("smite_install_clean_rc_broker_panel_mount", installer)
         self.assertIn("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false", installer)
+        self.assertIn('"node-prepare"', installer)
         self.assertIn("smite_install_clean_rc_broker_start_node_forwarding", installer)
         self.assertIn("--activate-existing --confirm-local-root", installer)
         self.assertIn("BROKER_TRUSTED_GRANTS=NONE_ROUTE_APPLY_HOLD", installer)
