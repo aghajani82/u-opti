@@ -1,10 +1,14 @@
-# Smite Clean Install — first RC bootstrap integration (DRAFT / DO NOT REBUILD YET)
+# Smite Clean Install — first RC bootstrap integration (DRAFT / DISPOSABLE TRIAL ONLY)
 
 This change converts the project's direction to **fresh installation
 after explicit IR/KH rebuild**. It does NOT migrate any live Smite,
 FRP, Backhaul, 3x-UI, credentials, inbound mappings or Docker containers.
 
 ## What has changed in the real installer
+
+**Source status (2026-10-26):** broker, signed Node forwarding, KH read-only Sanaei mount, existing FRP wizard handoff and clean-RC broker bootstrap are implemented on U-OPTI PR #48 / Smite PR #32. Current heads `88564641ebf35f3111c87188f7ae4ee8a8885b17` (U-OPTI) and `da1c08896508a5c9b3d7601d2943575b90f5c223` (Smite) passed CI: 16/16 U-OPTI jobs plus 5 focused checks, and 12/12 Smite workflows. This status permits evaluation only on separate disposable Ubuntu trial VPSs; it does not authorize or qualify an existing IR/KH host or Grandoptical.
+
+The exact-head Smite preview bundle is available from [Stage15 workflow run 40314745761](https://github.com/aghajani82/Smite/actions/runs/40314745761), artifact `smite-stage15-offline-images-da1c08896508a5c9b3d7601d2943575b90f5c223`, artifact ID `12645917689`. The uploaded ZIP digest is `sha256:ba94e9547871a52c8dae13a71b3fc6de342e14cfedaacfa6b5bc91ba5dac45ea`; retention expires 2026-10-29 11:26 UTC. It is an **untrusted, temporary test artifact**, not a signed registry release. Verify the archive digest and the inner source/manifest digests before use. Root grant approval for each test child remains an interactive operator action; evidence is operator-asserted.
 
 The existing U-OPTI Stable path remains the default
 (`SMITE_INSTALL_PROFILE=stable`, upstream Smite v0.1.7 as before).
