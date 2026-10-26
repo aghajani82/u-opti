@@ -290,7 +290,12 @@ def apply(stage: Path, backup: Path, module_names: list[str],
                 saved, _ = _read(backup / name)
                 if saved != previous:
                     raise Hold("BACKUP_IS_NOT_CURRENT_INSTALL")
-            mode = 0o644 if name in ("VERSION", "INSTALL_REF") else 0o755
+            # The local root Broker module is loaded with Python, not executed
+            # as a program. Its activation verifier requires this file to stay
+            # non-executable so an updater cannot silently widen its mode.
+            mode = (0o644 if name in (
+                "VERSION", "INSTALL_REF", "smite-rc5-xhttp-root-broker.py"
+            ) else 0o755)
             candidates[name] = candidate
             records[name] = {
                 "before": _sha(previous) if previous is not None else None,
