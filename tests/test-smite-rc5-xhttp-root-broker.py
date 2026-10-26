@@ -384,6 +384,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             calls = []
             def fake_systemctl(argv, **kwargs):
                 calls.append(tuple(argv[1:]))
+                if argv[0] == "getent":
+                    return SimpleNamespace(returncode=0,
+                                           stdout="u-opti-smite-peer:x:1348:\n",
+                                           stderr="")
                 action = argv[1]
                 if action == "start":
                     return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -410,6 +414,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(result["TRUSTED_GRANTS"], "UNCHANGED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
             self.assertEqual(calls, [
+                ("group", "u-opti-smite-peer"), ("group", "1348"),
                 ("daemon-reload",), ("enable", provisioner.SERVICE_NAME),
                 ("start", provisioner.SERVICE_NAME),
                 ("is-enabled", provisioner.SERVICE_NAME),
@@ -440,11 +445,54 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
                                   instance_id=INSTANCE)
             def failed_status(argv, **kwargs):
+                if argv[0] == "getent":
+                    return SimpleNamespace(returncode=0,
+                                           stdout="u-opti-smite-peer:x:1348:\n",
+                                           stderr="")
                 output = "failed\n" if argv[1] == "is-active" else "enabled\n"
                 return SimpleNamespace(returncode=0, stdout=output, stderr="")
             with self.assertRaisesRegex(provisioner.ProvisionHold,
                                         "BROKER_SYSTEMD_VERIFICATION_FAILED"):
                 provisioner.activate(root=root, runner=failed_status)
+
+    def test_activation_creates_missing_dedicated_peer_group_and_holds_on_collision(self):
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_peer_group_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+
+        calls = []
+        def mock_runner(argv, **kwargs):
+            calls.append(tuple(argv))
+            if argv[0] != "getent":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            key = argv[2]
+            if key == "u-opti-smite-peer":
+                found = any(call[:2] == ("groupadd", "--system") for call in calls)
+                output = "u-opti-smite-peer:x:1348:\n" if found else ""
+                return SimpleNamespace(returncode=0 if found else 2,
+                                       stdout=output, stderr="")
+            found = (key == "1348" and any(
+                call[:2] == ("groupadd", "--system") for call in calls
+            ))
+            output = "u-opti-smite-peer:x:1348:\n" if found else ""
+            return SimpleNamespace(returncode=0 if found else 2,
+                                   stdout=output, stderr="")
+
+        provisioner._ensure_peer_group(1348, mock_runner)
+        self.assertIn(("groupadd", "--system", "--gid", "1348", "u-opti-smite-peer"), calls)
+
+        def collision_runner(argv, **kwargs):
+            if argv[0] == "getent":
+                return SimpleNamespace(returncode=0,
+                                       stdout="docker:x:1348:\n", stderr="")
+            raise AssertionError("group collision must hold without mutation")
+
+        with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                    "BROKER_PEER_GROUP_COLLISION"):
+            provisioner._ensure_peer_group(1348, collision_runner)
 
     def test_root_operator_grant_install_and_revoke_are_exact_and_durable(self):
         repo = Path(__file__).resolve().parents[1]
