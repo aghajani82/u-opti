@@ -340,7 +340,7 @@ bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
-        *.py) python3 -m py_compile "$TEMP_DIR/$MODULE" || exit 1 ;;
+        *.py|smite-xhttp-nginx-route) python3 -m py_compile "$TEMP_DIR/$MODULE" || exit 1 ;;
         *) bash -n "$TEMP_DIR/$MODULE" || exit 1 ;;
     esac
 done
