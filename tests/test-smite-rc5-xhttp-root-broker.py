@@ -416,6 +416,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(calls, [
                 ("group", "u-opti-smite-peer"), ("group", "1348"),
                 ("daemon-reload",), ("enable", provisioner.SERVICE_NAME),
+                ("reset-failed", provisioner.SERVICE_NAME),
                 ("start", provisioner.SERVICE_NAME),
                 ("is-enabled", provisioner.SERVICE_NAME),
                 ("is-active", provisioner.SERVICE_NAME),
