@@ -1,0 +1,29 @@
+name: U-OPTI RC5 Signed XHTTP Route Intent (offline)
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-rc5-xhttp-signed-intent.py'
+      - 'tests/test-smite-rc5-xhttp-signed-intent.py'
+      - 'docs/SMITE-RC5-XHTTP-SIGNED-INTENT-BOUNDARY.md'
+      - '.github/workflows/smite-rc5-xhttp-signed-intent.yml'
+  push:
+    branches:
+      - feature/uopti-rc5-signed-xhttp-intent-contract-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  strict-intent-authentication:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile narrowly scoped intent verifier
+        run: python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-signed-intent.py
+      - name: Challenge HMAC, nonce, identity and lease binding offline
+        run: python3 -B tests/test-smite-rc5-xhttp-signed-intent.py -v
