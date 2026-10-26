@@ -340,7 +340,7 @@ jobs:
         shell: bash
         run: |
           bash -n tests/test-smite-clean-ir-resume.sh
-          bash tests/test-smite-clean-ir-resume.sh
+          sudo -n bash tests/test-smite-clean-ir-resume.sh
 
       - name: Verify clean RC foreign node paused pairing boot without HTTP 8000 fallback
         shell: bash
