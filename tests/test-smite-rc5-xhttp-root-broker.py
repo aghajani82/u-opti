@@ -331,6 +331,8 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             unit = service.read_text()
             self.assertIn("Group=1348", unit)
             self.assertIn("Restart=on-failure", unit)
+            self.assertLess(unit.index("StartLimitIntervalSec=60s"), unit.index("[Service]"))
+            self.assertLess(unit.index("StartLimitBurst=3"), unit.index("[Service]"))
             self.assertIn("NoNewPrivileges=yes", unit)
             self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)

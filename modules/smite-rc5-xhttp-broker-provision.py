@@ -122,6 +122,8 @@ def _service_unit(peer_gid: int) -> bytes:
 Description=U-OPTI Smite local XHTTP route broker
 ConditionHost=ir*
 After=local-fs.target
+StartLimitIntervalSec=60s
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -134,8 +136,6 @@ RuntimeDirectoryMode=0750
 UMask=0077
 Restart=on-failure
 RestartSec=3s
-StartLimitIntervalSec=60s
-StartLimitBurst=3
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes
