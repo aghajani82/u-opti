@@ -121,11 +121,22 @@ def _configuration() -> dict:
         "schema", "instance_id", "peer_uid", "peer_gid",
         "helper_sha256", "planner_sha256",
     })
+    uid = config.get("peer_uid")
+    gid = config.get("peer_gid")
+    # Smite's tunnel adapters require UID 0 in the container. For the broker
+    # socket, pair that UID only with a dedicated non-zero primary GID that
+    # U-OPTI provisions and mounts into this one container. Root:root is never
+    # accepted; the independent HMAC, root grant and replay ledger still gate
+    # every route transaction.
+    peer_identity_ok = (
+        type(uid) is int and (uid == 0 or 1 <= uid < 65536)
+        and type(gid) is int and 1 <= gid < 65536
+        and not (uid == 0 and gid == 0)
+    )
     if (type(config["schema"]) is not int or config["schema"] != 1
             or type(config["instance_id"]) is not str
             or not IDENT.fullmatch(config["instance_id"])
-            or any(type(config[n]) is not int or not 1 <= config[n] < 65536
-                   for n in ("peer_uid", "peer_gid"))
+            or not peer_identity_ok
             or any(type(config[n]) is not str or not HEX.fullmatch(config[n])
                    for n in ("helper_sha256", "planner_sha256"))):
         raise BrokerHold("INVALID_BROKER_CONFIG")
