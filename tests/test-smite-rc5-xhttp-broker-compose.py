@@ -173,7 +173,7 @@ class BrokerComposeTests(unittest.TestCase):
         self.assertIn("smite_install_clean_rc_broker_prepare", installer)
         self.assertIn("smite_install_clean_rc_broker_panel_mount", installer)
         self.assertIn("SMITE_UOPTI_ROUTE_BROKER_ENABLED=false", installer)
-        self.assertIn('"node-prepare"', installer)
+        self.assertIn('node-prepare "$SMITE_NODE_COMPOSE"', installer)
         self.assertIn("smite_install_clean_rc_broker_start_node_forwarding", installer)
         self.assertIn("--activate-existing --confirm-local-root", installer)
         self.assertIn("BROKER_TRUSTED_GRANTS=NONE_ROUTE_APPLY_HOLD", installer)
