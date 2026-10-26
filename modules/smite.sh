@@ -807,6 +807,14 @@ smite_prepare_overlays() {
             "$SMITE_OVERLAY_DIR/panel/nodes.py" \
             "$SMITE_OVERLAY_DIR/panel/tunnel_reapply_manager.py" \
             "$SMITE_OVERLAY_DIR/panel/core_health.py"
+        # Port the missing security PR #27 into this stacked Stage14 branch:
+        # when the legacy U-OPTI host main.py bind mount is copied, preserve
+        # admin JWT guards; for already-secured Smite v2, verify idempotently.
+        # Unexpected upstream structure must HOLD rather than run unguarded.
+        local auth_helper_dir
+        auth_helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+        python3 -B "$auth_helper_dir/smite-panel-auth-overlay.py" \
+            "$SMITE_OVERLAY_DIR/panel/main.py" || return 1
     fi
 
     if smite_container_exists smite-node; then
@@ -883,6 +891,35 @@ if missing:
     path.write_text(s)
 print("Node compose mounts: OK")
 PY
+    fi
+
+    # Existing Standard installations: retain the loopback bind when
+    # regenerating compatibility mounts or recreating the node container.
+    # Fresh installs are protected by smite_install_node_files before startup.
+    if [ -f "$SMITE_NODE_COMPOSE" ]; then
+        local bind_state_file="${SMITE_STATE_FILE:-/etc/u-opti/smite/state.env}"
+        local bind_mode=""
+        if [ -r "$bind_state_file" ]; then
+            bind_mode="$(sed -n 's/^SMITE_CONNECTION_MODE=//p' "$bind_state_file" | head -n1)"
+        fi
+        case "$bind_mode" in
+            standard)
+                local bind_helper_dir
+                bind_helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+                python3 -B "$bind_helper_dir/smite-node-local-bind.py" \
+                    "$SMITE_NODE_COMPOSE" --mode standard || return 1
+                ;;
+            private)
+                echo "Private Network bind unchanged; direct private access must remain available."
+                ;;
+            "")
+                echo "Smite Node bind migration deferred: installation state not yet saved."
+                ;;
+            *)
+                echo "HOLD: Unrecognized Smite connection mode in state file." >&2
+                return 1
+                ;;
+        esac
     fi
 
     if [ -f "$SMITE_PANEL_COMPOSE" ]; then
@@ -1017,6 +1054,8 @@ show_smite_menu() {
         echo
 
         read -rp "Please enter your selection [0-3]: " smite_choice
+        smite_choice="${smite_choice#"${smite_choice%%[![:space:]]*}"}"
+        smite_choice="${smite_choice%"${smite_choice##*[![:space:]]}"}"
         case "$smite_choice" in
             1) smite_show_status ;;
             2) smite_prepare_persistent_compatibility ;;

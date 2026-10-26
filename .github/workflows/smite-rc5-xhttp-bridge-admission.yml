@@ -1,0 +1,30 @@
+name: U-OPTI Smite RC5 XHTTP TLS Bridge Admission (offline)
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-rc5-xhttp-bridge-admission.py'
+      - 'tests/test-smite-rc5-xhttp-bridge-admission.py'
+      - '.github/workflows/smite-rc5-xhttp-bridge-admission.yml'
+  push:
+    branches:
+      - feature/uopti-smite-rc5-xhttp-bridge-admission-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-admission-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile bridge admission and isolated security tests
+        run: |
+          python3 -m py_compile modules/smite-rc5-xhttp-bridge-admission.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-bridge-admission.py
+      - name: Verify that TLS bridge planning is read-only and fail-closed
+        run: python3 -B tests/test-smite-rc5-xhttp-bridge-admission.py -v

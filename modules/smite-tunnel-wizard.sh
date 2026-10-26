@@ -47,6 +47,8 @@ smite_tw_choose_role() {
     printf '%s\n' "2) KH - Foreign exit / service endpoint" >&2
     printf '%s\n' "0) Cancel" >&2
     read -rp "Choose [0-2]: " choice || return 1
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
     case "$choice" in
         1) printf 'ir\n' ;;
         2) printf 'kh\n' ;;
@@ -174,13 +176,13 @@ smite_tw_backhaul_overview() {
     echo " Backhaul WS /channel + /tunnel/ -> KH TLS-verifying Nginx bridge -> KH Xray"
     if [ "$role" = ir ]; then
         echo "IR: Backhaul server bind 127.0.0.1:3080."
-        echo "IR: Backhaul data port 127.0.0.1:56053."
+        echo "IR: Backhaul data port is selected AFTER KH Sanaei inbound configuration."
         echo "IR: existing HTTPS backend is 127.0.0.1:8443."
-        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | legacy example path=/56053/www."
+        echo "Public client: IR-DOMAIN:443 | TLS SNI=IR-DOMAIN | XHTTP path from actual KH inbound."
     else
         echo "KH: Backhaul client connects to 127.0.0.1:13080."
         echo "KH: Nginx bridge verifies TLS and SNI of IR domain."
-        echo "KH: Xray listens on 127.0.0.1:56053."
+        echo "KH: Configure Sanaei inbound first; its loopback Xray port/path are chosen later."
         echo "IMPORTANT: public /13080/... forwarding must be BLOCKED on KH."
     fi
     echo "Token: generate privately on IR, transfer securely to KH."
@@ -309,6 +311,8 @@ smite_tw_backhaul_live_trial() {
         echo "3) Roll back only this trial (modifies THIS test server)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) python3 -B "$module" --role "$role" --status; smite_tw_pause ;;
             2)
@@ -494,6 +498,8 @@ smite_tw_backhaul_manual_menu() {
         echo "5) Check two existing private candidates (read-only)"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_tw_backhaul_overview "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_steps "$role"; smite_tw_pause ;;
@@ -646,6 +652,8 @@ smite_tw_backhaul_diagnostics_menu() {
         echo "4) Diagnose fresh Sidecar installation (read-only)"
         echo "0) Back"
         read -rp "Choose [0-4]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_tw_backhaul_status "$role"; smite_tw_pause ;;
             2) smite_tw_backhaul_readiness "$role" existing || :; smite_tw_pause ;;
@@ -694,6 +702,8 @@ smite_tw_backhaul_expert_menu() {
         echo "7) Install only (pairing already done)"
         echo "0) Back"
         read -rp "Choose [0-7]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_tw_backhaul_readiness "$role" new || :; smite_tw_pause ;;
             2) smite_tw_backhaul_guided_prepare "$role" || :; smite_tw_pause ;;
@@ -775,6 +785,8 @@ smite_tw_backhaul_menu() {
         echo "4) Advanced: manual steps and recovery"
         echo "0) Back"
         read -rp "Choose [0-4]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_tw_backhaul_quick_start "$role" || :; smite_tw_pause ;;
             2) smite_tw_backhaul_diagnostics_menu "$role" ;;
@@ -824,6 +836,8 @@ smite_tw_rathole_menu() {
         echo "3) WebSocket/TLS/443 compatibility checklist (NO activation)"
         echo "0) Back"
         read -rp "Choose [0-3]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1)
                 echo "Rathole forwards TCP/UDP services; transport can be TCP, TLS, Noise"
@@ -869,6 +883,8 @@ smite_tw_menu() {
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "0) Back"
         read -rp "Choose [0-5]: " choice || return
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
             2)

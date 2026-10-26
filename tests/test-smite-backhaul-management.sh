@@ -106,15 +106,10 @@ pgrep() {
     if [ "$(smite_bh_role)" = kh ]; then echo 4; return 0; fi
     return 1
 }
-ss() {
-    case "$1" in
-        -lntH) if [ "$(smite_bh_role)" = ir ]; then
-                    echo 'LISTEN 0 4096 127.0.0.1:7000 0.0.0.0:*'
-                else
-                    echo 'LISTEN 0 4096 127.0.0.1:56053 0.0.0.0:*'
-                fi ;;
-    esac
-}
+# Simulate a clean Core with no FRP server and NO Sanaei XHTTP inbound.
+# Offline Backhaul candidate staging must still work for BOTH roles.
+ss() { :; }
+# No FRP listener on 7000 and no fixed KH Xray 56053 on this host.
 smite_bh_preflight ir >/dev/null
 smite_bh_prepare ir >/dev/null
 ir="$(find "$SMITE_BH_STAGE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n1)"
@@ -123,7 +118,12 @@ grep -Fq 'normalize_node_spec(spec)' "$SMITE_BH_STAGE_ROOT/$ir/candidate/node/co
 grep -Fq 'compile_standard_specs(' "$SMITE_BH_STAGE_ROOT/$ir/candidate/panel/node_client.py"
 cmp -s "$SMITE_BH_STAGE_ROOT/$ir/candidate/panel/uopti_backhaul_standard.py" \
     modules/smite-backhaul-spec.py
-grep -Fq 'location ^~ /56053/www/' "$SMITE_BH_STAGE_ROOT/$ir/candidate/nginx/ir-xhttp.conf"
+# Port/path must be configured AFTER KH Sanaei inbound creation.
+grep -Fq 'XHTTP ROUTE NOT CONFIGURED.' \
+    "$SMITE_BH_STAGE_ROOT/$ir/candidate/nginx/IR-XHTTP-NOT-CONFIGURED.txt"
+test ! -e "$SMITE_BH_STAGE_ROOT/$ir/candidate/nginx/ir-xhttp.conf"
+grep -Fq 'FRP is NOT required' \
+    "$SMITE_BH_STAGE_ROOT/$ir/candidate/nginx/IR-XHTTP-NOT-CONFIGURED.txt"
 cmp -s "$tmp/node-before" "$SMITE_BH_OVERLAY_ROOT/node/core_adapters.py"
 cmp -s "$tmp/panel-before" "$SMITE_BH_OVERLAY_ROOT/panel/tunnels.py"
 printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
@@ -136,6 +136,7 @@ smite_bh_prepare kh >/dev/null
 kh="$(find "$SMITE_BH_STAGE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -v "^$ir$" | head -n1)"
 smite_bh_verify_stage "$kh" >/dev/null
 grep -Fq 'proxy_ssl_verify on;' "$SMITE_BH_STAGE_ROOT/$kh/candidate/nginx/kh-bridge.conf"
+test ! -e "$SMITE_BH_STAGE_ROOT/$kh/candidate/nginx/ir-xhttp.conf"
 echo '# tamper' >> "$SMITE_BH_STAGE_ROOT/$kh/candidate/nginx/kh-bridge.conf"
 if smite_bh_verify_stage "$kh" >/dev/null 2>&1; then
     echo "ERROR: Corrupted stage verified" >&2; exit 1
@@ -150,6 +151,9 @@ cmp -s "$tmp/node-before" "$SMITE_BH_OVERLAY_ROOT/node/core_adapters.py"
 # The four simulated KH Backhaul processes/configs remain untouched.
 test "$(pgrep -xc backhaul)" = 4
 clear() { :; }
+show_smite_install_menu() { echo CORE_INSTALL_OK; }
+show_smite_gateway_menu() { echo PANEL_GATEWAY_OK; }
+show_smite_foreign_gateway_menu() { echo FOREIGN_GATEWAY_OK; }
 docker_smite_open_setup_wizard() { echo PRIVATE_OK; }
 docker_smite_frp_standard_guide() { echo FRP_GUIDE_OK; }
 smite_frp_wizard_menu() { echo FRP_WIZARD_OK; }
@@ -157,10 +161,24 @@ smite_bh_management_menu() { echo BACKHAUL_OK; }
 smite_tw_menu() { echo UNIFIED_TUNNELS_OK; }
 smite_tw_choose_role() { echo ir; }
 twcc_menu() { echo READONLY_STATUS_OK; }
-menu="$(printf '1\n2\n3\n4\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
-for value in PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
+
+# IR role must route the final top-level Gateway entry to Panel Gateway.
+printf 'SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
+menu="$(printf '1\n2\n3\n4\n5\n6\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
+for value in CORE_INSTALL_OK PANEL_GATEWAY_OK PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
     grep -Fq "$value" <<< "$menu"
 done
-grep -Fq '4) Advanced & Legacy Tools' <<< "$menu"
-echo 'Backhaul offline staging integrity and simplified menus (with legacy FRP/Private routes): PASS'
+! grep -Fq 'FOREIGN_GATEWAY_OK' <<< "$menu"
+
+# KH role must route the same Gateway entry to Foreign Gateway.
+printf 'SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
+kh_gateway="$(printf '2\n0\n' | docker_smite_management_menu)"
+grep -Fq 'FOREIGN_GATEWAY_OK' <<< "$kh_gateway"
+! grep -Fq 'PANEL_GATEWAY_OK' <<< "$kh_gateway"
+grep -Fq '1) Install Smite Components' <<< "$menu"
+grep -Fq '2) 443 Gateway (auto-detect Panel / Foreign)' <<< "$menu"
+grep -Fq '3) Tunnel Management (FRP / Backhaul / Rathole)' <<< "$menu"
+grep -Fq '5) Private Network Wizard' <<< "$menu"
+grep -Fq '6) Advanced & Legacy Tools' <<< "$menu"
+echo 'Backhaul offline candidates are independent of FRP and fixed Xray inbound; Core and role-aware Gateway stay primary: PASS'
 

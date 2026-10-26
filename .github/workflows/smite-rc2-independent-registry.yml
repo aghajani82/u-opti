@@ -1,0 +1,38 @@
+name: Smite RC2 Independent Signed Registry Admission
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-rc2-signed-registry-candidate.json'
+      - 'modules/smite-registry-pair-admission.py'
+      - '.github/workflows/smite-rc2-independent-registry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-rc2-panel-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install upstream verified Cosign 3.0.6
+        uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Independently verify immutable signed Panel and Node + pair manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B modules/smite-registry-pair-admission.py \
+            --manifest modules/smite-rc2-signed-registry-candidate.json \
+            --manifest-sha256 63e3efbdec955e92deaf0a84c86cc5c8a950f48b4e0d6d301bc7f7c8354eb80b \
+            --source-sha e6c3ecce81010130ae28e7d1e37ea99b31d70c28 \
+            --publish-ref refs/tags/v2.0.0-rc.2
+          echo 'RC2_INDEPENDENT_SIGNATURE_ADMISSION=PASS'
+          echo 'GHCR_PUBLISH=NOT_PERFORMED'
+          echo 'IR_KH_INSTALL=NOT_PERFORMED'
+          echo 'PRODUCTION_RELEASE_APPROVED=NO'

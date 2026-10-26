@@ -56,6 +56,29 @@ smite_foreign_gateway_private_ip() {
     smite_foreign_gateway_state_value SMITE_FOREIGN_PRIVATE_IP "$SMITE_STATE_FILE"
 }
 
+# Only the pinned, signed RC.1 Field Trial uses strict, paused Node semantics.
+# Legacy v0.1.7 gateways must keep their original behavior.
+smite_foreign_gateway_is_clean_rc() {
+    [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.1" ]
+}
+
+smite_foreign_gateway_require_rc_paused() {
+    smite_foreign_gateway_is_clean_rc || return 0
+    local env_file="$SMITE_NODE_DIR/.env"
+    local identity="/etc/u-opti/smite/identities/node-identity.json"
+    if [ -e "$identity" ] || [ -L "$identity" ]; then
+        echo "HOLD: Paired RC Node requires separately reviewed signed gateway repair." >&2
+        return 1
+    fi
+    if [ ! -f "$env_file" ] ||
+       ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$env_file" ||
+       ! grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$env_file" ||
+       ! grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$env_file"; then
+        echo "HOLD: Foreign RC Node is not in the reviewed paused/strict/managed state." >&2
+        return 1
+    fi
+}
+
 smite_foreign_gateway_private_notice() {
     local private_ip=""
     private_ip="$(smite_foreign_gateway_private_ip)"
@@ -181,8 +204,13 @@ smite_foreign_gateway_require_node() {
     command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; return 1; }
     [ -f "$SMITE_NODE_COMPOSE" ] || { echo "ERROR: Smite Node compose file was not found: $SMITE_NODE_COMPOSE"; return 1; }
     smite_foreign_gateway_container_healthy || { echo "ERROR: smite-node is not healthy."; return 1; }
-    curl -fsS --max-time 3 http://127.0.0.1:8888/api/agent/status >/dev/null 2>&1 || {
-        echo "ERROR: Smite Node API is not reachable at 127.0.0.1:8888."
+    local health_path="/api/agent/status"
+    if smite_foreign_gateway_is_clean_rc; then
+        # Strict Agent status requires HMAC; /healthz is loopback-only readiness.
+        health_path="/healthz"
+    fi
+    curl --noproxy '*' -fsS --max-time 3 "http://127.0.0.1:8888${health_path}" >/dev/null 2>&1 || {
+        echo "ERROR: Smite Node local readiness is unavailable at 127.0.0.1:8888."
         return 1
     }
 }
@@ -448,19 +476,24 @@ PY
 
 smite_foreign_gateway_verify_local() {
     local domain="$1" control_path="$2"
-    local json="" attempt=1
+    local json="" attempt=1 health_path="/api/agent/status"
+    if smite_foreign_gateway_is_clean_rc; then
+        # Transport only: /healthz is loopback-only, so proxy readiness uses /.
+        # Do not treat root HTTP 200 as signed Agent authorization.
+        health_path="/"
+    fi
 
     while [ "$attempt" -le 10 ]; do
-        json="$(curl -fsS --max-time 10 --resolve "${domain}:443:127.0.0.1" \
-            "https://${domain}${control_path}/api/agent/status" 2>/dev/null || true)"
+        json="$(curl --noproxy '*' -fsS --max-time 10 --resolve "${domain}:443:127.0.0.1" \
+            "https://${domain}${control_path}${health_path}" 2>/dev/null || true)"
 
-        if [ -n "$json" ] && python3 - "$json" <<'PY'
+        if [ -n "$json" ] && python3 - "$json" "$health_path" <<'PY'
 import json, sys
 try:
     data = json.loads(sys.argv[1])
 except Exception:
     raise SystemExit(1)
-raise SystemExit(0 if data.get('status') == 'ok' else 1)
+raise SystemExit(0 if data.get("status") == "ok" and (sys.argv[2] != "/" or data.get("service") == "smite-node") else 1)
 PY
         then
             return 0
@@ -543,6 +576,15 @@ smite_foreign_gateway_set_node_control_address() {
 }
 
 smite_foreign_gateway_recreate_node() {
+    if smite_foreign_gateway_is_clean_rc; then
+        # Never install legacy panel_client.py overlay into the signed RC image.
+        smite_foreign_gateway_require_rc_paused || return 1
+        echo "Applying paused/strict RC Node control address (no legacy overlay)..."
+        docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
+        smite_foreign_gateway_wait_healthy 90
+        return $?
+    fi
+
     local env_file="$SMITE_NODE_DIR/.env"
     local overlay="$SMITE_OVERLAY_DIR/node/panel_client.py"
     local desired="" running="" mounted_source=""
@@ -581,7 +623,34 @@ smite_foreign_gateway_recreate_node() {
 
 smite_foreign_gateway_verify_panel() {
     local panel_domain="$1" node_name="$2" control_url="$3"
-    local attempt=1 tmp=""
+    local attempt=1 tmp="" identity helper
+    identity="/etc/u-opti/smite/identities/node-identity.json"
+    helper="${BASH_SOURCE[0]%/*}/smite-foreign-gateway-signed-check.py"
+
+    # An unpaired RC Node must NEVER use the legacy anonymous Panel discovery.
+    if smite_foreign_gateway_is_clean_rc &&
+       [ ! -e "$identity" ] && [ ! -L "$identity" ]; then
+        return 1
+    fi
+
+    # After a Node identity is staged, NEVER downgrade to anonymous /api/nodes.
+    # Signed verification reveals only this Node's own gateway-ready boolean.
+    # In legacy installs without pairing, preserve the prior readiness probe
+    # until both sides of the secure migration have been rolled out.
+    if [ -e "$identity" ] || [ -L "$identity" ]; then
+        [ -s "$helper" ] || return 1
+        while [ "$attempt" -le 8 ]; do
+            if python3 -B "$helper" \
+                --panel-domain "$panel_domain" \
+                --node-name "$node_name" \
+                --control-url "$control_url"; then
+                return 0
+            fi
+            [ "$attempt" -lt 8 ] && sleep 5
+            attempt=$((attempt + 1))
+        done
+        return 1
+    fi
 
     tmp="$(mktemp)" || return 1
     while [ "$attempt" -le 8 ]; do
@@ -670,7 +739,11 @@ smite_foreign_gateway_status() {
         && echo "Port 443       : Listening" || echo "Port 443       : Not listening"
 
     if [ -n "$domain" ] && [ -n "$control_path" ] && smite_foreign_gateway_verify_local "$domain" "$control_path" 2>/dev/null; then
-        echo "Local control  : OK"
+        if smite_foreign_gateway_is_clean_rc; then
+            echo "Local transport: OK (root readiness only; NOT signed control)"
+        else
+            echo "Local control  : OK"
+        fi
     else
         echo "Local control  : Not verified"
     fi
@@ -679,15 +752,19 @@ smite_foreign_gateway_status() {
         echo "Node control   : $(grep '^SMITE_CONTROL_ADDRESS=' "$SMITE_NODE_DIR/.env" | head -n1 | cut -d= -f2-)"
     fi
 
-    if [ -n "$panel_domain" ] && [ -n "$node_name" ] && [ -n "$control_path" ] && \
-       smite_foreign_gateway_verify_panel "$panel_domain" "$node_name" "$control_url"; then
-        echo "Panel -> Node  : OK over HTTPS/443"
+    if smite_foreign_gateway_is_clean_rc &&
+       [ ! -e /etc/u-opti/smite/identities/node-identity.json ] &&
+       [ ! -L /etc/u-opti/smite/identities/node-identity.json ]; then
+        echo "Panel -> Node  : PENDING signed pairing (no anonymous fallback)"
+    elif [ -n "$panel_domain" ] && [ -n "$node_name" ] && [ -n "$control_path" ] && \
+         smite_foreign_gateway_verify_panel "$panel_domain" "$node_name" "$control_url"; then
+        echo "Panel -> Node  : OK over signed HTTPS/443"
     else
         echo "Panel -> Node  : Not verified"
     fi
 
     echo
-    echo "Security note  : Public TCP/8888 should be blocked by provider firewall or UFW."
+    echo "Security note  : Standard Node TCP/8888 must bind 127.0.0.1 and provider rules must block WAN."
     smite_foreign_gateway_pause
 }
 
@@ -718,6 +795,7 @@ smite_foreign_gateway_configure() {
     fi
 
     smite_foreign_gateway_require_node || { smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_require_rc_paused || { smite_foreign_gateway_pause; return; }
 
     domain="$(smite_foreign_gateway_domain)"
     panel_domain="$(smite_foreign_gateway_panel_domain)"
@@ -795,7 +873,11 @@ smite_foreign_gateway_configure() {
     smite_foreign_gateway_verify_local "$domain" "$control_path" || { echo "ERROR: Local Foreign HTTPS/443 control verification failed."; smite_foreign_gateway_pause; return; }
     echo "Foreign local HTTPS/443 control: OK"
 
-    smite_foreign_gateway_patch_control_metadata || { echo "ERROR: Could not prepare control-address overlay."; smite_foreign_gateway_pause; return; }
+    if smite_foreign_gateway_is_clean_rc; then
+        echo "FOREIGN_RC_LEGACY_METADATA_OVERLAY=SKIPPED"
+    else
+        smite_foreign_gateway_patch_control_metadata || { echo "ERROR: Could not prepare control-address overlay."; smite_foreign_gateway_pause; return; }
+    fi
 
     env_backup="${SMITE_NODE_DIR}/.env.u-opti-before-foreign-gateway-$(date +%Y%m%d-%H%M%S).bak"
     smite_foreign_gateway_set_node_control_address "$control_url" "$env_backup" || { echo "ERROR: Could not update node control address."; smite_foreign_gateway_pause; return; }
@@ -810,6 +892,16 @@ smite_foreign_gateway_configure() {
     fi
 
     smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path" || echo "WARNING: Foreign gateway state could not be saved."
+
+    if smite_foreign_gateway_is_clean_rc; then
+        echo
+        echo "FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY"
+        echo "FOREIGN_RC_NODE_RUNTIME=PAUSED_STRICT"
+        echo "FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING"
+        echo "No signed HMAC or Panel registration has been claimed."
+        smite_foreign_gateway_pause
+        return
+    fi
 
     echo "Waiting for Panel registration and Panel -> Foreign control verification..."
     if ! smite_foreign_gateway_verify_panel "$panel_domain" "$node_name" "$control_url"; then

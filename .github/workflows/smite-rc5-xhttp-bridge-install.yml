@@ -1,0 +1,34 @@
+name: U-OPTI Smite RC5 XHTTP Bridge Transaction (offline)
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-rc5-xhttp-bridge-admission.py'
+      - 'modules/smite-rc5-xhttp-bridge-install.py'
+      - 'tests/test-smite-rc5-xhttp-bridge-admission.py'
+      - 'tests/test-smite-rc5-xhttp-bridge-install.py'
+      - '.github/workflows/smite-rc5-xhttp-bridge-install.yml'
+  push:
+    branches:
+      - feature/uopti-smite-rc5-xhttp-bridge-installer-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  local-bridge-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile approved module and mocked security tests
+        run: |
+          python3 -m py_compile modules/smite-rc5-xhttp-bridge-admission.py modules/smite-rc5-xhttp-bridge-install.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-bridge-admission.py tests/test-smite-rc5-xhttp-bridge-install.py
+      - name: Read-only gateway admission CI
+        run: python3 -B tests/test-smite-rc5-xhttp-bridge-admission.py -v
+      - name: Offline root-owned transaction tests without real host service access
+        run: sudo -n python3 -B tests/test-smite-rc5-xhttp-bridge-install.py -v

@@ -10,6 +10,133 @@ permissions:
   contents: read
 
 jobs:
+  managed-frp-signed-compose:
+    # PR-only, isolated Docker with network:none, no published host port;
+    # verifies actual signed Node inventory through full container recreate.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout reviewed U-OPTI experimental code
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite Node
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: a15c46288aae9849babc9c9358c68e46686bce9c
+          path: .managed-smite-source
+          persist-credentials: false
+      - name: Signed official FRP dual-binary Compose recreation and rollback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-frp-signed-compose.sh
+          bash -n tests/test-smite-managed-backhaul-signed-api.sh
+          python3 -m py_compile tests/smite-managed-backhaul-compose-fixture.py
+          bash tests/test-smite-managed-frp-signed-compose.sh
+
+  signed-runtime-verifier-offline:
+    # Exact, immutable Smite HMAC implementation; mocked HTTP transport only.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout experimental U-OPTI branch
+        uses: actions/checkout@v4
+      - name: Checkout reviewed Smite HMAC implementation by immutable SHA
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: a15c46288aae9849babc9c9358c68e46686bce9c
+          path: .managed-smite-source
+          persist-credentials: false
+      - name: Verify exact Smite revision and offline Signed Runtime acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .managed-smite-source rev-parse HEAD)" = "a15c46288aae9849babc9c9358c68e46686bce9c"
+          python3 -m py_compile tests/lab/smite_signed_runtime_probe.py tests/test-smite-signed-runtime-probe.py
+          python3 -B tests/test-smite-signed-runtime-probe.py -v
+  signed-fastapi-durable-replay-isolated:
+    # New Smite strict replay lifecycle pinned by immutable SHA, ASGI only.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout U-OPTI laboratory
+        uses: actions/checkout@v4
+      - name: Checkout immutable reviewed Smite API source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 02d05056d3a4baf577c9d3781d62af61c000f1ac
+          path: .managed-smite-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run FastAPI signed endpoints and durable replay across app recreation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .managed-smite-source rev-parse HEAD)" = "02d05056d3a4baf577c9d3781d62af61c000f1ac"
+          python3 -m pip install -r .managed-smite-source/node/requirements.txt
+          python3 -m py_compile tests/test-smite-fastapi-durable-bridge.py
+          python3 -B tests/test-smite-fastapi-durable-bridge.py -v
+
+  signed-stage28-ingress-identity-recovery:
+    # Stage28: Stage12 ACL against forged peer source + real pinned strict API.
+    # Unique disposable PR runner, no public binding or production reload.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout experimental U-OPTI code
+        uses: actions/checkout@v4
+      - name: Checkout immutable reviewed Smite strict Node source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 02d05056d3a4baf577c9d3781d62af61c000f1ac
+          path: .stage27-smite-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install disposable Nginx, OpenSSL and reviewed Smite Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .stage27-smite-src rev-parse HEAD)" = "02d05056d3a4baf577c9d3781d62af61c000f1ac"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nginx openssl
+          python3 -m pip install -r .stage27-smite-src/node/requirements.txt
+      - name: Verify TLS/SNI, denied source spoofing, paired Node identity and replay DB continuity
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-smite-stage27-signed-nginx-hmac.py
+          python3 -B tests/test-smite-stage27-signed-nginx-hmac.py
+
+  managed-frp-official-artifact:
+    # Trusted official downloads only on disposable PR CI, never push/main.
+    if: github.event_name == 'pull_request'
+    name: managed-frp-official-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify upstream FRP archive and BOTH binaries without host activation
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-frp-official.sh
+          bash tests/test-smite-managed-frp-official.sh "${{ matrix.arch }}"
   bash-validation:
     runs-on: ubuntu-latest
     steps:
@@ -27,6 +154,271 @@ jobs:
             echo "Checking $file"
             bash -n "$file"
           done < <(find modules -type f -name '*.sh' -print0 | sort -z)
+
+      - name: Verify top-level CLI version and main-menu exit regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-cli-entrypoint.py
+          python3 -B tests/test-uopti-cli-entrypoint.py -v
+
+      - name: Lock install/update downloads to a single immutable GitHub SHA (mocked, offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-source-pin.py
+          python3 -B tests/test-uopti-source-pin.py -v
+
+      - name: Safely install fresh and adopt legacy U-OPTI under forced shell crash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-first-install-adoption.py
+          python3 -B tests/test-uopti-first-install-adoption.py -v
+
+      - name: Simulate interrupted U-OPTI multi-file update and recover next process
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/u-opti-update-transaction.py tests/test-uopti-update-transaction.py
+          python3 -B tests/test-uopti-update-transaction.py -v
+
+      - name: Preserve real U-OPTI updater backup after failed rollback (isolated)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/test-uopti-update-rollback-retention.py
+          python3 -B tests/test-uopti-update-rollback-retention.py -v
+
+      - name: Verify opt-in Smite Node identity pairing preview
+        shell: bash
+        run: |
+          bash -n modules/smite-node-pairing-wizard.sh
+          python3 -m py_compile modules/smite-node-pairing.py tests/test-smite-node-pairing.py
+          python3 -B tests/test-smite-node-pairing.py -v
+          python3 -B tests/test-docker-3xui-xhttp-guard.py -v
+          python3 -B tests/test-uopti-kh-guard-bootstrap.py -v
+
+      - name: Independent signed registry Panel Node pair pre-admission (fake Cosign only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-registry-pair-admission.py tests/test-smite-registry-pair-admission.py
+          python3 -B tests/test-smite-registry-pair-admission.py -v
+          python3 -B tests/test-smite-rc2-candidate-staging.py -v
+          python3 -B tests/test-smite-rc2-upgrade-preflight.py -v
+          python3 -B tests/test-smite-rc2-panel-compose-review.py -v
+          python3 -B tests/test-smite-rc2-ir-panel-rollout.py -v
+          python3 -B tests/test-smite-rc2-kh-node-plan.py -v
+          python3 -B tests/test-smite-rc2-kh-node-rollout.py -v
+          python3 -B tests/test-smite-rc2-foreign-pairing-admission.py -v
+          python3 -B tests/test-smite-rc2-foreign-activation.py -v
+          python3 -B tests/test-smite-rc2-ir-foreign-origin-approval.py -v
+          python3 -B tests/test-smite-rc2-kh-credential-redeem.py -v
+          python3 -m py_compile modules/smite-rc2-kh-replay-only.py tests/test-smite-rc2-kh-replay-only.py
+          python3 -B tests/test-smite-rc2-kh-replay-only.py -v
+          python3 -m py_compile modules/smite-rc2-frp-bundled-enrollment.py tests/test-smite-rc2-frp-bundled-enrollment.py
+          python3 -B tests/test-smite-rc2-frp-bundled-enrollment.py -v
+          python3 -m py_compile modules/smite-rc2-frp-wss-plan.py tests/test-smite-rc2-frp-wss-plan.py
+          python3 -B tests/test-smite-rc2-frp-wss-plan.py -v
+          python3 -m py_compile modules/smite-rc2-frp-wss-edge-plan.py tests/test-smite-rc2-frp-wss-edge-plan.py
+          python3 -B tests/test-smite-rc2-frp-wss-edge-plan.py -v
+          python3 -m py_compile modules/smite-rc2-frp-wss-edge-executor.py tests/test-smite-rc2-frp-wss-edge-executor.py
+          python3 -B tests/test-smite-rc2-frp-wss-edge-executor.py -v
+          python3 -m py_compile modules/smite-rc2-frp-wss-node-activation.py tests/test-smite-rc2-frp-wss-node-activation.py
+          python3 -B tests/test-smite-rc2-frp-wss-node-activation.py -v
+          python3 -m py_compile modules/smite-rc2-panel-wss-activation.py tests/test-smite-rc2-panel-wss-activation.py
+          python3 -B tests/test-smite-rc2-panel-wss-activation.py -v
+          python3 -m py_compile modules/smite-frp-rc2-gateway-ready.py tests/test-smite-frp-rc2-gateway-ready.py
+          bash -n modules/smite-frp-xhttp.sh
+          python3 -B tests/test-smite-frp-rc2-gateway-ready.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-bootstrap.py tests/test-smite-frp-rc2-xhttp-bootstrap.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-bootstrap.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-include-transaction.py tests/test-smite-frp-rc2-xhttp-include-transaction.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-include-transaction.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-module-upgrade.py tests/test-smite-frp-rc2-xhttp-module-upgrade.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-module-upgrade.py -v
+          python3 -m py_compile modules/smite-frp-rc2-xhttp-publish-45121.py tests/test-smite-frp-rc2-xhttp-publish-45121.py
+          python3 -B tests/test-smite-frp-rc2-xhttp-publish-45121.py -v
+          python3 -m py_compile modules/smite-frp-rc2-guided-publish.py tests/test-smite-frp-rc2-guided-publish.py
+          python3 -B tests/test-smite-frp-rc2-guided-publish.py -v
+
+      - name: Fresh clean Smite IR/KH RC installation uses verified paired images only
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n modules/smite-install.sh
+          bash -n tests/test-smite-clean-install.sh
+          python3 -m py_compile modules/smite-clean-image-pair.py tests/test-smite-clean-image-pair.py
+          python3 -B tests/test-smite-clean-image-pair.py -v
+          bash tests/test-smite-clean-install.sh
+
+      - name: Phase1 Smite Core installs without host FRP, Stable requires original FRP
+        shell: bash
+        run: |
+          bash -n tests/test-smite-core-no-frp.sh
+          bash tests/test-smite-core-no-frp.sh
+
+      - name: Independently stage Backhaul engine with pinned artifacts (no live install)
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-managed-backhaul.py tests/test-smite-managed-backhaul.py
+          python3 -B tests/test-smite-managed-backhaul.py -v
+          grep -Fq '"smite-managed-backhaul.py"' install.sh
+          grep -Fq '"smite-managed-backhaul.py"' u-opti
+          grep -Fq '["smite-managed-backhaul.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-frp.py modules/smite-managed-frp-control.py tests/test-smite-managed-frp.py tests/test-smite-managed-frp-control.py
+          python3 -B tests/test-smite-managed-frp.py -v
+          python3 -B tests/test-smite-managed-frp-control.py -v
+          python3 -m py_compile modules/smite-managed-frp-transaction.py tests/test-smite-managed-frp-transaction.py
+          python3 -B tests/test-smite-managed-frp-transaction.py -v
+          grep -Fq '"smite-managed-frp-transaction.py"' install.sh
+          grep -Fq '["smite-managed-frp-transaction.py"]' u-opti
+          bash -n modules/smite-managed-frp-menu.sh
+          for helper in smite-managed-frp.py smite-managed-frp-control.py smite-managed-frp-menu.sh; do
+            grep -Fq "\"$helper\"" install.sh
+            grep -Fq "\"$helper\"" u-opti
+            grep -Fq "[$(printf '"%s"' "$helper")]" u-opti
+          done
+
+
+      - name: Rehearse isolated Backhaul activation, interrupted install and exact rollback
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          python3 -m py_compile modules/smite-managed-backhaul-transaction.py tests/test-smite-managed-backhaul-transaction.py
+          python3 -B tests/test-smite-managed-backhaul-transaction.py -v
+          grep -Fq '"smite-managed-backhaul-transaction.py"' install.sh
+          grep -Fq '"smite-managed-backhaul-transaction.py"' u-opti
+          grep -Fq '["smite-managed-backhaul-transaction.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-backhaul-control.py tests/test-smite-managed-backhaul-control.py
+          python3 -B tests/test-smite-managed-backhaul-control.py -v
+          bash -n modules/smite-managed-backhaul-menu.sh
+          grep -Fq '"smite-managed-backhaul-control.py"' install.sh
+          grep -Fq '"smite-managed-backhaul-menu.sh"' install.sh
+          grep -Fq '["smite-managed-backhaul-control.py"]' u-opti
+          grep -Fq '["smite-managed-backhaul-menu.sh"]' u-opti
+          python3 -m py_compile modules/smite-managed-backhaul-host-gate.py tests/test-smite-managed-backhaul-host-gate.py
+          python3 -B tests/test-smite-managed-backhaul-host-gate.py -v
+          python3 -m py_compile modules/smite-managed-backhaul-host-executor.py tests/test-smite-managed-backhaul-host-executor.py
+          python3 -B tests/test-smite-managed-backhaul-host-executor.py -v
+          grep -Fq '"smite-managed-backhaul-host-executor.py"' install.sh
+          grep -Fq '["smite-managed-backhaul-host-executor.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-engine-host-admission.py tests/test-smite-managed-engine-host-admission.py
+          python3 -B tests/test-smite-managed-engine-host-admission.py -v
+          python3 -m py_compile modules/smite-managed-engine-host-plan.py tests/test-smite-managed-engine-host-plan.py
+          python3 -B tests/test-smite-managed-engine-host-plan.py -v
+          # Lab-only: synthetic transactions; no host activation or Docker.
+          python3 -m py_compile tests/lab/smite_host_executor.py tests/test-smite-host-executor-lab.py
+          python3 -B tests/test-smite-host-executor-lab.py -v
+          python3 -m py_compile tests/lab/smite_fd_guard.py tests/test-smite-fd-guard.py
+          python3 -B tests/test-smite-fd-guard.py -v
+          grep -Fq '"smite-managed-engine-host-plan.py"' install.sh
+          grep -Fq '["smite-managed-engine-host-plan.py"]' u-opti
+          grep -Fq '"smite-managed-engine-host-admission.py"' install.sh
+          grep -Fq '["smite-managed-engine-host-admission.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-backhaul-pair-review.py tests/test-smite-managed-backhaul-pair-review.py
+          python3 -B tests/test-smite-managed-backhaul-pair-review.py -v
+          grep -Fq '"smite-managed-backhaul-host-gate.py"' install.sh
+          grep -Fq '["smite-managed-backhaul-host-gate.py"]' u-opti
+          grep -Fq '"smite-managed-backhaul-pair-review.py"' install.sh
+          grep -Fq '["smite-managed-backhaul-pair-review.py"]' u-opti
+          python3 -m py_compile modules/smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle-official.py
+          python3 -B tests/test-smite-managed-backhaul-lifecycle.py -v
+          grep -Fq '"smite-managed-backhaul-lifecycle.py"' install.sh
+          grep -Fq '["smite-managed-backhaul-lifecycle.py"]' u-opti
+
+      - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
+        shell: bash
+        run: |
+          bash -n tests/test-smite-clean-iran-pending.sh
+          bash tests/test-smite-clean-iran-pending.sh
+
+      - name: Verify clean RC foreign node paused pairing boot without HTTP 8000 fallback
+        shell: bash
+        run: |
+          bash -n tests/test-smite-foreign-paused-boot.sh
+          bash tests/test-smite-foreign-paused-boot.sh
+
+      - name: Stage15 verify archive delivery with tampering and no-install regressions
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage15-bundle-verify.py tests/test-smite-stage15-bundle-verify.py
+          python3 -B tests/test-smite-stage15-bundle-verify.py -v
+
+      - name: Checkout pinned Stage14 Smite security source (source only, no images)
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 631df78551e097dbded3b934ed6ea4987c554869
+          path: .stage14-smite-src
+          persist-credentials: false
+
+      - name: Cross-repository Stage14 HMAC and admin JWT overlay regression
+        shell: bash
+        env:
+          SMITE_STAGE14_SOURCE: ${{ github.workspace }}/.stage14-smite-src
+        run: |
+          set -euo pipefail
+          python3 -m json.tool release/smite-stage14-integration-review.json >/dev/null
+          python3 -m py_compile modules/smite-panel-auth-overlay.py tests/test-smite-panel-auth-overlay.py tests/test-smite-stage14-integration.py
+          python3 -B tests/test-smite-panel-auth-overlay.py -v
+          python3 -B tests/test-smite-stage14-integration.py -v
+
+      - name: Stage19 pairing 443 private offline Nginx plan
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage19-pairing-443-plan.py tests/test-smite-stage19-pairing-443-plan.py
+          python3 -B tests/test-smite-stage19-pairing-443-plan.py -v
+
+      - name: Stage13 IR KH deployment admission never greenlights live auth
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage13-preflight.py tests/test-smite-stage13-preflight.py
+          python3 -B tests/test-smite-stage13-preflight.py -v
+
+      - name: Stage12 signed Agent HTTPS 443 Nginx candidate never rewrites HMAC path
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage12-nginx-hmac-plan.py tests/test-smite-stage12-nginx-hmac-plan.py
+          python3 -B tests/test-smite-stage12-nginx-hmac-plan.py -v
+
+      - name: Verify Stage11 secure FRP and Backhaul overlay migration review bundles
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-stage11-overlay-review.py tests/test-smite-stage11-overlay-review.py
+          python3 -B tests/test-smite-stage11-overlay-review.py -v
+
+      - name: Verify Smite auth image shadow compatibility source audit
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-auth-image-overlay-audit.py tests/test-smite-auth-image-overlay-audit.py
+          python3 -B tests/test-smite-auth-image-overlay-audit.py -v
+
+      - name: Verify inert Smite Node security Compose staging and rollback
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-node-auth-candidate.py tests/test-smite-node-auth-candidate.py
+          python3 -B tests/test-smite-node-auth-candidate.py -v
+
+      - name: Read-only KH strict Node identity replay SQLite and Docker bind-mount preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-node-replay-mount-admission.py tests/test-smite-node-replay-mount-admission.py
+          python3 -B tests/test-smite-node-replay-mount-admission.py -v
+
+      - name: Verify paired-only Foreign Smite gateway readiness
+        shell: bash
+        run: |
+          python3 -m py_compile modules/smite-foreign-gateway-signed-check.py tests/test-smite-foreign-gateway-signed-check.py
+          python3 -B tests/test-smite-foreign-gateway-signed-check.py -v
+
+      - name: Verify secure Smite Node localhost/443 endpoint and update packaging
+        shell: bash
+        run: python3 -B tests/test-smite-node-local-bind.py
 
       - name: Verify isolated Smite FRP Compose override
         shell: bash
@@ -142,6 +534,10 @@ jobs:
       - name: Verify Standard FRP module bootstrap for legacy updates
         shell: bash
         run: bash tests/test-smite-frp-release-upgrade.sh
+
+      - name: Verify signed Field Trial bundle bootstrap for legacy updates
+        shell: bash
+        run: bash tests/test-smite-signed-field-trial-release-upgrade.sh
 
       - name: Test experimental Backhaul Standard renderer
         shell: bash
@@ -318,6 +714,77 @@ jobs:
           bash -n tests/test-smite-backhaul-sidecar-tls.sh
           bash tests/test-smite-backhaul-sidecar-tls.sh
 
+  node-compose-hmac-rollback-isolated:
+    # Execute the installer-created KH Compose and inert Stage9 overlay using
+    # the exact reviewed Smite Node source image, on runner network:none.
+    # Never activate real IR/KH, host network, tunnels or public endpoints.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout U-OPTI review branch
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: b08f375e4ed2cfe1dcbbe4c93ff18864ca833f66
+          path: .stage24-smite-src
+          persist-credentials: false
+      - name: Verify actual source-locked Node Compose, persistent signed identity, nonce replay and fail-closed DB-loss
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          bash -n tests/test-smite-stage24-compose-runtime.sh
+          bash tests/test-smite-stage24-compose-runtime.sh
+
+  pairing-tls-e2e-isolated:
+    # Real temporary Nginx stream/SNI/TLS and real Smite pairing API.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout U-OPTI proposed branch
+        uses: actions/checkout@v4
+      - name: Checkout exact Smite source commit
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: a15c46288aae9849babc9c9358c68e46686bce9c
+          path: .stage20-smite-src
+          persist-credentials: false
+      - name: Use reviewed Python runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated Nginx and pinned pairing runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nginx libnginx-mod-stream openssl
+          python -m pip install \
+            'fastapi==0.104.1' 'uvicorn==0.24.0' \
+            'pydantic==2.5.0' 'pydantic-settings==2.1.0' \
+            'sqlalchemy==2.0.23' 'aiosqlite==0.19.0' \
+            'cryptography==41.0.7' 'passlib[bcrypt]==1.7.4' \
+            'bcrypt==4.0.1' 'python-jose[cryptography]==3.3.0' \
+            'httpx==0.25.2'
+          test -f /usr/lib/nginx/modules/ngx_stream_module.so
+      - name: Real pairing security and reversible local Nginx test
+        shell: bash
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_EVENT_NAME: pull_request
+        run: |
+          python3 -m py_compile tests/fixtures/stage20_pairing_panel.py tests/test-smite-stage20-pairing-tls-e2e.py
+          python3 -B tests/test-smite-stage20-pairing-tls-e2e.py
+          # Run exact reviewed Panel outbound authorization tests too:
+          # pending/legacy-active/name-drift cannot send to a Node.
+          python3 -B .stage20-smite-src/tests/test_signed_node_inbound_panel.py -v
+          python3 -m py_compile tests/fixtures/stage26_kh_agent.py tests/test-smite-stage26-panel-kh-443.py
+          python3 -B tests/test-smite-stage26-panel-kh-443.py
+
   sidecar-service-reload-rollback:
     # These destructive synthetic-container drills are explicitly PR-only.
     # Their scripts intentionally refuse push/main execution.
@@ -364,3 +831,28 @@ jobs:
           python3 -B tests/test-smite-backhaul-sidecar-docker-lab-unit.py
           bash -n tests/test-smite-backhaul-sidecar-docker-executor.sh
           bash tests/test-smite-backhaul-sidecar-docker-executor.sh
+
+  managed-backhaul-official-artifact:
+    # Real pinned official archive and real Compose merge, but no live install.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout U-OPTI proposed branch
+        uses: actions/checkout@v4
+      - name: Checkout exact reviewed Smite Node Compose
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 02d05056d3a4baf577c9d3781d62af61c000f1ac
+          path: .managed-smite-source
+          persist-credentials: false
+      - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
+        shell: bash
+        run: |
+          bash -n tests/test-smite-managed-backhaul-official.sh
+          bash -n tests/test-smite-managed-backhaul-node-runtime.sh
+          bash -n tests/test-smite-managed-backhaul-signed-api.sh
+          python3 -m py_compile tests/smite-managed-backhaul-compose-fixture.py tests/test-smite-managed-backhaul-compose-fixture.py
+          python3 -B tests/test-smite-managed-backhaul-compose-fixture.py -v
+          bash tests/test-smite-managed-backhaul-official.sh

@@ -1,0 +1,55 @@
+name: U-OPTI RC5 Root XHTTP Replay Ledger (offline)
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-rc5-xhttp-signed-intent.py'
+      - 'modules/smite-rc5-xhttp-nonce-ledger.py'
+      - 'modules/smite-rc5-xhttp-root-broker.py'
+      - 'modules/smite-rc5-xhttp-broker-compose.py'
+      - 'modules/smite-rc5-xhttp-broker-provision.py'
+      - 'modules/smite-rc5-xhttp-sanaei-mount.py'
+      - 'modules/smite-install.sh'
+      - 'install.sh'
+      - 'u-opti'
+      - 'tests/test-smite-rc5-xhttp-signed-intent.py'
+      - 'tests/test-smite-rc5-xhttp-nonce-ledger.py'
+      - 'tests/test-smite-rc5-xhttp-root-broker.py'
+      - 'tests/test-smite-rc5-xhttp-broker-compose.py'
+      - 'tests/test-smite-rc5-xhttp-sanaei-mount.py'
+      - 'docs/SMITE-RC5-XHTTP-ROOT-REPLAY-LEDGER.md'
+      - '.github/workflows/smite-rc5-xhttp-nonce-ledger.yml'
+  push:
+    branches:
+      - feature/uopti-rc5-root-nonce-ledger-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-security-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile immutable intent and independent ledger
+        run: |
+          python3 -m py_compile modules/smite-rc5-xhttp-signed-intent.py modules/smite-rc5-xhttp-nonce-ledger.py modules/smite-rc5-xhttp-root-broker.py
+          python3 -m py_compile modules/smite-rc5-xhttp-broker-compose.py
+          python3 -m py_compile modules/smite-rc5-xhttp-broker-provision.py
+          python3 -m py_compile modules/smite-rc5-xhttp-sanaei-mount.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-signed-intent.py tests/test-smite-rc5-xhttp-nonce-ledger.py tests/test-smite-rc5-xhttp-root-broker.py tests/test-smite-rc5-xhttp-broker-compose.py
+          python3 -m py_compile tests/test-smite-rc5-xhttp-sanaei-mount.py
+      - name: Strict HMAC schema and signature regression
+        run: python3 -B tests/test-smite-rc5-xhttp-signed-intent.py -v
+      - name: Root-owned replay state, missing-DB HOLD, restart and concurrent uniqueness
+        run: sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py -v
+      - name: Verify local broker peer restrictions, replay consumption and scoped worker dispatch
+        run: sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py -v
+      - name: Validate KH Sanaei database mount remains read-only and metadata-only
+        run: python3 -B tests/test-smite-rc5-xhttp-sanaei-mount.py -v
+      - name: Inert clean-install key and socket Compose admission
+        run: python3 -B tests/test-smite-rc5-xhttp-broker-compose.py -v

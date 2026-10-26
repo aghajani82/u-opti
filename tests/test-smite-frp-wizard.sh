@@ -8,7 +8,9 @@ grep -Fq '"smite-frp-wizard.sh"' install.sh
 grep -Fq '1) START HERE - Install/check Smite + HTTPS Gateway' modules/smite-frp-wizard.sh
 grep -Fq '2) PORT + PATH - Save IR profile before Smite tunnel' modules/smite-frp-wizard.sh
 grep -Fq '3) VERIFY - XHTTP, client settings and real-traffic checklist' modules/smite-frp-wizard.sh
-grep -Fq 'Choose [0-4]' modules/smite-frp-wizard.sh
+grep -Fq 'Choose [0-5]' modules/smite-frp-wizard.sh
+grep -Fq '4) PUBLISH - Active FRP XHTTP route' modules/smite-frp-wizard.sh
+grep -Fq '"smite-frp-rc2-guided-publish.py"' install.sh
 grep -Fq 'FRP ADVANCED' modules/smite-frp-wizard.sh
 
 MODE=standard ROLE=panel-iran DOMAIN=ir.kolbe1.ir
@@ -156,16 +158,18 @@ MODE=standard ROLE=panel-iran
 smite_frp_wizard_start_here() { echo "PRIMARY_START_ROLE:$1"; }
 smite_frp_wizard_easy_configure() { echo "PRIMARY_CONFIGURE_ROLE:$1"; }
 smite_frp_wizard_easy_verify() { echo "PRIMARY_VERIFY_ROLE:$1"; }
-out="$(printf '1\n2\n3\n0\n' | smite_frp_wizard_menu ir)"
+smite_frp_wizard_easy_publish() { echo "PRIMARY_PUBLISH_ROLE:$1"; }
+out="$(printf '1\n2\n3\n4\n0\n' | smite_frp_wizard_menu ir)"
 grep -Fq 'PRIMARY_START_ROLE:ir' <<< "$out"
 grep -Fq 'PRIMARY_CONFIGURE_ROLE:ir' <<< "$out"
 grep -Fq 'PRIMARY_VERIFY_ROLE:ir' <<< "$out"
+grep -Fq 'PRIMARY_PUBLISH_ROLE:ir' <<< "$out"
 # The original individual installer is reachable ONLY under Advanced.
-out="$(printf '4\n2\n0\n0\n' | smite_frp_wizard_menu ir)"
+out="$(printf '5\n2\n0\n0\n' | smite_frp_wizard_menu ir)"
 grep -Fq 'INSTALL_STEP_ir' <<< "$out"
 # Role choice is a single explicit prompt if Smite not installed.
 MODE="" ROLE=""
 out="$(printf '2\n0\n' | smite_frp_wizard_menu)"
 grep -Fq 'This server: kh | Smite: NOT INSTALLED' <<< "$out"
 
-echo 'PASS: real 4-action FRP menu, guarded fresh install, custom Path, KH read-only, role guards and Advanced'
+echo 'PASS: real 5-action FRP menu, guarded fresh install, custom Path, KH read-only, role guards and Advanced'
