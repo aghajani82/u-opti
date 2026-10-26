@@ -504,3 +504,15 @@ The development heads contain **7 U-OPTI** and **23 Smite** workflow files. No w
 ### Remaining release gate
 
 CI and isolated installation fixtures do not prove a fresh two-host Ubuntu installation or real client traffic. Still required: disposable IR + KH from zero, a newly created third KH XHTTP inbound with its real path, automatic route creation, verified VLESS/XHTTP traffic over TLS/443, then reboot/reconnect and failure/rollback checks. Preserve existing `45121` and `49328`. No `main`, RC5 tag, IR/KH host, or Grandoptical change was made. Keep promotion and rollout on HOLD until that trial is reviewed.
+
+## 2026-10-26 — Main merge and interrupted clean-IR install recovery
+
+The operator explicitly requested placing the U-OPTI closeout stack on `main` for disposable IR/KH testing. PR #48 was retargeted to `main`, marked ready, and merged at `3b6b97fc2d3070cd9bc8a8046ad5fbf7ce0e4543`. This enables field testing; it is not production approval.
+
+The first clean-IR install ran U-OPTI source revision `349e65ba2c19c581afa1d4cae7e5b212dfa9b441` and stopped at `HOLD_NODE_BROKER_PEER_MOUNT_UNAVAILABLE`. The missing Node socket mount was subsequently fixed on `main`, but that older run left a healthy `smite-panel`, both Compose files and both environment files, no `state.env`, and no Node container. The ordinary installer correctly refuses to start a duplicate install. The generic Status & Diagnostics screen is a tunnel snapshot; `Install Smite Components -> Installation State` only reports metadata and does not repair it.
+
+Current recovery work adds a narrowly scoped, explicit resume action for this exact interrupted clean-RC IR state. It checks the pinned Stage15 manifest and loaded image IDs, private environment files, signed/paused auth configuration, and the healthy existing Panel before asking for `RESUME-CLEAN-IR-FIELD-TRIAL`. It prepares the missing Broker peer mount, starts the Node, activates only the local Broker socket service with no TrustedGrants or live route changes, and writes managed state after health checks. Its offline regression rejects altered auth config and verifies explicit confirmation. The change is on branch `fix/smite-clean-ir-resume-20261026`; do not use it on a host until its PR is merged and current CI passes.
+
+**Operator state:** IR is a disposable test host with a partial installation. Do not rebuild or delete `/opt/smite` or `/opt/smite-node`; preserve Panel DB/config. After the recovery change passes CI and reaches `main`, update U-OPTI, then use `Smite Management -> Install Smite Components -> Resume interrupted clean-RC IR test install`. The resume prints a recovery snapshot path (retained if a step fails; removed after successful verification) and leaves signed pairing pending, TrustedGrants empty and live routes unchanged. Grandoptical remains out of scope.
+
+**Next:** finish review and CI for the recovery change, merge it to `main` if green, then resume the existing IR install and continue KH testing separately. Record actual Broker/Node results and real client validation before claiming the clean-install test complete.
