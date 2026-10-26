@@ -35,8 +35,11 @@ SIBLING_CONTRACT = Path(__file__).resolve().with_name("smite-rc5-xhttp-signed-in
 
 def _contract_module():
     """Load the existing inert HMAC verifier without invoking a shell/API."""
+    module_name = "uopti_xhttp_intent_contract_for_ledger"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
     spec = importlib.util.spec_from_file_location(
-        "uopti_xhttp_intent_contract_for_ledger", SIBLING_CONTRACT
+        module_name, SIBLING_CONTRACT
     )
     if spec is None or spec.loader is None:
         raise LedgerHold("INTENT_CONTRACT_UNAVAILABLE")
