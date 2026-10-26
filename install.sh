@@ -112,6 +112,7 @@ MODULES=(
     "smite-profile-first.py"
     "smite-profile-first-menu.sh"
     "smite-backhaul-management.sh"
+    "smite-clean-ir-resume.sh"
     "smite-tunnel-wizard.sh"
     "smite-tunnel-control-center.sh"
     "smite-managed-backhaul.py"
@@ -269,6 +270,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-rc5-xhttp-bridge-admission.py) LABEL="Smite XHTTP bridge admission verifier" ;;
         smite-frp-rc2-guided-publish.py) LABEL="Signed RC2 FRP XHTTP Guided Publisher" ;;
         smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
+        smite-clean-ir-resume.sh) LABEL="Smite clean IR recovery" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
         smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
         smite-foreign-gateway.sh) LABEL="Smite Foreign 443 Gateway" ;;
