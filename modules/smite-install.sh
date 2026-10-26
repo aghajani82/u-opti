@@ -904,7 +904,7 @@ SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock
 EOF_RC_IR_BROKER
             broker_compose_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-rc5-xhttp-broker-compose.py"
             [ -f "$broker_compose_helper" ] && [ ! -L "$broker_compose_helper" ] || return 1
-            python3 -B "$broker_compose_helper" node "$SMITE_NODE_COMPOSE" \
+            python3 -B "$broker_compose_helper" node-prepare "$SMITE_NODE_COMPOSE" \
                 --peer-gid "$SMITE_UOPTI_BROKER_GID" || return 1
         elif [ "$node_role" = foreign ]; then
             mkdir -p "$(dirname "$empty_sanaei_dir")" || return 1
