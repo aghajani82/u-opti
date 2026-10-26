@@ -238,5 +238,30 @@ class BrokerRegressionTests(unittest.TestCase):
         self.assertFalse(broker.SOCKET.exists())
 
 
+class PinnedSmiteRouteWorkerTests(unittest.TestCase):
+    def test_installer_stages_exact_reviewed_worker_and_planner_bytes(self):
+        root = Path(__file__).resolve().parents[1]
+        expected = {
+            "modules/smite-xhttp-nginx-route":
+                "acb66752f6aa8600f1c45a7d68f46006b0d4d26c55330925bd35359d3ca868e6",
+            "modules/smite_xhttp_nginx_plan.py":
+                "0c007ca049b95227588d2e4847020a53d5d0c155d28dc537341367a783d81c19",
+        }
+        installer = (root / "install.sh").read_text()
+        for relative, digest in expected.items():
+            with self.subTest(relative=relative):
+                path = root / relative
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+                self.assertIn(f'"{Path(relative).name}"', installer)
+
+        worker = (root / "modules/smite-xhttp-nginx-route").read_text()
+        self.assertIn("from smite_xhttp_nginx_plan import", worker)
+        self.assertIn('parser.add_argument("--port"', worker)
+        self.assertIn('parser.add_argument("--path"', worker)
+        self.assertIn('parser.add_argument("--apply"', worker)
+        self.assertIn('parser.add_argument("--confirm-local-root"', worker)
+        self.assertIn("RESULT=PASS_LOCAL_NGINX_ROUTE_CREATED", worker)
+
+
 if __name__ == "__main__":
     unittest.main()
