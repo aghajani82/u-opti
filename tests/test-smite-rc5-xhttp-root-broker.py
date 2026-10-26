@@ -67,7 +67,7 @@ class BrokerRegressionTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         for directory in ("conf", "grants", "ledger", "bin", "uds"):
             p = self.root/directory
-            p.mkdir(mode=0o700)
+            p.mkdir(mode=0o755 if directory == "bin" else 0o700)
         broker.KEY.write_bytes(KEY_VALUE)
         broker.KEY.chmod(0o600)
         for path, body in (
@@ -169,6 +169,14 @@ class BrokerRegressionTests(unittest.TestCase):
         with self.assertRaises(broker.BrokerHold):
             self.accept()
         self._put_grant(claim())
+        self.assertEqual(self.accept(), "PASS_ROUTE_ADDED")
+
+    def test_untrusted_worker_directory_denies_before_nonce(self):
+        broker.HELPER.parent.chmod(0o777)
+        with self.assertRaises(broker.BrokerHold):
+            self.accept()
+        self.assertEqual(self._calls, [])
+        broker.HELPER.parent.chmod(0o755)
         self.assertEqual(self.accept(), "PASS_ROUTE_ADDED")
 
     def test_missing_ledger_cannot_auto_repair_or_trigger_tool(self):
