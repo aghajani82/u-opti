@@ -116,8 +116,8 @@ class BrokerComposeTests(unittest.TestCase):
 
     def test_node_prepare_rejects_conflicting_user_without_mutation(self):
         conflicting = NODE_BASE.replace(
-            "    container_name: smite-node\\n",
-            "    container_name: smite-node\\n    user: 1000:1000\\n",
+            "    container_name: smite-node\n",
+            "    container_name: smite-node\n    user: 1000:1000\n",
         )
         path = self.temp(conflicting)
         before = path.read_bytes()
