@@ -73,9 +73,9 @@ def propose_bridge(
     _one(backend, b"server {", "BACKEND_SERVER_COUNT")
     _one(backend, b"listen 127.0.0.1:8443 ssl;", "BACKEND_8443_MISSING")
     _one(backend, f"server_name {domain};".encode(), "DOMAIN_MISMATCH")
-    _one(backend, f"/etc/letsencrypt/live/{domain}/fullchain.pem;".encode(),
+    _one(backend, f"ssl_certificate     /etc/letsencrypt/live/{domain}/fullchain.pem;".encode(),
          "CERTIFICATE_MISMATCH")
-    _one(backend, f"/etc/letsencrypt/live/{domain}/privkey.pem;".encode(),
+    _one(backend, f"ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;".encode(),
          "CERTIFICATE_MISMATCH")
     _one(backend, OLD_INCLUDE, "UOPTI_XHTTP_INCLUDE_MISSING_OR_DUPLICATE")
     _one(backend, ROOT_LOCATION, "PANEL_ROOT_ROUTE_MISSING_OR_DUPLICATE")
@@ -90,6 +90,7 @@ def propose_bridge(
     # The optional 127.0.0.1:14443 probe also has ssl_preread and a
     # proxy_pass. Match the ONE public 443 server block explicitly instead
     # of requiring a global count of those directives.
+    _one(stream, b"listen 443;", "PUBLIC_443_STREAM_MISSING_OR_DUPLICATE")
     servers = re.findall(rb"(?ms)^\s*server\s*\{([^{}]*)\}", stream)
     public = [block for block in servers
               if re.search(rb"(?m)^\s*listen\s+443;", block)]
