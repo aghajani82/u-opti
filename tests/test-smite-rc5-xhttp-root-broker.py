@@ -126,6 +126,21 @@ class BrokerRegressionTests(unittest.TestCase):
             self.accept()
         self.assertEqual(len(self._calls), 1)
 
+    def test_root_node_container_requires_exact_dedicated_group(self):
+        conf = json.loads(broker.CONFIG.read_text())
+        conf["peer_uid"] = 0
+        conf["peer_gid"] = PEER_GID
+        broker.CONFIG.write_text(json.dumps(conf, sort_keys=True))
+        broker.CONFIG.chmod(0o600)
+        self.assertEqual(self.accept(uid=0, gid=PEER_GID), "PASS_ROUTE_ADDED")
+        self.assertEqual(self._calls, [(49328, "/49328/sso")])
+
+        conf["peer_gid"] = 0
+        broker.CONFIG.write_text(json.dumps(conf, sort_keys=True))
+        broker.CONFIG.chmod(0o600)
+        with self.assertRaises(broker.BrokerHold):
+            self.accept(uid=0, gid=0)
+
     def test_invalid_peers_fail_before_ledger_or_host_actions(self):
         for opts in ({"uid":0},{"uid":PEER_UID+1},{"gid":PEER_GID+1}):
             with self.subTest(opts=opts), self.assertRaises(broker.BrokerHold):
