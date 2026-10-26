@@ -99,6 +99,11 @@ MODULES=(
     # Exact reviewed Smite worker inputs, copied from feature HEAD 5540799300cab7dff89a81a1bfbde7d777c87d85.
     "smite-xhttp-nginx-route"
     "smite_xhttp_nginx_plan.py"
+    "smite-rc5-xhttp-root-broker.py"
+    "smite-rc5-xhttp-nonce-ledger.py"
+    "smite-rc5-xhttp-signed-intent.py"
+    "smite-rc5-xhttp-bridge-install.py"
+    "smite-rc5-xhttp-bridge-admission.py"
     "smite-frp-rc2-guided-publish.py"
     "smite-frp-wizard.sh"
     "smite-profile-first.py"
@@ -251,6 +256,11 @@ for MODULE in "${MODULES[@]}"; do
         smite-frp-xhttp-paths.py) LABEL="Smite FRP Custom XHTTP Path Registry" ;;
         smite-xhttp-nginx-route) LABEL="Pinned Smite XHTTP route worker" ;;
         smite_xhttp_nginx_plan.py) LABEL="Pinned Smite XHTTP route planner" ;;
+        smite-rc5-xhttp-root-broker.py) LABEL="Smite XHTTP local broker (staged only)" ;;
+        smite-rc5-xhttp-nonce-ledger.py) LABEL="Smite XHTTP durable replay ledger" ;;
+        smite-rc5-xhttp-signed-intent.py) LABEL="Smite XHTTP signed intent contract" ;;
+        smite-rc5-xhttp-bridge-install.py) LABEL="Smite XHTTP bridge verifier" ;;
+        smite-rc5-xhttp-bridge-admission.py) LABEL="Smite XHTTP bridge admission verifier" ;;
         smite-frp-rc2-guided-publish.py) LABEL="Signed RC2 FRP XHTTP Guided Publisher" ;;
         smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
