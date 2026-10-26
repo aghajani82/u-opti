@@ -37,4 +37,9 @@ d2c9f5a799545179e74e0edba1816d9751eec8ac modules/smite-setup-progress-actions.sh
 57a5430c925c3cd0f9993926be33f0ba0beacca5 modules/smite-setup-progress-ui.sh
 1ae5f900a0018170658a8f69220e316ff9faf80a modules/smite-setup-progress-compact-ui.sh
 BASELINE
+if ! grep -Fq 'export U_OPTI_BRANCH="$BRANCH"' u-opti; then
+    echo "ERROR: Installed source ref is not propagated to lazily fetched wizard modules." >&2
+    exit 1
+fi
+echo 'PASS: Installed U-OPTI source ref is inherited by the Smite setup wizard'
 echo 'PASS: Existing independent wizards pinned; reviewed Field Trial menu-normalization blobs accepted'
