@@ -17,6 +17,7 @@ spec = importlib.util.spec_from_file_location("uopti_rc5_xhttp_install_test", SO
 tx = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = tx
 spec.loader.exec_module(tx)
+REAL_EFFECTIVE_BRIDGE_GATE = tx.verify_effective_bridge
 
 PREVIOUS_SOURCE = ROOT / "tests" / "test-smite-rc5-xhttp-bridge-admission.py"
 spec2 = importlib.util.spec_from_file_location("rc5_fixture", PREVIOUS_SOURCE)
@@ -178,18 +179,15 @@ class BridgeInstallTests(unittest.TestCase):
         config += tx.BRIDGE_BYTES.decode()
 
         with patch.object(tx.admission, "_run", return_value=(0, config)):
-            # Stop mocking only this method: test the actual effective gate.
-            with patch.object(tx, "verify_effective_bridge", wraps=tx.verify_effective_bridge):
-                tx.verify_effective_bridge()
+            REAL_EFFECTIVE_BRIDGE_GATE()
         for bad in (
             config.replace(tx.admission.INCLUDE.decode(), ""),
             config.replace(f"# configuration file {self.bridge}:\n", ""),
             config.replace(tx.BRIDGE_BYTES.decode(), ""),
         ):
             with self.subTest(bad=bad), patch.object(tx.admission, "_run", return_value=(0, bad)):
-                with patch.object(tx, "verify_effective_bridge", wraps=tx.verify_effective_bridge):
-                    with self.assertRaises(tx.Hold):
-                        tx.verify_effective_bridge()
+                with self.assertRaises(tx.Hold):
+                    REAL_EFFECTIVE_BRIDGE_GATE()
 
     def test_manual_only_cli_never_calls_apply_or_rollback_without_approval(self):
         with patch.object(sys, "argv", ["program", "apply"]), patch.dict(os.environ, {}, clear=True):
