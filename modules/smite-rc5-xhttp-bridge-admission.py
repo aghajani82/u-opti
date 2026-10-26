@@ -87,10 +87,18 @@ def propose_bridge(
 
     if not stream.startswith(b"# Managed by U-OPTI - Smite TCP/443 SNI gateway\n"):
         raise BridgeHold("UNAPPROVED_STREAM_GATEWAY")
-    _one(stream, b"listen 443;", "PUBLIC_443_STREAM_MISSING_OR_DUPLICATE")
-    _one(stream, b"ssl_preread on;", "STREAM_TLS_SNI_MISSING_OR_DUPLICATE")
-    _one(stream, b"proxy_pass $uopti_frp_canary_backend;",
-         "STREAM_BACKEND_MISSING_OR_DUPLICATE")
+    # The optional 127.0.0.1:14443 probe also has ssl_preread and a
+    # proxy_pass. Match the ONE public 443 server block explicitly instead
+    # of requiring a global count of those directives.
+    servers = re.findall(rb"(?ms)^\s*server\s*\{([^{}]*)\}", stream)
+    public = [block for block in servers
+              if re.search(rb"(?m)^\s*listen\s+443;", block)]
+    if len(public) != 1:
+        raise BridgeHold("PUBLIC_443_STREAM_MISSING_OR_DUPLICATE")
+    public_server = public[0]
+    for directive in (b"listen [::]:443;", b"ssl_preread on;",
+                      b"proxy_pass $uopti_frp_canary_backend;"):
+        _one(public_server, directive, "PUBLIC_443_SNI_CHAIN_UNTRUSTED")
     _one(stream, b"include /etc/nginx/u-opti-smite-stream-map.conf;",
          "STREAM_MAP_INCLUDE_UNAPPROVED")
 
@@ -176,6 +184,8 @@ def audit_read_only() -> BridgePlan:
             raise BridgeHold("BRIDGE_ALREADY_PRESENT")
     source = {p: _read_root_file(p) for p in (BACKEND, STREAM, SNI_MAP, LEGACY, STATE)}
     domain = _state_domain(source[STATE])
+    if source[STATE].splitlines().count(b"SMITE_CONNECTION_MODE=standard") != 1:
+        raise BridgeHold("SMITE_STANDARD_CONNECTION_MODE_REQUIRED")
     if _run([NGINX, "-t"])[0] != 0:
         raise BridgeHold("NGINX_SYNTAX_INVALID")
     code, config = _run([NGINX, "-T"])
