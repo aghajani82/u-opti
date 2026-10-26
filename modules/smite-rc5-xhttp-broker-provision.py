@@ -28,6 +28,7 @@ LEDGER_MODULE = "smite-rc5-xhttp-nonce-ledger.py"
 HELPER_MODULE = "smite-xhttp-nginx-route"
 PLANNER_MODULE = "smite_xhttp_nginx_plan.py"
 SERVICE_NAME = "u-opti-smite-xhttp-broker.service"
+PEER_GROUP_NAME = "u-opti-smite-peer"
 IDENT = re.compile(r"[A-Za-z0-9_-]{8,128}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 GRANT_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\Z")
@@ -35,6 +36,44 @@ GRANT_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\Z")
 
 class ProvisionHold(RuntimeError):
     pass
+
+
+def _ensure_peer_group(peer_gid: int, runner) -> None:
+    """Ensure the Node's primary GID resolves to a dedicated host group."""
+    def lookup(key: str) -> str | None:
+        try:
+            result = runner(["getent", "group", key], check=False,
+                            capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ProvisionHold("BROKER_PEER_GROUP_LOOKUP_FAILED") from exc
+        if result.returncode != 0:
+            return None
+        fields = result.stdout.strip().split(":")
+        if len(fields) < 3 or not fields[2].isascii() or not fields[2].isdecimal():
+            raise ProvisionHold("BROKER_PEER_GROUP_LOOKUP_INVALID")
+        return result.stdout.strip()
+
+    by_name = lookup(PEER_GROUP_NAME)
+    by_gid = lookup(str(peer_gid))
+    if by_name is None and by_gid is None:
+        try:
+            result = runner(["groupadd", "--system", "--gid", str(peer_gid),
+                             PEER_GROUP_NAME], check=False,
+                            capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ProvisionHold("BROKER_PEER_GROUP_CREATE_FAILED") from exc
+        if result.returncode != 0:
+            raise ProvisionHold("BROKER_PEER_GROUP_CREATE_FAILED")
+        by_name = lookup(PEER_GROUP_NAME)
+        by_gid = lookup(str(peer_gid))
+    def matches(entry: str | None) -> bool:
+        if entry is None:
+            return False
+        fields = entry.split(":")
+        return fields[0] == PEER_GROUP_NAME and fields[2] == str(peer_gid)
+
+    if not matches(by_name) or not matches(by_gid):
+        raise ProvisionHold("BROKER_PEER_GROUP_COLLISION")
 
 
 def _check_root(root: Path) -> None:
@@ -353,6 +392,10 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
         if (not stat.S_ISDIR(item.st_mode) or item.st_uid != 0
                 or stat.S_IMODE(item.st_mode) != 0o700):
             raise ProvisionHold("BROKER_ACTIVATION_DIRECTORY_UNTRUSTED")
+
+    # systemd's Group= numeric credential lookup requires a host NSS group
+    # entry. The Node container's primary GID alone does not create one here.
+    _ensure_peer_group(peer_gid, runner)
 
     commands = (
         ("daemon-reload",), ("enable", SERVICE_NAME), ("start", SERVICE_NAME),
