@@ -108,6 +108,48 @@ def verify_node(path: Path, peer_gid: int) -> None:
         raise ComposeHold("BROKER_KEY_MUST_NOT_BE_MOUNTED_IN_NODE")
 
 
+def prepare_node(path: Path, peer_gid: int) -> None:
+    """Add the exact read-only Broker socket peer mount to a fresh Node candidate."""
+    if not 1 <= peer_gid < 65536:
+        raise ComposeHold("INVALID_BROKER_PEER_GID")
+    raw, mode = _read(path)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise ComposeHold("UNREADABLE_COMPOSE_CANDIDATE") from exc
+    marker = "  smite-node:\\n"
+    if text.count(marker) != 1:
+        raise ComposeHold("UNREVIEWED_NODE_COMPOSE_LAYOUT")
+    start = text.index(marker)
+    next_service = re.search(r"^  [A-Za-z0-9_-]+:\\s*$", text[start + len(marker):], re.M)
+    end = start + len(marker) + next_service.start() if next_service else len(text)
+    block = text[start:end]
+    if "/route-broker.key" in block:
+        raise ComposeHold("BROKER_KEY_MUST_NOT_BE_MOUNTED_IN_NODE")
+    user_lines = re.findall(r"^    user:.*$", block, re.M)
+    if user_lines and user_lines != [NODE_USER.rstrip("\\n")]:
+        raise ComposeHold("CONFLICTING_NODE_BROKER_USER")
+    mount_lines = [line for line in block.splitlines(keepends=True)
+                   if "/run/u-opti/smite" in line]
+    if mount_lines and mount_lines != [NODE_SOCKET_MOUNT]:
+        raise ComposeHold("CONFLICTING_NODE_BROKER_MOUNT")
+    if block.count("    volumes:\\n") != 1:
+        raise ComposeHold("UNREVIEWED_NODE_VOLUME_LAYOUT")
+    config_mount = "      - ./config:/etc/smite-node\\n"
+    if block.count(config_mount) != 1:
+        raise ComposeHold("UNREVIEWED_NODE_CONFIG_MOUNT")
+    container_anchor = "    container_name: smite-node\\n"
+    if not user_lines and block.count(container_anchor) != 1:
+        raise ComposeHold("UNREVIEWED_NODE_CONTAINER_LAYOUT")
+    updated = text
+    if not user_lines:
+        updated = updated.replace(container_anchor, container_anchor + NODE_USER, 1)
+    if not mount_lines:
+        updated = updated.replace(config_mount, config_mount + NODE_SOCKET_MOUNT, 1)
+    if updated != text:
+        _replace(path, updated.encode("utf-8"), mode)
+    verify_node(path, peer_gid)
+
 def set_node_broker_enabled(path: Path, enabled: bool) -> None:
     """Atomically toggle only the IR Node's root-broker forwarding flag."""
     if type(enabled) is not bool:
@@ -155,7 +197,7 @@ def set_node_broker_enabled(path: Path, enabled: bool) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("panel", "node", "node-env"))
+    parser.add_argument("operation", choices=("panel", "node", "node-prepare", "node-env"))
     parser.add_argument("compose", type=Path, help="Compose file or Node .env for node-env")
     parser.add_argument("--peer-gid", type=int)
     parser.add_argument("--enabled", choices=("true", "false"))
@@ -175,6 +217,8 @@ def main() -> int:
             prepare_panel(args.compose)
             print("PANEL_BROKER_KEY_MOUNT=PASS_READ_ONLY")
         else:
+            if args.operation == "node-prepare":
+                prepare_node(args.compose, args.peer_gid)
             verify_node(args.compose, args.peer_gid)
             print("NODE_BROKER_SOCKET_PEER=PASS_UID0_DEDICATED_GID")
         print("BROKER_SERVICE=NOT_ACTIVATED")
