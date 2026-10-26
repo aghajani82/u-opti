@@ -8,6 +8,23 @@ lab="$(mktemp -d)"
 trap 'rm -rf -- "$lab"' EXIT
 export SMITE_INSTALL_PROFILE=clean-rc
 source "$root/modules/smite-install.sh"
+# This core installer test runs in an arbitrary disposable runner, not on an
+# IR host. The provisioner and Compose admission have dedicated offline tests.
+smite_install_clean_rc_broker_prepare() {
+  SMITE_UOPTI_BROKER_GID=39100
+  return 0
+}
+smite_install_clean_rc_broker_panel_mount() { return 0; }
+python3() {
+  if [[ " $* " == *"smite-rc5-xhttp-broker-compose.py"* ]]; then
+    return 0
+  fi
+  command python3 "$@"
+}
+if [ "$(id -u)" -ne 0 ]; then
+  # Production install runs as root; model its ownership step in this temp lab.
+  chown() { return 0; }
+fi
 SMITE_PANEL_IMAGE="smite-panel:stage15-local"
 SMITE_NODE_IMAGE="smite-node:stage15-local"
 SMITE_FRP_BIN_DIR="$lab/nonexistent-frp"
@@ -107,6 +124,10 @@ grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"
 grep -qx 'SMITE_ENGINE_INVENTORY_MODE=managed' "$SMITE_NODE_DIR/.env"
 [ ! -e "$SMITE_NODE_DIR/certs/ca.crt" ]
+[ -d "$SMITE_NODE_DIR/.sanaei-empty" ]
+[ "$(stat -c '%a' "$SMITE_NODE_DIR/.sanaei-empty")" = 700 ]
+grep -qx "SMITE_SANAEI_DB_HOST_PATH=$SMITE_NODE_DIR/.sanaei-empty" "$SMITE_NODE_DIR/.env"
+grep -qx 'SMITE_SANAEI_INVENTORY_ENABLED=false' "$SMITE_NODE_DIR/.env"
 echo "PHASE1_IR_KH_CORE_NO_HOST_FRP=PASS"
 
 # Stable must STILL call the original FRP preparation, mounts and

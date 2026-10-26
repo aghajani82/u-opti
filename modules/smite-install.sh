@@ -782,7 +782,7 @@ smite_install_node_files() {
     local backhaul_address="${6:-}"
     local connection_mode="${7:-standard}"
     local broker_compose_helper=""
-    local empty_sanaei_dir="/var/lib/u-opti/smite-sanaei-empty"
+    local empty_sanaei_dir="$SMITE_NODE_DIR/.sanaei-empty"
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || return 1
 
