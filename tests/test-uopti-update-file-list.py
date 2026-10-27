@@ -60,10 +60,8 @@ class UpdaterFileListTests(unittest.TestCase):
         self.assertTrue(source.startswith("#!/usr/bin/env python3"))
         compile(source, str(helper), "exec")
         self.assertIn("smite-xhttp-nginx-route", quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
-        self.assertIn(
-            '"$TEMP_DIR/"*.py|"$TEMP_DIR/smite-xhttp-nginx-route")',
-            self.source,
-        )
+        self.assertIn('"$TEMP_DIR/"*.py)', self.source)
+        self.assertIn('"$TEMP_DIR/smite-xhttp-nginx-route")', self.source)
 
     def test_json_candidate_is_checked_as_json(self):
         """Prevent the updater from running bash -n on a JSON candidate."""
