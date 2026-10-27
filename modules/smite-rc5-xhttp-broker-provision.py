@@ -210,6 +210,18 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
     if not source_dir.is_absolute() or source_dir.is_symlink():
         raise ProvisionHold("UNTRUSTED_BROKER_SOURCE_DIR")
 
+    # The systemd unit binds this exact path writable while ProtectSystem=full
+    # is enabled. Require a real, trusted Nginx config directory first, then
+    # create the dedicated route include directory below before activation.
+    nginx_config_dir = root / "etc/nginx"
+    try:
+        nginx_info = nginx_config_dir.lstat()
+    except OSError as exc:
+        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_MISSING") from exc
+    if (not stat.S_ISDIR(nginx_info.st_mode) or nginx_info.st_uid != 0
+            or nginx_info.st_mode & 0o022):
+        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_UNTRUSTED")
+
     helper_source = source_dir / HELPER_MODULE
     planner_source = source_dir / PLANNER_MODULE
     broker_source = source_dir / BROKER_MODULE
@@ -242,7 +254,8 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
     global _CREATED_DIRS
     _CREATED_DIRS = set()
     for relative, mode in (
-        ("etc", 0o755), ("etc/u-opti", 0o755),
+        ("etc", 0o755), ("etc/nginx/smite-xhttp-routes", 0o755),
+        ("etc/u-opti", 0o755),
         ("etc/u-opti/smite", 0o700), ("etc/u-opti/smite/route-grants", 0o700),
         ("var", 0o755), ("var/lib", 0o755), ("var/lib/u-opti", 0o755),
         ("var/lib/u-opti/smite-xhttp-broker", 0o700),
