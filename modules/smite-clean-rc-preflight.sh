@@ -7,8 +7,25 @@ smite_clean_rc_nginx_paths_ready() {
         [ -d /var/log/nginx ] && command -v nginx >/dev/null 2>&1
 }
 
+smite_clean_rc_broker_code_ready() {
+    local module_dir broker
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    broker="$module_dir/smite-rc5-xhttp-broker-provision.py"
+    [ -s "$broker" ] && [ ! -L "$broker" ] &&
+        grep -Fq 'def _validate_nginx_config_dir' "$broker" &&
+        grep -Fq 'ReadWritePaths=-/run/lock/u-opti-smite-engine.lock' "$broker" &&
+        grep -Fq 'ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock' "$broker" &&
+        grep -Fq '_replace_existing_trusted_file(service, expected_unit, 0o644)' "$broker"
+}
+
 smite_clean_rc_prepare_gateway_packages() {
     [ "${SMITE_INSTALL_PROFILE:-stable}" = clean-rc ] || return 0
+
+    smite_clean_rc_broker_code_ready || {
+        echo "HOLD: Clean-RC broker modules are not at the required revision." >&2
+        echo "Run Update U-OPTI again, then retry; no package or service change was made." >&2
+        return 1
+    }
 
     local module_dir confirm=""
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
