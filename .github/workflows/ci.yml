@@ -166,8 +166,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/test-uopti-source-pin.py
+          python3 -m py_compile tests/test-uopti-source-pin.py tests/test-uopti-update-file-list.py
           python3 -B tests/test-uopti-source-pin.py -v
+          python3 -B tests/test-uopti-update-file-list.py -v
 
       - name: Safely install fresh and adopt legacy U-OPTI under forced shell crash
         shell: bash
@@ -342,6 +343,13 @@ jobs:
         run: |
           bash -n tests/test-smite-clean-iran-pending.sh
           bash tests/test-smite-clean-iran-pending.sh
+
+      - name: Verify Clean-RC Nginx package preflight before filesystem mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/test-smite-clean-rc-nginx-preflight.sh
+          bash tests/test-smite-clean-rc-nginx-preflight.sh
 
       - name: Verify explicit clean RC IR interrupted-install recovery
         shell: bash

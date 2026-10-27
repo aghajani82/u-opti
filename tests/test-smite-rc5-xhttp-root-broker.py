@@ -342,7 +342,8 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertLess(unit.index("StartLimitBurst=3"), unit.index("[Service]"))
             self.assertIn("NoNewPrivileges=yes", unit)
             self.assertIn("ReadWritePaths=/etc/nginx/smite-xhttp-routes", unit)
-            self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
+            self.assertIn("ReadWritePaths=-/run/lock/u-opti-smite-engine.lock", unit)
+            self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
 
             key_before = (etc / "route-broker.key").read_bytes()
@@ -410,6 +411,19 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
                                   instance_id=INSTANCE)
 
+            # Reproduce the exact old unit emitted before missing lock paths
+            # were made optional for systemd namespace setup.
+            service = root / "etc/systemd/system" / provisioner.SERVICE_NAME
+            legacy_unit = service.read_text().replace(
+                "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock",
+                "ReadWritePaths=/run/lock/u-opti-smite-engine.lock",
+            ).replace(
+                "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock",
+                "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock",
+            )
+            service.write_text(legacy_unit)
+            service.chmod(0o644)
+
             calls = []
             def fake_systemctl(argv, **kwargs):
                 calls.append(tuple(argv[1:]))
@@ -459,6 +473,11 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertTrue(route_dir.is_dir())
             self.assertEqual(list(route_dir.iterdir()), [])
             self.assertEqual(list((root / "etc/nginx").glob("**/*.conf")), [])
+            repaired_unit = service.read_text()
+            self.assertIn("ReadWritePaths=-/run/lock/u-opti-smite-engine.lock", repaired_unit)
+            self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
+            self.assertNotIn("ReadWritePaths=/run/lock/u-opti-smite-engine.lock", repaired_unit)
+            self.assertNotIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
 
     def test_activation_holds_if_systemd_does_not_confirm_active(self):
         repo = Path(__file__).resolve().parents[1]
