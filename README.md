@@ -112,6 +112,21 @@ Then run:
 u-opti
 ```
 
+**Fresh-install scope:** the two commands above install the U-OPTI CLI and
+its managed modules; they do **not** automatically deploy Smite, create a Node,
+configure HTTPS/443 or enable tunneling. Fresh installs now ship the same
+Clean-RC Nginx/Certbot prerequisite helper as the updater, and syntax-check
+Python (including the extensionless route worker), JSON and Bash correctly.
+
+**Experimental Clean-RC is not the Stable menu default.** The intentionally
+opt-in `u-opti --smite-clean-rc` entry requires a separately verified local
+Panel/Node image bundle plus `SMITE_RC_BUNDLE_DIR`, `SMITE_RC_SOURCE_SHA`
+and `SMITE_RC_MANIFEST_SHA256`. On a fresh IR host it verifies the bundle and
+asks permission to prepare Nginx/Certbot **before** opening Panel + Iran Node
+installation; gateway/TLS setup, signed Node pairing and grants remain separate
+approval steps. Do not treat this field-trial profile as production-certified
+or use it to overwrite an existing Smite setup.
+
 ## Recommended Smite Clean Installation Order
 
 For a fresh two-server Smite Private Network deployment, use the production Wizard:

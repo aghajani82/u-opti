@@ -112,6 +112,9 @@ MODULES=(
     "smite-profile-first.py"
     "smite-profile-first-menu.sh"
     "smite-backhaul-management.sh"
+    # Clean-RC host Nginx/Certbot preflight must be present on FIRST install,
+    # not only after the first U-OPTI updater run.
+    "smite-clean-rc-preflight.sh"
     "smite-clean-ir-resume.sh"
     "smite-tunnel-wizard.sh"
     "smite-tunnel-control-center.sh"
@@ -270,6 +273,7 @@ for MODULE in "${MODULES[@]}"; do
         smite-rc5-xhttp-bridge-admission.py) LABEL="Smite XHTTP bridge admission verifier" ;;
         smite-frp-rc2-guided-publish.py) LABEL="Signed RC2 FRP XHTTP Guided Publisher" ;;
         smite-backhaul-management.sh) LABEL="Smite Tunnel Management & Backhaul (experimental)" ;;
+        smite-clean-rc-preflight.sh) LABEL="Smite clean-RC Nginx/Certbot prerequisite" ;;
         smite-clean-ir-resume.sh) LABEL="Smite clean IR recovery" ;;
         smite-tunnel-wizard.sh) LABEL="Smite Tunnel Wizard (experimental test-host install)" ;;
         smite-tunnel-control-center.sh) LABEL="Smite Tunnel Control Center (read-only dashboard)" ;;
@@ -318,6 +322,7 @@ if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'def render(' "$TEMP_DIR/smite-frp-xhttp-paths.py" || \
    ! grep -q 'def inspection(' "$TEMP_DIR/smite-frp-rc2-guided-publish.py" || \
    ! grep -q 'smite_bh_management_menu()' "$TEMP_DIR/smite-backhaul-management.sh" || \
+   ! grep -Fq 'smite_clean_rc_prepare_gateway_packages()' "$TEMP_DIR/smite-clean-rc-preflight.sh" || \
    ! grep -q 'smite_tw_menu()' "$TEMP_DIR/smite-tunnel-wizard.sh" || \
    ! grep -q 'def validate(' "$TEMP_DIR/smite-profile-first.py" || \
    ! grep -q 'PROFILE FIRST' "$TEMP_DIR/smite-profile-first-menu.sh" || \
@@ -343,10 +348,11 @@ bash -n "$TEMP_DIR/common.sh"
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
         *.py|smite-xhttp-nginx-route) python3 -m py_compile "$TEMP_DIR/$MODULE" || exit 1 ;;
+        *.json) python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$TEMP_DIR/$MODULE" || exit 1 ;;
         *) bash -n "$TEMP_DIR/$MODULE" || exit 1 ;;
     esac
 done
-echo "Bash/Python syntax checks passed."
+echo "Bash/Python/JSON syntax checks passed."
 
 echo
 echo "Preparing recoverable installation transaction..."
