@@ -64,9 +64,10 @@ EOF_NODE_COMPOSE
 chmod 0644 "$TMP/ir/panel/docker-compose.yml" "$TMP/ir/node/docker-compose.yml"
 
 source "$ROOT/modules/smite-install.sh"
+source "$ROOT/modules/smite-clean-rc-preflight.sh"
 source "$ROOT/modules/smite-clean-ir-resume.sh"
 smite_gateway_ensure_packages() { return 0; }
-smite_install_clean_rc_nginx_paths_ready() { return 0; }
+smite_clean_rc_nginx_paths_ready() { return 0; }
 SMITE_PANEL_DIR="$TMP/ir/panel"
 SMITE_NODE_DIR="$TMP/ir/node"
 SMITE_PANEL_COMPOSE="$SMITE_PANEL_DIR/docker-compose.yml"
