@@ -426,6 +426,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+            # Simulate an interrupted legacy install where the unit already
+            # references the route path but the directory was never provisioned.
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            route_dir.rmdir()
             sock_dir = root / "run/u-opti/smite"
             sock = sock_dir / "xhttp-broker.sock"
             original_lstat = Path.lstat
