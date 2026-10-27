@@ -2,6 +2,8 @@
 
 Ubuntu Server Optimization and Management Tool
 
+**Smite integration status:** [single delivery board (IR/KH, signed pairing, FRP/XHTTP, field gates)](https://github.com/aghajani82/Smite/blob/main/docs/SMITE-UOPTI-DELIVERY-BOARD.md). New source in `main` is not automatically a deployed, signed image or a completed VPS test.
+
 U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaining Ubuntu servers through an interactive menu. It combines system administration, SSH/UFW/Fail2Ban hardening, Docker and Sanaei 3x-UI management, certificate automation, backup/restore, and the tested Smite integration used by this project.
 
 ## Current Version
