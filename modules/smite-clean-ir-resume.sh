@@ -216,6 +216,12 @@ PY_RESUME_PREFLIGHT
         return
     }
 
+    if ! smite_install_clean_rc_prepare_gateway_packages; then
+        echo "HOLD: Host Nginx prerequisite is not ready; broker activation was not attempted."
+        smite_install_pause
+        return
+    fi
+
     backup="$(mktemp -d /var/backups/u-opti-smite-ir-resume.XXXXXX)" || {
         echo "HOLD: Could not create a recovery snapshot."
         smite_install_pause
