@@ -1,5 +1,11 @@
 # Smite Clean Install — first RC bootstrap integration (DRAFT / DISPOSABLE TRIAL ONLY)
 
+## Smite × U-OPTI delivery status (2026-10-27)
+
+The canonical cross-repository delivery board is maintained in [Smite: SMITE-UOPTI-DELIVERY-BOARD.md](https://github.com/aghajani82/Smite/blob/main/docs/SMITE-UOPTI-DELIVERY-BOARD.md). Use that board for current IR/KH milestone status, release gates, and the documented order of installation. The historical stage-by-stage draft notes below are **not** instructions to apply old preview images or merge old stacked PRs.
+
+**Current Clean-RC IR field check:** `smite-panel:stage15-local` and `smite-node:stage15-local` are running with `SMITE_VERSION=2.0.0-rc.1`. Panel/Agent registration mode is signed, but secure Panel pairing is **disabled**, the Node is **paused + strict**, credentials are not staged, and replay enrollment is not provisioned. An active container is **not** evidence that a Node is registered in Panel. The signed-only Iran/KH name reservation change was reviewed in Smite #33; promoting its source to main **does not upgrade these locally pinned trial images**. Do not use the old IP/API-port form in signed mode, enable pairing prematurely, or rebuild the IR/KH VPS merely because CI passes. Stage an independently checked matching image/source pair and test rollback before enabling live enrollment.
+
 This change converts the project's direction to **fresh installation
 after explicit IR/KH rebuild**. It does NOT migrate any live Smite,
 FRP, Backhaul, 3x-UI, credentials, inbound mappings or Docker containers.

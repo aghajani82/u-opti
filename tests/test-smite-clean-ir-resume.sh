@@ -132,46 +132,20 @@ read() {
   return 0
 }
 smite_install_resume_clean_ir >"$TMP/resume.log" 2>&1
-grep -q '^PANEL_ADMIN_ACCOUNT=CREATED
-grep -q '^IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL$' "$TMP/resume.log"
-grep -q '^TRUSTED_GRANTS=NONE$' "$TMP/resume.log"
-grep -q '^LIVE_ROUTE_CHANGE=NO$' "$TMP/resume.log"
+# Verify the exact success markers. The original tail was accidentally
+# duplicated with unterminated shell quoting, so bash -n missed runtime expansion.
+grep -qx 'PANEL_ADMIN_ACCOUNT=CREATED' "$TMP/resume.log"
+grep -qx 'CLEAN_RC_IR_RESUME=PASS' "$TMP/resume.log"
+grep -qx 'IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL' "$TMP/resume.log"
+grep -qx 'TRUSTED_GRANTS=NONE' "$TMP/resume.log"
+grep -qx 'LIVE_ROUTE_CHANGE=NO' "$TMP/resume.log"
 [ "$node_exists" = 1 ] && [ "$node_broker_starts" = 1 ] && [ "$admin_created" = 1 ]
 grep -qx 'SMITE_ROLE=panel-iran' "$SMITE_STATE_FILE"
 grep -qx 'SMITE_NODE_NAME=node-ir' "$SMITE_STATE_FILE"
 grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.1' "$SMITE_STATE_FILE"
-grep -q '^    user: "0:\${SMITE_UOPTI_BROKER_GID:-0}"$' "$SMITE_NODE_COMPOSE"
-grep -q '^      - /run/u-opti/smite:/run/u-opti/smite:ro$' "$SMITE_NODE_COMPOSE"
+grep -Fq 'user: "0:${SMITE_UOPTI_BROKER_GID:-0}"' "$SMITE_NODE_COMPOSE"
+grep -Fq -- '- /run/u-opti/smite:/run/u-opti/smite:ro' "$SMITE_NODE_COMPOSE"
 grep -Fq 'source "$SMITE_BH_DIR/smite-clean-ir-resume.sh"' "$ROOT/modules/smite-backhaul-management.sh"
 grep -Fq 'read -rp "Press Enter to return..."' "$ROOT/modules/smite-backhaul-management.sh"
 grep -Fq '|| "$FILE" = "smite-clean-ir-resume.sh"' "$ROOT/u-opti"
-echo "SMITE_CLEAN_IR_EXPLICIT_RESUME_AND_FAIL_CLOSED_TESTS=PASS"
- "$TMP/resume.log"
-grep -q '^CLEAN_RC_IR_RESUME=PASS
-grep -q '^IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL$' "$TMP/resume.log"
-grep -q '^TRUSTED_GRANTS=NONE$' "$TMP/resume.log"
-grep -q '^LIVE_ROUTE_CHANGE=NO$' "$TMP/resume.log"
-[ "$node_exists" = 1 ] && [ "$node_broker_starts" = 1 ]
-grep -qx 'SMITE_ROLE=panel-iran' "$SMITE_STATE_FILE"
-grep -qx 'SMITE_NODE_NAME=node-ir' "$SMITE_STATE_FILE"
-grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.1' "$SMITE_STATE_FILE"
-grep -q '^    user: "0:\${SMITE_UOPTI_BROKER_GID:-0}"$' "$SMITE_NODE_COMPOSE"
-grep -q '^      - /run/u-opti/smite:/run/u-opti/smite:ro$' "$SMITE_NODE_COMPOSE"
-grep -Fq 'source "$SMITE_BH_DIR/smite-clean-ir-resume.sh"' "$ROOT/modules/smite-backhaul-management.sh"
-grep -Fq 'read -rp "Press Enter to return..."' "$ROOT/modules/smite-backhaul-management.sh"
-grep -Fq '|| "$FILE" = "smite-clean-ir-resume.sh"' "$ROOT/u-opti"
-echo "SMITE_CLEAN_IR_EXPLICIT_RESUME_AND_FAIL_CLOSED_TESTS=PASS"
- "$TMP/resume.log"
-grep -q '^IR_RC_PAIRING=PENDING_SIGNED_ADMIN_APPROVAL$' "$TMP/resume.log"
-grep -q '^TRUSTED_GRANTS=NONE$' "$TMP/resume.log"
-grep -q '^LIVE_ROUTE_CHANGE=NO$' "$TMP/resume.log"
-[ "$node_exists" = 1 ] && [ "$node_broker_starts" = 1 ]
-grep -qx 'SMITE_ROLE=panel-iran' "$SMITE_STATE_FILE"
-grep -qx 'SMITE_NODE_NAME=node-ir' "$SMITE_STATE_FILE"
-grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.1' "$SMITE_STATE_FILE"
-grep -q '^    user: "0:\${SMITE_UOPTI_BROKER_GID:-0}"$' "$SMITE_NODE_COMPOSE"
-grep -q '^      - /run/u-opti/smite:/run/u-opti/smite:ro$' "$SMITE_NODE_COMPOSE"
-grep -Fq 'source "$SMITE_BH_DIR/smite-clean-ir-resume.sh"' "$ROOT/modules/smite-backhaul-management.sh"
-grep -Fq 'read -rp "Press Enter to return..."' "$ROOT/modules/smite-backhaul-management.sh"
-grep -Fq '|| "$FILE" = "smite-clean-ir-resume.sh"' "$ROOT/u-opti"
-echo "SMITE_CLEAN_IR_EXPLICIT_RESUME_AND_FAIL_CLOSED_TESTS=PASS"
+echo 'SMITE_CLEAN_IR_EXPLICIT_RESUME_AND_FAIL_CLOSED_TESTS=PASS'
