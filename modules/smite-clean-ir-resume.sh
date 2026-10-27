@@ -220,7 +220,7 @@ PY_RESUME_PREFLIGHT
         module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         [ -s "$module_dir/smite-clean-rc-preflight.sh" ] &&
             [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || {
-                echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe."
+                echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe. Run Update U-OPTI again."
                 smite_install_pause
                 return
             }
