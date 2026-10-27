@@ -10,6 +10,7 @@ smite_gateway_ensure_packages() {
     called=$((called + 1))
     return 0
 }
+smite_clean_rc_broker_code_ready() { return 0; }
 smite_clean_rc_nginx_paths_ready() { return 0; }
 smite_install_pause() { :; }
 
