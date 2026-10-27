@@ -10,6 +10,31 @@ This change converts the project's direction to **fresh installation
 after explicit IR/KH rebuild**. It does NOT migrate any live Smite,
 FRP, Backhaul, 3x-UI, credentials, inbound mappings or Docker containers.
 
+## Explicit Clean-RC entry point (2026-10-27)
+
+The normal Docker Management → Smite Management entry currently includes the older Private Network/EasyTier wizard. **Do not use that wizard for this Standard HTTPS/443 Signed Pairing field trial.** The clean image-pair installer has an explicit direct entry instead.
+
+After installing U-OPTI on a disposable IR or KH host, copy the verified ZIP to that host and extract it so this directory contains `stage15-images.json`, `smite-panel-stage15.docker.tar.gz`, and `smite-node-stage15.docker.tar.gz`. Then run:
+
+```bash
+SMITE_RC_BUNDLE_DIR=/opt/smite-stage15-bundle \
+SMITE_RC_SOURCE_SHA=4e16633a304db6c03f7f2911cc7d77213b0c4ec1 \
+SMITE_RC_MANIFEST_SHA256=fe32c9c54714cfdb482f27112829eba13d5188e9e1e7e26c7266d8d54e85462a \
+u-opti --smite-clean-rc
+```
+
+The CLI verifies the paired archive/manifest inputs **before** opening the component menu. It explicitly selects `SMITE_INSTALL_PROFILE=clean-rc`; it does not start pairing or activate a tunnel by itself.
+
+- On **IR**, choose `1) Install Panel + Iran Node`.
+- On **KH**, choose `2) Install Foreign Node`.
+- On **KH after the Foreign Node exists**, choose `4) Install Sanaei 3x-UI on Foreign Node`. If no Sanaei instance exists, the option launches the normal U-OPTI installer; after it returns, reopen option 4 to attach the selected Sanaei database read-only to the KH Node.
+- Do not select option 5 (existing-IR upgrade) during a fresh install.
+- Configure the IR HTTPS/443 gateway and then the KH HTTPS/443 control gateway from the Standard FRP Test Guide's gateway actions; do **not** run its legacy FRP tunnel test yet.
+- Secure enrollment is a separate explicit step: `u-opti --smite-pairing`. Follow the on-screen safe order: IR pairing/check-in first, approve the KH Gateway origin on IR, then redeem and activate the KH identity.
+- Create the actual FRP/XHTTP tunnel from the Smite Panel UI only after both Nodes show the expected signed/active state and Sanaei inventory is verified. Do not manually launch `frps`/`frpc` or Backhaul commands in the terminal for this path.
+
+Use the same source SHA, manifest SHA, and exact image-pair ZIP on both disposable hosts. The ZIP SHA256 is `2bda0c80aa77ce6fa6bd1af0a4ed0d8fccfad670915dfd2f56a6120b08d19a71`. Never use these preview images on Grandoptical/production.
+
 ## What has changed in the real installer
 
 **Source status (2026-10-26):** broker, signed Node forwarding, KH read-only Sanaei mount, existing FRP wizard handoff and clean-RC broker bootstrap are implemented on U-OPTI PR #48 / Smite PR #32. Current heads `88564641ebf35f3111c87188f7ae4ee8a8885b17` (U-OPTI) and `da1c08896508a5c9b3d7601d2943575b90f5c223` (Smite) passed CI: 16/16 U-OPTI jobs plus 5 focused checks, and 12/12 Smite workflows. This status permits evaluation only on separate disposable Ubuntu trial VPSs; it does not authorize or qualify an existing IR/KH host or Grandoptical.

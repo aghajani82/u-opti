@@ -346,6 +346,48 @@ if [ "${1:-}" = "--smite-pairing" ]; then
     exit $?
 fi
 
+# Explicit offline Clean-RC installer entry. Never fall back to Stable or the
+# legacy Private Network wizard when the paired preview inputs are incomplete.
+if [ "${1:-}" = "--smite-clean-rc" ]; then
+    bundle_helper="$MODULES_PATH/smite-clean-image-pair.py"
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
+       [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
+       [ -z "${SMITE_RC_MANIFEST_SHA256:-}" ]; then
+        echo "HOLD: Set SMITE_RC_BUNDLE_DIR, SMITE_RC_SOURCE_SHA and SMITE_RC_MANIFEST_SHA256." >&2
+        exit 2
+    fi
+    if [[ ! "$SMITE_RC_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+       [[ ! "$SMITE_RC_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "HOLD: Clean-RC source/manifest hashes have invalid format." >&2
+        exit 2
+    fi
+    if [ ! -d "$SMITE_RC_BUNDLE_DIR" ] || [ -L "$SMITE_RC_BUNDLE_DIR" ] ||
+       [ ! -s "$bundle_helper" ] || [ -L "$bundle_helper" ]; then
+        echo "HOLD: Clean-RC bundle directory or verifier is missing/unsafe." >&2
+        exit 2
+    fi
+    for input in stage15-images.json smite-panel-stage15.docker.tar.gz smite-node-stage15.docker.tar.gz; do
+        if [ ! -f "$SMITE_RC_BUNDLE_DIR/$input" ] || [ -L "$SMITE_RC_BUNDLE_DIR/$input" ]; then
+            echo "HOLD: Clean-RC bundle input is missing/unsafe: $input" >&2
+            exit 2
+        fi
+    done
+    python3 -B "$bundle_helper" \
+        --folder "$SMITE_RC_BUNDLE_DIR" \
+        --source-sha "$SMITE_RC_SOURCE_SHA" \
+        --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256" || exit 2
+    SMITE_INSTALL_PROFILE=clean-rc
+    export SMITE_INSTALL_PROFILE
+    if ! declare -F show_smite_install_menu >/dev/null 2>&1; then
+        echo "HOLD: Smite Install/Lifecycle menu is unavailable." >&2
+        exit 2
+    fi
+    echo "CLEAN_RC_INSTALL_ENTRY=EXPLICIT_PREVIEW"
+    echo "Pairing remains disabled until the separate Signed Pairing workflow."
+    show_smite_install_menu
+    exit $?
+fi
+
 while true; do
     clear
 
