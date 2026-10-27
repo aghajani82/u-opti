@@ -226,8 +226,8 @@ ProtectHome=yes
 ProtectSystem=full
 ReadWritePaths=/etc/nginx/smite-xhttp-routes
 ReadWritePaths=/var/lib/u-opti/smite-xhttp-broker
-ReadWritePaths=/run/lock/u-opti-smite-engine.lock
-ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock
+ReadWritePaths=-/run/lock/u-opti-smite-engine.lock
+ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock
 ReadWritePaths=/run/u-opti/smite
 ReadWritePaths=/var/log/nginx
 
