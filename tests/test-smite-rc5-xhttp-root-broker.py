@@ -353,6 +353,24 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 )
             self.assertEqual((etc / "route-broker.key").read_bytes(), key_before)
 
+    def test_missing_nginx_config_dir_holds_before_any_filesystem_change(self):
+        import importlib.util
+
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_provisioner_missing_nginx_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-no-nginx-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "NGINX_CONFIG_DIRECTORY_MISSING"):
+                provisioner.provision(
+                    peer_gid=PEER_GID, root=root, source_dir=repo / "modules"
+                )
+            self.assertEqual(list(root.iterdir()), [])
+
     def test_bad_peer_gid_holds_before_any_filesystem_change(self):
         import importlib.util
 
