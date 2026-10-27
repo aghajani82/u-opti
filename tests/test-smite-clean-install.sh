@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Simulated clean install, no real Docker or network calls.
 set -euo pipefail
+
+# The explicit CLI must gate the offline Clean-RC menu on an independently
+# supplied source SHA + manifest SHA and the real paired-image verifier.
+grep -Fq 'if [ "${1:-}" = "--smite-clean-rc" ]; then' "$ROOT/u-opti"
+grep -Fq 'SMITE_RC_SOURCE_SHA' "$ROOT/u-opti"
+grep -Fq 'SMITE_RC_MANIFEST_SHA256' "$ROOT/u-opti"
+grep -Fq 'python3 -B "$bundle_helper"' "$ROOT/u-opti"
+grep -Fq 'CLEAN_RC_INSTALL_ENTRY=EXPLICIT_PREVIEW' "$ROOT/u-opti"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
