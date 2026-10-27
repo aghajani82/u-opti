@@ -190,6 +190,55 @@ def _write_new(path: Path, data: bytes, mode: int) -> None:
         os.close(dir_fd)
 
 
+def _replace_existing_trusted_file(path: Path, data: bytes, mode: int) -> None:
+    """Atomically replace a known root-owned file without following path links."""
+    parent = path.parent
+    try:
+        parent_info = parent.lstat()
+        before = path.lstat()
+    except OSError as exc:
+        raise ProvisionHold("BROKER_UNIT_REPAIR_TARGET_MISSING") from exc
+    if (not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != 0
+            or parent_info.st_mode & 0o022):
+        raise ProvisionHold("BROKER_UNIT_REPAIR_DIRECTORY_UNTRUSTED")
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+            or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != mode):
+        raise ProvisionHold("BROKER_UNIT_REPAIR_TARGET_UNTRUSTED")
+
+    dir_fd = -1
+    fd = -1
+    temp_name = f".{path.name}.uopti-{secrets.token_hex(8)}"
+    try:
+        dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     mode, dir_fd=dir_fd)
+        os.fchown(fd, 0, 0)
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb", closefd=False) as out:
+            out.write(data)
+            out.flush()
+            os.fsync(fd)
+        current = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+            raise ProvisionHold("BROKER_UNIT_REPAIR_TARGET_CHANGED")
+        os.replace(temp_name, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        os.fsync(dir_fd)
+    except Exception as exc:
+        if dir_fd >= 0:
+            try:
+                os.unlink(temp_name, dir_fd=dir_fd)
+            except OSError:
+                pass
+        if isinstance(exc, ProvisionHold):
+            raise
+        raise ProvisionHold("BROKER_UNIT_REPAIR_FAILED") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if dir_fd >= 0:
+            os.close(dir_fd)
+
+
 def _ledger(source_dir: Path):
     path = source_dir / LEDGER_MODULE
     spec = importlib.util.spec_from_file_location("uopti_provision_ledger", path)
@@ -422,6 +471,25 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
             or "NoNewPrivileges=yes\n" not in unit
             or "ProtectSystem=full\n" not in unit):
         raise ProvisionHold("BROKER_ACTIVATION_CONFIG_INVALID")
+
+    # Older provisioners wrote exact lock-file ReadWritePaths entries. Those
+    # files are intentionally created lazily under /run/lock, so systemd must
+    # tolerate their absence when the persistent broker service starts.
+    expected_unit = _service_unit(peer_gid)
+    expected_text = expected_unit.decode("ascii")
+    legacy_text = expected_text.replace(
+        "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
+        "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
+    ).replace(
+        "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
+        "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
+    )
+    if unit == legacy_text:
+        _replace_existing_trusted_file(service, expected_unit, 0o644)
+        unit = expected_text
+    elif unit != expected_text:
+        raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
+
     helper = trusted_file(root / "usr/local/libexec" / HELPER_MODULE, 0o755, 1024 * 1024)
     planner = trusted_file(root / "usr/local/libexec" / PLANNER_MODULE, 0o755, 1024 * 1024)
     broker_module = trusted_file(
