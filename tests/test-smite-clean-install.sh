@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+bash -n "$ROOT/u-opti"
 # The explicit CLI must gate the offline Clean-RC menu on an independently
 # supplied source SHA + manifest SHA and the real paired-image verifier.
 grep -Fq 'if [ "${1:-}" = "--smite-clean-rc" ]; then' "$ROOT/u-opti"
