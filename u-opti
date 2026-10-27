@@ -378,6 +378,32 @@ if [ "${1:-}" = "--smite-clean-rc" ]; then
         --manifest-sha256 "$SMITE_RC_MANIFEST_SHA256" || exit 2
     SMITE_INSTALL_PROFILE=clean-rc
     export SMITE_INSTALL_PROFILE
+
+    SMITE_RC_PREFLIGHT_MODULE="$MODULES_PATH/smite-clean-rc-preflight.sh"
+    if [ ! -s "$SMITE_RC_PREFLIGHT_MODULE" ] || [ -L "$SMITE_RC_PREFLIGHT_MODULE" ]; then
+        echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe." >&2
+        exit 2
+    fi
+    # shellcheck source=/dev/null
+    source "$SMITE_RC_PREFLIGHT_MODULE" || exit 2
+
+    # Prepare gateway packages only for a fresh IR install. Existing partial
+    # installs go through the separate, explicitly confirmed recovery path.
+    SMITE_RC_PREFLIGHT_PANEL_COMPOSE="${SMITE_PANEL_DIR:-/opt/smite}/docker-compose.yml"
+    SMITE_RC_PREFLIGHT_NODE_COMPOSE="${SMITE_NODE_DIR:-/opt/smite-node}/docker-compose.yml"
+    if [ "$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "ir" ] &&
+       ! docker inspect smite-panel >/dev/null 2>&1 &&
+       ! docker inspect smite-node >/dev/null 2>&1 &&
+       [ ! -e "$SMITE_RC_PREFLIGHT_PANEL_COMPOSE" ] &&
+       [ ! -L "$SMITE_RC_PREFLIGHT_PANEL_COMPOSE" ] &&
+       [ ! -e "$SMITE_RC_PREFLIGHT_NODE_COMPOSE" ] &&
+       [ ! -L "$SMITE_RC_PREFLIGHT_NODE_COMPOSE" ]; then
+        smite_clean_rc_prepare_gateway_packages || {
+            echo "HOLD: Clean-RC Nginx prerequisite is not ready; no Smite install was started." >&2
+            exit 2
+        }
+    fi
+
     if ! declare -F show_smite_install_menu >/dev/null 2>&1; then
         echo "HOLD: Smite Install/Lifecycle menu is unavailable." >&2
         exit 2
@@ -701,6 +727,7 @@ print(sha)
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
+                "smite-clean-rc-preflight.sh"
                 "smite-xhttp-nginx-route"
                 "smite_xhttp_nginx_plan.py"
                 "smite-rc5-xhttp-root-broker.py"
@@ -874,6 +901,7 @@ print(sha)
                 ["smite-foreign-gateway-signed-check.py"]="$BASE_URL/modules/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
+                ["smite-clean-rc-preflight.sh"]="$BASE_URL/modules/smite-clean-rc-preflight.sh"
                 ["smite-xhttp-nginx-route"]="$BASE_URL/modules/smite-xhttp-nginx-route"
                 ["smite_xhttp_nginx_plan.py"]="$BASE_URL/modules/smite_xhttp_nginx_plan.py"
                 ["smite-rc5-xhttp-root-broker.py"]="$BASE_URL/modules/smite-rc5-xhttp-root-broker.py"
@@ -970,6 +998,7 @@ print(sha)
                 ["smite-foreign-gateway-signed-check.py"]="$TEMP_DIR/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
                 ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
+                ["smite-clean-rc-preflight.sh"]="$TEMP_DIR/smite-clean-rc-preflight.sh"
                 ["smite-xhttp-nginx-route"]="$TEMP_DIR/smite-xhttp-nginx-route"
                 ["smite_xhttp_nginx_plan.py"]="$TEMP_DIR/smite_xhttp_nginx_plan.py"
                 ["smite-rc5-xhttp-root-broker.py"]="$TEMP_DIR/smite-rc5-xhttp-root-broker.py"
@@ -1253,6 +1282,7 @@ print(sha)
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
                 "smite-install.sh"
+                "smite-clean-rc-preflight.sh"
                 "smite-xhttp-nginx-route"
                 "smite_xhttp_nginx_plan.py"
                 "smite-rc5-xhttp-root-broker.py"
@@ -1359,7 +1389,7 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
