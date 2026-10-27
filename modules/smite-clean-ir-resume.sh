@@ -253,6 +253,26 @@ PY_RESUME_PREFLIGHT
         smite_install_pause
         return
     fi
+    echo
+    echo "The interrupted installer did not reach Smite admin setup."
+    echo "Create the Panel administrator now; the password is entered privately."
+    local create_admin=""
+    read -r -p "Create a Smite admin account now? [Y/n]: " create_admin
+    case "$create_admin" in
+        n|N|no|NO)
+            echo "HOLD: Panel administrator account remains uncreated."
+            echo "Create it later with: cd /opt/smite && /usr/local/bin/smite admin create"
+            smite_install_pause
+            return 1
+            ;;
+    esac
+    if ! smite_install_create_admin; then
+        echo "HOLD: Smite admin account creation failed."
+        echo "Retry later with: cd /opt/smite && /usr/local/bin/smite admin create"
+        smite_install_pause
+        return 1
+    fi
+    echo "PANEL_ADMIN_ACCOUNT=CREATED"
     rm -rf -- "$backup"
     echo
     echo "CLEAN_RC_IR_RESUME=PASS"
