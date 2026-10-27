@@ -140,12 +140,19 @@ def _ensure_nginx_route_dir(root: Path) -> Path:
     """Ensure only the dedicated empty route include directory exists."""
     nginx_config_dir = _validate_nginx_config_dir(root)
     route_dir = nginx_config_dir / "smite-xhttp-routes"
+    created = False
     try:
         route_dir.mkdir(mode=0o755)
+        created = True
     except FileExistsError:
         pass
     except OSError as exc:
         raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_CREATE_FAILED") from exc
+    if created:
+        try:
+            os.chmod(route_dir, 0o755, follow_symlinks=False)
+        except OSError as exc:
+            raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_MODE_SET_FAILED") from exc
     try:
         info = route_dir.lstat()
     except OSError as exc:
@@ -353,7 +360,7 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
 
 
 def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]:
-    """Enable and start the prepared IR broker without creating grants/routes."""
+    """Enable/start the prepared IR broker without grants or live route entries."""
     _check_root(root)
     if root == Path("/"):
         if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
