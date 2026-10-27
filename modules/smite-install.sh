@@ -555,6 +555,14 @@ smite_install_cli_tools() {
     return 0
 }
 
+smite_install_create_admin() {
+    [ -x /usr/local/bin/smite ] || {
+        echo "ERROR: Smite admin CLI is missing at /usr/local/bin/smite." >&2
+        return 1
+    }
+    (cd "$SMITE_PANEL_DIR" && /usr/local/bin/smite admin create)
+}
+
 smite_write_state() {
     local role="$1"
     local panel_domain="$2"
@@ -1372,7 +1380,7 @@ smite_install_panel_iran() {
     read -rp "Create a Smite admin account now? [y/N]: " create_admin
     case "$create_admin" in
         y|Y|yes|YES)
-            (cd "$SMITE_PANEL_DIR" && /usr/local/bin/smite admin create) || true
+            smite_install_create_admin || echo "HOLD: Smite admin account was not created."
             ;;
     esac
 
