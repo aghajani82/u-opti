@@ -253,6 +253,13 @@ jobs:
           python3 -B tests/test-smite-clean-image-pair.py -v
           bash tests/test-smite-clean-install.sh
 
+      - name: Verify Clean-RC XHTTP broker provisioning and activation gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-rc5-xhttp-root-broker.py modules/smite-rc5-xhttp-broker-provision.py tests/test-smite-rc5-xhttp-root-broker.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py -v
+
       - name: Phase1 Smite Core installs without host FRP, Stable requires original FRP
         shell: bash
         run: |
