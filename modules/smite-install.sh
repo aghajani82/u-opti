@@ -731,6 +731,53 @@ smite_install_clean_rc_broker_prepare() {
     echo "NODE_BROKER_FORWARDING=DISABLED"
 }
 
+# The Root Broker's systemd sandbox and the later HTTPS/443 gateway both
+# require the host Nginx package. Prepare packages before creating any Smite
+# files; the TLS gateway configuration itself remains a separate guided step.
+smite_install_clean_rc_nginx_paths_ready() {
+    [ -d /etc/nginx ] && [ ! -L /etc/nginx ] &&
+        [ -d /var/log/nginx ] && command -v nginx >/dev/null 2>&1
+}
+
+smite_install_clean_rc_prepare_gateway_packages() {
+    [ "${SMITE_INSTALL_PROFILE:-stable}" = clean-rc ] || return 0
+
+    local module_dir confirm=""
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! declare -F smite_gateway_ensure_packages >/dev/null 2>&1; then
+        [ -s "$module_dir/smite-gateway.sh" ] && [ ! -L "$module_dir/smite-gateway.sh" ] || {
+            echo "HOLD: Clean-RC Nginx gateway package helper is not staged." >&2
+            return 1
+        }
+        # shellcheck source=/dev/null
+        source "$module_dir/smite-gateway.sh" || return 1
+    fi
+    declare -F smite_gateway_ensure_packages >/dev/null 2>&1 || {
+        echo "HOLD: Clean-RC Nginx gateway package helper is unavailable." >&2
+        return 1
+    }
+
+    echo
+    echo "Clean-RC Root Broker requires host Nginx before the Panel + Node install."
+    echo "This prepares Nginx, Certbot and the stream module only; domain/TLS gateway"
+    echo "configuration remains a separate step after the Panel is healthy."
+    read -rp "Install/enable the host gateway packages now? [y/N]: " confirm
+    case "$confirm" in
+        y|Y|yes|YES) ;;
+        *) echo "HOLD: Host gateway packages were not prepared; no Smite files were created." >&2; return 1 ;;
+    esac
+
+    smite_gateway_ensure_packages || {
+        echo "HOLD: Host Nginx/Certbot/stream package preparation failed." >&2
+        return 1
+    }
+    smite_install_clean_rc_nginx_paths_ready || {
+        echo "HOLD: Nginx package preparation did not create the required host paths." >&2
+        return 1
+    }
+    echo "CLEAN_RC_NGINX_PREREQUISITE=PASS"
+}
+
 smite_install_clean_rc_broker_panel_mount() {
     local compose_file="$1" module_dir="" helper=""
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1201,6 +1248,14 @@ smite_install_panel_iran() {
         echo "HOLD: Unknown Smite install profile."
         smite_install_pause
         return
+    fi
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if ! smite_install_clean_rc_prepare_gateway_packages; then
+            echo "HOLD: Clean-RC host Nginx prerequisite is not ready."
+            smite_install_pause
+            return
+        fi
     fi
 
     mkdir -p "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" || {
