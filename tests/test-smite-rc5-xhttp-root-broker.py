@@ -295,6 +295,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-provision-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)
@@ -319,6 +322,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(result["SERVICE_START"], "NOT_PERFORMED")
             self.assertEqual(result["NODE_ENABLEMENT"], "NOT_PERFORMED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            self.assertTrue(route_dir.is_dir())
+            self.assertEqual(stat.S_IMODE(route_dir.stat().st_mode), 0o755)
+            self.assertEqual(route_dir.stat().st_uid, 0)
             self.assertEqual(list(grants.iterdir()), [])
             self.assertEqual(len((etc / "route-broker.key").read_bytes()), 32)
             self.assertEqual(stat.S_IMODE((etc / "route-broker.key").stat().st_mode), 0o600)
@@ -334,6 +341,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertLess(unit.index("StartLimitIntervalSec=60s"), unit.index("[Service]"))
             self.assertLess(unit.index("StartLimitBurst=3"), unit.index("[Service]"))
             self.assertIn("NoNewPrivileges=yes", unit)
+            self.assertIn("ReadWritePaths=/etc/nginx/smite-xhttp-routes", unit)
             self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
 
