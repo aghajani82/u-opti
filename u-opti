@@ -379,16 +379,8 @@ if [ "${1:-}" = "--smite-clean-rc" ]; then
     SMITE_INSTALL_PROFILE=clean-rc
     export SMITE_INSTALL_PROFILE
 
-    SMITE_RC_PREFLIGHT_MODULE="$MODULES_PATH/smite-clean-rc-preflight.sh"
-    if [ ! -s "$SMITE_RC_PREFLIGHT_MODULE" ] || [ -L "$SMITE_RC_PREFLIGHT_MODULE" ]; then
-        echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe. Run Update U-OPTI again." >&2
-        exit 2
-    fi
-    # shellcheck source=/dev/null
-    source "$SMITE_RC_PREFLIGHT_MODULE" || exit 2
-
-    # Prepare gateway packages only for a fresh IR install. Existing partial
-    # installs go through the separate, explicitly confirmed recovery path.
+    # Prepare gateway packages only for a fresh IR install. KH installs and
+    # existing partial IR installs use their separate, guided paths.
     SMITE_RC_PREFLIGHT_PANEL_COMPOSE="${SMITE_PANEL_DIR:-/opt/smite}/docker-compose.yml"
     SMITE_RC_PREFLIGHT_NODE_COMPOSE="${SMITE_NODE_DIR:-/opt/smite-node}/docker-compose.yml"
     if [ "$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "ir" ] &&
@@ -398,6 +390,13 @@ if [ "${1:-}" = "--smite-clean-rc" ]; then
        [ ! -L "$SMITE_RC_PREFLIGHT_PANEL_COMPOSE" ] &&
        [ ! -e "$SMITE_RC_PREFLIGHT_NODE_COMPOSE" ] &&
        [ ! -L "$SMITE_RC_PREFLIGHT_NODE_COMPOSE" ]; then
+        SMITE_RC_PREFLIGHT_MODULE="$MODULES_PATH/smite-clean-rc-preflight.sh"
+        if [ ! -s "$SMITE_RC_PREFLIGHT_MODULE" ] || [ -L "$SMITE_RC_PREFLIGHT_MODULE" ]; then
+            echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe. Run Update U-OPTI again." >&2
+            exit 2
+        fi
+        # shellcheck source=/dev/null
+        source "$SMITE_RC_PREFLIGHT_MODULE" || exit 2
         smite_clean_rc_prepare_gateway_packages || {
             echo "HOLD: Clean-RC Nginx prerequisite is not ready; no Smite install was started." >&2
             exit 2
