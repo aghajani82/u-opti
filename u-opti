@@ -1172,8 +1172,17 @@ print(sha)
                 case "$FILE" in
                     "$TEMP_DIR/VERSION")
                         ;;
-                    # Extensionless root-only route helper is Python as well.
-                    "$TEMP_DIR/"*.py|"$TEMP_DIR/smite-xhttp-nginx-route")
+                    "$TEMP_DIR/"*.py)
+                        if ! python3 -m py_compile "$FILE"; then
+                            echo "Python syntax check failed: $FILE"
+                            cleanup_update_temp
+                            read -rp "Press Enter to return..."
+                            continue 2
+                        fi
+                        ;;
+                    # This Python helper has no .py suffix; keep the legacy
+                    # *.py arm intact for the Backhaul packaging contract.
+                    "$TEMP_DIR/smite-xhttp-nginx-route")
                         if ! python3 -m py_compile "$FILE"; then
                             echo "Python syntax check failed: $FILE"
                             cleanup_update_temp
