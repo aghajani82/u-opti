@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 UPDATER = ROOT / "u-opti"
 
 CRITICAL_BROKER_FILES = {
+    "smite-clean-rc-preflight.sh",
     "smite-xhttp-nginx-route",
     "smite_xhttp_nginx_plan.py",
     "smite-rc5-xhttp-root-broker.py",
