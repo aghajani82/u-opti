@@ -381,7 +381,7 @@ if [ "${1:-}" = "--smite-clean-rc" ]; then
 
     SMITE_RC_PREFLIGHT_MODULE="$MODULES_PATH/smite-clean-rc-preflight.sh"
     if [ ! -s "$SMITE_RC_PREFLIGHT_MODULE" ] || [ -L "$SMITE_RC_PREFLIGHT_MODULE" ]; then
-        echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe." >&2
+        echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe. Run Update U-OPTI again." >&2
         exit 2
     fi
     # shellcheck source=/dev/null
