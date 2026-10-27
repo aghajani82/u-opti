@@ -4,6 +4,8 @@
 # installer now has reviewed clean-RC broker/mount integration paths; pin its
 # accepted full source blob below so later wizard drift still fails closed.
 # The pinned installer also auto-selects Standard *only* in clean-rc mode.
+# 2026-10-27: re-pin to the current reviewed main installer after its
+# clean-RC broker/admin-helper integrations; no installer bytes change here.
 # Stable image pull/overlay isolation is checked separately by
 # tests/test-smite-clean-install.sh. During the final Field Trial, the only
 # intentional changes to docker.sh and smite-install.sh are numeric menu-input
@@ -28,7 +30,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-e42ef4847c198272970644aae15f268068001151 modules/smite-install.sh
+043deef02265d2ee1c6ca6444a548233fae1242e modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
