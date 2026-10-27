@@ -1172,7 +1172,8 @@ print(sha)
                 case "$FILE" in
                     "$TEMP_DIR/VERSION")
                         ;;
-                    "$TEMP_DIR/"*.py)
+                    # Extensionless root-only route helper is Python as well.
+                    "$TEMP_DIR/"*.py|"$TEMP_DIR/smite-xhttp-nginx-route")
                         if ! python3 -m py_compile "$FILE"; then
                             echo "Python syntax check failed: $FILE"
                             cleanup_update_temp
