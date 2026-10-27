@@ -342,7 +342,8 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertLess(unit.index("StartLimitBurst=3"), unit.index("[Service]"))
             self.assertIn("NoNewPrivileges=yes", unit)
             self.assertIn("ReadWritePaths=/etc/nginx/smite-xhttp-routes", unit)
-            self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
+            self.assertIn("ReadWritePaths=-/run/lock/u-opti-smite-engine.lock", unit)
+            self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
 
             key_before = (etc / "route-broker.key").read_bytes()
