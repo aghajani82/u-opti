@@ -216,7 +216,21 @@ PY_RESUME_PREFLIGHT
         return
     }
 
-    if ! smite_install_clean_rc_prepare_gateway_packages; then
+    if ! declare -F smite_clean_rc_prepare_gateway_packages >/dev/null 2>&1; then
+        module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        [ -s "$module_dir/smite-clean-rc-preflight.sh" ] &&
+            [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || {
+                echo "HOLD: Clean-RC Nginx package preflight module is missing or unsafe."
+                smite_install_pause
+                return
+            }
+        # shellcheck source=/dev/null
+        source "$module_dir/smite-clean-rc-preflight.sh" || {
+            smite_install_pause
+            return
+        }
+    fi
+    if ! smite_clean_rc_prepare_gateway_packages; then
         echo "HOLD: Host Nginx prerequisite is not ready; broker activation was not attempted."
         smite_install_pause
         return
