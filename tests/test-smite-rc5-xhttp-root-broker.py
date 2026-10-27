@@ -398,6 +398,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)
@@ -463,6 +466,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-hold-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)
