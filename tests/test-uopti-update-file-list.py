@@ -53,5 +53,18 @@ class UpdaterFileListTests(unittest.TestCase):
                 )
 
 
+    def test_extensionless_xhttp_route_is_checked_as_python(self):
+        """Prevent the updater from running bash -n on a Python helper."""
+        helper = ROOT / "modules/smite-xhttp-nginx-route"
+        source = helper.read_text()
+        self.assertTrue(source.startswith("#!/usr/bin/env python3"))
+        compile(source, str(helper), "exec")
+        self.assertIn("smite-xhttp-nginx-route", quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
+        self.assertIn(
+            '"$TEMP_DIR/"*.py|"$TEMP_DIR/smite-xhttp-nginx-route")',
+            self.source,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
