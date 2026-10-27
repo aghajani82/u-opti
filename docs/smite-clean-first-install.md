@@ -14,7 +14,7 @@ FRP, Backhaul, 3x-UI, credentials, inbound mappings or Docker containers.
 
 The normal Docker Management → Smite Management entry currently includes the older Private Network/EasyTier wizard. **Do not use that wizard for this Standard HTTPS/443 Signed Pairing field trial.** The clean image-pair installer has an explicit direct entry instead.
 
-After installing U-OPTI on a disposable IR or KH host, copy the verified ZIP to that host and extract it so this directory contains `stage15-images.json`, `smite-panel-stage15.docker.tar.gz`, and `smite-node-stage15.docker.tar.gz`. Then run:
+After installing U-OPTI on a disposable IR or KH host, use **Update U-OPTI** before starting the Clean-RC flow. If the host already had an older fixed-file updater, run **Update U-OPTI a second time** if the Clean-RC preflight says the broker modules are not at the required revision; it will HOLD before package or service changes until the new module list is installed. Copy the verified ZIP to that host and extract it so this directory contains `stage15-images.json`, `smite-panel-stage15.docker.tar.gz`, and `smite-node-stage15.docker.tar.gz`. Then run:
 
 ```bash
 SMITE_RC_BUNDLE_DIR=/opt/smite-stage15-bundle \
