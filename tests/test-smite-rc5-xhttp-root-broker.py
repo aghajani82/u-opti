@@ -451,8 +451,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 ("is-active", provisioner.SERVICE_NAME),
             ])
             self.assertEqual(list((root / "etc/u-opti/smite/route-grants").iterdir()), [])
-            self.assertEqual(list((root / "etc/nginx").glob("**/*")) if
-                             (root / "etc/nginx").exists() else [], [])
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            self.assertTrue(route_dir.is_dir())
+            self.assertEqual(list(route_dir.iterdir()), [])
+            self.assertEqual(list((root / "etc/nginx").glob("**/*.conf")), [])
 
     def test_activation_holds_if_systemd_does_not_confirm_active(self):
         repo = Path(__file__).resolve().parents[1]
