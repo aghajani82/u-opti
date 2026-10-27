@@ -1243,6 +1243,9 @@ smite_gateway_configure_panel() {
     echo "======================================"
     echo
     echo "Panel URL    : https://$domain"
+    echo "Login note   : This gateway does not create a username or password."
+    echo "              Sign in with the existing Smite Panel administrator account."
+    echo "VPN users   : Created separately in the KH Sanaei Xray inbound."
     echo "Public TCP   : 443"
     echo "Panel API    : 127.0.0.1:8000"
     echo "TLS backend  : 127.0.0.1:8443"
@@ -1255,6 +1258,7 @@ smite_gateway_configure_panel() {
     echo "Renewal hook : installed"
     echo
     echo "Keep public ports 8000 and 8888 blocked."
+    echo "Next: finish KH Smite/Sanaei setup, then configure the matching FRP port/path."
 
     smite_gateway_pause
 }
