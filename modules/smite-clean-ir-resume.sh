@@ -3,9 +3,9 @@
 smite_install_resume_clean_ir() {
     local SMITE_INSTALL_PROFILE=clean-rc
     local SMITE_UPSTREAM_VERSION="2.0.0-rc.1"
-    local bundle="${SMITE_RC_BUNDLE_DIR:-/root/smite-stage15}"
-    local manifest_sha="${SMITE_RC_MANIFEST_SHA256:-7c9eca981da655548172eceb14c98fffd89910e7ab024652a3504b4fb0ed7fb9}"
-    local source_sha="${SMITE_RC_SOURCE_SHA:-da1c08896508a5c9b3d7601d2943575b90f5c223}"
+    local bundle="${SMITE_RC_BUNDLE_DIR:-/opt/smite-stage15-bundle}"
+    local manifest_sha="${SMITE_RC_MANIFEST_SHA256:-fe32c9c54714cfdb482f27112829eba13d5188e9e1e7e26c7266d8d54e85462a}"
+    local source_sha="${SMITE_RC_SOURCE_SHA:-4e16633a304db6c03f7f2911cc7d77213b0c4ec1}"
     local module_dir helper panel_domain node_name peer_gid panel_id node_id answer backup preflight
     local -a summary=()
 
