@@ -295,6 +295,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-provision-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)
@@ -319,6 +322,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(result["SERVICE_START"], "NOT_PERFORMED")
             self.assertEqual(result["NODE_ENABLEMENT"], "NOT_PERFORMED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            self.assertTrue(route_dir.is_dir())
+            self.assertEqual(stat.S_IMODE(route_dir.stat().st_mode), 0o755)
+            self.assertEqual(route_dir.stat().st_uid, 0)
             self.assertEqual(list(grants.iterdir()), [])
             self.assertEqual(len((etc / "route-broker.key").read_bytes()), 32)
             self.assertEqual(stat.S_IMODE((etc / "route-broker.key").stat().st_mode), 0o600)
@@ -334,6 +341,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertLess(unit.index("StartLimitIntervalSec=60s"), unit.index("[Service]"))
             self.assertLess(unit.index("StartLimitBurst=3"), unit.index("[Service]"))
             self.assertIn("NoNewPrivileges=yes", unit)
+            self.assertIn("ReadWritePaths=/etc/nginx/smite-xhttp-routes", unit)
             self.assertIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", unit)
             self.assertIn("smite-rc5-xhttp-root-broker.py --serve", unit)
 
@@ -344,6 +352,24 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                     instance_id=INSTANCE,
                 )
             self.assertEqual((etc / "route-broker.key").read_bytes(), key_before)
+
+    def test_missing_nginx_config_dir_holds_before_any_filesystem_change(self):
+        import importlib.util
+
+        repo = Path(__file__).resolve().parents[1]
+        provisioner_path = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_provisioner_missing_nginx_test", provisioner_path)
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-no-nginx-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "NGINX_CONFIG_DIRECTORY_MISSING"):
+                provisioner.provision(
+                    peer_gid=PEER_GID, root=root, source_dir=repo / "modules"
+                )
+            self.assertEqual(list(root.iterdir()), [])
 
     def test_bad_peer_gid_holds_before_any_filesystem_change(self):
         import importlib.util
@@ -372,6 +398,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)
@@ -397,6 +426,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+            # Simulate an interrupted legacy install where the unit already
+            # references the route path but the directory was never provisioned.
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            route_dir.rmdir()
             sock_dir = root / "run/u-opti/smite"
             sock = sock_dir / "xhttp-broker.sock"
             original_lstat = Path.lstat
@@ -422,8 +455,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 ("is-active", provisioner.SERVICE_NAME),
             ])
             self.assertEqual(list((root / "etc/u-opti/smite/route-grants").iterdir()), [])
-            self.assertEqual(list((root / "etc/nginx").glob("**/*")) if
-                             (root / "etc/nginx").exists() else [], [])
+            route_dir = root / "etc/nginx/smite-xhttp-routes"
+            self.assertTrue(route_dir.is_dir())
+            self.assertEqual(list(route_dir.iterdir()), [])
+            self.assertEqual(list((root / "etc/nginx").glob("**/*.conf")), [])
 
     def test_activation_holds_if_systemd_does_not_confirm_active(self):
         repo = Path(__file__).resolve().parents[1]
@@ -437,6 +472,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="uopti-broker-activation-hold-") as raw_root:
             root = Path(raw_root)
             root.chmod(0o700)
+            nginx_config = root / "etc/nginx"
+            nginx_config.mkdir(parents=True, mode=0o755)
+            nginx_config.chmod(0o755)
             target_modules = root / "usr/local/lib/u-opti/modules"
             target_modules.mkdir(parents=True, mode=0o755)
             target_modules.chmod(0o755)

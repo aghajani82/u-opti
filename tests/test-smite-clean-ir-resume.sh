@@ -3,6 +3,9 @@
 # install. Only temporary files are touched; Docker/systemd are mocked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+grep -Fq 'local bundle="${SMITE_RC_BUNDLE_DIR:-/opt/smite-stage15-bundle}"' "$ROOT/modules/smite-clean-ir-resume.sh"
+grep -Fq 'local manifest_sha="${SMITE_RC_MANIFEST_SHA256:-fe32c9c54714cfdb482f27112829eba13d5188e9e1e7e26c7266d8d54e85462a}"' "$ROOT/modules/smite-clean-ir-resume.sh"
+grep -Fq 'local source_sha="${SMITE_RC_SOURCE_SHA:-4e16633a304db6c03f7f2911cc7d77213b0c4ec1}"' "$ROOT/modules/smite-clean-ir-resume.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 

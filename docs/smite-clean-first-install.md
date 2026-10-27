@@ -35,6 +35,12 @@ The CLI verifies the paired archive/manifest inputs **before** opening the compo
 
 Use the same source SHA, manifest SHA, and exact image-pair ZIP on both disposable hosts. The ZIP SHA256 is `2bda0c80aa77ce6fa6bd1af0a4ed0d8fccfad670915dfd2f56a6120b08d19a71`. Never use these preview images on Grandoptical/production.
 
+## Recovering an interrupted Clean-RC IR install
+
+If the IR installer has already started the Panel and Node but stops during the Root Broker/Node channel check, **do not rerun option 1**: the clean installer intentionally rejects existing containers/Compose files. Update U-OPTI from main, then open **Docker Management → Smite Management → 8) Resume interrupted clean-RC IR test install**.
+
+The recovery menu verifies the existing Panel/Node images, environment files and current Stage15 bundle before asking for the exact confirmation phrase. The broker activation helper now safely creates only the missing, root-owned `/etc/nginx/smite-xhttp-routes` directory (mode `0755`) when `/etc/nginx` already exists and passes ownership/permission checks. It does not create TrustedGrants, enable pairing, or add live route files. If the recovery check does not pass, stop and share the full output; do not manually enable the service or delete the partial installation.
+
 ## What has changed in the real installer
 
 **Source status (2026-10-26):** broker, signed Node forwarding, KH read-only Sanaei mount, existing FRP wizard handoff and clean-RC broker bootstrap are implemented on U-OPTI PR #48 / Smite PR #32. Current heads `88564641ebf35f3111c87188f7ae4ee8a8885b17` (U-OPTI) and `da1c08896508a5c9b3d7601d2943575b90f5c223` (Smite) passed CI: 16/16 U-OPTI jobs plus 5 focused checks, and 12/12 Smite workflows. This status permits evaluation only on separate disposable Ubuntu trial VPSs; it does not authorize or qualify an existing IR/KH host or Grandoptical.
