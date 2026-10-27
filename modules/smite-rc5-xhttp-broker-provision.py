@@ -123,6 +123,40 @@ def _ensure_dir(root: Path, relative: str, mode: int) -> Path:
     return target
 
 
+def _validate_nginx_config_dir(root: Path) -> Path:
+    """Require the real root-owned Nginx config directory; never create it."""
+    nginx_config_dir = root / "etc/nginx"
+    try:
+        info = nginx_config_dir.lstat()
+    except OSError as exc:
+        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_MISSING") from exc
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o022):
+        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_UNTRUSTED")
+    return nginx_config_dir
+
+
+def _ensure_nginx_route_dir(root: Path) -> Path:
+    """Ensure only the dedicated empty route include directory exists."""
+    nginx_config_dir = _validate_nginx_config_dir(root)
+    route_dir = nginx_config_dir / "smite-xhttp-routes"
+    try:
+        route_dir.mkdir(mode=0o755)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_CREATE_FAILED") from exc
+    try:
+        info = route_dir.lstat()
+    except OSError as exc:
+        raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_UNAVAILABLE") from exc
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_UNTRUSTED")
+    if stat.S_IMODE(info.st_mode) != 0o755:
+        raise ProvisionHold("BROKER_NGINX_ROUTE_DIRECTORY_MODE_MISMATCH")
+    return route_dir
+
+
 def _write_new(path: Path, data: bytes, mode: int) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     try:
@@ -211,16 +245,9 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
         raise ProvisionHold("UNTRUSTED_BROKER_SOURCE_DIR")
 
     # The systemd unit binds this exact path writable while ProtectSystem=full
-    # is enabled. Require a real, trusted Nginx config directory first, then
-    # create the dedicated route include directory below before activation.
-    nginx_config_dir = root / "etc/nginx"
-    try:
-        nginx_info = nginx_config_dir.lstat()
-    except OSError as exc:
-        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_MISSING") from exc
-    if (not stat.S_ISDIR(nginx_info.st_mode) or nginx_info.st_uid != 0
-            or nginx_info.st_mode & 0o022):
-        raise ProvisionHold("NGINX_CONFIG_DIRECTORY_UNTRUSTED")
+    # is enabled. Require a real, trusted Nginx config directory before
+    # provisioning any broker state.
+    _validate_nginx_config_dir(root)
 
     helper_source = source_dir / HELPER_MODULE
     planner_source = source_dir / PLANNER_MODULE
@@ -405,6 +432,11 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
         if (not stat.S_ISDIR(item.st_mode) or item.st_uid != 0
                 or stat.S_IMODE(item.st_mode) != 0o700):
             raise ProvisionHold("BROKER_ACTIVATION_DIRECTORY_UNTRUSTED")
+
+    # Recovery may encounter a service unit left behind by an older
+    # provisioner that did not create this path. Repair only the dedicated,
+    # empty include directory before systemd's ReadWritePaths sandbox is set up.
+    _ensure_nginx_route_dir(root)
 
     # systemd's Group= numeric credential lookup requires a host NSS group
     # entry. The Node container's primary GID alone does not create one here.
