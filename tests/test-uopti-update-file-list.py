@@ -65,6 +65,19 @@ class UpdaterFileListTests(unittest.TestCase):
             self.source,
         )
 
+    def test_json_candidate_is_checked_as_json(self):
+        """Prevent the updater from running bash -n on a JSON candidate."""
+        import json
+
+        candidate = ROOT / "modules/smite-field-trial-candidate.json"
+        json.loads(candidate.read_text())
+        self.assertIn(
+            "smite-field-trial-candidate.json",
+            quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")),
+        )
+        self.assertIn('"$TEMP_DIR/"*.json)', self.source)
+        self.assertIn("json.load(open(sys.argv[1]", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
