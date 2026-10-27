@@ -1181,6 +1181,14 @@ print(sha)
                             continue 2
                         fi
                         ;;
+                    "$TEMP_DIR/"*.json)
+                        if ! python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$FILE"; then
+                            echo "JSON syntax check failed: $FILE"
+                            cleanup_update_temp
+                            read -rp "Press Enter to return..."
+                            continue 2
+                        fi
+                        ;;
                     *)
                         if ! bash -n "$FILE"; then
                             echo
