@@ -25,7 +25,10 @@ u-opti --smite-clean-rc
 
 The CLI verifies the paired archive/manifest inputs **before** opening the component menu. It explicitly selects `SMITE_INSTALL_PROFILE=clean-rc`; it does not start pairing or activate a tunnel by itself.
 
-- On **IR**, choose `1) Install Panel + Iran Node`.
+- On **IR**, choose `1) Install Panel + Iran Node`. Clean-RC asks to prepare
+  host Nginx, Certbot and the Nginx stream module before creating Smite files;
+  accept this prerequisite prompt. This starts/prepares the host gateway packages
+  but does **not** configure the Panel domain or request its certificate yet.
 - On **KH**, choose `2) Install Foreign Node`.
 - On **KH after the Foreign Node exists**, choose `4) Install Sanaei 3x-UI on Foreign Node`. If no Sanaei instance exists, the option launches the normal U-OPTI installer; after it returns, reopen option 4 to attach the selected Sanaei database read-only to the KH Node.
 - Do not select option 5 (existing-IR upgrade) during a fresh install.
@@ -39,7 +42,7 @@ Use the same source SHA, manifest SHA, and exact image-pair ZIP on both disposab
 
 If the IR installer has already started the Panel and Node but stops during the Root Broker/Node channel check, **do not rerun option 1**: the clean installer intentionally rejects existing containers/Compose files. Update U-OPTI from main, then open **Docker Management → Smite Management → 8) Resume interrupted clean-RC IR test install**.
 
-The recovery menu verifies the existing Panel/Node images, environment files and current Stage15 bundle before asking for the exact confirmation phrase. The broker activation helper now safely creates only the missing, root-owned `/etc/nginx/smite-xhttp-routes` directory (mode `0755`) when `/etc/nginx` already exists and passes ownership/permission checks. It does not create TrustedGrants, enable pairing, or add live route files. If the recovery check does not pass, stop and share the full output; do not manually enable the service or delete the partial installation.
+The recovery menu verifies the existing Panel/Node images, environment files and current Stage15 bundle before asking for the exact confirmation phrase. It then offers to prepare the host Nginx/Certbot/stream packages if needed, before activating the Root Broker. Activation repairs only the exact known older systemd unit whose lazy `/run/lock` paths were not marked optional, and creates only the missing, root-owned `/etc/nginx/smite-xhttp-routes` directory (mode `0755`) when `/etc/nginx` exists and passes ownership/permission checks. It does not create TrustedGrants, enable pairing, or add live route files. If recovery does not pass, stop and share the full output; do not manually enable the service or delete the partial installation.
 
 ## What has changed in the real installer
 
