@@ -200,6 +200,7 @@ def candidate(root: Path, stage: Path, *, verify_official=frp.verify):
             "UNRECOGNIZED_STAGE15_COMPOSE")
     old = (regular(f["manifest"], 8192)
            if f["manifest"].exists() or f["manifest"].is_symlink() else None)
+    require(old is None, "OTHER_ENGINE_REAL_HOST_TRANSACTION_HOLD")
     current = json.loads(old) if old is not None else {
         "schema": 1, "engines": {}
     }
@@ -291,9 +292,7 @@ def activate(root: Path, stage: Path, *, official_verify=frp.verify,
             raise Hold("UNTRUSTED_MANIFEST_DIR")
         else:
             private_dir(state)
-        # Lab refuses pre-existing other engines in this phase; another
-        # engine needs a separately audited additive manifest transaction.
-        require(old is None, "OTHER_ENGINE_REAL_HOST_TRANSACTION_HOLD")
+        # Existing other-engine manifests are rejected before journaling.
         write_new(f["manifest"], manifest)
         if interrupt == "manifest":
             raise Interrupted("manifest")
