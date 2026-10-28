@@ -120,7 +120,7 @@ class FrpOperator(unittest.TestCase):
 
     def test_stage15_readiness_is_read_only_and_never_authorizes_install(self):
         signed = self.node / "docker-compose.security-candidate.yml"
-        signed.write_text("services:\\n  smite-node:\\n    environment:\\n      - SMITE_NODE_PANEL_AUTH_MODE=signed\\n".replace("\\\\n", "\\n"))
+        signed.write_text("services:\\n  smite-node:\\n    environment:\\n")
         signed.chmod(0o600)
         values = {
             "SMITE_NODE_PANEL_AUTH_MODE": "signed",
@@ -185,16 +185,17 @@ class FrpOperator(unittest.TestCase):
         with self.assertRaisesRegex(control.Hold, "STAGE15_SIGNED_COMPOSE_NOT_ACTIVE"):
             control.stage15_readiness(self.node, run=fake_run)
 
-    def test_stage15_readiness_rejects_unsigned_node_without_docker_probe(self):
-        (self.node / "docker-compose.security-candidate.yml").write_text("services:\\n")
-        (self.node / "docker-compose.security-candidate.yml").chmod(0o600)
-        called = []
+    def test_stage15_readiness_rejects_incomplete_unsigned_core(self):
+        (self.node / ".env").write_text(ENV.replace(
+            "SMITE_AGENT_AUTH_MODE=strict",
+            "SMITE_AGENT_AUTH_MODE=legacy"))
+        calls = []
         def run(argv):
-            called.append(argv)
-            return ""
-        with self.assertRaises(control.Hold):
+            calls.append(argv)
+            raise AssertionError("Docker should not be queried for invalid Core")
+        with self.assertRaisesRegex(control.Hold, "MANAGED_STRICT_CORE_REQUIRED"):
             control.stage15_readiness(self.node, run=run)
-        self.assertTrue(called or True)  # signed-runtime admission itself stays fail-closed
+        self.assertEqual(calls, [])
 
     def test_parent_has_separate_frp_and_existing_backhaul(self):
         source = BH_MENU.read_text()
