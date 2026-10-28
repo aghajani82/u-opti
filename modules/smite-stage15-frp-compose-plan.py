@@ -46,18 +46,28 @@ EXPECTED_MOUNTS = {
     "/usr/local/bin/frpc": str(frp.INSTALL_ROOT / "frpc"),
     "/usr/local/bin/frps": str(frp.INSTALL_ROOT / "frps"),
 }
-OVERLAY = (
-    "services:\n"
-    "  smite-node:\n"
-    "    volumes:\n"
+# The existing official candidate is independently attested by frp.verify().
+# Its Compose candidate has implicit bind.create_host_path=true. Never apply
+# that permissive mount: harden the prospective in-memory proposal instead.
+STAGED_OVERLAY = (
+    "services:\\n"
+    "  smite-node:\\n"
+    "    volumes:\\n"
     + "".join(
-        "      - type: bind\n"
-        f"        source: {src}\n"
-        f"        target: {dst}\n"
-        "        read_only: true\n"
+        "      - type: bind\\n"
+        f"        source: {src}\\n"
+        f"        target: {dst}\\n"
+        "        read_only: true\\n"
         for dst, src in EXPECTED_MOUNTS.items()
     )
 )
+OVERLAY = STAGED_OVERLAY.replace(
+    "        read_only: true\\n",
+    "        read_only: true\\n"
+    "        bind:\\n"
+    "          create_host_path: false\\n",
+)
+
 
 
 def compose_read(argv: list[str], *, stdin: str | None = None) -> str:
@@ -121,7 +131,7 @@ def validate_config(before: dict, after: dict) -> dict[str, str]:
                 if (mount.get("type") != "bind"
                         or mount.get("source") != EXPECTED_MOUNTS[target]
                         or mount.get("read_only") is not True
-                        or mount.get("bind", {}).get("create_host_path") is True):
+                        or mount.get("bind", {}).get("create_host_path") is not False):
                     raise Hold("UNTRUSTED_FRP_BINARY_MOUNT")
                 expected[target] = mount
         if set(expected) != set(EXPECTED_MOUNTS):
@@ -168,7 +178,7 @@ def review(
     # checksums and exactly the expected offline proposal.
     stage_overlay = frp.shared._file(stage / "compose.override.candidate.yml",
                                      max_size=8192)
-    if stage_overlay != OVERLAY.encode():
+    if stage_overlay != STAGED_OVERLAY.encode():
         raise Hold("OFFICIAL_FRP_COMPOSE_CANDIDATE_DRIFT")
     cmd = ["docker", "compose", "-f", str(node / "docker-compose.yml"),
            "-f", str(node / "docker-compose.security-candidate.yml")]
