@@ -1706,7 +1706,7 @@ smite_install_foreign_node() {
         echo "Keep public ports 8000 and 8888 blocked at the firewall/provider level."
         echo "Machine-to-machine control traffic uses the private network."
     elif [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        echo "NEXT: Pair this installed node over verified HTTPS/443 and enable signed mode."
+        echo "NEXT: Install/attach Sanaei (option 4), configure KH Gateway (option 6), then Signed Pairing."
         echo "DO NOT enable legacy Panel registration or open port 8000/8888."
         echo "No second Smite installation should be required."
     else
@@ -1718,7 +1718,7 @@ smite_install_foreign_node() {
 }
 
 smite_install_sanaei_foreign() {
-    local current_role="" helper selected="" backup="" choice="" index=""
+    local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
     local -a instance_ids=() usable_ids=()
 
     clear
@@ -1745,6 +1745,26 @@ smite_install_sanaei_foreign() {
         echo "Detected role: ${current_role:-Unknown}"
         smite_install_pause
         return
+    fi
+
+    # Attaching Sanaei recreates base Compose. Never drop an active signed
+    # overlay or modify a credential-staged Node through this fresh-install path.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if [ -e "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
+           [ -L "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
+           ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env" ||
+           ! grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"; then
+            echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict." >&2
+            smite_install_pause
+            return
+        fi
+        if ! runtime_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" ||
+           [ "$(printf '%s\n' "$runtime_env" | grep '^SMITE_NODE_PANEL_AUTH_MODE=')" != 'SMITE_NODE_PANEL_AUTH_MODE=paused' ] ||
+           [ "$(printf '%s\n' "$runtime_env" | grep '^SMITE_AGENT_AUTH_MODE=')" != 'SMITE_AGENT_AUTH_MODE=strict' ]; then
+            echo "HOLD: KH runtime is not confirmed paused; Sanaei attachment cancelled." >&2
+            smite_install_pause
+            return
+        fi
     fi
 
     if ! declare -F docker_3xui_install >/dev/null 2>&1; then
@@ -2025,11 +2045,12 @@ show_smite_install_menu() {
         echo "3) Installation State"
         echo "4) Install Sanaei 3x-UI on Foreign Node"
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
+        echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-5]: " smite_install_choice
+        read -rp "Please enter your selection [0-6]: " smite_install_choice
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
@@ -2038,6 +2059,7 @@ show_smite_install_menu() {
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
             5) smite_install_upgrade_signed_field_trial ;;
+            6) smite_foreign_gateway_configure ;;
             0) break ;;
             *)
                 echo

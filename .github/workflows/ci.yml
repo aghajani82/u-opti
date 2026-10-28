@@ -10,6 +10,37 @@ permissions:
   contents: read
 
 jobs:
+  stage15-foreign-signed-compatibility:
+    # Exact source that produced the already installed Stage15 image pair.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 4e16633a304db6c03f7f2911cc7d77213b0c4ec1
+          path: .stage15-foreign-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify exact Stage15 source and both signed transport directions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .stage15-foreign-source rev-parse HEAD)" = "4e16633a304db6c03f7f2911cc7d77213b0c4ec1"
+          python3 -m pip install -r .stage15-foreign-source/panel/requirements.txt -r .stage15-foreign-source/node/requirements.txt
+          python3 -B tests/test-smite-stage15-foreign-pairing.py -v
+          cd .stage15-foreign-source
+          python3 -B tests/test_panel_signed_nodeclient.py -v
+          python3 -B tests/test_signed_node_outbound_client.py -v
+          python3 -B tests/test_stage12_signed_origins_and_updates.py -v
+          python3 -B tests/test_replay_enrollment_offline.py -v
+          python3 -B tests/test_panel_xhttp_route_lifecycle.py -v
+          python3 -B tests/test_panel_xhttp_route_intent.py -v
+          python3 -B tests/test_sanaei_inbound_inventory.py -v
+
   managed-frp-signed-compose:
     # PR-only, isolated Docker with network:none, no published host port;
     # verifies actual signed Node inventory through full container recreate.
@@ -367,6 +398,7 @@ jobs:
         shell: bash
         run: |
           python3 -B tests/test-smite-stage15-pairing-regression.py -v
+          python3 -B tests/test-smite-stage15-foreign-pairing.py -v
 
       - name: Stage15 verify archive delivery with tampering and no-install regressions
         shell: bash

@@ -1,5 +1,7 @@
 # Smite Clean Install — first RC bootstrap integration (DRAFT / DISPOSABLE TRIAL ONLY)
 
+> Current Stage15 KH instructions: [signed KH installation and automation boundaries](SMITE-STAGE15-KH-INSTALL.md). Follow its Node → Sanaei → Gateway → Pairing order; the historical sequence below does not authorize post-pairing base-Compose recreation.
+
 ## Smite × U-OPTI delivery status (2026-10-27)
 
 The canonical cross-repository delivery board is maintained in [Smite: SMITE-UOPTI-DELIVERY-BOARD.md](https://github.com/aghajani82/Smite/blob/main/docs/SMITE-UOPTI-DELIVERY-BOARD.md). Use that board for current IR/KH milestone status, release gates, and the documented order of installation. The historical stage-by-stage draft notes below are **not** instructions to apply old preview images or merge old stacked PRs.
@@ -107,9 +109,8 @@ The clean RC mode:
    and the automatic *second* Panel/Node container recreation.
    Signed-auth code is not shadowed by the v0.1.7 overlay patcher.
 6. Refuses Private Network mode. Only Standard two-host logic is
-   under test. Even on a fresh host, the RC starts in the security
-   flags' default legacy settings until coordinated Pairing/443
-   admission is complete.
+   under test. Fresh Clean-RC Nodes start paused + strict and require
+   coordinated Signed Pairing/443 admission; no legacy fallback is enabled.
 7. Automatically selects Standard (HTTPS where appropriate) on the
    clean RC path, without prompting for unavailable Private Network mode.
    Summaries distinguish skipped overlays from the unchanged Stable path,
