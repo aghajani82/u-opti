@@ -183,6 +183,19 @@ and ends with `APPLY_ALLOWED=NO` and `FRP_HOST_TRANSACTION=NOT_IMPLEMENTED`.
 It is CI/source review, not a supported command to run on live IR/KH until
 package deployment and signed rollback tooling have been released.
 
+**Signed FRP transaction failure-injection lab (CI only):** 
+`smite-stage15-frp-transaction-lab.py` exercises the next lifecycle's
+journal-before-write, dual-binary pair staging, signed security overlay
+continuity, durable Replay inode preservation, and exact rollback after
+simulated crashes at each step. It cannot run as a real-host executor:
+all writes are confined to a private marker-bearing GitHub PR runner
+fixture, the signed status callbacks are synthetic, and running the module
+as a command always returns `HOLD`. It does **not** recreate a real
+Node or prove live HMAC, Stage15/WSS compatibility, networking, or
+release-readiness. The separate audited host executor, real signed probes,
+WSS/443 gateway admission and two-host traffic acceptance remain open in #67.
+Do not point this lab at `/opt/smite-node` or remove its CI-only gate.
+
 Additionally, `SMITE_FRP_STANDARD_WSS=1` is not set by the Clean-RC installer.
 The existing shared-child implementation requires it; without it, a shared child
 fails before mutation. Historical RC.2 WSS activation helpers pin different
