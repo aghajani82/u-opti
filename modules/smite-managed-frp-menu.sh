@@ -26,9 +26,10 @@ smite_managed_frp_menu() {
         echo "1) FRP status (read-only)"
         echo "2) Review prerequisites (no ports)"
         echo "3) Install FRP (not enabled yet)"
+        echo "4) Stage15 Signed FRP readiness (read-only)"
         echo "0) Back"
         echo
-        read -rp "Choose [0-3]: " selection || return 0
+        read -rp "Choose [0-4]: " selection || return 0
         selection="${selection#"${selection%%[![:space:]]*}"}"
         selection="${selection%"${selection##*[![:space:]]}"}"
         case "$selection" in
@@ -46,6 +47,9 @@ smite_managed_frp_menu() {
             3)
                 echo "HOLD: FRP installation on real IR/KH is disabled."
                 echo "No Backhaul, FRP, Smite, paths, ports or Docker containers changed."
+                ;;
+            4)
+                python3 -B "$SMITE_MANAGED_FRP_CONTROL" stage15 --node-dir "$SMITE_FRP_NODE_DIR" || :
                 ;;
             0) return ;;
             *) echo "Invalid choice" ;;
