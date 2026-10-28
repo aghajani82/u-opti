@@ -123,6 +123,15 @@ class SignedStage15FrpHost(unittest.TestCase):
         }
         (self.stage / "engines.candidate.json").write_text(json.dumps(self.manifest))
         (self.stage / "summary.txt").write_text("FRP_ARCH=amd64\nFRP_VERSION=v0.71.0\n")
+        (self.stage / "frp.official.tar.gz").write_bytes(b"OFFLINE_SYNTHETIC_ONLY")
+        (self.stage / "SHA256SUMS").write_text("FIXTURE_NOT_OFFICIAL")
+        (self.stage / "compose.override.candidate.yml").write_bytes(
+            host.proposal.STAGED_OVERLAY.encode())
+        for name in ("frpc.bin", "frps.bin"):
+            (self.stage / name).chmod(0o755)
+        for name in ("frp.official.tar.gz", "SHA256SUMS", "summary.txt",
+                     "engines.candidate.json", "compose.override.candidate.yml"):
+            (self.stage / name).chmod(0o600)
         self.fake = FakeDocker(self.p)
         self.signed_events = []
         self.env = patch.dict(os.environ, {host.FLAG: "YES"})
@@ -264,6 +273,17 @@ class SignedStage15FrpHost(unittest.TestCase):
             self.install()
         self.assertFalse(self.p.journal.exists())
         self.assertFalse(self.p.binaries.exists())
+
+    def test_non_private_or_writable_stage_never_reaches_host_install(self):
+        (self.stage / "frpc.bin").chmod(0o777)
+        with self.assertRaisesRegex(host.Hold, "UNSAFE_FILE_MODE"):
+            self.install()
+        self.assertFalse(self.p.journal.exists())
+        (self.stage / "frpc.bin").chmod(0o755)
+        self.stage.chmod(0o755)
+        with self.assertRaisesRegex(host.Hold, "UNTRUSTED_DIRECTORY"):
+            self.install()
+        self.assertFalse(self.p.journal.exists())
 
     def test_host_cli_gated_and_no_other_host_changes(self):
         cmd = subprocess.run([sys.executable, "-B", str(SOURCE), "install",
