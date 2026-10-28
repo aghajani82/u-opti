@@ -384,7 +384,9 @@ def _cleanup_empty(p: Paths):
 def restore(p: Paths, data: dict, *, runner=run, signed=signed_inventory):
     """Checked rollback. On uncertainty keep journal and HOLD, never erase."""
     ensure_protected(p, data["protected"])
-    verify_artifacts(p, data, complete=False)
+    # An already committed install must retain all four exact artifacts;
+    # missing files indicate out-of-band drift, not a recoverable interruption.
+    verify_artifacts(p, data, complete=(data["state"] == "COMMITTED"))
     require(not (p.node / "config/tunnels.json").exists(),
             "TUNNELS_CREATED_AFTER_FRP_STAGE")
     if p.manifest.exists():
@@ -476,6 +478,8 @@ def rollback(p: Paths, *, role_confirm: str, runner=run,
             "EXPLICIT_ROOT_FIELD_TRIAL_REQUIRED")
     with exclusive(p.lock):
         data = receipt(p)
+        require(os.uname().nodename.split(".")[0].upper() == data["role"],
+                "JOURNAL_HOST_ROLE_MISMATCH")
         expected = "RECOVER" if allow_incomplete else "ROLLBACK"
         require(role_confirm == expected + "-STAGE15-FRP-" + data["role"],
                 "ROLE_CONFIRMATION_REQUIRED")
@@ -490,6 +494,8 @@ def rollback(p: Paths, *, role_confirm: str, runner=run,
 def verify(p: Paths, *, runner=run, signed=signed_inventory):
     with exclusive(p.lock):
         data = receipt(p)
+        require(os.uname().nodename.split(".")[0].upper() == data["role"],
+                "JOURNAL_HOST_ROLE_MISMATCH")
         require(data["state"] == "COMMITTED", "FRP_HOST_TRANSACTION_INCOMPLETE")
         ensure_protected(p, data["protected"])
         verify_artifacts(p, data, complete=True)
