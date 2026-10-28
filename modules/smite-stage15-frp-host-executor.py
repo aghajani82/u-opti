@@ -291,6 +291,21 @@ def preflight(p: Paths, stage: Path, *, review=proposal.review,
     return proof
 
 def stage_bytes(stage: Path):
+    require(stage.is_absolute() and not stage.is_symlink()
+            and not stage.parent.is_symlink(), "UNTRUSTED_OFFICIAL_STAGE_PATH")
+    directory(stage.parent, private=True)
+    directory(stage, private=True)
+    # All reviewed staged outputs must remain root-owned with their exact
+    # original modes; do not admit an attacker-writable official stage.
+    for name, mode in {
+        "frp.official.tar.gz": 0o600,
+        "summary.txt": 0o600,
+        "SHA256SUMS": 0o600,
+        "engines.candidate.json": 0o600,
+        "compose.override.candidate.yml": 0o600,
+        "frpc.bin": 0o755, "frps.bin": 0o755,
+    }.items():
+        file(stage / name, limit=MAX_BIN, mode=mode)
     require(package.verify(stage), "OFFICIAL_FRP_STAGE_NOT_VERIFIED")
     # A valid upstream ARM bundle must not be admitted on an amd64 host
     # (and vice versa); a signed inventory hash alone cannot detect ELF ABI.
