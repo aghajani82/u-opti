@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -83,9 +85,126 @@ def inspect(node: Path, *, binaries: dict[str, Path] | None = None) -> dict[str,
     return {"role": role, "state": "ENROLLED_UNVERIFIED", "reason": "SIGNED_NODE_RECHECK_REQUIRED"}
 
 
+# The two local Stage15 archives were independently checked for the KH
+# signed-pairing field trial. This is a test-image ID, NOT an OCI digest or
+# a production provenance attestation. RC.2 lanes keep their original pins.
+STAGE15_NODE_ID = (
+    "sha256:a417e8c28426da5eaf16d59925d5c89b52dbf7849ca560dfa9a765a1266b3991"
+)
+
+
+def _read_only(argv: list[str]) -> str:
+    """Bounded argv-only reads. No shell, network, Docker recreation or writes."""
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=20,
+                           check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("STAGE15_READ_ONLY_COMMAND_FAILED") from exc
+    if p.returncode or len(p.stdout) > 262144:
+        raise Hold("STAGE15_READ_ONLY_COMMAND_FAILED")
+    return p.stdout.strip()
+
+
+def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
+    """Read-only signed Stage15 Node readiness; never authorizes FRP apply.
+
+    Enforces the specific running and tagged image ID, signed runtime,
+    composed security overlay, loopback-only API, and bundled version.
+    An image-ID match alone is NOT signed health, replay or live tunnel proof.
+    """
+    if run is None:
+        run = _read_only
+    previous = inspect(node)
+    if previous["state"] != "NOT_INSTALLED":
+        raise Hold("STAGE15_FRP_ENROLLMENT_REQUIRES_REVIEW")
+    signed = node / "docker-compose.security-candidate.yml"
+    frp.shared._file(signed, max_size=131072)
+    try:
+        entries = json.loads(run(["docker", "inspect", "smite-node"]))
+        if not isinstance(entries, list) or len(entries) != 1:
+            raise Hold("STAGE15_NODE_INSPECT_INVALID")
+        runtime = entries[0]
+        config = runtime["Config"]
+        host = runtime["HostConfig"]
+        env_raw = config["Env"]
+        if not isinstance(env_raw, list):
+            raise Hold("STAGE15_ENV_INVALID")
+        values: dict[str, str] = {}
+        for line in env_raw:
+            if not isinstance(line, str) or "=" not in line:
+                raise Hold("STAGE15_ENV_INVALID")
+            key, value = line.split("=", 1)
+            if key in values:
+                raise Hold("STAGE15_DUPLICATE_ENV")
+            values[key] = value
+        if (config["Image"] != "smite-node:stage15-local"
+                or runtime["Image"] != STAGE15_NODE_ID
+                or run(["docker", "image", "inspect", "-f", "{{.Id}}",
+                        "smite-node:stage15-local"]) != STAGE15_NODE_ID):
+            raise Hold("STAGE15_IMAGE_ID_MISMATCH")
+        if (runtime["State"]["Running"] is not True
+                or runtime["State"]["Health"]["Status"] != "healthy"):
+            raise Hold("STAGE15_NODE_UNHEALTHY")
+        if (host["NetworkMode"] != "host" or host.get("PortBindings")
+                or host.get("Privileged") is True):
+            raise Hold("STAGE15_NODE_NETWORK_DRIFT")
+        if config.get("Cmd") != [
+            "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"
+        ]:
+            raise Hold("STAGE15_NODE_LOOPBACK_DRIFT")
+        for key, expected in {
+            "SMITE_NODE_PANEL_AUTH_MODE": "signed",
+            "SMITE_AGENT_AUTH_MODE": "strict",
+            "SMITE_ENGINE_INVENTORY_MODE": "managed",
+        }.items():
+            if values.get(key) != expected:
+                raise Hold("STAGE15_SIGNED_POLICY_DRIFT")
+        if not re.fullmatch(r"[a-z0-9.-]+:443", values.get("PANEL_ADDRESS", "")):
+            raise Hold("STAGE15_PANEL_TRANSPORT_DRIFT")
+        if "SMITE_FRP_STANDARD_WSS" in values:
+            raise Hold("STAGE15_WSS_FLAG_UNREVIEWED")
+        active_files = {
+            f.strip() for f in config.get("Labels", {}).get(
+                "com.docker.compose.project.config_files", ""
+            ).split(",") if f.strip()
+        }
+        if active_files != {str(node / "docker-compose.yml"), str(signed)}:
+            raise Hold("STAGE15_SIGNED_COMPOSE_NOT_ACTIVE")
+        mounts = {m["Destination"]: m for m in runtime["Mounts"]}
+        for target, writable in {
+            "/etc/smite-node": True,
+            "/run/smite-node-identity": False,
+            "/var/lib/smite-node/auth": True,
+        }.items():
+            if target not in mounts or mounts[target].get("RW") is not writable:
+                raise Hold("STAGE15_SIGNED_MOUNT_DRIFT")
+        for name in ("frpc", "frps"):
+            version = run(["docker", "exec", "smite-node",
+                           "/usr/local/bin/" + name, "--version"])
+            if version.strip().lstrip("v") != "0.71.0":
+                raise Hold("STAGE15_FRP_BINARY_VERSION_DRIFT")
+    except (TypeError, KeyError, IndexError, AttributeError, ValueError,
+            json.JSONDecodeError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        raise Hold("STAGE15_RUNTIME_EVIDENCE_INVALID") from exc
+    return {
+        "ROLE": previous["role"],
+        "STAGE15_IMAGE": "PINNED_TEST_ID_MATCH",
+        "SIGNED_NODE": "HEALTHY_LOCAL_RUNTIME_ONLY",
+        "FRP_BINARIES": "BUNDLED_0_71_0",
+        "FRP_ENGINE_ENROLLED": "NO",
+        "WSS_ACTIVATION": "NOT_ENABLED",
+        "SIGNED_HMAC_REPLAY_PROOF": "NOT_QUERIED",
+        "HOST_FRP_INSTALL": "HOLD",
+        "PUBLIC_PORTS_CHANGED": "NO",
+        "LIVE_CHANGES": "NONE",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="FRP independent managed-engine read-only operator review")
-    parser.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback"))
+    parser.add_argument("action", choices=("status", "review", "stage15", "verify-stage", "install", "rollback"))
     parser.add_argument("--node-dir", type=Path, default=Path("/opt/smite-node"))
     parser.add_argument("--stage", type=Path)
     args = parser.parse_args()
@@ -93,7 +212,10 @@ def main() -> int:
         print("HOLD: Real-host FRP engine activation is NOT enabled; no server changed", file=sys.stderr)
         return 2
     try:
-        if args.action == "verify-stage":
+        if args.action == "stage15":
+            for key, value in stage15_readiness(args.node_dir).items():
+                print(f"{key}={value}")
+        elif args.action == "verify-stage":
             if args.stage is None or not frp.verify(args.stage):
                 raise Hold("ONLY_OFFICIAL_FRP_CANDIDATE_ALLOWED")
             print("FRP_STAGE_VERIFIED=YES")
@@ -107,7 +229,7 @@ def main() -> int:
                 print("PORT_OR_TUNNEL_INPUT=NOT_REQUIRED")
                 print("HOST_DOCKER_ACTIONS=NONE")
         return 0
-    except (Hold, frp.shared.Hold, OSError, UnicodeError) as exc:
+    except (Hold, frp.shared.Hold, OSError, UnicodeError, subprocess.SubprocessError) as exc:
         value = str(exc)
         print("HOLD: " + (value if re.fullmatch(r"[A-Z0-9_]+", value) else "UNTRUSTED_LOCAL_STATE"), file=sys.stderr)
         return 2
