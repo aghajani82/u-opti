@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -39,6 +43,21 @@ class UpdaterFileListTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.source = UPDATER.read_text()
         cls.installer = INSTALLER.read_text()
+
+    def test_all_updated_modules_participate_in_backup(self):
+        updated = quoted_names(array_body(self.source, "UPDATE_FILE_NAMES"))
+        backed_up = quoted_names(array_body(self.source, "BACKUP_FILES"))
+        self.assertFalse(updated - backed_up, sorted(updated - backed_up))
+
+    def test_stage15_executor_imports_from_actual_first_install_file_set(self):
+        installed = quoted_names(array_body(self.installer, "MODULES"))
+        with tempfile.TemporaryDirectory() as temp:
+            for name in installed:
+                shutil.copyfile(ROOT / "modules" / name, Path(temp) / name)
+            result = subprocess.run([sys.executable, "-B",
+                str(Path(temp) / "smite-stage15-frp-host-executor.py"), "--help"],
+                capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_broker_modules_are_downloaded_compared_and_backed_up(self):
         names = {

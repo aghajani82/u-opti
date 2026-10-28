@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parents[1]
 SOURCE = HERE / "modules/smite-managed-frp.py"
@@ -90,6 +91,17 @@ class OfflineFrp(unittest.TestCase):
         digest = self.archive_with(arch=arch)
         return frp.prepare(self.node, self.archive, self.stages,
                            arch=arch, allowed_sha=digest)
+
+    def test_archive_replacement_after_hash_cannot_change_extracted_bytes(self):
+        trusted = self.archive_with()
+        original_open = tarfile.open
+        def replaced(*args, **kwargs):
+            self.archive.write_bytes(b"changed after verification")
+            return original_open(*args, **kwargs)
+        with patch.object(frp.tarfile, "open", side_effect=replaced):
+            binaries = frp.unpack(self.archive, arch="amd64", trusted_sha=trusted)
+        self.assertEqual(binaries["frpc"], elf("amd64"))
+        self.assertEqual(binaries["frps"], elf("amd64") + b"server")
 
     def test_frp_only_stages_both_pins_without_backhaul(self):
         stage = self.stage()

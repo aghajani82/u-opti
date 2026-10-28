@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: a15c46288aae9849babc9c9358c68e46686bce9c
+          ref: 4e16633a304db6c03f7f2911cc7d77213b0c4ec1
           path: .managed-smite-source
           persist-credentials: false
       - name: Signed official FRP dual-binary Compose recreation and rollback
@@ -316,6 +316,7 @@ jobs:
           python3 -B tests/test-smite-stage15-frp-transaction-lab.py -v
           python3 -m py_compile modules/smite-stage15-frp-host-executor.py tests/test-smite-stage15-frp-host-executor.py
           sudo -n python3 -B tests/test-smite-stage15-frp-host-executor.py -v
+          python3 -m py_compile tools/build-stage15-review-bundle.py
           grep -Fq '"smite-stage15-frp-host-executor.py"' install.sh
           grep -Fq '["smite-stage15-frp-host-executor.py"]' u-opti
           grep -Fq '"smite-stage15-frp-compose-plan.py"' install.sh

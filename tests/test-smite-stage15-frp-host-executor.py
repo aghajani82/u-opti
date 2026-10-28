@@ -47,9 +47,9 @@ class FakeDocker:
             if self.enabled:
                 files.append(str(self.paths.overlay))
             mounts = [
-                {"Destination": "/etc/smite-node", "RW": True},
-                {"Destination": "/run/smite-node-identity", "RW": False},
-                {"Destination": "/var/lib/smite-node/auth", "RW": True},
+                {"Destination": "/etc/smite-node", "RW": True, "Type": "bind", "Source": str(self.paths.node / "config")},
+                {"Destination": "/run/smite-node-identity", "RW": False, "Type": "bind", "Source": str(self.paths.identity.parent)},
+                {"Destination": "/var/lib/smite-node/auth", "RW": True, "Type": "bind", "Source": str(self.paths.replay.parent)},
             ]
             if self.enabled:
                 for n in ("frpc", "frps"):
@@ -63,7 +63,9 @@ class FakeDocker:
                     "Env": ["SMITE_AGENT_AUTH_MODE=strict",
                             "SMITE_NODE_PANEL_AUTH_MODE=signed",
                             "SMITE_ENGINE_INVENTORY_MODE=managed",
-                            "PANEL_ADDRESS=02ir.kolbe1.ir:443"],
+                            "PANEL_ADDRESS=02ir.kolbe1.ir:443",
+                            "SMITE_AGENT_IDENTITY_PATH=/run/smite-node-identity/node-identity.json",
+                            "SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3"],
                     "Cmd": ["uvicorn", "main:app", "--host",
                             "127.0.0.1", "--port", "8888"],
                     "Labels": {
@@ -284,6 +286,122 @@ class SignedStage15FrpHost(unittest.TestCase):
         with self.assertRaisesRegex(host.Hold, "UNTRUSTED_DIRECTORY"):
             self.install()
         self.assertFalse(self.p.journal.exists())
+
+    def test_mount_source_or_type_drift_refuses_rollback_without_mutation(self):
+        self.install()
+        for field, value in (("Source", "/tmp/wrong-replay"), ("Type", "volume")):
+            def changed(argv, **kwargs):
+                raw = self.fake(argv, **kwargs)
+                if argv == ["docker", "inspect", "smite-node"]:
+                    doc = json.loads(raw)
+                    doc[0]["Mounts"][2][field] = value
+                    return json.dumps(doc)
+                return raw
+            before = self.p.manifest.read_bytes()
+            self.fake.actions.clear()
+            with self.assertRaisesRegex(host.Hold, "MOUNT_DRIFT|FILE_SET_DRIFT"):
+                host.rollback(self.p, role_confirm="ROLLBACK-STAGE15-FRP-KH",
+                              runner=changed, signed=self.signed)
+            self.assertEqual(self.p.manifest.read_bytes(), before)
+            self.assertFalse(any("up" in cmd for cmd in self.fake.actions))
+            self.assertEqual(host.receipt(self.p)["state"], "COMMITTED")
+
+    def test_unhealthy_runtime_can_restore_only_if_security_configuration_matches(self):
+        self.install()
+        def unhealthy(argv, **kwargs):
+            raw = self.fake(argv, **kwargs)
+            if argv == ["docker", "inspect", "smite-node"] and self.fake.enabled:
+                doc = json.loads(raw)
+                doc[0]["State"]["Health"]["Status"] = "unhealthy"
+                return json.dumps(doc)
+            return raw
+        # This callback deliberately asserts only inventory, not test adapter identity.
+        host.rollback(self.p, role_confirm="ROLLBACK-STAGE15-FRP-KH",
+                      runner=unhealthy, signed=lambda expected, **_: None)
+        self.clean_state()
+
+    def test_uncommitted_journal_scratch_recovers(self):
+        for content in (b"{partial", b'{"state":"NODE_RECREATED"}'):
+            with self.assertRaises(host.SimulatedCrash):
+                self.install(inject="overlay")
+            host.new_file(self.p.journal / "record.new", content, 0o600)
+            self.rollback(recover=True)
+            self.clean_state()
+
+    def test_journal_scratch_symlink_never_removed(self):
+        self.install()
+        scratch = self.p.journal / "record.new"
+        scratch.symlink_to(self.p.identity)
+        with self.assertRaisesRegex(host.Hold, "SYMLINK"):
+            self.rollback()
+        self.assertTrue(scratch.is_symlink())
+        self.assertTrue(self.p.manifest.exists())
+
+    def test_power_loss_after_manifest_removal_recovers(self):
+        self.install()
+        with patch.object(host, "restart", side_effect=host.SimulatedCrash("rollback")):
+            with self.assertRaises(host.SimulatedCrash):
+                self.rollback()
+        self.assertEqual(host.receipt(self.p)["state"], "RECOVERING")
+        self.assertFalse(self.p.manifest.exists())
+        self.rollback(recover=True)
+        self.clean_state()
+
+    def test_ancestor_symlink_and_writable_journal_are_rejected(self):
+        self.install()
+        link = Path(self.tmp.name) / "alias"
+        link.symlink_to(self.p.journal, target_is_directory=True)
+        with self.assertRaisesRegex(host.Hold, "DIRECTORY_TREE"):
+            host.file(link / "record.json")
+        self.p.journal.chmod(0o755)
+        with self.assertRaisesRegex(host.Hold, "UNTRUSTED_DIRECTORY"):
+            self.rollback()
+        self.assertTrue(self.p.manifest.exists())
+
+    def test_remote_docker_environment_is_rejected_before_subprocess(self):
+        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://remote.invalid:2375"}), \
+             patch.object(host.subprocess, "run") as run:
+            with self.assertRaisesRegex(host.Hold, "AMBIENT_DOCKER"):
+                host.run(["docker", "inspect", "smite-node"])
+            run.assert_not_called()
+
+    def test_signed_probe_checks_survive_python_optimization(self):
+        import urllib.request
+        fake_settings = types.SimpleNamespace(smite_agent_identity_path="unused")
+        modules = {
+            "app.config": types.SimpleNamespace(settings=fake_settings),
+            "app.agent_auth": types.SimpleNamespace(read_identity=lambda _: ("test", "test")),
+            "app.node_auth": types.SimpleNamespace(sign_request=lambda **_: {}),
+        }
+        class Response:
+            status = 200  # Unsigned inventory MUST be denied, even under -O.
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self): return b'{}'
+        opener = types.SimpleNamespace(open=lambda *a, **k: Response())
+        with patch.dict(sys.modules, modules), patch.object(sys, "argv", ["probe", "ready"]), \
+             patch.object(urllib.request, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(RuntimeError, "SIGNED_FRP_INVENTORY_REJECTED"):
+                exec(compile(host.SIGNED_CHECK, "signed_probe", "exec", optimize=2), {})
+
+    def test_root_owned_sticky_lock_parent_is_supported_but_plain_writable_is_not(self):
+        parent = Path(self.tmp.name) / "locks"
+        parent.mkdir(mode=0o700)
+        parent.chmod(0o1777)
+        with host.exclusive(parent / "engine.lock"):
+            pass
+        parent.chmod(0o777)
+        with self.assertRaisesRegex(host.Hold, "UNTRUSTED_DIRECTORY"):
+            with host.exclusive(parent / "engine.lock"):
+                self.fail("writable non-sticky lock parent admitted")
+
+    def test_default_context_cannot_redirect_docker(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(host.subprocess, "run", return_value=types.SimpleNamespace(
+                 returncode=0, stdout="OK")) as run:
+            host.run(["docker", "inspect", "smite-node"])
+            self.assertEqual(run.call_args.args[0][:3],
+                             ["docker", "--host", "unix:///var/run/docker.sock"])
 
     def test_host_cli_gated_and_no_other_host_changes(self):
         cmd = subprocess.run([sys.executable, "-B", str(SOURCE), "install",

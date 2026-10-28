@@ -45,7 +45,41 @@ def load(alias: str, name: str):
 package = load("stage15_frp_host_package", "smite-managed-frp.py")
 proposal = load("stage15_frp_host_compose_plan", "smite-stage15-frp-compose-plan.py")
 control = load("stage15_frp_host_control", "smite-managed-frp-control.py")
-rc2 = load("stage15_frp_host_signed_probe", "smite-rc2-frp-bundled-enrollment.py")
+# Keep the bounded signed probe self-contained: the RC.2 executor is not
+# installed by the Clean-RC installer and must not be a runtime dependency.
+SIGNED_CHECK = r'''
+import json, urllib.request, urllib.error
+from app.config import settings
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+expected=__import__("sys").argv[1]
+node_id,secret=read_identity(settings.smite_agent_identity_path)
+target="/api/agent/engines"
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+def check(ok):
+    if not ok:
+        raise RuntimeError("SIGNED_FRP_INVENTORY_REJECTED")
+def request(headers=None):
+    q=urllib.request.Request("http://127.0.0.1:8888"+target,
+        method="GET",headers=headers or {})
+    try:
+        with opener.open(q,timeout=6) as r:
+            return r.status,r.read()
+    except urllib.error.HTTPError as e:
+        return e.code,e.read()
+check(request()[0]==401)
+h=sign_request(secret=secret,node_id=node_id,method="GET",target=target,body=b"")
+status,body=request(h)
+check(status==200)
+data=json.loads(body)
+check(data["mode"]=="managed" and data["engines"]["frp"]==expected)
+check(request(h)[0]==401)
+print("SIGNED_FRP_INVENTORY=PASS")
+'''
+
 
 class Hold(RuntimeError):
     pass
@@ -84,6 +118,7 @@ def require(ok: bool, code: str):
 
 def file(path: Path, *, limit: int = 131072, mode: int | None = None) -> bytes:
     try:
+        trusted_parents(path)
         require(not path.is_symlink(), "UNTRUSTED_SYMLINK")
         old = path.lstat()
         require(stat.S_ISREG(old.st_mode) and old.st_nlink == 1
@@ -104,11 +139,26 @@ def file(path: Path, *, limit: int = 131072, mode: int | None = None) -> bytes:
     except FileNotFoundError as exc:
         raise Hold("REQUIRED_FILE_MISSING") from exc
 
-def directory(path: Path, *, private: bool = False):
+def trusted_parents(path: Path):
+    # O_NOFOLLOW on the leaf alone does not protect an ancestor symlink.
+    require(path.is_absolute() and ".." not in path.parts, "UNTRUSTED_DIRECTORY_TREE")
+    for parent in path.parents:
+        st = parent.lstat()
+        require(stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
+                and (stat.S_IMODE(st.st_mode) & 0o022 == 0
+                     or (st.st_uid == 0 and st.st_mode & stat.S_ISVTX)),
+                "UNTRUSTED_DIRECTORY_TREE")
+
+
+def directory(path: Path, *, private: bool = False, shared_sticky: bool = False):
+    trusted_parents(path)
     require(path.is_absolute() and not path.is_symlink(), "UNTRUSTED_DIRECTORY")
     st = path.lstat()
     require(stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid()
-            and stat.S_IMODE(st.st_mode) & (0o077 if private else 0o022) == 0,
+            and (stat.S_IMODE(st.st_mode) == 0o700 if private
+                 else (stat.S_IMODE(st.st_mode) & 0o022 == 0
+                       or (shared_sticky and st.st_uid == 0
+                           and stat.S_IMODE(st.st_mode) == 0o1777))),
             "UNTRUSTED_DIRECTORY")
 
 def new_dir(path: Path):
@@ -126,6 +176,7 @@ def flush(path: Path):
         os.close(fd)
 
 def new_file(path: Path, data: bytes, mode: int):
+    trusted_parents(path)
     require(not path.exists() and not path.is_symlink(), "FILE_ALREADY_EXISTS")
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY
                  | getattr(os, "O_NOFOLLOW", 0), mode)
@@ -143,7 +194,8 @@ def new_file(path: Path, data: bytes, mode: int):
 
 @contextmanager
 def exclusive(path: Path):
-    require(path.parent.is_dir() and not path.is_symlink(), "UNSAFE_ENGINE_LOCK")
+    directory(path.parent, shared_sticky=True)
+    require(not path.is_symlink(), "UNSAFE_ENGINE_LOCK")
     fd = os.open(path, os.O_CREAT | os.O_RDWR
                  | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
@@ -161,6 +213,12 @@ def exclusive(path: Path):
 
 def run(argv: list[str], *, input: str | None = None, timeout: int = 35):
     """Argument-vector only; only exact reviewed commands are permitted."""
+    require(not any(os.environ.get(key) for key in (
+        "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY",
+        "DOCKER_CERT_PATH", "COMPOSE_FILE", "COMPOSE_PROFILES")),
+        "REMOTE_OR_AMBIENT_DOCKER_CONFIGURATION")
+    if argv and argv[0] == "docker":
+        argv = ["docker", "--host", "unix:///var/run/docker.sock", *argv[1:]]
     try:
         res = subprocess.run(argv, input=input, capture_output=True, text=True,
                              check=False, timeout=timeout)
@@ -196,15 +254,15 @@ def artifacts(p: Paths):
     return {"frpc": p.binaries / "frpc", "frps": p.binaries / "frps",
             "overlay": p.overlay, "manifest": p.manifest}
 
-def runtime(p: Paths, enabled: bool, *, runner=run):
+def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
     try:
         raw = json.loads(runner(["docker", "inspect", "smite-node"]))
         require(isinstance(raw, list) and len(raw) == 1, "NODE_INSPECT_UNTRUSTED")
         obj = raw[0]
         require(obj["Image"] == control.STAGE15_NODE_ID
                 and obj["Config"]["Image"] == "smite-node:stage15-local"
-                and obj["State"]["Running"] is True
-                and obj["State"]["Health"]["Status"] == "healthy",
+                and (not healthy or (obj["State"]["Running"] is True
+                    and obj["State"]["Health"]["Status"] == "healthy")),
                 "SIGNED_STAGE15_RUNTIME_UNHEALTHY")
         env = obj["Config"]["Env"]
         require(len(env) == len(set(x.split("=", 1)[0] for x in env)),
@@ -213,7 +271,13 @@ def runtime(p: Paths, enabled: bool, *, runner=run):
                       "SMITE_NODE_PANEL_AUTH_MODE=signed",
                       "SMITE_ENGINE_INVENTORY_MODE=managed"):
             require(value in env, "SIGNED_RUNTIME_POLICY_DRIFT")
-        require("SMITE_FRP_STANDARD_WSS=1" not in env, "UNREVIEWED_WSS_ENABLED")
+        require(not any(x.startswith("SMITE_FRP_STANDARD_WSS=") for x in env),
+                "UNREVIEWED_WSS_ENABLED")
+        for value in (
+            "SMITE_AGENT_IDENTITY_PATH=/run/smite-node-identity/node-identity.json",
+            "SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3",
+        ):
+            require(value in env, "SIGNED_STORAGE_PATH_DRIFT")
         require(obj["HostConfig"]["NetworkMode"] == "host"
                 and not obj["HostConfig"].get("PortBindings")
                 and obj["HostConfig"].get("Privileged") is False,
@@ -228,10 +292,15 @@ def runtime(p: Paths, enabled: bool, *, runner=run):
             expected.add(str(p.overlay))
         require(files == expected, "SIGNED_COMPOSE_FILE_SET_DRIFT")
         mounts = {m["Destination"]: m for m in obj["Mounts"]}
-        for key, rw in {"/etc/smite-node": True,
-                        "/run/smite-node-identity": False,
-                        "/var/lib/smite-node/auth": True}.items():
-            require(key in mounts and mounts[key].get("RW") is rw,
+        require(len(mounts) == len(obj["Mounts"]), "DUPLICATE_RUNTIME_MOUNT")
+        for key, (source, rw) in {
+            "/etc/smite-node": (p.node / "config", True),
+            "/run/smite-node-identity": (p.identity.parent, False),
+            "/var/lib/smite-node/auth": (p.replay.parent, True),
+        }.items():
+            require(key in mounts and mounts[key].get("RW") is rw
+                    and mounts[key].get("Type") == "bind"
+                    and mounts[key].get("Source") == str(source),
                     "SIGNED_IDENTITY_MOUNT_DRIFT")
         if enabled:
             for name in ("frpc", "frps"):
@@ -253,7 +322,7 @@ def signed_inventory(expected: str, *, runner=run):
     """A real HMAC nonce and durable Replay test (not a synthetic status)."""
     result = runner([
         "docker", "exec", "smite-node", "python3", "-B", "-c",
-        rc2.SIGNED_CHECK, expected,
+        SIGNED_CHECK, expected,
     ])
     require(result == "SIGNED_FRP_INVENTORY=PASS", "SIGNED_HMAC_REPLAY_FAILED")
 
@@ -346,12 +415,24 @@ def update_record(p: Paths, data: dict, state: str):
     # Replace the bounded private journal atomically, retaining its earlier
     # canonical digest-protected preconditions in every state transition.
     data["state"] = state
+    directory(p.state, private=True)
+    directory(p.journal, private=True)
     out = p.journal / "record.new"
+    if out.exists() or out.is_symlink():
+        # A power loss before rename leaves an uncommitted scratch record.
+        # Validate its file boundary; never trust its possibly partial contents.
+        file(out, limit=16384, mode=0o600)
+        out.unlink()
+        flush(p.journal)
     new_file(out, (json.dumps(data, sort_keys=True) + "\n").encode(), 0o600)
     os.replace(out, p.journal / "record.json")
     flush(p.journal)
 
 def receipt(p: Paths):
+    directory(p.state, private=True)
+    directory(p.journal, private=True)
+    require({entry.name for entry in p.journal.iterdir()} <= {"record.json", "record.new"},
+            "JOURNAL_UNSAFE_ENTRY")
     data = json.loads(file(p.journal / "record.json", limit=16384, mode=0o600))
     keys = {"schema", "role", "state", "protected",
             "binary_sha256", "overlay_sha256", "manifest_sha256"}
@@ -379,7 +460,8 @@ def verify_artifacts(p: Paths, data: dict, *, complete: bool):
         expected = (data["binary_sha256"][name] if name in ("frpc", "frps")
                     else data[name + "_sha256"])
         require(digest(file(target, limit=MAX_BIN if name in ("frpc", "frps")
-                            else 131072)) == expected, "FRP_HOST_ARTIFACT_EXTERNAL_DRIFT")
+                            else 131072, mode=0o755 if name in ("frpc", "frps") else 0o600)) == expected,
+                "FRP_HOST_ARTIFACT_EXTERNAL_DRIFT")
 
 def restart(p: Paths, *, enabled: bool, runner=run):
     runner(compose_cmd(p, enabled=enabled, action=[
@@ -399,7 +481,7 @@ def await_signed(p: Paths, *, enabled: bool, expected: str, runner=run,
     raise Hold("SIGNED_HMAC_REPLAY_OR_RUNTIME_NOT_RESTORED")
 
 def _cleanup_empty(p: Paths):
-    for path in [p.manifest_dir, p.binaries, p.binaries.parent, p.state]:
+    for path in [p.manifest_dir, p.binaries, p.state]:
         if path.exists() and not path.is_symlink() and not any(path.iterdir()):
             path.rmdir()
             flush(path.parent)
@@ -410,14 +492,23 @@ def restore(p: Paths, data: dict, *, runner=run, signed=signed_inventory):
     # An already committed install must retain all four exact artifacts;
     # missing files indicate out-of-band drift, not a recoverable interruption.
     verify_artifacts(p, data, complete=(data["state"] == "COMMITTED"))
-    require(not (p.node / "config/tunnels.json").exists(),
+    require(not (p.node / "config/tunnels.json").exists()
+            and not (p.node / "config/tunnels.json").is_symlink(),
             "TUNNELS_CREATED_AFTER_FRP_STAGE")
+    # Verify the current runtime before overwriting it. A changed mount,
+    # listener/auth policy or extra Compose overlay is external drift.
+    try:
+        runtime(p, True, runner=runner, healthy=False)
+    except Hold:
+        runtime(p, False, runner=runner, healthy=False)
+    # Commit rollback intent BEFORE removing the manifest. A crash here must
+    # not leave COMMITTED claiming that all artifacts still exist.
+    update_record(p, data, "RECOVERING")
     if p.manifest.exists():
         p.manifest.unlink()
         flush(p.manifest.parent)
     # Explicitly restore base + signed overlay. Never use the plain base
     # alone: that would silently drop strict/signed authentication.
-    update_record(p, data, "RECOVERING")
     restart(p, enabled=False, runner=runner)
     await_signed(p, enabled=False, expected="not-installed",
                  runner=runner, signed=signed)

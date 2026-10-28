@@ -1,5 +1,7 @@
 # Clean-RC Stage15 KH: signed pairing with the existing IR Panel
 
+Current integrated review: [security findings and outstanding gates](SMITE-PR71-SECURITY-REVIEW-2026-10-28.md) and [Persian bundle instructions](SMITE-INTEGRATED-BUNDLE-FA.md). Historical source/image evidence below does not include the later FRPS log privacy fix. Overall FRP/WSS/XHTTP acceptance remains HOLD.
+
 Scope: disposable Ubuntu 24.04 amd64 hosts only. No production release, no live
 host access, no image rebuild or IR upgrade is performed by this change. The
 operator reports `node-ir` Connected at `https://02ir.kolbe1.ir`.
