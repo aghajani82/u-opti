@@ -52,10 +52,12 @@ cannot be proven from that captured output alone.
 Source-level finding: `Type=simple` systemd start returning is **not**
 proof that the Python listener has bound or begun listening. The activation
 helper previously checked the socket just once. The fix uses a **bounded**
-startup wait for `activating` service state, exact trusted socket metadata,
-and a successful local UNIX connect before enabling Node forwarding.
-Wrong owner/mode, unexpected systemd state, permanent socket errors, or
-readiness timeout **still HOLD**; no grant is created and no live route is
+startup wait for `activating` service state, trusted socket metadata,
+and a successful local UNIX connect before enabling Node forwarding. The
+brief root-owned owner-only `0700` socket created under `UMask=0077`
+between `bind()` and `chmod(0660)` is treated as **not yet ready**, never
+as approved. Wrong owner, unsafe mode, unexpected systemd state, permanent
+socket errors, or readiness timeout **still HOLD**; no grant is created and no live route is
 changed. The broker also tolerates a health-check peer closing before reply.
 The installer now displays the specific sanitized `HOLD_...` code without
 printing keys or arbitrary helper output.
