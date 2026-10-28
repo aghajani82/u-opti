@@ -764,7 +764,9 @@ smite_install_clean_rc_broker_start_node_forwarding() {
        ! grep -qx 'TRUSTED_GRANTS=UNCHANGED' <<< "$activation_output" ||
        ! grep -qx 'LIVE_ROUTE_CHANGE=NO' <<< "$activation_output"; then
         echo "HOLD: Root Broker activation did not pass its systemd/socket checks." >&2
-        grep -E '^(HOLD|SERVICE_|BROKER_SOCKET|TRUSTED_GRANTS|LIVE_ROUTE_CHANGE)=' <<< "$activation_output" >&2 || true
+        # The provisioner emits HOLD_REASON (no '='); do not hide its actual failure code.
+        # Keep diagnostics restricted to structured status fields (never print secrets).
+        grep -E '^(HOLD_[A-Z0-9_]+$|SERVICE_[A-Z0-9_]+=|BROKER_SOCKET=|TRUSTED_GRANTS=|LIVE_ROUTE_CHANGE=)' <<< "$activation_output" >&2 || true
         return 1
     fi
     echo "$activation_output"
