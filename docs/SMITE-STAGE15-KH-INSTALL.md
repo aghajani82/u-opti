@@ -149,6 +149,18 @@ Stage15 Node contains FRP binaries, but managed mode does not authorize arbitrar
 bundled binaries merely because they exist. Independent engine provenance and
 managed enrollment must be admitted first.
 
+**Stage15 read-only admission (new):** after signed KH activation, run
+`python3 -B /usr/local/lib/u-opti/modules/smite-managed-frp-control.py stage15`
+on **each** disposable node host, or choose Independent FRP > 4 in U-OPTI.
+The bounded gate verifies the exact local Stage15 Node image ID, the signed
+strict runtime and active Compose overlay, the 127.0.0.1:8888 listener command,
+no published Node ports, expected identity/Replay mounts, and both bundled
+FRP v0.71.0 executable versions. It does **not** read secrets, spend a signed
+nonce, create a tunnel, attest the OCI supply chain, or authorize FRP install.
+Expected success still reports `HOST_FRP_INSTALL=HOLD` and
+`SIGNED_HMAC_REPLAY_PROOF=NOT_QUERIED`. A `HOLD` is a reason to stop,
+never an invitation to override image IDs or enable the WSS flag.
+
 Additionally, `SMITE_FRP_STANDARD_WSS=1` is not set by the Clean-RC installer.
 The existing shared-child implementation requires it; without it, a shared child
 fails before mutation. Historical RC.2 WSS activation helpers pin different
