@@ -50,9 +50,14 @@ bash start.sh IR
 
 1. گزینه نصب Panel + Iran Node؛ نام پنل واقعی و `node-ir` را وارد کنید.
 2. HTTPS/443 و حساب مدیر را از ویزارد تکمیل کنید.
-3. از `u-opti --smite-pairing`، رزرو/کد یک‌بارمصرف و فعال‌سازی Signed ایران را طبق
-   راهنمای `u-opti/docs/SMITE-STAGE15-KH-INSTALL.md` انجام دهید.
-4. ابتدا Healthy، Signed و Connected بودن `node-ir` را تأیید کنید. نصب تازه روی IR فعلی لازم نیست.
+3. `u-opti --smite-pairing` را باز کنید؛ گزینه ۲ و تأیید `ENABLE-IR-SIGNED-PAIRING`.
+   باید `PANEL_PAIRING_PREVIEW=ENABLED_FIELD_TRIAL` گزارش شود.
+4. در پنل، `node-ir` را در Signed Mode رزرو و برای همان UUID کد یک‌بارمصرف بسازید.
+   در ویزارد Pairing روی IR، گزینه ۳ را برای Redeem همان هویت انتخاب کنید؛ کد را فقط در Prompt وارد کنید.
+5. گزینه ۴ و تأیید `ACTIVATE-IR-SIGNED-NODE` را انتخاب کنید. هر چهار نتیجه لازم است:
+   `IR_SIGNED_NODE_RUNTIME=ACTIVE_FIELD_TRIAL`، `IR_SIGNED_NODE_CHECKIN=PASS`،
+   `IR_LOCAL_HMAC_REPLAY=PASS` و `PANEL_TO_IR_SIGNED_HMAC=PASS`.
+6. Healthy و Connected بودن `node-ir` را در پنل تأیید کنید. نصب تازه یا Redeem مجدد روی IR فعلی لازم نیست.
 
 **KH — نصب تازه**:
 
