@@ -30,7 +30,7 @@ class Stage15FrpComposePlan(unittest.TestCase):
         self.stage = Path(self.tmp.name) / "official-stage"
         self.node.mkdir()
         self.stage.mkdir()
-        (self.stage / "compose.override.candidate.yml").write_bytes(plan.OVERLAY.encode())
+        (self.stage / "compose.override.candidate.yml").write_bytes(plan.STAGED_OVERLAY.encode())
         self.base = {
             "name": "smite-node",
             "services": {
@@ -126,7 +126,7 @@ class Stage15FrpComposePlan(unittest.TestCase):
 
     def test_forged_official_compose_override_rejected(self):
         (self.stage / "compose.override.candidate.yml").write_text(
-            plan.OVERLAY.replace("read_only: true", "read_only: false", 1)
+            plan.STAGED_OVERLAY.replace("read_only: true", "read_only: false", 1)
         )
         with self.assertRaisesRegex(plan.Hold, "OFFICIAL_FRP_COMPOSE_CANDIDATE_DRIFT"):
             self.check()
