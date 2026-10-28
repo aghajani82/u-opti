@@ -445,16 +445,25 @@ def _wait_for_broker_socket(sock_dir: Path, peer_gid: int) -> None:
             if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0
                     or directory.st_gid != peer_gid or stat.S_IMODE(directory.st_mode) != 0o750
                     or not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 0
-                    or sock.st_gid != peer_gid or stat.S_IMODE(sock.st_mode) != 0o660):
+                    or sock.st_gid != peer_gid):
                 raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
-            try:
-                _probe_broker_socket(socket_path)
-            except ProvisionHold as exc:
-                if str(exc) != "BROKER_SOCKET_NOT_READY":
-                    raise
-                failure = exc
+            # Between bind() and chmod(0660), systemd's UMask=0077
+            # creates an owner-only (0700) socket. This narrow, more
+            # restrictive intermediate mode is NOT readiness. Never connect
+            # or enable the Node until the exact final 0660 mode is verified.
+            if stat.S_IMODE(sock.st_mode) == 0o700:
+                failure = ProvisionHold("BROKER_SOCKET_NOT_READY")
+            elif stat.S_IMODE(sock.st_mode) != 0o660:
+                raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
             else:
-                return
+                try:
+                    _probe_broker_socket(socket_path)
+                except ProvisionHold as exc:
+                    if str(exc) != "BROKER_SOCKET_NOT_READY":
+                        raise
+                    failure = exc
+                else:
+                    return
         if time.monotonic() >= deadline:
             raise failure
         time.sleep(BROKER_STARTUP_POLL)
