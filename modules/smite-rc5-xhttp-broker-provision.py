@@ -17,9 +17,11 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
 import stat
 import subprocess
 import sys
+import time
 
 HELPER_SHA256 = "acb66752f6aa8600f1c45a7d68f46006b0d4d26c55330925bd35359d3ca868e6"
 PLANNER_SHA256 = "0c007ca049b95227588d2e4847020a53d5d0c155d28dc537341367a783d81c19"
@@ -29,6 +31,8 @@ HELPER_MODULE = "smite-xhttp-nginx-route"
 PLANNER_MODULE = "smite_xhttp_nginx_plan.py"
 SERVICE_NAME = "u-opti-smite-xhttp-broker.service"
 PEER_GROUP_NAME = "u-opti-smite-peer"
+BROKER_STARTUP_TIMEOUT = 10.0
+BROKER_STARTUP_POLL = 0.1
 IDENT = re.compile(r"[A-Za-z0-9_-]{8,128}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 GRANT_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\Z")
@@ -408,6 +412,63 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
     }
 
 
+def _probe_broker_socket(socket_path: Path) -> None:
+    """A successful connect proves the owner-checked UDS is listening."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(1.0)
+            connection.connect(str(socket_path))
+    except (FileNotFoundError, ConnectionRefusedError, socket.timeout) as exc:
+        raise ProvisionHold("BROKER_SOCKET_NOT_READY") from exc
+    except OSError as exc:
+        raise ProvisionHold("BROKER_SOCKET_CONNECT_FAILED") from exc
+
+
+def _wait_for_broker_socket(sock_dir: Path, peer_gid: int) -> None:
+    """Wait for the actual listener; Type=simple does not imply UDS readiness.
+
+    Retry only the known transient NOT_READY state. Wrong ownership, modes or
+    other access errors HOLD immediately, even during first boot.
+    """
+    deadline = time.monotonic() + BROKER_STARTUP_TIMEOUT
+    socket_path = sock_dir / "xhttp-broker.sock"
+    while True:
+        try:
+            directory = sock_dir.lstat()
+            sock = socket_path.lstat()
+        except FileNotFoundError as exc:
+            failure = ProvisionHold("BROKER_SOCKET_NOT_READY")
+            failure.__cause__ = exc
+        except OSError as exc:
+            raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED") from exc
+        else:
+            if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0
+                    or directory.st_gid != peer_gid or stat.S_IMODE(directory.st_mode) != 0o750
+                    or not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 0
+                    or sock.st_gid != peer_gid):
+                raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
+            # Between bind() and chmod(0660), systemd's UMask=0077
+            # creates an owner-only (0700) socket. This narrow, more
+            # restrictive intermediate mode is NOT readiness. Never connect
+            # or enable the Node until the exact final 0660 mode is verified.
+            if stat.S_IMODE(sock.st_mode) == 0o700:
+                failure = ProvisionHold("BROKER_SOCKET_NOT_READY")
+            elif stat.S_IMODE(sock.st_mode) != 0o660:
+                raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
+            else:
+                try:
+                    _probe_broker_socket(socket_path)
+                except ProvisionHold as exc:
+                    if str(exc) != "BROKER_SOCKET_NOT_READY":
+                        raise
+                    failure = exc
+                else:
+                    return
+        if time.monotonic() >= deadline:
+            raise failure
+        time.sleep(BROKER_STARTUP_POLL)
+
+
 def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]:
     """Enable/start the prepared IR broker without grants or live route entries."""
     _check_root(root)
@@ -529,25 +590,31 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
             raise ProvisionHold("BROKER_SYSTEMD_COMMAND_FAILED") from exc
         if result.returncode != 0:
             raise ProvisionHold("BROKER_SYSTEMD_COMMAND_FAILED")
-    for args, expected in ((("is-enabled", SERVICE_NAME), "enabled"),
-                           (("is-active", SERVICE_NAME), "active")):
+    try:
+        result = runner(["systemctl", "is-enabled", SERVICE_NAME], check=False,
+                        capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED") from exc
+    if result.returncode != 0 or result.stdout.strip() != "enabled":
+        raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED")
+
+    # systemd Type=simple returns from start before the Python process binds
+    # and listens. Wait for the only acceptable transient state ("activating"),
+    # never treating inactive/failed as recoverable.
+    active_deadline = time.monotonic() + BROKER_STARTUP_TIMEOUT
+    while True:
         try:
-            result = runner(["systemctl", *args], check=False,
+            result = runner(["systemctl", "is-active", SERVICE_NAME], check=False,
                             capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED") from exc
-        if result.returncode != 0 or result.stdout.strip() != expected:
+        if result.returncode == 0 and result.stdout.strip() == "active":
+            break
+        if result.stdout.strip() != "activating" or time.monotonic() >= active_deadline:
             raise ProvisionHold("BROKER_SYSTEMD_VERIFICATION_FAILED")
-    try:
-        directory = sock_dir.lstat()
-        sock = (sock_dir / "xhttp-broker.sock").lstat()
-    except OSError as exc:
-        raise ProvisionHold("BROKER_SOCKET_NOT_READY") from exc
-    if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0
-            or directory.st_gid != peer_gid or stat.S_IMODE(directory.st_mode) != 0o750
-            or not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 0
-            or sock.st_gid != peer_gid or stat.S_IMODE(sock.st_mode) != 0o660):
-        raise ProvisionHold("BROKER_SOCKET_NOT_TRUSTED")
+        time.sleep(BROKER_STARTUP_POLL)
+
+    _wait_for_broker_socket(sock_dir, peer_gid)
     return {
         "SERVICE_ACTIVATION": "PASS_ACTIVE_PERSISTENT",
         "SERVICE_ENABLED": "YES",

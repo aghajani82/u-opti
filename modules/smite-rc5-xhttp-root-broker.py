@@ -279,6 +279,15 @@ def _receive(connection: socket.socket) -> bytes:
     raise BrokerHold("OVERSIZED_LOCAL_FRAME")
 
 
+def _send_reply(connection: socket.socket, response: str) -> None:
+    """An early-disconnecting health probe must never kill the root broker."""
+    try:
+        connection.sendall((response + "\n").encode("ascii"))
+    except (BrokenPipeError, ConnectionResetError):
+        # The peer has gone away; no route action is retried or authorized.
+        pass
+
+
 def serve() -> None:
     """Explicit local root service command. No TCP listener, no auto-install."""
     if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
@@ -316,7 +325,7 @@ def serve() -> None:
                                     else "HOLD")
                     except Exception:
                         response = "HOLD"
-                    connection.sendall((response + "\n").encode("ascii"))
+                    _send_reply(connection, response)
         finally:
             # Remove only our socket entry; never replace a pre-existing path.
             SOCKET.unlink(missing_ok=True)
