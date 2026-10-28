@@ -122,12 +122,13 @@ class SignedStage15FrpHost(unittest.TestCase):
             }},
         }
         (self.stage / "engines.candidate.json").write_text(json.dumps(self.manifest))
+        (self.stage / "summary.txt").write_text("FRP_ARCH=amd64\nFRP_VERSION=v0.71.0\n")
         self.fake = FakeDocker(self.p)
         self.signed_events = []
         self.env = patch.dict(os.environ, {host.FLAG: "YES"})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.uname = patch.object(host.os, "uname", return_value=types.SimpleNamespace(nodename="kh"))
+        self.uname = patch.object(host.os, "uname", return_value=types.SimpleNamespace(nodename="kh", machine="x86_64"))
         self.uname.start()
         self.addCleanup(self.uname.stop)
         self.pkg = patch.object(host.package, "verify", return_value=True)
@@ -240,7 +241,7 @@ class SignedStage15FrpHost(unittest.TestCase):
     def test_journal_from_another_host_cannot_be_rolled_back(self):
         self.install()
         with patch.object(host.os, "uname",
-                          return_value=types.SimpleNamespace(nodename="ir")):
+                          return_value=types.SimpleNamespace(nodename="ir", machine="x86_64")):
             with self.assertRaisesRegex(host.Hold, "JOURNAL_HOST_ROLE_MISMATCH"):
                 self.rollback()
         self.assertTrue(self.p.journal.exists())
@@ -256,6 +257,13 @@ class SignedStage15FrpHost(unittest.TestCase):
         with self.assertRaisesRegex(host.Hold, "SIGNED_IDENTITY_REPLAY_OR_COMPOSE_DRIFT"):
             self.rollback(recover=True)
         self.assertTrue(self.p.journal.exists())
+
+    def test_official_verified_arm_stage_on_amd64_host_is_denied(self):
+        (self.stage / "summary.txt").write_text("FRP_ARCH=arm64\nFRP_VERSION=v0.71.0\n")
+        with self.assertRaisesRegex(host.Hold, "OFFICIAL_FRP_STAGE_HOST_ARCH_MISMATCH"):
+            self.install()
+        self.assertFalse(self.p.journal.exists())
+        self.assertFalse(self.p.binaries.exists())
 
     def test_host_cli_gated_and_no_other_host_changes(self):
         cmd = subprocess.run([sys.executable, "-B", str(SOURCE), "install",
