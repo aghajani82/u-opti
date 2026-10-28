@@ -154,10 +154,14 @@ managed enrollment must be admitted first.
 on **each** disposable node host, or choose Independent FRP > 4 in U-OPTI.
 The bounded gate verifies the exact local Stage15 Node image ID, the signed
 strict runtime and active Compose overlay, the 127.0.0.1:8888 listener command,
-no published Node ports, expected identity/Replay mounts, and both bundled
-FRP v0.71.0 executable versions. It does **not** read secrets, spend a signed
+no published Node ports, expected identity/Replay mounts, and the **legacy
+FRP v0.65.0** binaries actually bundled by the pinned Stage15 source.
+These binaries are NOT the separate verified v0.71.0 managed FRP candidate.
+Stage15's Dockerfile downloads the v0.65.0 archive without an explicit
+SHA256 pin, so local version reporting is not binary supply-chain attestation. It does **not** read secrets, spend a signed
 nonce, create a tunnel, attest the OCI supply chain, or authorize FRP install.
-Expected success still reports `HOST_FRP_INSTALL=HOLD` and
+Expected success still reports `HOST_FRP_INSTALL=HOLD_VERSION_AND_SIGNED_WSS_ADMISSION`,
+`FRP_0_71_MANAGED_MATCH=NO`, and
 `SIGNED_HMAC_REPLAY_PROOF=NOT_QUERIED`. A `HOLD` is a reason to stop,
 never an invitation to override image IDs or enable the WSS flag.
 

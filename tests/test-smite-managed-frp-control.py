@@ -155,12 +155,15 @@ class FrpOperator(unittest.TestCase):
             if argv[:3] == ["docker", "image", "inspect"]:
                 return control.STAGE15_NODE_ID
             if argv[:3] == ["docker", "exec", "smite-node"]:
-                return "0.71.0"
+                return "0.65.0"
             raise AssertionError(argv)
 
         result = control.stage15_readiness(self.node, run=fake_run)
         self.assertEqual(result["STAGE15_IMAGE"], "PINNED_TEST_ID_MATCH")
-        self.assertEqual(result["HOST_FRP_INSTALL"], "HOLD")
+        self.assertEqual(result["HOST_FRP_INSTALL"], "HOLD_VERSION_AND_SIGNED_WSS_ADMISSION")
+        self.assertEqual(result["FRP_BINARIES"], "STAGE15_BUNDLED_0_65_0")
+        self.assertEqual(result["FRP_0_71_MANAGED_MATCH"], "NO")
+        self.assertEqual(result["BUNDLED_FRP_PROVENANCE"], "NOT_ATTESTED")
         self.assertEqual(result["LIVE_CHANGES"], "NONE")
         self.assertEqual(result["FRP_ENGINE_ENROLLED"], "NO")
         self.assertFalse(any("restart" in argv or "up" in argv for argv in calls))

@@ -109,7 +109,7 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
     """Read-only signed Stage15 Node readiness; never authorizes FRP apply.
 
     Enforces the specific running and tagged image ID, signed runtime,
-    composed security overlay, loopback-only API, and bundled version.
+    composed security overlay, loopback-only API, and source-declared bundled version.
     An image-ID match alone is NOT signed health, replay or live tunnel proof.
     """
     if run is None:
@@ -181,7 +181,7 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
         for name in ("frpc", "frps"):
             version = run(["docker", "exec", "smite-node",
                            "/usr/local/bin/" + name, "--version"])
-            if version.strip().lstrip("v") != "0.71.0":
+            if version.strip().lstrip("v") != "0.65.0":
                 raise Hold("STAGE15_FRP_BINARY_VERSION_DRIFT")
     except (TypeError, KeyError, IndexError, AttributeError, ValueError,
             json.JSONDecodeError) as exc:
@@ -192,11 +192,13 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
         "ROLE": previous["role"],
         "STAGE15_IMAGE": "PINNED_TEST_ID_MATCH",
         "SIGNED_NODE": "HEALTHY_LOCAL_RUNTIME_ONLY",
-        "FRP_BINARIES": "BUNDLED_0_71_0",
+        "FRP_BINARIES": "STAGE15_BUNDLED_0_65_0",
+        "FRP_0_71_MANAGED_MATCH": "NO",
+        "BUNDLED_FRP_PROVENANCE": "NOT_ATTESTED",
         "FRP_ENGINE_ENROLLED": "NO",
         "WSS_ACTIVATION": "NOT_ENABLED",
         "SIGNED_HMAC_REPLAY_PROOF": "NOT_QUERIED",
-        "HOST_FRP_INSTALL": "HOLD",
+        "HOST_FRP_INSTALL": "HOLD_VERSION_AND_SIGNED_WSS_ADMISSION",
         "PUBLIC_PORTS_CHANGED": "NO",
         "LIVE_CHANGES": "NONE",
     }

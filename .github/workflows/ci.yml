@@ -30,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C .stage15-foreign-source rev-parse HEAD)" = "4e16633a304db6c03f7f2911cc7d77213b0c4ec1"
+          python3 -B tests/test-smite-stage15-frp-source-version.py -v
           python3 -m pip install -r .stage15-foreign-source/panel/requirements.txt -r .stage15-foreign-source/node/requirements.txt
           python3 -B tests/test-smite-stage15-foreign-pairing.py -v
           cd .stage15-foreign-source
