@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -231,6 +232,39 @@ class BrokerRegressionTests(unittest.TestCase):
         with self.assertRaises(broker.BrokerHold):
             broker._receive(right)
 
+    def test_broker_survives_early_disconnect_from_socket_health_probe(self):
+        class DisconnectedPeer:
+            def __init__(self, failure):
+                self.failure = failure
+            def sendall(self, data):
+                self.assert_bytes = data
+                raise self.failure
+
+        for failure in (BrokenPipeError(), ConnectionResetError()):
+            with self.subTest(failure=type(failure).__name__):
+                peer = DisconnectedPeer(failure)
+                broker._send_reply(peer, "HOLD")
+                self.assertEqual(peer.assert_bytes, b"HOLD\\n")
+
+    def test_clean_rc_installer_reports_actual_broker_hold_without_secrets(self):
+        installer = (MODULE.parent / "smite-install.sh").read_text()
+        filter_lines = [
+            line.strip() for line in installer.splitlines()
+            if "grep -E" in line and "activation_output" in line
+        ]
+        self.assertEqual(len(filter_lines), 1)
+        output = subprocess.run(
+            ["bash", "-c", filter_lines[0]], check=True,
+            capture_output=True, text=True,
+            env={**os.environ, "activation_output":
+                 "HOLD_BROKER_SOCKET_NOT_READY\\n"
+                 "SERVICE_ENABLED=NO\\nSECRET_KEY=must-not-print\\n"},
+        )
+        self.assertIn("HOLD_BROKER_SOCKET_NOT_READY", output.stderr)
+        self.assertIn("SERVICE_ENABLED=NO", output.stderr)
+        self.assertNotIn("SECRET_KEY", output.stderr)
+        self.assertNotIn("must-not-print", output.stderr)
+
     def test_service_keeps_root_exec_and_public_ports_unavailable(self):
         source = MODULE.read_text()
         self.assertNotIn("shell=True", source)
@@ -447,16 +481,33 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             sock_dir = root / "run/u-opti/smite"
             sock = sock_dir / "xhttp-broker.sock"
             original_lstat = Path.lstat
+            socket_checks = 0
+            connection_checks = 0
             def lstat_with_mocked_service_socket(path):
+                nonlocal socket_checks
                 if path == sock_dir:
                     return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750,
                                            st_uid=0, st_gid=PEER_GID)
                 if path == sock:
+                    socket_checks += 1
+                    if socket_checks <= 2:
+                        raise FileNotFoundError("systemd returned before bind")
                     return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660,
                                            st_uid=0, st_gid=PEER_GID)
                 return original_lstat(path)
-            with patch.object(Path, "lstat", lstat_with_mocked_service_socket):
+            def listener_ready_after_one_refusal(path):
+                nonlocal connection_checks
+                connection_checks += 1
+                if connection_checks == 1:
+                    raise provisioner.ProvisionHold("BROKER_SOCKET_NOT_READY")
+            with patch.object(Path, "lstat", lstat_with_mocked_service_socket), \\
+                 patch.object(provisioner, "_probe_broker_socket",
+                              side_effect=listener_ready_after_one_refusal), \\
+                 patch.object(provisioner.time, "sleep", return_value=None) as sleep:
                 result = provisioner.activate(root=root, runner=fake_systemctl)
+            self.assertEqual(socket_checks, 4)
+            self.assertEqual(connection_checks, 2)
+            self.assertEqual(sleep.call_count, 3)
             self.assertEqual(result["SERVICE_ACTIVATION"], "PASS_ACTIVE_PERSISTENT")
             self.assertEqual(result["TRUSTED_GRANTS"], "UNCHANGED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
@@ -478,6 +529,44 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
             self.assertNotIn("ReadWritePaths=/run/lock/u-opti-smite-engine.lock", repaired_unit)
             self.assertNotIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
+
+    def test_activation_socket_readiness_timeout_does_not_bypass_hold(self):
+        repo = Path(__file__).resolve().parents[1]
+        source = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_startup_timeout_test", source)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+        with patch.object(Path, "lstat", side_effect=FileNotFoundError), \\
+             patch.object(provisioner.time, "monotonic",
+                          side_effect=[100.0, 111.0]), \\
+             patch.object(provisioner.time, "sleep") as sleep:
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_SOCKET_NOT_READY"):
+                provisioner._wait_for_broker_socket(Path("/run/u-opti/smite"), PEER_GID)
+            sleep.assert_not_called()
+
+    def test_activation_socket_wrong_owner_fails_immediately(self):
+        repo = Path(__file__).resolve().parents[1]
+        source = repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location("broker_socket_owner_test", source)
+        provisioner = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = provisioner
+        spec.loader.exec_module(provisioner)
+        def mocked_stat(path):
+            if path.name == "xhttp-broker.sock":
+                return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660,
+                                       st_uid=123, st_gid=PEER_GID)
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750,
+                                   st_uid=0, st_gid=PEER_GID)
+        with patch.object(Path, "lstat", side_effect=mocked_stat), \\
+             patch.object(provisioner.time, "sleep") as sleep, \\
+             patch.object(provisioner, "_probe_broker_socket") as probe:
+            with self.assertRaisesRegex(provisioner.ProvisionHold,
+                                        "BROKER_SOCKET_NOT_TRUSTED"):
+                provisioner._wait_for_broker_socket(Path("/run/u-opti/smite"), PEER_GID)
+            sleep.assert_not_called()
+            probe.assert_not_called()
 
     def test_activation_holds_if_systemd_does_not_confirm_active(self):
         repo = Path(__file__).resolve().parents[1]
