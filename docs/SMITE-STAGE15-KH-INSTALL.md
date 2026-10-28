@@ -165,6 +165,24 @@ Expected success still reports `HOST_FRP_INSTALL=HOLD_VERSION_AND_SIGNED_WSS_ADM
 `SIGNED_HMAC_REPLAY_PROOF=NOT_QUERIED`. A `HOLD` is a reason to stop,
 never an invitation to override image IDs or enable the WSS flag.
 
+**Signed Compose-only v0.71 migration review (no installation):** the
+`modules/smite-stage15-frp-compose-plan.py` source-side helper can evaluate an
+existing **officially verified FRP v0.71.0 offline stage** without applying it.
+Its `plan --stage <verified-stage>` checks that *both* official binaries would
+be mounted read-only at the reviewed host root, and compares fully resolved
+Stage15 Node Compose before and after the proposal. Only those two mounts may
+change; the in-memory proposal sets `bind.create_host_path=false` so Docker
+cannot invent missing binary files at activation time. The original official
+staged overlay remains independently verified. Signed auth, identity, Replay,
+loopback API, Sanaei and all other
+effective config must be byte-equivalent in the resolved JSON structure.
+The built-in legacy v0.65.0 files would be shadowed only by verified v0.71.0
+bind mounts **if a future separately audited transaction actually installs
+and activates them**. This helper has no apply/install action, writes nothing,
+and ends with `APPLY_ALLOWED=NO` and `FRP_HOST_TRANSACTION=NOT_IMPLEMENTED`.
+It is CI/source review, not a supported command to run on live IR/KH until
+package deployment and signed rollback tooling have been released.
+
 Additionally, `SMITE_FRP_STANDARD_WSS=1` is not set by the Clean-RC installer.
 The existing shared-child implementation requires it; without it, a shared child
 fails before mutation. Historical RC.2 WSS activation helpers pin different
