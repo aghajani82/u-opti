@@ -59,6 +59,8 @@ jobs:
           path: .managed-smite-source
           persist-credentials: false
       - name: Signed official FRP dual-binary Compose recreation and rollback
+        env:
+          SMITE_CI_STRICT_REPLAY_BOOTSTRAP: stage15
         shell: bash
         run: |
           bash -n tests/test-smite-managed-frp-signed-compose.sh
