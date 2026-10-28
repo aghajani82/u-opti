@@ -2,6 +2,7 @@
 """Offline-only RC5 U-OPTI bridge transaction tests; no real host service calls."""
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 from pathlib import Path
@@ -93,6 +94,76 @@ class BridgeInstallTests(unittest.TestCase):
         for p in mocks:
             p.start()
             self.addCleanup(p.stop)
+
+    def use_bootstrap_directory(self):
+        self.route_dir.mkdir(mode=0o755)
+        self.plan_obj = dataclasses.replace(self.plan_obj, route_dir_preexisting=True)
+        tx.admission.audit_read_only.return_value = self.plan_obj
+
+    def test_clean_rc_empty_directory_preserved_after_apply_verify_and_rollback(self):
+        self.use_bootstrap_directory()
+        before = self.route_dir.stat()
+        tx.plan()
+        self.assertFalse(self.journal.exists())
+        tx.apply()
+        tx.verify()
+        self.assertTrue(json.loads(self.journal.read_text())["route_dir_preexisting"])
+        tx.rollback()
+        after = self.route_dir.stat()
+        self.assertEqual((before.st_ino, before.st_mode), (after.st_ino, after.st_mode))
+        self.assertFalse(self.bridge.exists())
+        self.assertEqual(self.backend.read_bytes(), fixture.BACKEND)
+
+    def test_clean_rc_reload_failure_preserves_bootstrap_directory(self):
+        self.use_bootstrap_directory()
+        self.break_first_reload = True
+        with self.assertRaisesRegex(tx.Hold, "APPLY_FAILED_ROLLED_BACK"):
+            tx.apply()
+        self.assertTrue(self.route_dir.is_dir())
+        self.assertEqual(self.route_dir.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.backend.read_bytes(), fixture.BACKEND)
+
+    def test_preexisting_directory_rejects_unsafe_modes_owners_symlink_and_contents(self):
+        self.use_bootstrap_directory()
+        for mode in (0o777, 0o775, 0o700, 0o2755):
+            self.route_dir.chmod(mode)
+            with self.assertRaises(tx.admission.BridgeHold): tx.plan()
+        self.route_dir.chmod(0o755)
+        real_lstat = Path.lstat
+        for uid, gid in ((1, 0), (0, 1)):
+            def wrong_owner(path, *args, **kwargs):
+                value = real_lstat(path, *args, **kwargs)
+                if path == self.route_dir:
+                    fields = list(value)
+                    fields[4:6] = [uid, gid]
+                    return os.stat_result(fields)
+                return value
+            with patch.object(Path, 'lstat', wrong_owner):
+                with self.assertRaises(tx.admission.BridgeHold): tx.plan()
+        (self.route_dir / 'existing.conf').write_text('unreviewed route')
+        with self.assertRaises(tx.admission.BridgeHold): tx.plan()
+        (self.route_dir / 'existing.conf').unlink()
+        self.route_dir.rmdir()
+        self.route_dir.symlink_to(self.etc, target_is_directory=True)
+        with self.assertRaises(tx.admission.BridgeHold): tx.plan()
+        self.assertFalse(self.journal.exists())
+
+    def test_preexisting_directory_with_later_route_still_blocks_rollback(self):
+        self.use_bootstrap_directory()
+        tx.apply()
+        (self.route_dir / 'route.conf').write_text('later route')
+        with self.assertRaisesRegex(tx.Hold, "MANAGED_ROUTES_REQUIRE_REVIEW"):
+            tx.rollback()
+        self.assertTrue(self.bridge.exists())
+
+    def test_old_schema_one_transaction_remains_recoverable(self):
+        tx.prepare(self.plan_obj)
+        record = json.loads(self.journal.read_text())
+        record['schema'] = 1
+        del record['route_dir_preexisting']
+        self.journal.write_text(json.dumps(record))
+        tx.rollback()
+        self.assertEqual(json.loads(self.journal.read_text())['state'], 'ROLLED_BACK')
 
     def test_plan_creates_no_files_or_service_changes(self):
         tx.plan()

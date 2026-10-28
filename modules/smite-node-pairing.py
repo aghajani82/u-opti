@@ -777,20 +777,7 @@ def _provision_replay_once() -> None:
     # the immutable ID for one-time offline Replay provisioning. Do not
     # broaden acceptance to arbitrary local tags or disable signed checks.
     if image == "smite-node:stage15-local":
-        pinned_id = (
-            "sha256:a417e8c28426da5eaf16d59925d5c89b52dbf7849ca560dfa9a765a1266b3991"
-        )
-        running_id = _run(
-            ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
-            timeout=10, capture=True,
-        )
-        local_id = _run(
-            ["docker", "image", "inspect", "-f", "{{.Id}}", image],
-            timeout=10, capture=True,
-        )
-        if running_id != pinned_id or local_id != pinned_id:
-            raise WizardHold("Local Stage15 Node image identity is not the pinned verified image")
-        replay_image = pinned_id
+        replay_image = _require_stage15_identity("node")
     elif re.fullmatch(r"ghcr\.io/aghajani82/smite-node@sha256:[a-f0-9]{64}", image):
         replay_image = image  # Existing immutable GHCR path remains unchanged.
     else:
@@ -1080,14 +1067,69 @@ def _approved_foreign_control_url(url: str) -> tuple[str, str]:
     return f"https://{host}:443", f"https://{host}{parts.path}"
 
 
+# Stage15 source 4e16633a304db6c03f7f2911cc7d77213b0c4ec1; independently
+# verified build IDs in Smite run 40461876836 / job 122048191494.
+# Test artifacts only: never registry digests or production attestations.
+_STAGE15_IMAGE_IDS = {
+    "panel": "sha256:51f7e45e06e8cc59f4f04972090962b9c8d6db8aad2ec1591fc5ede0da112ae9",
+    "node": "sha256:a417e8c28426da5eaf16d59925d5c89b52dbf7849ca560dfa9a765a1266b3991",
+}
+
+
+def _require_stage15_identity(role: str) -> str:
+    if role not in _STAGE15_IMAGE_IDS:
+        raise WizardHold("Unknown Stage15 image role")
+    name = "smite-" + role
+    tag = name + ":stage15-local"
+    expected = _STAGE15_IMAGE_IDS[role]
+    running = _run(["docker", "inspect", "-f", "{{.Image}}", name],
+                   timeout=10, capture=True)
+    local = _run(["docker", "image", "inspect", "-f", "{{.Id}}", tag],
+                 timeout=10, capture=True)
+    if running != expected or local != expected:
+        raise WizardHold("Stage15 running image and local tag must match the reviewed build")
+    return expected
+
+
+def _require_stage15_foreign_compose(url: str, panel: str) -> None:
+    """Check the resolved clean-install configuration before signed activation."""
+    raw = _run(["docker", "compose", "-f", str(NODE_COMPOSE),
+                "config", "--format", "json"], timeout=30, capture=True)
+    try:
+        service = json.loads(raw)["services"]["smite-node"]
+        env = service["environment"]
+        command = service["command"]
+        if (
+            service.get("image") != "smite-node:stage15-local"
+            or service.get("network_mode") != "host"
+            or service.get("ports") or service.get("privileged")
+            or not isinstance(command, list)
+            or command[:3] != ["uvicorn", "main:app", "--host"]
+            or command[3:6] != ["127.0.0.1", "--port", "8888"]
+            or env.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
+            or env.get("SMITE_AGENT_AUTH_MODE") != "strict"
+            or env.get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
+            or env.get("PANEL_ADDRESS") != panel + ":443"
+            or env.get("SMITE_CONTROL_ADDRESS") != url
+        ):
+            raise WizardHold("Stage15 Foreign effective Compose security has drifted")
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise WizardHold("Stage15 Foreign effective Compose invalid") from exc
+    if _run(["docker", "inspect", "-f", "{{.State.Health.Status}}", "smite-node"],
+            timeout=10, capture=True) != "healthy":
+        raise WizardHold("Stage15 Foreign Node is not healthy")
+
+
 def _require_panel_foreign_transport() -> None:
-    """Refuse IR approval until a new signed Panel image understands KH prefix."""
+    """Admit reviewed image identity AND the path-pinned signed implementation."""
     image = _run(
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-panel"],
         timeout=10, capture=True,
     )
-    if image != _FOREIGN_PANEL_IMAGE_RC2:
-        raise WizardHold("Panel must run the exact reviewed signed RC.2 image")
+    if image == "smite-panel:stage15-local":
+        _require_stage15_identity("panel")
+    elif image != _FOREIGN_PANEL_IMAGE_RC2:
+        raise WizardHold("Panel must run exact reviewed RC.2 or pinned Stage15 with foreign HMAC support")
     check = r"""
 import inspect
 from app.signed_agent_transport import validate_foreign_gateway_prefix, signed_agent_call
@@ -1290,7 +1332,12 @@ def _foreign_gateway_preflight(
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
         capture=True, timeout=10,
     )
-    if running != expected_image:
+    if running == "smite-node:stage15-local" and expected_image == _FOREIGN_NODE_IMAGE:
+        # The ordinary wizard supports this exact proven Clean-RC pair.
+        # The separately frozen RC.2 lane must never accept local substitutes.
+        _require_stage15_identity("node")
+        _require_stage15_foreign_compose(url, panel)
+    elif running != expected_image:
         raise WizardHold("Foreign Node image differs from the exact approved digest")
     if expected_image == _FOREIGN_NODE_IMAGE_RC2:
         # Refuse a one-line image pin swap unless *all* paused/strict managed

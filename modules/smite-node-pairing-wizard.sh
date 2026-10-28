@@ -91,13 +91,13 @@ smite_node_pairing_menu() {
                 echo "  6. Activate signed IR runtime."
                 echo "  7. Require Node->Panel signed check-in AND Panel->Node HMAC/replay PASS."
                 echo
-                echo "KH remains untouched until the reviewed foreign-origin"
-                echo "approval is installed on IR and signed Panel image is updated."
+                echo "KH order: install Foreign Node, install/attach Sanaei, configure Gateway."
+                echo "Then reserve KH on Panel, approve its origin on IR, redeem on KH, activate KH."
                 ;;
             7)
                 echo
                 echo "KH ONLY: requires externally approved foreign Node origin"
-                echo "on IR, newly verified signed Panel image and one-time identity."
+                echo "on IR, reviewed RC.2 or pinned Stage15 Panel and one-time identity."
                 echo "This command will apply the signed security overlay, create"
                 echo "durable local Replay state, and may recreate ONLY smite-node."
                 echo "Failure attempts a paused/strict Node rollback; identity and"
@@ -113,7 +113,7 @@ smite_node_pairing_menu() {
             8)
                 echo
                 echo "IR ONLY: requires an admin-reserved pending KH Node UUID,"
-                echo "new signed Panel image with pinned HTTPS/443 path support,"
+                echo "reviewed Panel image with pinned HTTPS/443 path support,"
                 echo "and verified remote TLS. This records an exact trusted"
                 echo "origin without restarting Panel or creating pairing codes."
                 read -rp "Type APPROVE-KH-PIN to continue: " answer || return 2

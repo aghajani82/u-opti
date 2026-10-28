@@ -130,6 +130,11 @@ class BridgeAdmissionTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(tx.BridgeHold):
                 self.plan(**item)
 
+    def test_explicit_validated_empty_bootstrap_directory_keeps_same_backend_diff(self):
+        result = self.plan(directory_exists=True, directory_prepared=True)
+        self.assertTrue(result.route_dir_preexisting)
+        self.assertEqual(result.candidate, self.plan().candidate)
+
     def test_reject_competing_legacy_timer_or_bridge_and_untrusted_sources(self):
         for item in (
             {"timer_enabled": True},

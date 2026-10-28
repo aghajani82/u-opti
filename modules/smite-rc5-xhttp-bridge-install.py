@@ -195,7 +195,8 @@ def lock_host() -> int:
 
 def journal_payload(state: str, plan: admission.BridgePlan) -> dict:
     return {
-        "schema": 1,
+        "schema": 2,
+        "route_dir_preexisting": plan.route_dir_preexisting,
         "state": state,
         "domain": plan.domain,
         "before_sha": digest(plan.original),
@@ -232,9 +233,13 @@ def read_record() -> tuple[dict, bytes, bytes]:
         record = json.loads(raw)
     except (ValueError, TypeError) as exc:
         raise Hold("INVALID_TRANSACTION_JOURNAL") from exc
-    require(isinstance(record, dict) and set(record) == {
-        "schema", "state", "domain", "before_sha", "after_sha", "bridge_sha",
-    } and record["schema"] == 1
+    old_keys = {"schema", "state", "domain", "before_sha", "after_sha", "bridge_sha"}
+    require(isinstance(record, dict) and (
+        (set(record) == old_keys and record.get("schema") == 1)
+        or (set(record) == old_keys | {"route_dir_preexisting"}
+            and record.get("schema") == 2
+            and type(record.get("route_dir_preexisting")) is bool)
+    )
         and record["state"] in ("PREPARED", "COMMITTED", "ROLLED_BACK")
         and isinstance(record["domain"], str)
         and admission.DOMAIN.fullmatch(record["domain"])
@@ -268,15 +273,17 @@ def rollback_known(record: dict, original: bytes, candidate: bytes) -> None:
         require(trusted_file(BRIDGE, mode=0o644) == BRIDGE_BYTES,
                 "BRIDGE_EXTERNAL_DRIFT")
     if not absent(ROUTE_DIR):
-        trusted_dir(ROUTE_DIR, mode=0o700)
+        trusted_dir(ROUTE_DIR, mode=0o755 if record.get("route_dir_preexisting", False) else 0o700)
         require(not any(ROUTE_DIR.iterdir()), "MANAGED_ROUTES_REQUIRE_REVIEW")
+    elif record.get("route_dir_preexisting", False):
+        raise Hold("PREEXISTING_ROUTE_DIRECTORY_MISSING")
 
     if current_backend == candidate:
         replace_file(BACKEND, original, 0o644)
     if not absent(BRIDGE):
         BRIDGE.unlink()
         sync_dir(BRIDGE.parent)
-    if not absent(ROUTE_DIR):
+    if not absent(ROUTE_DIR) and not record.get("route_dir_preexisting", False):
         ROUTE_DIR.rmdir()
         sync_dir(ROUTE_DIR.parent)
 
@@ -290,8 +297,10 @@ def plan() -> admission.BridgePlan:
     host_gate()
     require(absent(TX_DIR) and absent(JOURNAL),
             "EXISTING_TX_REQUIRES_REVIEW")
-    require(absent(BRIDGE) and absent(ROUTE_DIR), "BRIDGE_ALREADY_PRESENT")
+    require(absent(BRIDGE), "BRIDGE_ALREADY_PRESENT")
+    preexisting = admission.checked_empty_route_directory(ROUTE_DIR)
     result = admission.audit_read_only()
+    require(result.route_dir_preexisting == preexisting, "ROUTE_DIRECTORY_CHANGED")
     require(trusted_file(BACKEND, mode=0o644) == result.original,
             "BACKEND_CHANGED")
     return result
@@ -306,10 +315,15 @@ def apply() -> None:
         record = prepare(result)
         try:
             # No route is published here: empty directory + bridge only.
-            require(absent(ROUTE_DIR) and absent(BRIDGE), "BRIDGE_ALREADY_PRESENT")
-            ROUTE_DIR.mkdir(mode=0o700)
-            sync_dir(ROUTE_DIR.parent)
-            trusted_dir(ROUTE_DIR, mode=0o700)
+            require(absent(BRIDGE), "BRIDGE_ALREADY_PRESENT")
+            if record["route_dir_preexisting"]:
+                require(admission.checked_empty_route_directory(ROUTE_DIR),
+                        "PREEXISTING_ROUTE_DIRECTORY_MISSING")
+            else:
+                require(absent(ROUTE_DIR), "ROUTE_DIRECTORY_CHANGED")
+                ROUTE_DIR.mkdir(mode=0o700)
+                sync_dir(ROUTE_DIR.parent)
+                trusted_dir(ROUTE_DIR, mode=0o700)
             new_file(BRIDGE, BRIDGE_BYTES, 0o644)
             require(trusted_file(BACKEND, mode=0o644) == result.original,
                     "BACKEND_CHANGED_BEFORE_COMMIT")
@@ -343,7 +357,7 @@ def verify() -> None:
     require(trusted_file(BACKEND, mode=0o644) == candidate
             and trusted_file(BRIDGE, mode=0o644) == BRIDGE_BYTES,
             "BRIDGE_CONTENT_DRIFT")
-    trusted_dir(ROUTE_DIR, mode=0o700)
+    trusted_dir(ROUTE_DIR, mode=0o755 if record.get("route_dir_preexisting", False) else 0o700)
     nginx_test()
     verify_effective_bridge()
     probe_panel(record["domain"])

@@ -12,6 +12,10 @@
 # input normalization. On 2026-10-28 only the sanitized Broker HOLD diagnostic
 # in smite-install.sh was deliberately changed and its entire reviewed blob
 # was re-pinned; all other wizard sources remain pinned against drift.
+# 2026-10-28 PR #65: re-pin the reviewed installer after the isolated KH-only
+# paused/strict Sanaei attachment guard and its explicit Foreign Gateway menu
+# entry. Existing independent/private setup wizard blobs remain unchanged.
+# The Clean-RC safety and signed KH compatibility suites test behavior.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -31,7 +35,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-4c1be8a4b4a3c09eec3ea2f2b5de21e49c827052 modules/smite-install.sh
+f843733acece4afe2d3c86e6e454470caf4241c3 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh

@@ -42,6 +42,7 @@ class BridgePlan:
     domain: str
     destination: str
     change_count: int
+    route_dir_preexisting: bool = False
 
 
 def _one(data: bytes, value: bytes, hold: str) -> None:
@@ -52,7 +53,7 @@ def _one(data: bytes, value: bytes, hold: str) -> None:
 def propose_bridge(
     *, backend: bytes, stream: bytes, sni_map: bytes,
     legacy: bytes, domain: str, timer_enabled: bool,
-    bridge_exists: bool, directory_exists: bool,
+    bridge_exists: bool, directory_exists: bool, directory_prepared: bool = False,
 ) -> BridgePlan:
     """Validate a known U-OPTI stream/TLS backend pair, then plan one diff.
 
@@ -63,7 +64,7 @@ def propose_bridge(
         raise BridgeHold("INVALID_PANEL_DOMAIN")
     if timer_enabled:
         raise BridgeHold("LEGACY_XHTTP_TIMER_UNSAFE")
-    if bridge_exists or directory_exists:
+    if bridge_exists or (directory_exists and not directory_prepared):
         raise BridgeHold("EXISTING_BRIDGE_REQUIRES_MIGRATION_REVIEW")
     for data in (backend, stream, sni_map, legacy):
         if not isinstance(data, bytes) or not 0 < len(data) <= MAX_BYTES:
@@ -119,7 +120,7 @@ def propose_bridge(
         raise BridgeHold("CANDIDATE_NOT_UNIQUE")
     if candidate.replace(INCLUDE + b"\n", b"", 1) != backend:
         raise BridgeHold("UNRELATED_BACKEND_MUTATION")
-    return BridgePlan(backend, candidate, domain, str(BACKEND), 1)
+    return BridgePlan(backend, candidate, domain, str(BACKEND), 1, directory_exists)
 
 
 def _read_root_file(path: Path) -> bytes:
@@ -176,13 +177,24 @@ def _timer_is_unsafe() -> bool:
     return False
 
 
+def checked_empty_route_directory(path: Path) -> bool:
+    """Admit only the empty root:root 0755 directory made by Clean-RC bootstrap."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o755 or any(path.iterdir())):
+        raise BridgeHold("UNTRUSTED_OR_NONEMPTY_ROUTE_DIRECTORY")
+    return True
+
+
 def audit_read_only() -> BridgePlan:
     if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
         raise BridgeHold("IR_ROOT_ONLY")
-    for p in (BRIDGE, ROUTE_DIR):
-        # Never inherit an existing unmanaged bridge or route directory.
-        if p.exists() or p.is_symlink():
-            raise BridgeHold("BRIDGE_ALREADY_PRESENT")
+    if BRIDGE.exists() or BRIDGE.is_symlink():
+        raise BridgeHold("BRIDGE_ALREADY_PRESENT")
+    preexisting = checked_empty_route_directory(ROUTE_DIR)
     source = {p: _read_root_file(p) for p in (BACKEND, STREAM, SNI_MAP, LEGACY, STATE)}
     domain = _state_domain(source[STATE])
     if source[STATE].splitlines().count(b"SMITE_CONNECTION_MODE=standard") != 1:
@@ -199,7 +211,7 @@ def audit_read_only() -> BridgePlan:
         backend=source[BACKEND], stream=source[STREAM],
         sni_map=source[SNI_MAP], legacy=source[LEGACY], domain=domain,
         timer_enabled=_timer_is_unsafe(), bridge_exists=False,
-        directory_exists=False,
+        directory_exists=preexisting, directory_prepared=preexisting,
     )
 
 
