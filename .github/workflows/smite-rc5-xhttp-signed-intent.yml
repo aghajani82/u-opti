@@ -3,6 +3,9 @@ name: U-OPTI RC5 Signed XHTTP Route Intent (offline)
 on:
   pull_request:
     paths:
+      - 'modules/smite-node-auth-candidate.py'
+      - 'modules/smite-node-pairing.py'
+      - 'tests/test-smite-stage15-pairing-regression.py'
       - 'modules/smite-rc5-xhttp-signed-intent.py'
       - 'tests/test-smite-rc5-xhttp-signed-intent.py'
       - 'docs/SMITE-RC5-XHTTP-SIGNED-INTENT-BOUNDARY.md'

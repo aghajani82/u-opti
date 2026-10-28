@@ -3,6 +3,9 @@ name: U-OPTI Smite RC5 XHTTP Bridge Transaction (offline)
 on:
   pull_request:
     paths:
+      - 'modules/smite-node-auth-candidate.py'
+      - 'modules/smite-node-pairing.py'
+      - 'tests/test-smite-stage15-pairing-regression.py'
       - 'modules/smite-rc5-xhttp-bridge-admission.py'
       - 'modules/smite-rc5-xhttp-bridge-install.py'
       - 'tests/test-smite-rc5-xhttp-bridge-admission.py'

@@ -337,6 +337,27 @@ def _env_update(raw: bytes, updates: dict[str, str]) -> bytes:
     return ("\n".join(out).rstrip("\n") + "\n").encode("utf-8")
 
 
+def _host_failure_context(command: list[str], stderr: str = "") -> str:
+    """Only fixed labels may cross the subprocess diagnostic boundary."""
+    if command == ["python3", "-B", str(CANDIDATE_HELPER), "--prepare"]:
+        reasons = {
+            "HOLD: Private directory must be owned and mode 0700": "private-directory-permissions",
+            "HOLD: Replay storage anchor is unsafe": "unsafe-storage-anchor",
+            "HOLD: Replay storage anchor is unavailable": "missing-storage-anchor",
+            "HOLD: Refusing symlinked private directory": "symlinked-private-directory",
+            "HOLD: Replay storage hierarchy is ambiguous or symlinked": "unsafe-storage-hierarchy",
+        }
+        reason = reasons.get(stderr.strip(), "helper-failed")
+        return "security-candidate-prepare/" + reason
+    if command[:2] == ["docker", "run"]:
+        return "offline-replay-enrollment"
+    if command[:2] == ["docker", "inspect"] or command[:3] == ["docker", "image", "inspect"]:
+        return "docker-inspection"
+    if command[:2] == ["docker", "compose"]:
+        return "docker-compose"
+    return "host-operation"
+
+
 def _run(command: list[str], *, timeout: int = 60, capture: bool = False) -> str:
     try:
         completed = subprocess.run(
@@ -349,10 +370,16 @@ def _run(command: list[str], *, timeout: int = 60, capture: bool = False) -> str
             check=False,
             env={**os.environ, "LC_ALL": "C"},
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise WizardHold("Required host operation failed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WizardHold("Host operation timed out [" + _host_failure_context(command) + "]") from exc
+    except OSError as exc:
+        raise WizardHold("Host operation unavailable [" + _host_failure_context(command) + "]") from exc
     if completed.returncode != 0:
-        raise WizardHold("Required host operation was rejected")
+        raise WizardHold(
+            "Required host operation was rejected ["
+            + _host_failure_context(command, completed.stderr)
+            + f"; exit={completed.returncode}]"
+        )
     return completed.stdout.strip() if capture else ""
 
 
@@ -743,15 +770,38 @@ def _provision_replay_once() -> None:
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
         timeout=10, capture=True,
     )
-    if not re.fullmatch(r"ghcr\.io/aghajani82/smite-node@sha256:[a-f0-9]{64}", image):
-        raise WizardHold("Active Node is not an immutable signed Field Trial image")
+    # Independently reviewed Smite Stage15 run 40461876836, job 122048191494,
+    # source 4e16633a304db6c03f7f2911cc7d77213b0c4ec1. This is a test-only
+    # Docker image ID, NOT a signed production registry digest. Recheck the running
+    # container and the local tag to the exact reviewed IMAGE ID; use only
+    # the immutable ID for one-time offline Replay provisioning. Do not
+    # broaden acceptance to arbitrary local tags or disable signed checks.
+    if image == "smite-node:stage15-local":
+        pinned_id = (
+            "sha256:a417e8c28426da5eaf16d59925d5c89b52dbf7849ca560dfa9a765a1266b3991"
+        )
+        running_id = _run(
+            ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
+            timeout=10, capture=True,
+        )
+        local_id = _run(
+            ["docker", "image", "inspect", "-f", "{{.Id}}", image],
+            timeout=10, capture=True,
+        )
+        if running_id != pinned_id or local_id != pinned_id:
+            raise WizardHold("Local Stage15 Node image identity is not the pinned verified image")
+        replay_image = pinned_id
+    elif re.fullmatch(r"ghcr\.io/aghajani82/smite-node@sha256:[a-f0-9]{64}", image):
+        replay_image = image  # Existing immutable GHCR path remains unchanged.
+    else:
+        raise WizardHold("Active Node is not an admitted immutable Field Trial image")
     output = _run(
         [
-            "docker", "run", "--rm", "--network", "none",
+            "docker", "run", "--rm", "--pull", "never", "--network", "none",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--mount", f"type=bind,source={IDENTITY_DIR},target=/run/smite-node-identity",
             "--mount", f"type=bind,source={REPLAY_DIR},target=/var/lib/smite-node/auth",
-            "--entrypoint", "python3", image,
+            "--entrypoint", "python3", replay_image,
             "-m", "app.replay_enrollment",
             "--identity", CONTAINER_IDENTITY,
             "--replay-db", CONTAINER_REPLAY,

@@ -3,6 +3,9 @@ name: Smite RC2 Independent Signed Registry Admission
 on:
   pull_request:
     paths:
+      - 'modules/smite-node-auth-candidate.py'
+      - 'modules/smite-node-pairing.py'
+      - 'tests/test-smite-stage15-pairing-regression.py'
       - 'modules/smite-rc2-signed-registry-candidate.json'
       - 'modules/smite-registry-pair-admission.py'
       - '.github/workflows/smite-rc2-independent-registry.yml'

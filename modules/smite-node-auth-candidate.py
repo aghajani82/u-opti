@@ -97,20 +97,26 @@ def _trusted_storage_anchor(path: Path) -> None:
 
 
 def _create_private_hierarchy(path: Path) -> None:
-    """Create three private levels below a trusted, existing host anchor.
+    """Create dedicated private replay storage under a trusted shared parent.
 
-    Default production path:
-      /var/lib                    (trusted existing anchor)
-      /var/lib/u-opti             (0700)
-      /var/lib/u-opti/smite-node-security (0700)
-      .../replay                  (0700)
+    /var/lib and /var/lib/u-opti must be root-owned and not group/other
+    writable. A pre-existing shared /var/lib/u-opti may have mode 0755;
+    changing it to 0700 could break unrelated U-OPTI components. Only
+    smite-node-security and replay are strictly private (mode 0700).
     """
     if not path.is_absolute() or len(path.parents) < 3:
         raise StageHold("Replay storage path is not an admitted absolute layout")
     anchor = path.parents[2]
     _trusted_storage_anchor(anchor)
-    expected_parent = anchor
-    for component in (path.parents[1], path.parent, path):
+    shared_parent = path.parents[1]
+    if shared_parent.parent != anchor or shared_parent.is_symlink():
+        raise StageHold("Replay storage hierarchy is ambiguous or symlinked")
+    if shared_parent.exists():
+        _trusted_storage_anchor(shared_parent)
+    else:
+        _create_private_directory(shared_parent)
+    expected_parent = shared_parent
+    for component in (path.parent, path):
         if component.parent != expected_parent:
             raise StageHold("Replay storage hierarchy is ambiguous")
         _create_private_directory(component)
