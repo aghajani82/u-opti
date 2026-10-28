@@ -81,7 +81,7 @@ class Stage15FrpComposePlan(unittest.TestCase):
             self.assertNotIn("-", args)
             return json.dumps(self.base)
         self.assertEqual(stdin, plan.OVERLAY)
-        self.assertEqual(args[-4:], ["-f", "-", "config", "--format", "json"][-4:]) if False else None
+        self.assertEqual(args[-5:], ["-f", "-", "config", "--format", "json"])
         return json.dumps(self.future)
 
     def check(self):
