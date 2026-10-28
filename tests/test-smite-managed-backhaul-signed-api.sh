@@ -96,9 +96,14 @@ fi
 # container; preserve the marker on identity storage for every restart.
 image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
 replay_mode="${SMITE_CI_STRICT_REPLAY_BOOTSTRAP:-0}"
-case "$replay_mode" in 0|1) ;; *) echo "HOLD: invalid CI replay mode" >&2; exit 2 ;; esac
-if [[ "$replay_mode" == 1 ]]; then
-  expected_smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
+case "$replay_mode" in 0|1|stage15) ;; *) echo "HOLD: invalid CI replay mode" >&2; exit 2 ;; esac
+if [[ "$replay_mode" != 0 ]]; then
+  if [[ "$replay_mode" == stage15 ]]; then
+    [[ "$engine" == frp ]] || { echo 'HOLD: Stage15 replay lane requires FRP'; exit 2; }
+    expected_smite_sha="4e16633a304db6c03f7f2911cc7d77213b0c4ec1"
+  else
+    expected_smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
+  fi
   [[ "$(git -C "$smite" rev-parse HEAD)" == "$expected_smite_sha" ]] || {
     echo "HOLD: reviewed strict replay Smite source SHA mismatch" >&2
     exit 2
@@ -281,7 +286,8 @@ if mode == "after-restart":
         old_headers = json.load(f)
     assert request("GET", endpoint, headers=old_headers)[0] == 401, "replay accepted after Node restart"
 else:
-    assert request("GET", endpoint)[0] == 401, "unsigned inventory accepted"
+    unsigned_status = request("GET", endpoint)[0]
+    assert unsigned_status == 401, ("expected unsigned rejection 401", unsigned_status)
     assert request("GET", endpoint, headers=signed("GET", endpoint, key="a"*64))[0] == 401, "wrong signature accepted"
 
 headers = signed("GET", endpoint)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -96,12 +97,13 @@ def _elf(binary: bytes, *, arch: str) -> None:
 def unpack(archive: Path, *, arch: str, trusted_sha: str) -> dict[str, bytes]:
     if arch not in OFFICIAL_TAR_SHA256 or not SHA.fullmatch(trusted_sha):
         raise Hold("INVALID_ARCH_OR_SHA")
-    if hashlib.sha256(shared._file(archive, max_size=ARCHIVE_MAX)).hexdigest() != trusted_sha:
+    archive_bytes = shared._file(archive, max_size=ARCHIVE_MAX)
+    if hashlib.sha256(archive_bytes).hexdigest() != trusted_sha:
         raise Hold("OFFICIAL_FRP_ARCHIVE_SHA_MISMATCH")
     found = {}
     expected_dir = f"frp_{VERSION.removeprefix('v')}_linux_{arch}"
     try:
-        with tarfile.open(archive, "r:gz") as archive_file:
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive_file:
             members = archive_file.getmembers()
             if len(members) > 150:
                 raise Hold("EXCESSIVE_ARCHIVE_MEMBERS")

@@ -108,6 +108,8 @@ def validate_config(before: dict, after: dict) -> dict[str, str]:
                 "SMITE_NODE_PANEL_AUTH_MODE": "signed",
                 "SMITE_AGENT_AUTH_MODE": "strict",
                 "SMITE_ENGINE_INVENTORY_MODE": "managed",
+                "SMITE_AGENT_IDENTITY_PATH": "/run/smite-node-identity/node-identity.json",
+                "SMITE_AGENT_REPLAY_DB": "/var/lib/smite-node/auth/agent-replay.sqlite3",
             }.items()
         ):
             raise Hold("STAGE15_SIGNED_BASE_COMPOSE_DRIFT")
@@ -118,6 +120,16 @@ def validate_config(before: dict, after: dict) -> dict[str, str]:
         baseline_targets = [v.get("target") for v in old_volumes]
         if len(set(baseline_targets)) != len(baseline_targets):
             raise Hold("DUPLICATE_BASE_MOUNT")
+        mounts = {v["target"]: v for v in old_volumes}
+        for target, (source, read_only) in {
+            "/etc/smite-node": ("/opt/smite-node/config", False),
+            "/run/smite-node-identity": ("/etc/u-opti/smite/identities", True),
+            "/var/lib/smite-node/auth": ("/var/lib/u-opti/smite-node-security/replay", False),
+        }.items():
+            mount = mounts.get(target, {})
+            if (mount.get("type") != "bind" or mount.get("source") != source
+                    or mount.get("read_only", False) is not read_only):
+                raise Hold("SIGNED_STORAGE_MOUNT_DRIFT")
         if any(target in baseline_targets for target in EXPECTED_MOUNTS):
             raise Hold("FRP_BINARY_MOUNT_ALREADY_PRESENT")
         expected = {}

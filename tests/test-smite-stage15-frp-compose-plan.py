@@ -42,6 +42,8 @@ class Stage15FrpComposePlan(unittest.TestCase):
                         "SMITE_NODE_PANEL_AUTH_MODE": "signed",
                         "SMITE_AGENT_AUTH_MODE": "strict",
                         "SMITE_ENGINE_INVENTORY_MODE": "managed",
+                        "SMITE_AGENT_IDENTITY_PATH": "/run/smite-node-identity/node-identity.json",
+                        "SMITE_AGENT_REPLAY_DB": "/var/lib/smite-node/auth/agent-replay.sqlite3",
                         "PANEL_ADDRESS": "02ir.kolbe1.ir:443",
                     },
                     "volumes": [
@@ -89,6 +91,12 @@ class Stage15FrpComposePlan(unittest.TestCase):
             self.node, self.stage, official_verify=lambda _: True,
             signed_readiness=lambda _: self.readiness, run=self.runner,
         )
+
+    def test_same_wrong_replay_source_in_both_configs_is_rejected(self):
+        for doc in (self.base, self.future):
+            doc["services"]["smite-node"]["volumes"][2]["source"] = "/tmp/other-replay"
+        with self.assertRaisesRegex(plan.Hold, "SIGNED_STORAGE_MOUNT_DRIFT"):
+            self.check()
 
     def test_accepts_only_verified_dual_readonly_bind_overlay(self):
         result = self.check()
