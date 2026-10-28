@@ -292,6 +292,14 @@ def preflight(p: Paths, stage: Path, *, review=proposal.review,
 
 def stage_bytes(stage: Path):
     require(package.verify(stage), "OFFICIAL_FRP_STAGE_NOT_VERIFIED")
+    # A valid upstream ARM bundle must not be admitted on an amd64 host
+    # (and vice versa); a signed inventory hash alone cannot detect ELF ABI.
+    machine = {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
+    require(machine is not None, "HOST_FRP_ARCH_UNSUPPORTED")
+    summary = file(stage / "summary.txt", limit=4096).decode()
+    settings = dict(line.split("=", 1) for line in summary.splitlines())
+    require(settings.get("FRP_ARCH") == machine,
+            "OFFICIAL_FRP_STAGE_HOST_ARCH_MISMATCH")
     return {n: file(stage / (n + ".bin"), limit=MAX_BIN) for n in ("frpc", "frps")}
 
 def create_parent(path: Path, anchor: Path):
