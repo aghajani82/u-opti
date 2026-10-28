@@ -497,6 +497,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                     socket_checks += 1
                     if socket_checks <= 2:
                         raise FileNotFoundError("systemd returned before bind")
+                    if socket_checks == 3:
+                        # bind() exists but chmod(0660) has not executed yet.
+                        return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o700,
+                                               st_uid=0, st_gid=PEER_GID)
                     return SimpleNamespace(st_mode=stat.S_IFSOCK | 0o660,
                                            st_uid=0, st_gid=PEER_GID)
                 return original_lstat(path)
@@ -510,10 +514,10 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                               side_effect=listener_ready_after_one_refusal), \
                  patch.object(provisioner.time, "sleep", return_value=None) as sleep:
                 result = provisioner.activate(root=root, runner=fake_systemctl)
-            self.assertEqual(socket_checks, 4)
+            self.assertEqual(socket_checks, 5)
             self.assertEqual(connection_checks, 2)
             self.assertEqual(active_checks, 2)
-            self.assertEqual(sleep.call_count, 4)
+            self.assertEqual(sleep.call_count, 5)
             self.assertEqual(result["SERVICE_ACTIVATION"], "PASS_ACTIVE_PERSISTENT")
             self.assertEqual(result["TRUSTED_GRANTS"], "UNCHANGED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
