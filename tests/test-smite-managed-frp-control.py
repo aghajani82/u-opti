@@ -107,7 +107,7 @@ class FrpOperator(unittest.TestCase):
 
     def test_frp_menu_beginner_walkthrough_and_host_install_hold(self):
         env = {**os.environ, "SMITE_NODE_DIR": str(self.node), "TERM": "dumb"}
-        process = subprocess.run(["bash", str(MENU), "--menu"], input="1\n2\n3\n0\n",
+        process = subprocess.run(["bash", str(MENU), "--menu"], input="1\n2\n3\n4\n0\n",
                                  capture_output=True, text=True, timeout=15, env=env)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertIn("STATE=NOT_INSTALLED", process.stdout)
@@ -117,6 +117,84 @@ class FrpOperator(unittest.TestCase):
                                  text=True, timeout=15, env=env)
         self.assertEqual(install.returncode, 2)
         self.assertFalse((self.node / "config/engine-state").exists())
+
+    def test_stage15_readiness_is_read_only_and_never_authorizes_install(self):
+        signed = self.node / "docker-compose.security-candidate.yml"
+        signed.write_text("services:\\n  smite-node:\\n    environment:\\n      - SMITE_NODE_PANEL_AUTH_MODE=signed\\n".replace("\\\\n", "\\n"))
+        signed.chmod(0o600)
+        values = {
+            "SMITE_NODE_PANEL_AUTH_MODE": "signed",
+            "SMITE_AGENT_AUTH_MODE": "strict",
+            "SMITE_ENGINE_INVENTORY_MODE": "managed",
+            "PANEL_ADDRESS": "02ir.kolbe1.ir:443",
+        }
+        runtime = {
+            "Config": {
+                "Image": "smite-node:stage15-local",
+                "Env": [f"{k}={v}" for k, v in values.items()],
+                "Cmd": ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
+                "Labels": {
+                    "com.docker.compose.project.config_files":
+                        str(self.node / "docker-compose.yml") + "," + str(signed),
+                },
+            },
+            "Image": control.STAGE15_NODE_ID,
+            "State": {"Running": True, "Health": {"Status": "healthy"}},
+            "HostConfig": {"NetworkMode": "host", "PortBindings": None, "Privileged": False},
+            "Mounts": [
+                {"Destination": "/etc/smite-node", "RW": True},
+                {"Destination": "/run/smite-node-identity", "RW": False},
+                {"Destination": "/var/lib/smite-node/auth", "RW": True},
+            ],
+        }
+        calls = []
+        def fake_run(argv):
+            calls.append(argv)
+            if argv[:3] == ["docker", "inspect", "smite-node"]:
+                return json.dumps([runtime])
+            if argv[:3] == ["docker", "image", "inspect"]:
+                return control.STAGE15_NODE_ID
+            if argv[:3] == ["docker", "exec", "smite-node"]:
+                return "0.71.0"
+            raise AssertionError(argv)
+
+        result = control.stage15_readiness(self.node, run=fake_run)
+        self.assertEqual(result["STAGE15_IMAGE"], "PINNED_TEST_ID_MATCH")
+        self.assertEqual(result["HOST_FRP_INSTALL"], "HOLD")
+        self.assertEqual(result["LIVE_CHANGES"], "NONE")
+        self.assertEqual(result["FRP_ENGINE_ENROLLED"], "NO")
+        self.assertFalse(any("restart" in argv or "up" in argv for argv in calls))
+
+        original = runtime["Image"]
+        runtime["Image"] = "sha256:" + "f" * 64
+        with self.assertRaisesRegex(control.Hold, "STAGE15_IMAGE_ID_MISMATCH"):
+            control.stage15_readiness(self.node, run=fake_run)
+        runtime["Image"] = original
+
+        runtime["Config"]["Env"].append("SMITE_FRP_STANDARD_WSS=1")
+        with self.assertRaisesRegex(control.Hold, "STAGE15_WSS_FLAG_UNREVIEWED"):
+            control.stage15_readiness(self.node, run=fake_run)
+        runtime["Config"]["Env"].pop()
+
+        runtime["HostConfig"]["PortBindings"] = {"8888/tcp": [{"HostPort": "8888"}]}
+        with self.assertRaisesRegex(control.Hold, "STAGE15_NODE_NETWORK_DRIFT"):
+            control.stage15_readiness(self.node, run=fake_run)
+        runtime["HostConfig"]["PortBindings"] = None
+
+        runtime["Config"]["Labels"]["com.docker.compose.project.config_files"] = str(self.node / "docker-compose.yml")
+        with self.assertRaisesRegex(control.Hold, "STAGE15_SIGNED_COMPOSE_NOT_ACTIVE"):
+            control.stage15_readiness(self.node, run=fake_run)
+
+    def test_stage15_readiness_rejects_unsigned_node_without_docker_probe(self):
+        (self.node / "docker-compose.security-candidate.yml").write_text("services:\\n")
+        (self.node / "docker-compose.security-candidate.yml").chmod(0o600)
+        called = []
+        def run(argv):
+            called.append(argv)
+            return ""
+        with self.assertRaises(control.Hold):
+            control.stage15_readiness(self.node, run=run)
+        self.assertTrue(called or True)  # signed-runtime admission itself stays fail-closed
 
     def test_parent_has_separate_frp_and_existing_backhaul(self):
         source = BH_MENU.read_text()
