@@ -196,6 +196,35 @@ release-readiness. The separate audited host executor, real signed probes,
 WSS/443 gateway admission and two-host traffic acceptance remain open in #67.
 Do not point this lab at `/opt/smite-node` or remove its CI-only gate.
 
+**Stage15 FRP real-host executor (reviewed code, gated field trial only):**
+`modules/smite-stage15-frp-host-executor.py` is deployed as an inert
+helper with the installer/updater. It is NOT enabled in the novice FRP
+menu. The `install` command requires both disposable `ir`/`kh` host
+identity, root, `UOPTI_STAGE15_FRP_HOST_FIELD_TRIAL=YES`, a private official
+FRP v0.71.0 stage verified by its pinned archive SHA256, fresh snapshots
+and consoles, and exact `INSTALL-STAGE15-FRP-IR` or `...-KH` confirmation.
+The existing Panel/Node Signed Pairing is **not** regenerated.
+
+The host transaction saves a private durable journal; performs an exact
+signed-Compose config preview; requires an actual authenticated HMAC Agent
+inventory GET (including nonce replay rejection); writes both verified
+binaries, one restrictive read-only overlay, and the FRP manifest; then
+recreates **only `smite-node` with all three reviewed Compose files**.
+A fresh signed inventory/replay check, health, and identity/Replay inode
+continuity are mandatory before `COMMITTED`. An interrupted trial requires
+explicit `recover`; a failed check attempts a checked rollback recreating
+the Node with **both base and Signed security Compose**. On ambiguous
+external drift or failed prior signed proof, the journal remains and the
+operator must stop: no unsafe automatic cleanup or legacy fallback.
+The independent Node management/panel pairing should still be rechecked.
+
+**Deployment gate:** the executor is **not a production release**, does
+not create FRPS ownership, launch an FRP tunnel, enable WSS/443, modify
+Nginx/firewall/Sanaei, or expose port 8888. Its mocked Docker CI is not
+two-host acceptance. Do not execute live `install` until snapshots and
+a separate operator-reviewed IR/KH rollout plan are confirmed. This
+work closes only the host enrollment implementation subset of #67.
+
 Additionally, `SMITE_FRP_STANDARD_WSS=1` is not set by the Clean-RC installer.
 The existing shared-child implementation requires it; without it, a shared child
 fails before mutation. Historical RC.2 WSS activation helpers pin different
