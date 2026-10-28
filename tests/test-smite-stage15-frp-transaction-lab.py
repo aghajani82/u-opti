@@ -150,8 +150,11 @@ class SignedFrpLab(unittest.TestCase):
         with tx.lock(self.root):
             self.activate()
             key = tx.paths(self.root)["replay"]
-            key.unlink()
-            key.write_bytes(b"persistent-replay-store")
+            replacement = key.with_name("replacement-replay.db")
+            replacement.write_bytes(b"persistent-replay-store")
+            # Atomic rename while original exists guarantees a new inode;
+            # unlink-then-create can legally reuse the old inode number.
+            os.replace(replacement, key)
             with self.assertRaisesRegex(tx.Hold, "SIGNED_IDENTITY_REPLAY_DRIFT"):
                 self.rollback()
             self.assertTrue(tx.paths(self.root)["manifest"].exists())
