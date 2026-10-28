@@ -310,6 +310,8 @@ jobs:
           python3 -m py_compile modules/smite-managed-frp.py modules/smite-managed-frp-control.py tests/test-smite-managed-frp.py tests/test-smite-managed-frp-control.py
           python3 -B tests/test-smite-managed-frp.py -v
           python3 -B tests/test-smite-managed-frp-control.py -v
+          python3 -m py_compile modules/smite-stage15-frp-compose-plan.py tests/test-smite-stage15-frp-compose-plan.py
+          python3 -B tests/test-smite-stage15-frp-compose-plan.py -v
           python3 -m py_compile modules/smite-managed-frp-transaction.py tests/test-smite-managed-frp-transaction.py
           python3 -B tests/test-smite-managed-frp-transaction.py -v
           grep -Fq '"smite-managed-frp-transaction.py"' install.sh
