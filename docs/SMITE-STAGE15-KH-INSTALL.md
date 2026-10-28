@@ -171,7 +171,10 @@ existing **officially verified FRP v0.71.0 offline stage** without applying it.
 Its `plan --stage <verified-stage>` checks that *both* official binaries would
 be mounted read-only at the reviewed host root, and compares fully resolved
 Stage15 Node Compose before and after the proposal. Only those two mounts may
-change; signed auth, identity, Replay, loopback API, Sanaei and all other
+change; the in-memory proposal sets `bind.create_host_path=false` so Docker
+cannot invent missing binary files at activation time. The original official
+staged overlay remains independently verified. Signed auth, identity, Replay,
+loopback API, Sanaei and all other
 effective config must be byte-equivalent in the resolved JSON structure.
 The built-in legacy v0.65.0 files would be shadowed only by verified v0.71.0
 bind mounts **if a future separately audited transaction actually installs
