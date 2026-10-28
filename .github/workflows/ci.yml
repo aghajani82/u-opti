@@ -363,6 +363,11 @@ jobs:
           bash -n tests/test-smite-foreign-paused-boot.sh
           bash tests/test-smite-foreign-paused-boot.sh
 
+      - name: Stage15 signed pairing storage, immutable image and safe failure regressions
+        shell: bash
+        run: |
+          python3 -B tests/test-smite-stage15-pairing-regression.py -v
+
       - name: Stage15 verify archive delivery with tampering and no-install regressions
         shell: bash
         run: |

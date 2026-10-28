@@ -83,6 +83,17 @@ class Stage9Test(unittest.TestCase):
         self.assertNotIn("docker compose up", yaml)
         self.assertEqual(json.loads(self.identity.read_text())["node_secret"], "a" * 64)
 
+    def test_prepare_shared_0755_keeps_candidate_inert_and_existing_files_unchanged(self):
+        self.storage_root.chmod(0o755)
+        before = {p: p.read_bytes() for p in (self.base, self.identity, self.state)}
+        self.assertEqual(tool.prepare(**self.kwargs), "PREPARED")
+        self.assertEqual(tool.prepare(**self.kwargs), "UNCHANGED")
+        self.assertEqual(stat.S_IMODE(self.storage_root.stat().st_mode), 0o755)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertIn("INERT", self.candidate.read_text())
+        self.assertFalse((self.replay_dir / "agent-replay.sqlite3").exists())
+
     def test_prepare_creates_missing_fresh_host_replay_hierarchy(self):
         # Regression: a clean host may have none of the U-OPTI replay tree yet.
         # The trusted host anchor exists, while all three private levels do not.

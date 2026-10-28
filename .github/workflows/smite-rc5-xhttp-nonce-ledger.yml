@@ -3,6 +3,9 @@ name: U-OPTI RC5 Root XHTTP Replay Ledger (offline)
 on:
   pull_request:
     paths:
+      - 'modules/smite-node-auth-candidate.py'
+      - 'modules/smite-node-pairing.py'
+      - 'tests/test-smite-stage15-pairing-regression.py'
       - 'modules/smite-rc5-xhttp-signed-intent.py'
       - 'modules/smite-rc5-xhttp-nonce-ledger.py'
       - 'modules/smite-rc5-xhttp-root-broker.py'
