@@ -38,6 +38,36 @@ The CLI verifies the paired archive/manifest inputs **before** opening the compo
 
 Use the same source SHA, manifest SHA, and exact image-pair ZIP on both disposable hosts. The ZIP SHA256 is `2bda0c80aa77ce6fa6bd1af0a4ed0d8fccfad670915dfd2f56a6120b08d19a71`. Never use these preview images on Grandoptical/production.
 
+## First-boot Root Broker readiness regression (2026-10-28)
+
+A fresh IR trial reported `HOLD: Root Broker activation did not pass its
+systemd/socket checks` even though later read-only inspection found the
+`u-opti-smite-xhttp-broker.service` active, the private root-owned UNIX socket
+present with `0750/0660` permissions, and the dedicated peer group intact.
+The Node broker forwarding flag remained `false`. The historical installer
+hid the actual provisioner `HOLD_...` reason because its Bash filter expected
+an equals sign after `HOLD`; therefore the specific original failure
+cannot be proven from that captured output alone.
+
+Source-level finding: `Type=simple` systemd start returning is **not**
+proof that the Python listener has bound or begun listening. The activation
+helper previously checked the socket just once. The fix uses a **bounded**
+startup wait for `activating` service state, exact trusted socket metadata,
+and a successful local UNIX connect before enabling Node forwarding.
+Wrong owner/mode, unexpected systemd state, permanent socket errors, or
+readiness timeout **still HOLD**; no grant is created and no live route is
+changed. The broker also tolerates a health-check peer closing before reply.
+The installer now displays the specific sanitized `HOLD_...` code without
+printing keys or arbitrary helper output.
+
+Regression coverage simulates delayed socket creation and delayed listening,
+immediate wrong-owner rejection, bounded timeout, disconnected clients, and
+visible sanitized failure reporting. These checks demonstrate the corrected
+first-boot control logic, **not** a completed real two-VPS install. Keep the
+existing IR/KH host unchanged; use a new disposable snapshot-backed clean
+rebuild only after the code is merged and CI verifies the exact head, then
+report the complete IR first-boot and later KH/443 pairing evidence.
+
 ## Recovering an interrupted Clean-RC IR install
 
 If the IR installer has already started the Panel and Node but stops during the Root Broker/Node channel check, **do not rerun option 1**: the clean installer intentionally rejects existing containers/Compose files. Update U-OPTI from main, then open **Docker Management → Smite Management → 8) Resume interrupted clean-RC IR test install**.
