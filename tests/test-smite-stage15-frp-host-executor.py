@@ -229,6 +229,23 @@ class SignedStage15FrpHost(unittest.TestCase):
         self.assertTrue(self.p.journal.exists())
         self.assertTrue(self.fake.enabled)
 
+    def test_missing_committed_artifact_is_not_treated_as_incomplete_recovery(self):
+        self.install()
+        self.p.binaries.joinpath("frpc").unlink()
+        with self.assertRaisesRegex(host.Hold, "FRP_HOST_ARTIFACT_MISSING"):
+            self.rollback()
+        self.assertTrue(self.p.journal.exists())
+        self.assertTrue(self.fake.enabled)
+
+    def test_journal_from_another_host_cannot_be_rolled_back(self):
+        self.install()
+        with patch.object(host.os, "uname",
+                          return_value=types.SimpleNamespace(nodename="ir")):
+            with self.assertRaisesRegex(host.Hold, "JOURNAL_HOST_ROLE_MISMATCH"):
+                self.rollback()
+        self.assertTrue(self.p.journal.exists())
+        self.assertTrue(self.fake.enabled)
+
     def test_replay_inode_replacement_refuses_unsafe_recover(self):
         with self.assertRaises(host.SimulatedCrash):
             self.install(inject="overlay")
