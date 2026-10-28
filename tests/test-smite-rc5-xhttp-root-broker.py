@@ -459,7 +459,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             service.chmod(0o644)
 
             calls = []
+            active_checks = 0
             def fake_systemctl(argv, **kwargs):
+                nonlocal active_checks
                 calls.append(tuple(argv[1:]))
                 if argv[0] == "getent":
                     return SimpleNamespace(returncode=0,
@@ -471,6 +473,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 if action == "is-enabled":
                     return SimpleNamespace(returncode=0, stdout="enabled\n", stderr="")
                 if action == "is-active":
+                    active_checks += 1
+                    if active_checks == 1:
+                        return SimpleNamespace(returncode=3, stdout="activating\n", stderr="")
                     return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -507,7 +512,8 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 result = provisioner.activate(root=root, runner=fake_systemctl)
             self.assertEqual(socket_checks, 4)
             self.assertEqual(connection_checks, 2)
-            self.assertEqual(sleep.call_count, 3)
+            self.assertEqual(active_checks, 2)
+            self.assertEqual(sleep.call_count, 4)
             self.assertEqual(result["SERVICE_ACTIVATION"], "PASS_ACTIVE_PERSISTENT")
             self.assertEqual(result["TRUSTED_GRANTS"], "UNCHANGED")
             self.assertEqual(result["LIVE_ROUTE_CHANGE"], "NO")
@@ -517,6 +523,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 ("reset-failed", provisioner.SERVICE_NAME),
                 ("start", provisioner.SERVICE_NAME),
                 ("is-enabled", provisioner.SERVICE_NAME),
+                ("is-active", provisioner.SERVICE_NAME),
                 ("is-active", provisioner.SERVICE_NAME),
             ])
             self.assertEqual(list((root / "etc/u-opti/smite/route-grants").iterdir()), [])
@@ -559,7 +566,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                                        st_uid=123, st_gid=PEER_GID)
             return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750,
                                    st_uid=0, st_gid=PEER_GID)
-        with patch.object(Path, "lstat", side_effect=mocked_stat), \
+        with patch.object(Path, "lstat", mocked_stat), \
              patch.object(provisioner.time, "sleep") as sleep, \
              patch.object(provisioner, "_probe_broker_socket") as probe:
             with self.assertRaisesRegex(provisioner.ProvisionHold,
