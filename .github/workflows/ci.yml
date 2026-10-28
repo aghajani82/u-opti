@@ -314,6 +314,12 @@ jobs:
           python3 -B tests/test-smite-stage15-frp-compose-plan.py -v
           python3 -m py_compile modules/smite-stage15-frp-transaction-lab.py tests/test-smite-stage15-frp-transaction-lab.py
           python3 -B tests/test-smite-stage15-frp-transaction-lab.py -v
+          python3 -m py_compile modules/smite-stage15-frp-host-executor.py tests/test-smite-stage15-frp-host-executor.py
+          sudo -n python3 -B tests/test-smite-stage15-frp-host-executor.py -v
+          grep -Fq '"smite-stage15-frp-host-executor.py"' install.sh
+          grep -Fq '["smite-stage15-frp-host-executor.py"]' u-opti
+          grep -Fq '"smite-stage15-frp-compose-plan.py"' install.sh
+          grep -Fq '["smite-stage15-frp-compose-plan.py"]' u-opti
           python3 -m py_compile modules/smite-managed-frp-transaction.py tests/test-smite-managed-frp-transaction.py
           python3 -B tests/test-smite-managed-frp-transaction.py -v
           grep -Fq '"smite-managed-frp-transaction.py"' install.sh

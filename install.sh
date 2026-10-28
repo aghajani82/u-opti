@@ -121,6 +121,8 @@ MODULES=(
     "smite-managed-backhaul.py"
     "smite-managed-frp.py"
     "smite-managed-frp-transaction.py"
+    "smite-stage15-frp-compose-plan.py"
+    "smite-stage15-frp-host-executor.py"
     "smite-managed-frp-control.py"
     "smite-managed-frp-menu.sh"
     "smite-managed-backhaul-control.py"
