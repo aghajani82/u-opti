@@ -244,7 +244,7 @@ class BrokerRegressionTests(unittest.TestCase):
             with self.subTest(failure=type(failure).__name__):
                 peer = DisconnectedPeer(failure)
                 broker._send_reply(peer, "HOLD")
-                self.assertEqual(peer.assert_bytes, b"HOLD\\n")
+                self.assertEqual(peer.assert_bytes, b"HOLD\n")
 
     def test_clean_rc_installer_reports_actual_broker_hold_without_secrets(self):
         installer = (MODULE.parent / "smite-install.sh").read_text()
@@ -257,8 +257,8 @@ class BrokerRegressionTests(unittest.TestCase):
             ["bash", "-c", filter_lines[0]], check=True,
             capture_output=True, text=True,
             env={**os.environ, "activation_output":
-                 "HOLD_BROKER_SOCKET_NOT_READY\\n"
-                 "SERVICE_ENABLED=NO\\nSECRET_KEY=must-not-print\\n"},
+                 "HOLD_BROKER_SOCKET_NOT_READY\n"
+                 "SERVICE_ENABLED=NO\nSECRET_KEY=must-not-print\n"},
         )
         self.assertIn("HOLD_BROKER_SOCKET_NOT_READY", output.stderr)
         self.assertIn("SERVICE_ENABLED=NO", output.stderr)
@@ -500,9 +500,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 connection_checks += 1
                 if connection_checks == 1:
                     raise provisioner.ProvisionHold("BROKER_SOCKET_NOT_READY")
-            with patch.object(Path, "lstat", lstat_with_mocked_service_socket), \\
+            with patch.object(Path, "lstat", lstat_with_mocked_service_socket), \
                  patch.object(provisioner, "_probe_broker_socket",
-                              side_effect=listener_ready_after_one_refusal), \\
+                              side_effect=listener_ready_after_one_refusal), \
                  patch.object(provisioner.time, "sleep", return_value=None) as sleep:
                 result = provisioner.activate(root=root, runner=fake_systemctl)
             self.assertEqual(socket_checks, 4)
@@ -537,9 +537,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
         provisioner = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = provisioner
         spec.loader.exec_module(provisioner)
-        with patch.object(Path, "lstat", side_effect=FileNotFoundError), \\
+        with patch.object(Path, "lstat", side_effect=FileNotFoundError), \
              patch.object(provisioner.time, "monotonic",
-                          side_effect=[100.0, 111.0]), \\
+                          side_effect=[100.0, 111.0]), \
              patch.object(provisioner.time, "sleep") as sleep:
             with self.assertRaisesRegex(provisioner.ProvisionHold,
                                         "BROKER_SOCKET_NOT_READY"):
@@ -559,8 +559,8 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                                        st_uid=123, st_gid=PEER_GID)
             return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750,
                                    st_uid=0, st_gid=PEER_GID)
-        with patch.object(Path, "lstat", side_effect=mocked_stat), \\
-             patch.object(provisioner.time, "sleep") as sleep, \\
+        with patch.object(Path, "lstat", side_effect=mocked_stat), \
+             patch.object(provisioner.time, "sleep") as sleep, \
              patch.object(provisioner, "_probe_broker_socket") as probe:
             with self.assertRaisesRegex(provisioner.ProvisionHold,
                                         "BROKER_SOCKET_NOT_TRUSTED"):
