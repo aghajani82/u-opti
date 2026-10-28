@@ -50,22 +50,22 @@ EXPECTED_MOUNTS = {
 # Its Compose candidate has implicit bind.create_host_path=true. Never apply
 # that permissive mount: harden the prospective in-memory proposal instead.
 STAGED_OVERLAY = (
-    "services:\\n"
-    "  smite-node:\\n"
-    "    volumes:\\n"
+    "services:\n"
+    "  smite-node:\n"
+    "    volumes:\n"
     + "".join(
-        "      - type: bind\\n"
-        f"        source: {src}\\n"
-        f"        target: {dst}\\n"
-        "        read_only: true\\n"
+        "      - type: bind\n"
+        f"        source: {src}\n"
+        f"        target: {dst}\n"
+        "        read_only: true\n"
         for dst, src in EXPECTED_MOUNTS.items()
     )
 )
 OVERLAY = STAGED_OVERLAY.replace(
-    "        read_only: true\\n",
-    "        read_only: true\\n"
-    "        bind:\\n"
-    "          create_host_path: false\\n",
+    "        read_only: true\n",
+    "        read_only: true\n"
+    "        bind:\n"
+    "          create_host_path: false\n",
 )
 
 
