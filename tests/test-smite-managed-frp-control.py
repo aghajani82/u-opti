@@ -168,6 +168,30 @@ class FrpOperator(unittest.TestCase):
         self.assertEqual(result["FRP_ENGINE_ENROLLED"], "NO")
         self.assertFalse(any("restart" in argv or "up" in argv for argv in calls))
 
+        # The current Standard installer uses the reviewed 9-token command.
+        runtime["Image"] = control.STAGE15_FRP071_NODE_ID
+        runtime["Config"]["Cmd"] = list(control.SAFE_NODE_COMMANDS[1])
+        def new_image_run(argv):
+            result = fake_run(argv)
+            if argv[:3] == ["docker", "image", "inspect"]:
+                return control.STAGE15_FRP071_NODE_ID
+            if argv[:3] == ["docker", "exec", "smite-node"]:
+                return "0.71.0"
+            return result
+        modern = control.stage15_readiness(self.node, run=new_image_run)
+        self.assertEqual(modern["FRP_BINARIES"], "STAGE15_BUNDLED_0_71_0")
+        for invalid in (
+            list(control.SAFE_NODE_COMMANDS[1]) + ["--proxy-headers"],
+            ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8888"],
+            ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8899",
+             "--log-level", "info", "--access-log"],
+        ):
+            runtime["Config"]["Cmd"] = invalid
+            with self.assertRaisesRegex(control.Hold, "STAGE15_NODE_LOOPBACK_DRIFT"):
+                control.stage15_readiness(self.node, run=new_image_run)
+        runtime["Config"]["Cmd"] = list(control.SAFE_NODE_COMMANDS[0])
+        runtime["Image"] = control.STAGE15_NODE_ID
+
         original = runtime["Image"]
         runtime["Image"] = "sha256:" + "f" * 64
         with self.assertRaisesRegex(control.Hold, "STAGE15_IMAGE_ID_MISMATCH"):
