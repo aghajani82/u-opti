@@ -54,6 +54,20 @@ class RuntimePolicy(unittest.TestCase):
         with patch.object(c,'trusted'):
             self.assertEqual(c.active_files(base,obj),[base])
             self.assertEqual(c.active_files(base,node(True)),w.service_files('node')+[w.overlay('node')])
+    def test_nondefault_frps_listener_blocks_wss_changes(self):
+        # A live Owner must block WSS changes even when control port != 7000.
+        # Test is completely offline and reads no actual host sockets.
+        with tempfile.TemporaryDirectory() as temp:
+            def fake_ss(argv):
+                if argv == ['ss','-H','-lnt','( sport = :7000 )']:
+                    return ''
+                if argv == ['ss','-H','-lntp']:
+                    return 'LISTEN 0 128 127.0.0.1:17000 0.0.0.0:* users:(("frps",pid=123,fd=3))'
+                raise AssertionError('unexpected host query')
+            with patch.object(w,'NODE',Path(temp)),patch.object(w,'run',side_effect=fake_ss):
+                with self.assertRaisesRegex(w.Hold,'FRPS_OWNER_STILL_RUNNING'):
+                    w.no_tunnels()
+
     def test_unknown_duplicate_or_external_compose_rejected(self):
         base=Path('/opt/smite-node/docker-compose.yml')
         for extra in ('/tmp/evil.yml',str(base),'/opt/smite-node/unreviewed.yml'):
