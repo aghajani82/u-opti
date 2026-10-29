@@ -127,6 +127,10 @@ def no_tunnels():
     if path.exists() or path.is_symlink():
         need(json.loads(host.file(path,limit=1048576))=={},'REMOVE_TUNNELS_BEFORE_WSS_CHANGE')
     need(not run(['ss','-H','-lnt','( sport = :7000 )']).strip(),'FRPS_OWNER_STILL_RUNNING')
+    # An Owner can use a non-default control port. Detect any host-network
+    # frps listener as well; the 7000 check remains a fail-closed fallback.
+    need(not re.search(r'(?<![A-Za-z0-9_])frps(?![A-Za-z0-9_])',
+                       run(['ss','-H','-lntp'])),'FRPS_OWNER_STILL_RUNNING')
 
 
 def protected(roles,enrolled=True):
