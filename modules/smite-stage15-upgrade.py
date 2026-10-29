@@ -64,7 +64,7 @@ def health(doc,new):
             except h.Hold:
                 if attempt==19:raise
                 time.sleep(3)
-    h.signed_inventory('absent')
+    h.signed_inventory('not-installed')
 
 
 def plan(role,folder):
@@ -81,7 +81,7 @@ def plan(role,folder):
         need(bundle['images'][component]['local_image_id']==w.REVIEWED_IMAGES[component],'NEW_IMAGE_NOT_REVIEWED')
         need(h.run(['docker','image','inspect',OLD[component],'--format','{{.Id}}'])==OLD[component],'ROLLBACK_IMAGE_MISSING')
         doc['runtime'][component]=normal(obj)
-    h.signed_inventory('absent')
+    h.signed_inventory('not-installed')
     return doc,bundle
 
 
