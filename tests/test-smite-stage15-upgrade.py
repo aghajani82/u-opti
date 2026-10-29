@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import copy
 import os
 from pathlib import Path
 import tempfile
@@ -10,6 +11,8 @@ spec=importlib.util.spec_from_file_location('upgrade_test',ROOT/'modules/smite-s
 u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
 REAL_PLAN=u.plan
 REAL_HEALTH=u.health
+REAL_VALIDATE=u.validate
+REAL_NORMAL=u.normal
 
 @unittest.skipUnless(os.geteuid()==0,'root-owned fixture')
 class Upgrade(unittest.TestCase):
@@ -72,6 +75,52 @@ class Upgrade(unittest.TestCase):
         self.obj['Image']=u.w.REVIEWED_IMAGES['node']
         u.health(doc,True)
         self.assertEqual(observed,['not-installed','not-installed'])
+
+    def test_ir_prepared_journal_bind_reordering_only(self):
+        # Reproduce the live IR incident: both containers are already new
+        # and healthy, all inspected mounts are equal, only HostConfig.Binds
+        # appears in a different order after Compose force-recreate.
+        original={
+            'Image':u.w.REVIEWED_IMAGES['node'],
+            'Config':{'Env':['SMITE_AGENT_AUTH_MODE=strict'],
+                      'Cmd':list(u.h.SAFE_NODE_COMMANDS[1])},
+            'Mounts':[{'Destination':'/etc/smite-node',
+                       'Source':'/opt/smite-node/config','RW':True,'Type':'bind'},
+                      {'Destination':'/run/smite-node-identity',
+                       'Source':'/etc/u-opti/smite/identities','RW':False,
+                       'Type':'bind'}],
+            'HostConfig':{'NetworkMode':'host','Privileged':False,
+                          'Binds':['/opt/smite-node/config:/etc/smite-node:rw',
+                                   '/etc/u-opti/smite/identities:/run/smite-node-identity:ro']}
+        }
+        saved=REAL_NORMAL(copy.deepcopy(original))
+        # Existing PREPARED journal was written before this fix, when Binds
+        # was stored in Docker's observed (unsorted) order.
+        saved['host']['Binds']=list(original['HostConfig']['Binds'])
+        doc={'runtime':{'node':saved}}
+        obj=copy.deepcopy(original)
+        obj['HostConfig']['Binds'].reverse()
+        self.patch(u.w,'runtime',lambda *a,**k:None)
+        self.patch(u,'validate',REAL_VALIDATE)
+        u.validate('node',obj,doc)
+        # Do not admit any true source/target/mode drift, missing entries,
+        # duplicate bind, changed container mount, or other HostConfig drift.
+        mutations=(
+            lambda x:x['HostConfig']['Binds'].__setitem__(0,
+                '/etc/u-opti/smite/identities:/run/smite-node-identity:rw'),
+            lambda x:x['HostConfig']['Binds'].pop(),
+            lambda x:x['HostConfig']['Binds'].append(
+                '/tmp/extra:/run/extra:rw'),
+            lambda x:x['HostConfig'].__setitem__('Privileged',True),
+            lambda x:x['Mounts'][0].__setitem__('RW',False),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=repr(mutate)):
+                changed=copy.deepcopy(obj)
+                mutate(changed)
+                with self.assertRaisesRegex(u.h.Hold,
+                                            'UPGRADE_RUNTIME_SECURITY_DRIFT'):
+                    u.validate('node',changed,doc)
 
     def test_copy_checks_same_private_bytes(self):
         # Exercise the real implementation, independent of the transaction mock.
