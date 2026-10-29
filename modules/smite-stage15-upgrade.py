@@ -134,6 +134,55 @@ def restore(doc):
     health(doc,False);doc['state']='ROLLED_BACK';save(doc)
 
 
+def resume_prepared(role):
+    """Finalize a previously completed-image transaction, without recreating.
+
+    Only the exact reviewed new images, untouched signed state, complete
+    private backups, and current Signed HMAC/replay checks may be committed.
+    A mixed/unknown runtime remains PREPARED for manual review.
+    """
+    roles=['panel','node'] if role=='IR' else ['node']
+    with h.exclusive(w.LOCK):
+        doc=record()
+        need(doc['state']=='PREPARED' and doc['roles']==roles,
+             'RESUME_REQUIRES_MATCHING_PREPARED_JOURNAL')
+        w.no_tunnels()
+        for component in roles:
+            for path in (w.overlay(component),w.NODE/'docker-compose.frp-stage15.yml'):
+                need(not path.exists() and not path.is_symlink(),
+                     'RESUME_REQUIRES_NO_FRP_WSS')
+        # An operator-requested recovery must never hide missing rollback data.
+        backup_names=['node-identity.before.json','replay.before.sqlite3']
+        if role=='IR':backup_names.append('panel.before.sqlite3')
+        backup_names += [component+'.image-before.tar' for component in roles]
+        for name in backup_names:
+            path=STATE/name
+            h.trusted_parents(path)
+            need(not path.is_symlink(),'UNTRUSTED_RESUME_BACKUP')
+            st=path.lstat()
+            need(stat.S_ISREG(st.st_mode) and st.st_uid==0 and st.st_nlink==1
+                 and stat.S_IMODE(st.st_mode)==0o600 and st.st_size>0,
+                 'MISSING_OR_UNSAFE_RESUME_BACKUP')
+        for name in ('replay.before.sqlite3',)+(('panel.before.sqlite3',) if role=='IR' else ()):
+            with sqlite3.connect((STATE/name).as_uri()+'?mode=ro',uri=True) as db:
+                need(db.execute('PRAGMA integrity_check').fetchone()[0]=='ok',
+                     'CORRUPT_RESUME_SQLITE_BACKUP')
+        for component in roles:
+            need(h.run(['docker','image','inspect',OLD[component],
+                        '--format','{{.Id}}'])==OLD[component],
+                 'ROLLBACK_IMAGE_MISSING')
+            need(h.run(['docker','image','inspect','smite-'+component+':stage15-local',
+                        '--format','{{.Id}}'])==w.REVIEWED_IMAGES[component],
+                 'RESUME_IMAGE_TAG_DRIFT')
+        # health() enforces complete runtime signature, exact reviewed images,
+        # healthy containers, signed auth mode, and durable Replay nonce probe.
+        health(doc,True)
+        need(w.protected(roles,False)==doc['protected'],
+             'UPGRADE_PROTECTED_STATE_DRIFT')
+        doc['state']='COMMITTED'
+        save(doc)
+
+
 def backup_state(doc):
     p=h.Paths()
     h.new_file(STATE/'node-identity.before.json',h.file(p.identity,mode=0o600),0o600)
@@ -172,15 +221,16 @@ def apply(role,folder):
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['plan','apply','verify','rollback','recover']);ap.add_argument('--images',type=Path);a=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['plan','apply','verify','rollback','recover','resume']);ap.add_argument('--images',type=Path);a=ap.parse_args()
     try:
         role=os.uname().nodename.split('.')[0].upper();need(os.geteuid()==0 and role in ('IR','KH'),'DISPOSABLE_ROOT_ONLY')
-        if a.action in ('apply','rollback','recover'):
+        if a.action in ('apply','rollback','recover','resume'):
             need(sys.stdin.isatty(),'INTERACTIVE_CONFIRMATION_REQUIRED')
             value=a.action.upper()+'-IMAGES-'+role+'-SNAPSHOT-CONSOLE'
             need(input('Type '+value+': ').strip()==value,'OPERATOR_CANCELLED')
         if a.action in ('plan','apply'):need(a.images is not None and a.images.is_absolute(),'ABSOLUTE_IMAGE_FOLDER_REQUIRED')
         if a.action=='apply':apply(role,a.images)
+        elif a.action=='resume':resume_prepared(role)
         else:
             with h.exclusive(w.LOCK):
                 if a.action=='plan':plan(role,a.images)
