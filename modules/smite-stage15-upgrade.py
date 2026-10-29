@@ -158,15 +158,19 @@ def resume_prepared(role):
         for name in backup_names:
             path=STATE/name
             h.trusted_parents(path)
-            need(not path.is_symlink(),'UNTRUSTED_RESUME_BACKUP')
+            need(path.is_file() and not path.is_symlink(),
+                 'MISSING_OR_UNSAFE_RESUME_BACKUP')
             st=path.lstat()
             need(stat.S_ISREG(st.st_mode) and st.st_uid==0 and st.st_nlink==1
                  and stat.S_IMODE(st.st_mode)==0o600 and st.st_size>0,
                  'MISSING_OR_UNSAFE_RESUME_BACKUP')
         for name in ('replay.before.sqlite3',)+(('panel.before.sqlite3',) if role=='IR' else ()):
-            with sqlite3.connect((STATE/name).as_uri()+'?mode=ro',uri=True) as db:
+            db=sqlite3.connect((STATE/name).as_uri()+'?mode=ro',uri=True)
+            try:
                 need(db.execute('PRAGMA integrity_check').fetchone()[0]=='ok',
                      'CORRUPT_RESUME_SQLITE_BACKUP')
+            finally:
+                db.close()
         for component in roles:
             need(h.run(['docker','image','inspect',OLD[component],
                         '--format','{{.Id}}'])==OLD[component],
