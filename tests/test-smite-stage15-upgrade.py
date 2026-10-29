@@ -4,6 +4,7 @@ import copy
 import os
 from pathlib import Path
 import tempfile
+import sqlite3
 import unittest
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
@@ -121,6 +122,48 @@ class Upgrade(unittest.TestCase):
                 with self.assertRaisesRegex(u.h.Hold,
                                             'UPGRADE_RUNTIME_SECURITY_DRIFT'):
                     u.validate('node',changed,doc)
+
+    def make_prepared_resume_state(self):
+        self.root.joinpath('state').mkdir(mode=0o700)
+        self.root.joinpath('state','record.json').write_text(json.dumps(self.doc)+'\n')
+        self.root.joinpath('state','record.json').chmod(0o600)
+        for filename in ('node-identity.before.json','node.image-before.tar'):
+            target=self.root/'state'/filename
+            target.write_bytes(b'CI-PRIVATE-BACKUP')
+            target.chmod(0o600)
+        db=self.root/'state'/'replay.before.sqlite3'
+        with sqlite3.connect(db) as conn:
+            conn.execute('CREATE TABLE replay_ci (id INTEGER PRIMARY KEY)')
+        db.chmod(0o600)
+        return db
+
+    def test_resume_prepared_verified_new_runtime_without_recreate(self):
+        self.make_prepared_resume_state()
+        self.assertEqual(u.record()['state'],'PREPARED')
+        u.resume_prepared('KH')
+        self.assertEqual(u.record()['state'],'COMMITTED')
+        self.assertEqual(self.health,[True])
+        self.assertTrue(all(cmd[:2]!=['docker','compose'] for cmd in self.calls))
+        self.assertEqual((self.root/'state'/'node-identity.before.json').read_bytes(),
+                         b'CI-PRIVATE-BACKUP')
+
+    def test_resume_fails_closed_and_does_not_commit(self):
+        db=self.make_prepared_resume_state()
+        db.unlink()
+        with self.assertRaisesRegex(u.h.Hold,'MISSING_OR_UNSAFE_RESUME_BACKUP'):
+            u.resume_prepared('KH')
+        self.assertEqual(u.record()['state'],'PREPARED')
+        with sqlite3.connect(db) as conn:
+            conn.execute('CREATE TABLE replay_ci (id INTEGER PRIMARY KEY)')
+        db.chmod(0o600)
+        with self.assertRaisesRegex(u.h.Hold,'RESUME_REQUIRES_MATCHING_PREPARED_JOURNAL'):
+            u.resume_prepared('IR')
+        self.assertEqual(u.record()['state'],'PREPARED')
+        self.patch(u,'health',lambda *a: (_ for _ in ()).throw(
+            u.h.Hold('UPGRADE_RUNTIME_SECURITY_DRIFT')))
+        with self.assertRaisesRegex(u.h.Hold,'UPGRADE_RUNTIME_SECURITY_DRIFT'):
+            u.resume_prepared('KH')
+        self.assertEqual(u.record()['state'],'PREPARED')
 
     def test_copy_checks_same_private_bytes(self):
         # Exercise the real implementation, independent of the transaction mock.
