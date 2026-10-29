@@ -349,6 +349,28 @@ fi
 # Explicit offline Clean-RC installer entry. Never fall back to Stable or the
 # legacy Private Network wizard when the paired preview inputs are incomplete.
 if [ "${1:-}" = "--smite-clean-rc" ]; then
+    # A fresh Stage15 preview can fetch its exact reviewed FRP071 image
+    # archives from a durable public prerelease. Explicit local bundles remain
+    # supported for controlled review, but there is never an unpinned fallback.
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ]; then
+        if { [ -n "${SMITE_RC_SOURCE_SHA:-}" ] &&
+              [ "$SMITE_RC_SOURCE_SHA" != "6981bd91b43811fad8847da9abd81ef99a921003" ]; } ||
+           { [ -n "${SMITE_RC_MANIFEST_SHA256:-}" ] &&
+              [ "$SMITE_RC_MANIFEST_SHA256" != "0b34ee3fbd9174e6bf7ef6ddf145f7ebcd606c9bbeae176bb3d6a38b8a2a7840" ]; }; then
+            echo "HOLD: Caller-specified source/manifest pin conflicts with reviewed automatic image source." >&2
+            exit 2
+        fi
+        image_fetcher="$MODULES_PATH/smite-stage15-fetch-images.sh"
+        if [ ! -s "$image_fetcher" ] || [ -L "$image_fetcher" ] ||
+           ! bash "$image_fetcher"; then
+            echo "HOLD: Verified Stage15 auto-download unavailable; no Smite installation started." >&2
+            exit 2
+        fi
+        SMITE_RC_BUNDLE_DIR=/var/lib/u-opti/smite-stage15-frp071-images
+        SMITE_RC_SOURCE_SHA=6981bd91b43811fad8847da9abd81ef99a921003
+        SMITE_RC_MANIFEST_SHA256=0b34ee3fbd9174e6bf7ef6ddf145f7ebcd606c9bbeae176bb3d6a38b8a2a7840
+        export SMITE_RC_BUNDLE_DIR SMITE_RC_SOURCE_SHA SMITE_RC_MANIFEST_SHA256
+    fi
     bundle_helper="$MODULES_PATH/smite-clean-image-pair.py"
     if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
        [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
@@ -758,6 +780,7 @@ print(sha)
                 "smite-stage15-upgrade.py"
                 "smite-stage15-wss-edge.py"
                 "smite-stage15-frp-wizard.sh"
+                "smite-stage15-fetch-images.sh"
                 "smite-rc2-frp-wss-edge-plan.py"
                 "smite-managed-frp-control.py"
                 "smite-managed-frp-menu.sh"
@@ -940,6 +963,7 @@ print(sha)
                 ["smite-stage15-upgrade.py"]="$BASE_URL/modules/smite-stage15-upgrade.py"
                 ["smite-stage15-wss-edge.py"]="$BASE_URL/modules/smite-stage15-wss-edge.py"
                 ["smite-stage15-frp-wizard.sh"]="$BASE_URL/modules/smite-stage15-frp-wizard.sh"
+                ["smite-stage15-fetch-images.sh"]="$BASE_URL/modules/smite-stage15-fetch-images.sh"
                 ["smite-rc2-frp-wss-edge-plan.py"]="$BASE_URL/modules/smite-rc2-frp-wss-edge-plan.py"
                 ["smite-managed-frp-control.py"]="$BASE_URL/modules/smite-managed-frp-control.py"
                 ["smite-managed-frp-menu.sh"]="$BASE_URL/modules/smite-managed-frp-menu.sh"
@@ -1045,6 +1069,7 @@ print(sha)
                 ["smite-stage15-upgrade.py"]="$TEMP_DIR/smite-stage15-upgrade.py"
                 ["smite-stage15-wss-edge.py"]="$TEMP_DIR/smite-stage15-wss-edge.py"
                 ["smite-stage15-frp-wizard.sh"]="$TEMP_DIR/smite-stage15-frp-wizard.sh"
+                ["smite-stage15-fetch-images.sh"]="$TEMP_DIR/smite-stage15-fetch-images.sh"
                 ["smite-rc2-frp-wss-edge-plan.py"]="$TEMP_DIR/smite-rc2-frp-wss-edge-plan.py"
                 ["smite-managed-frp-control.py"]="$TEMP_DIR/smite-managed-frp-control.py"
                 ["smite-managed-frp-menu.sh"]="$TEMP_DIR/smite-managed-frp-menu.sh"
@@ -1355,6 +1380,7 @@ print(sha)
                 "smite-stage15-upgrade.py"
                 "smite-stage15-wss-edge.py"
                 "smite-stage15-frp-wizard.sh"
+                "smite-stage15-fetch-images.sh"
                 "smite-rc2-frp-wss-edge-plan.py"
                 "smite-managed-frp-control.py"
                 "smite-managed-frp-menu.sh"
