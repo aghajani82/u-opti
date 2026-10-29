@@ -44,6 +44,8 @@ def plan(peer):
     need(not STATE.exists() and not STATE.is_symlink(),'EXISTING_EDGE_JOURNAL')
     signed=wss.read_record();need(signed['state']=='COMMITTED' and signed['roles']==['panel','node'],'IR_WSS_NOT_COMMITTED')
     wss.health(signed,True)
+    # Do not install a new edge over an already-running FRPS owner or tunnel.
+    wss.no_tunnels()
     edge.DOMAIN=wss.domain(signed['domain']);peer=edge.kh_ip(peer)
     source=host.file(edge.TLS_SOURCE).decode();stream=host.file(edge.STREAM_SOURCE).decode();mapping=host.file(edge.FRP_MAP).decode()
     edge.stream_gate(stream)
@@ -57,6 +59,9 @@ def plan(peer):
 
 
 def restore(doc):
+    # Edge rollback is only safe after all children and their FRPS owner are
+    # removed. Otherwise KH would lose its active signed transport.
+    wss.no_tunnels()
     protected(doc)
     need(host.file(edge.FRP_MAP).decode() in (doc['old_map'],doc['new_map']),'EXTERNAL_MAP_DRIFT')
     if edge.ALT_CANDIDATE.exists() or edge.ALT_CANDIDATE.is_symlink():
@@ -83,6 +88,18 @@ def apply(peer):
             restore(doc);raise host.Hold('EDGE_FAILURE_ROLLED_BACK')
 
 
+def verify(doc):
+    # A syntactically valid Nginx map alone is not operational proof.
+    signed=wss.read_record()
+    need(signed['state']=='COMMITTED' and signed['roles']==['panel','node']
+         and signed['domain']==doc['domain'],'IR_WSS_NOT_COMMITTED')
+    wss.health(signed,True)
+    protected(doc)
+    need(host.file(edge.FRP_MAP).decode()==doc['new_map']
+         and host.file(edge.ALT_CANDIDATE).decode()==doc['alt'],'EDGE_DRIFT')
+    host.run(['nginx','-t'])
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['plan','apply','verify','rollback','recover']);ap.add_argument('--kh-ip',default='');args=ap.parse_args()
     try:
@@ -97,8 +114,7 @@ def main():
             with host.exclusive(wss.LOCK):
                 doc=state()
                 if args.action=='verify':
-                    need(doc['state']=='COMMITTED','EDGE_NOT_COMMITTED');protected(doc)
-                    need(host.file(edge.FRP_MAP).decode()==doc['new_map'] and host.file(edge.ALT_CANDIDATE).decode()==doc['alt'],'EDGE_DRIFT');host.run(['nginx','-t'])
+                    need(doc['state']=='COMMITTED','EDGE_NOT_COMMITTED');verify(doc)
                 else:restore(doc)
         print('STAGE15_WSS_EDGE_'+args.action.upper()+'=PASS');print('PUBLIC_CONTROL_PORTS_OPENED=NO');return 0
     except (host.Hold,edge.Hold,OSError,ValueError,KeyError,TypeError) as exc:
