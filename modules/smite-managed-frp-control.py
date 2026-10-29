@@ -97,6 +97,14 @@ STAGE15_NODE_ID = (
 STAGE15_FRP071_NODE_ID = 'sha256:cf0f3b12fc2c31cb0847fd5206304837661019d8f604853a8e956448c2576265'
 STAGE15_NODE_VERSIONS = {STAGE15_NODE_ID: '0.65.0', STAGE15_FRP071_NODE_ID: '0.71.0'}
 
+# Match the two reviewed loopback-only Standard installer argv variants.
+# Do NOT admit arbitrary flags, publicly bound hosts, or non-8888 ports.
+SAFE_NODE_COMMANDS = (
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888",
+     "--log-level", "info", "--access-log"],
+)
+
 def _read_only(argv: list[str]) -> str:
     """Bounded argv-only reads. No shell, network, Docker recreation or writes."""
     try:
@@ -152,9 +160,7 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
         if (host["NetworkMode"] != "host" or host.get("PortBindings")
                 or host.get("Privileged") is True):
             raise Hold("STAGE15_NODE_NETWORK_DRIFT")
-        if config.get("Cmd") != [
-            "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"
-        ]:
+        if config.get("Cmd") not in SAFE_NODE_COMMANDS:
             raise Hold("STAGE15_NODE_LOOPBACK_DRIFT")
         for key, expected in {
             "SMITE_NODE_PANEL_AUTH_MODE": "signed",
