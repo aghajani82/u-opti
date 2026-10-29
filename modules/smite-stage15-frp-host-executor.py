@@ -7,7 +7,7 @@ existing signed security Compose overlay, and restarts ONLY smite-node.
 The signed HMAC inventory probe consumes durable replay nonces before and
 after recreation. Every mutation has a journaled rollback/recover path.
 
-This must NOT be wired to the beginner menu before two-host acceptance.
+The experimental wizard requires explicit snapshot/console confirmation.
 No firewall, Nginx, FRP server, Xray, route or public port changes.
 Production Grandoptical is explicitly excluded by host/role/image gates.
 """
@@ -259,7 +259,7 @@ def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
         raw = json.loads(runner(["docker", "inspect", "smite-node"]))
         require(isinstance(raw, list) and len(raw) == 1, "NODE_INSPECT_UNTRUSTED")
         obj = raw[0]
-        require(obj["Image"] == control.STAGE15_NODE_ID
+        require(obj["Image"] in control.STAGE15_NODE_VERSIONS
                 and obj["Config"]["Image"] == "smite-node:stage15-local"
                 and (not healthy or (obj["State"]["Running"] is True
                     and obj["State"]["Health"]["Status"] == "healthy")),

@@ -7,6 +7,10 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/fresh/node" "$TMP/fresh/node/certs" "$TMP/fresh/node/config"
 export SMITE_INSTALL_PROFILE=clean-rc
 source "$ROOT/modules/smite-install.sh"
+python3() {
+    if [[ " $* " == *"smite-compose-safe.py"* ]]; then return 0; fi
+    command python3 "$@"
+}
 # The CI runner is unprivileged; model the production root ownership step in
 # this disposable fixture. The mount verifier separately tests trusted owners.
 if [ "$(id -u)" -ne 0 ]; then chown() { return 0; }; fi

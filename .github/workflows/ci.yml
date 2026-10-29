@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 4e16633a304db6c03f7f2911cc7d77213b0c4ec1
+          ref: 6981bd91b43811fad8847da9abd81ef99a921003
           path: .managed-smite-source
           persist-credentials: false
       - name: Signed official FRP dual-binary Compose recreation and rollback
@@ -294,6 +294,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile modules/smite-rc5-xhttp-root-broker.py modules/smite-rc5-xhttp-broker-provision.py tests/test-smite-rc5-xhttp-root-broker.py
           sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py -v
+
+      - name: Stage15 WSS rollback, upgrade and Compose preservation
+        run: |
+          sudo -n python3 -B tests/test-smite-stage15-wss.py -v
+          sudo -n python3 -B tests/test-smite-stage15-wss-edge.py -v
+          sudo -n python3 -B tests/test-smite-stage15-upgrade.py -v
+          bash -n modules/smite-stage15-frp-wizard.sh
 
       - name: Phase1 Smite Core installs without host FRP, Stable requires original FRP
         shell: bash

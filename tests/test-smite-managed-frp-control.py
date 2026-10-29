@@ -112,7 +112,7 @@ class FrpOperator(unittest.TestCase):
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertIn("STATE=NOT_INSTALLED", process.stdout)
         self.assertIn("BACKHAUL_DEPENDENCY=NONE", process.stdout)
-        self.assertIn("installation on real IR/KH is disabled", process.stdout)
+        self.assertIn("HOLD: Disposable IR/KH root only", process.stdout)
         install = subprocess.run(["bash", str(MENU), "--install"], capture_output=True,
                                  text=True, timeout=15, env=env)
         self.assertEqual(install.returncode, 2)

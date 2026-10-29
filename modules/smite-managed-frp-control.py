@@ -93,6 +93,10 @@ STAGE15_NODE_ID = (
 )
 
 
+# PR39 final source and independently checked build 40830661751.
+STAGE15_FRP071_NODE_ID = 'sha256:cf0f3b12fc2c31cb0847fd5206304837661019d8f604853a8e956448c2576265'
+STAGE15_NODE_VERSIONS = {STAGE15_NODE_ID: '0.65.0', STAGE15_FRP071_NODE_ID: '0.71.0'}
+
 def _read_only(argv: list[str]) -> str:
     """Bounded argv-only reads. No shell, network, Docker recreation or writes."""
     try:
@@ -138,9 +142,9 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
                 raise Hold("STAGE15_DUPLICATE_ENV")
             values[key] = value
         if (config["Image"] != "smite-node:stage15-local"
-                or runtime["Image"] != STAGE15_NODE_ID
+                or runtime["Image"] not in STAGE15_NODE_VERSIONS
                 or run(["docker", "image", "inspect", "-f", "{{.Id}}",
-                        "smite-node:stage15-local"]) != STAGE15_NODE_ID):
+                        "smite-node:stage15-local"]) != runtime["Image"]):
             raise Hold("STAGE15_IMAGE_ID_MISMATCH")
         if (runtime["State"]["Running"] is not True
                 or runtime["State"]["Health"]["Status"] != "healthy"):
@@ -181,7 +185,7 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
         for name in ("frpc", "frps"):
             version = run(["docker", "exec", "smite-node",
                            "/usr/local/bin/" + name, "--version"])
-            if version.strip().lstrip("v") != "0.65.0":
+            if version.strip().lstrip("v") != STAGE15_NODE_VERSIONS[runtime["Image"]]:
                 raise Hold("STAGE15_FRP_BINARY_VERSION_DRIFT")
     except (TypeError, KeyError, IndexError, AttributeError, ValueError,
             json.JSONDecodeError) as exc:
@@ -192,7 +196,7 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
         "ROLE": previous["role"],
         "STAGE15_IMAGE": "PINNED_TEST_ID_MATCH",
         "SIGNED_NODE": "HEALTHY_LOCAL_RUNTIME_ONLY",
-        "FRP_BINARIES": "STAGE15_BUNDLED_0_65_0",
+        "FRP_BINARIES": "STAGE15_BUNDLED_" + STAGE15_NODE_VERSIONS[runtime["Image"]].replace(".", "_"),
         "FRP_0_71_MANAGED_MATCH": "NO",
         "BUNDLED_FRP_PROVENANCE": "NOT_ATTESTED",
         "FRP_ENGINE_ENROLLED": "NO",
