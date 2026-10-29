@@ -128,6 +128,7 @@ MODULES=(
     "smite-stage15-upgrade.py"
     "smite-stage15-wss-edge.py"
     "smite-stage15-frp-wizard.sh"
+    "smite-stage15-fetch-images.sh"
     "smite-rc2-frp-wss-edge-plan.py"
     "smite-managed-frp-control.py"
     "smite-managed-frp-menu.sh"
