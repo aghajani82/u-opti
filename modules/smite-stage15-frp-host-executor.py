@@ -254,6 +254,16 @@ def artifacts(p: Paths):
     return {"frpc": p.binaries / "frpc", "frps": p.binaries / "frps",
             "overlay": p.overlay, "manifest": p.manifest}
 
+# Exact, reviewed loopback commands only. The original Standard installer
+# (smite-node-local-bind.py) explicitly includes Uvicorn logging flags; the
+# shorter argv is retained for existing reviewed Stage15 installs. This is an
+# allowlist, not a prefix match: arbitrary Uvicorn options remain forbidden.
+SAFE_NODE_COMMANDS = (
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888",
+     "--log-level", "info", "--access-log"],
+)
+
 def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
     try:
         raw = json.loads(runner(["docker", "inspect", "smite-node"]))
@@ -282,9 +292,8 @@ def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
                 and not obj["HostConfig"].get("PortBindings")
                 and obj["HostConfig"].get("Privileged") is False,
                 "NODE_NETWORK_SECURITY_DRIFT")
-        require(obj["Config"]["Cmd"] == [
-            "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"
-        ], "NODE_LOOPBACK_API_DRIFT")
+        require(obj["Config"]["Cmd"] in SAFE_NODE_COMMANDS,
+                "NODE_LOOPBACK_API_DRIFT")
         files = {x.strip() for x in obj["Config"]["Labels"].get(
             "com.docker.compose.project.config_files", "").split(",") if x.strip()}
         expected = {str(p.base), str(p.signed)}
