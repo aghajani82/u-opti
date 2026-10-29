@@ -33,6 +33,37 @@ class RuntimePolicy(unittest.TestCase):
         self.assertEqual(w.runtime('node',node(),False),'ir.example.net')
         self.assertEqual(w.runtime('node',node(True),True),'ir.example.net')
         self.assertEqual(w.signature(node()),w.signature(node(True)))
+    def test_docker_bind_order_only_is_canonical_but_security_drift_is_not(self):
+        old=node()
+        old['HostConfig']['Binds']=[
+            '/opt/smite-node/config:/etc/smite-node:rw',
+            '/etc/u-opti/smite/identities:/run/smite-node-identity:ro',
+            '/var/lib/u-opti/smite-node-security/replay:/var/lib/smite-node/auth:rw',
+            '/opt/u-opti/engines/frp/v0.71.0/frpc:/usr/local/bin/frpc:ro',
+            '/opt/u-opti/engines/frp/v0.71.0/frps:/usr/local/bin/frps:ro',
+        ]
+        before=w.signature(old)
+        after=copy.deepcopy(old)
+        after['HostConfig']['Binds'].reverse()
+        after['Config']['Env'].append('SMITE_FRP_STANDARD_WSS=1')
+        self.assertEqual(before,w.signature(after))
+        # WSS apply/rollback must still fail closed on actual bind changes,
+        # including added or deleted entries, even if the rest is reordered.
+        for changes in (
+            lambda x:x['HostConfig']['Binds'].__setitem__(0,'/tmp/evil:/run/smite-node-identity:rw'),
+            lambda x:x['HostConfig']['Binds'].append('/tmp/evil:/tmp/evil:rw'),
+            lambda x:x['HostConfig']['Binds'].pop(),
+            lambda x:x['HostConfig'].update(Privileged=True),
+            lambda x:x['Mounts'][1].update(Source='/tmp/evil'),
+            lambda x:x['Config']['Cmd'].append('--proxy-headers'),
+        ):
+            changed=copy.deepcopy(after);changes(changed)
+            self.assertNotEqual(before,w.signature(changed))
+        for bad in ('untrusted', ['valid',1], {'unexpected':'dict'}):
+            obj=copy.deepcopy(after);obj['HostConfig']['Binds']=bad
+            with self.assertRaisesRegex(w.Hold,'INVALID_HOST_BINDS'):
+                w.signature(obj)
+
     def test_exact_standard_installer_loopback_command_is_admitted(self):
         # smite-node-local-bind.py ships these exact extra Uvicorn flags.
         self.assertEqual(len(w.host.SAFE_NODE_COMMANDS),2)
