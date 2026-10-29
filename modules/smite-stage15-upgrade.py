@@ -31,8 +31,26 @@ verify_bundle=w.load('upgrade_bundle','smite-stage15-bundle-verify.py')
 
 def save(doc):w.write_atomic(STATE/'record.json',(json.dumps(doc,sort_keys=True)+'\n').encode())
 
+def canonical_runtime(result):
+    """Ignore ONLY Docker's reorder of identical HostConfig.Binds entries.
+
+    Mount source, target, flags, duplicates, other HostConfig fields, and
+    the independently checked container Mounts must remain unchanged.
+    Canonicalize saved PREPARED journals too, without editing journal bytes.
+    """
+    need(isinstance(result,dict) and isinstance(result.get('host'),dict),
+         'INVALID_RUNTIME_SIGNATURE')
+    host=dict(result['host'])
+    if 'Binds' in host and isinstance(host['Binds'],list):
+        need(all(isinstance(entry,str) for entry in host['Binds']),
+             'INVALID_HOST_BINDS')
+        host['Binds']=sorted(host['Binds'])
+    return dict(result,host=host)
+
+
 def normal(obj):
-    result=w.signature(obj);result.pop('image');return result
+    result=w.signature(obj);result.pop('image')
+    return canonical_runtime(result)
 
 
 def record():
@@ -52,7 +70,9 @@ def base_command(role,args):
 
 def validate(role,obj,doc=None,healthy=True):
     w.runtime(role,obj,False,healthy,enrolled=False,allowed_images={OLD[role],w.REVIEWED_IMAGES[role]})
-    if doc is not None:need(normal(obj)==doc['runtime'][role],'UPGRADE_RUNTIME_SECURITY_DRIFT')
+    if doc is not None:
+        need(normal(obj)==canonical_runtime(doc['runtime'][role]),
+             'UPGRADE_RUNTIME_SECURITY_DRIFT')
 
 
 def health(doc,new):
