@@ -16,7 +16,10 @@ smite_stage15_frp_wizard() {
         echo '7) Recover interrupted WSS runtime'
         echo '8) IR: recover interrupted edge'
         echo '9) Roll back FRP engine (after WSS rollback)'
-        echo 'G) IR: approve one XHTTP child grant (after signed owner/inbound review)'
+        echo 'B) IR: prepare Stage15 XHTTP bridge (preserves existing WSS and owner)'
+        echo 'V) IR: verify Stage15 XHTTP bridge'
+        echo 'X) IR: roll back/recover Stage15 XHTTP bridge (remove managed routes first)'
+        echo 'G) IR: review signed XHTTP proposal and independently approve root grant'
         echo 'D) Download/verify reviewed Stage15 FRP071 images (no install)'
         echo 'U) Upgrade original Stage15 images before installing FRP'
         echo 'R) Roll back image upgrade (before FRP/WSS)'
@@ -39,11 +42,6 @@ smite_stage15_frp_wizard() {
             2) python3 -B "$dir/smite-stage15-wss.py" apply || :;;
             3)
                 [[ "$role" == IR ]] || { echo 'Run this step on IR'; continue; }
-                # Prepare the existing signed route bridge before cloning the TLS vhost.
-                # A failed verification never permits the edge to bypass bridge admission.
-                if ! python3 -B "$dir/smite-rc5-xhttp-bridge-install.py" verify; then
-                    UOPTI_RC5_IR_XHTTP_BRIDGE_TRIAL=YES python3 -B "$dir/smite-rc5-xhttp-bridge-install.py" apply || continue
-                fi
                 read -rp 'Verified KH public egress IPv4: ' peer || return
                 python3 -B "$dir/smite-stage15-wss-edge.py" apply --kh-ip "$peer" || :
                 ;;
@@ -57,9 +55,12 @@ smite_stage15_frp_wizard() {
                 [[ "$answer" == "ROLLBACK-STAGE15-FRP-$role" ]] || continue
                 UOPTI_STAGE15_FRP_HOST_FIELD_TRIAL=YES python3 -B "$dir/smite-stage15-frp-host-executor.py" rollback --role-confirm "$answer" || :
                 ;;
+            b|B) python3 -B "$dir/smite-stage15-xhttp-bridge.py" apply || :;;
+            v|V) python3 -B "$dir/smite-stage15-xhttp-bridge.py" verify || :;;
+            x|X) python3 -B "$dir/smite-stage15-xhttp-bridge.py" recover || :;;
             g|G)
                 [[ "$role" == IR ]] || { echo 'Run root grant approval on IR'; continue; }
-                python3 -B "$dir/smite-rc5-xhttp-broker-provision.py" --approve-grant --confirm-local-root || :;;
+                python3 -B "$dir/smite-stage15-root-review.py" || :;;
             d|D)
                 echo 'Downloads only; no running Smite container, identity or Replay will be changed.'
                 bash "$dir/smite-stage15-fetch-images.sh" || :;;
