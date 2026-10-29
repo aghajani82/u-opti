@@ -147,6 +147,62 @@ class Upgrade(unittest.TestCase):
         self.assertEqual((self.root/'state'/'node-identity.before.json').read_bytes(),
                          b'CI-PRIVATE-BACKUP')
 
+    def test_ir_prepared_resume_requires_both_healthy_and_signed_proof(self):
+        self.make_prepared_resume_state()
+        panel_tar=self.root/'state'/'panel.image-before.tar'
+        panel_tar.write_bytes(b'CI-PANEL-ORIGINAL-ARCHIVE')
+        panel_tar.chmod(0o600)
+        panel_db=self.root/'state'/'panel.before.sqlite3'
+        with sqlite3.connect(panel_db) as conn:
+            conn.execute('CREATE TABLE panel_ci (id INTEGER PRIMARY KEY)')
+        panel_db.chmod(0o600)
+        live={}
+        for role in ('panel','node'):
+            binds=['/opt/smite-node/config:/etc/smite-node:rw',
+                   '/etc/u-opti/smite/identities:/run/smite-node-identity:ro'] if role=='node' else [
+                   '/opt/smite/panel/data:/app/data:rw']
+            live[role]={
+                'Image':u.w.REVIEWED_IMAGES[role],
+                'Config':{'Env':['CI_RUNTIME_POLICY=unchanged'],
+                          'Cmd':list(u.h.SAFE_NODE_COMMANDS[1]) if role=='node' else ['CI-PANEL-CMD']},
+                'Mounts':[{'Destination':'/etc/smite-node','Source':'/opt/smite-node/config',
+                           'RW':True,'Type':'bind'}] if role=='node' else [],
+                'HostConfig':{'NetworkMode':'host','Privileged':False,'Binds':list(reversed(binds))},
+                'State':{'Running':True,'Health':{'Status':'healthy'}}
+            }
+        runtime={}
+        for role in ('panel','node'):
+            original=copy.deepcopy(live[role])
+            original['HostConfig']['Binds'].reverse()
+            runtime[role]=REAL_NORMAL(original)
+        self.doc.update(roles=['panel','node'],runtime=runtime)
+        (self.root/'state'/'record.json').write_text(json.dumps(self.doc)+'\n')
+        self.patch(u.w,'inspect',lambda role:copy.deepcopy(live[role]))
+        self.patch(u.w,'runtime',lambda role,obj,enabled,healthy=True,**kw:
+            u.h.require(obj['State']['Running'] and obj['State']['Health']['Status']=='healthy'
+                        and obj['Image']==u.w.REVIEWED_IMAGES[role],
+                        'SIMULATED_UNHEALTHY_OR_WRONG_IMAGE'))
+        signed=[]
+        self.patch(u.h,'signed_inventory',lambda expected: signed.append(expected))
+        self.patch(u,'validate',REAL_VALIDATE)
+        self.patch(u,'health',REAL_HEALTH)
+        commands=[]
+        def inspect_images(args,**_):
+            commands.append(args)
+            if args[:3]!=['docker','image','inspect']:
+                raise AssertionError('UNEXPECTED_DOCKER_CALL')
+            target=args[3]
+            for role in ('panel','node'):
+                if target==u.OLD[role]:return u.OLD[role]
+                if target=='smite-'+role+':stage15-local':return u.w.REVIEWED_IMAGES[role]
+            raise AssertionError('UNKNOWN_IMAGE_INSPECTION')
+        self.patch(u.h,'run',inspect_images)
+        u.resume_prepared('IR')
+        self.assertEqual(u.record()['state'],'COMMITTED')
+        self.assertEqual(signed,['not-installed'])
+        self.assertEqual(len(commands),4)
+        self.assertTrue(all(c[:3]==['docker','image','inspect'] for c in commands))
+
     def test_resume_fails_closed_and_does_not_commit(self):
         db=self.make_prepared_resume_state()
         db.unlink()
