@@ -8,6 +8,8 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('upgrade_test',ROOT/'modules/smite-stage15-upgrade.py')
 u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
+REAL_PLAN=u.plan
+REAL_HEALTH=u.health
 
 @unittest.skipUnless(os.geteuid()==0,'root-owned fixture')
 class Upgrade(unittest.TestCase):
@@ -40,6 +42,30 @@ class Upgrade(unittest.TestCase):
         with self.assertRaisesRegex(u.h.Hold,'ROLLED_BACK'):u.apply('KH',self.root)
         self.assertEqual(u.record()['state'],'ROLLED_BACK');self.assertIn(['docker','tag',u.OLD['node'],'smite-node:stage15-local'],self.calls)
         self.assertEqual(self.health,[False])
+    def test_real_plan_and_health_require_signed_not_installed(self):
+        # Regression: Smite engine_inventory() emits "not-installed" for
+        # an unenrolled FRP engine, never "absent". Both preflight and
+        # post-upgrade checks must use the exact API response value.
+        observed=[]
+        def signed_inventory(state):
+            observed.append(state)
+            if state != 'not-installed':
+                raise u.h.Hold('SIGNED_FRP_INVENTORY_REJECTED')
+        self.patch(u.h,'signed_inventory',signed_inventory)
+        self.patch(u.w,'NODE',self.root/'node')
+        self.patch(u.verify_bundle,'verify',
+                   lambda **kwargs:{'images':{'node':{
+                       'local_image_id':u.w.REVIEWED_IMAGES['node']}}})
+        self.patch(u,'plan',REAL_PLAN)
+        doc,bundle=u.plan('KH',self.root)
+        self.assertEqual(doc['roles'],['node'])
+        self.assertEqual(bundle['images']['node']['local_image_id'],
+                         u.w.REVIEWED_IMAGES['node'])
+        self.patch(u,'health',REAL_HEALTH)
+        self.obj['Image']=u.w.REVIEWED_IMAGES['node']
+        u.health(doc,True)
+        self.assertEqual(observed,['not-installed','not-installed'])
+
     def test_copy_checks_same_private_bytes(self):
         # Exercise the real implementation, independent of the transaction mock.
         spec=importlib.util.spec_from_file_location('upgrade_copy',ROOT/'modules/smite-stage15-upgrade.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
