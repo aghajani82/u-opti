@@ -91,7 +91,7 @@ def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None):
     mounts=obj['Mounts'];bydest={m['Destination']:m for m in mounts}
     need(len(bydest)==len(mounts),'DUPLICATE_RUNTIME_MOUNT')
     if role=='node':
-        need(obj['Config']['Cmd']==['uvicorn','main:app','--host','127.0.0.1','--port','8888'],'NODE_API_NOT_LOOPBACK')
+        need(obj['Config']['Cmd'] in host.SAFE_NODE_COMMANDS,'NODE_API_NOT_LOOPBACK')
         need(env.get('SMITE_AGENT_IDENTITY_PATH')=='/run/smite-node-identity/node-identity.json'
              and env.get('SMITE_AGENT_REPLAY_DB')=='/var/lib/smite-node/auth/agent-replay.sqlite3','IDENTITY_PATH_DRIFT')
         address=env.get('PANEL_ADDRESS','');need(address.endswith(':443'),'PANEL_NOT_443');dns=domain(address[:-4])
