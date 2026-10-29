@@ -301,6 +301,8 @@ jobs:
           sudo -n python3 -B tests/test-smite-stage15-wss-edge.py -v
           sudo -n python3 -B tests/test-smite-stage15-upgrade.py -v
           bash -n modules/smite-stage15-frp-wizard.sh
+          bash -n modules/smite-stage15-fetch-images.sh
+          sudo -n bash tests/test-smite-stage15-fetch-images.sh
 
       - name: Phase1 Smite Core installs without host FRP, Stable requires original FRP
         shell: bash
