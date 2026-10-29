@@ -33,6 +33,25 @@ class RuntimePolicy(unittest.TestCase):
         self.assertEqual(w.runtime('node',node(),False),'ir.example.net')
         self.assertEqual(w.runtime('node',node(True),True),'ir.example.net')
         self.assertEqual(w.signature(node()),w.signature(node(True)))
+    def test_exact_standard_installer_loopback_command_is_admitted(self):
+        # smite-node-local-bind.py ships these exact extra Uvicorn flags.
+        self.assertEqual(len(w.host.SAFE_NODE_COMMANDS),2)
+        for argv in w.host.SAFE_NODE_COMMANDS:
+            obj=node()
+            obj['Config']['Cmd']=list(argv)
+            self.assertEqual(w.runtime('node',obj,False),'ir.example.net')
+        for argv in (
+            list(w.host.SAFE_NODE_COMMANDS[1])+['--proxy-headers'],
+            ['uvicorn','main:app','--host','0.0.0.0','--port','8888',
+             '--log-level','info','--access-log'],
+            ['uvicorn','main:app','--host','127.0.0.1','--port','9999',
+             '--log-level','info','--access-log'],
+        ):
+            obj=node()
+            obj['Config']['Cmd']=argv
+            with self.assertRaisesRegex(w.Hold,'NODE_API_NOT_LOOPBACK'):
+                w.runtime('node',obj,False)
+
     def test_unknown_image_mount_privilege_api_and_policy_rejected(self):
         changes=[lambda x:x.update(Image='sha256:'+'0'*64),lambda x:x['Mounts'][1].update(Source='/tmp/identity'),
             lambda x:x['Mounts'][1].update(RW=True),lambda x:x['HostConfig'].update(Privileged=True),
