@@ -17,6 +17,7 @@ smite_stage15_frp_wizard() {
         echo '8) IR: recover interrupted edge'
         echo '9) Roll back FRP engine (after WSS rollback)'
         echo 'G) IR: approve one XHTTP child grant (after signed owner/inbound review)'
+        echo 'D) Download/verify reviewed Stage15 FRP071 images (no install)'
         echo 'U) Upgrade original Stage15 images before installing FRP'
         echo 'R) Roll back image upgrade (before FRP/WSS)'
         echo '0) Back'
@@ -59,9 +60,16 @@ smite_stage15_frp_wizard() {
             g|G)
                 [[ "$role" == IR ]] || { echo 'Run root grant approval on IR'; continue; }
                 python3 -B "$dir/smite-rc5-xhttp-broker-provision.py" --approve-grant --confirm-local-root || :;;
+            d|D)
+                echo 'Downloads only; no running Smite container, identity or Replay will be changed.'
+                bash "$dir/smite-stage15-fetch-images.sh" || :;;
             u|U)
                 archive="${SMITE_RC_BUNDLE_DIR:-}"
-                [[ -n "$archive" ]] || read -rp 'Extracted verified image folder: ' archive || return
+                if [[ -z "$archive" ]]; then
+                    echo 'Checking pinned FRP071 prerelease asset cache / downloading once...'
+                    bash "$dir/smite-stage15-fetch-images.sh" || continue
+                    archive=/var/lib/u-opti/smite-stage15-frp071-images
+                fi
                 python3 -B "$dir/smite-stage15-upgrade.py" apply --images "$archive" || :;;
             r|R) python3 -B "$dir/smite-stage15-upgrade.py" rollback || :;;
             0) return;;
