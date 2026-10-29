@@ -116,10 +116,20 @@ def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None):
 
 
 def signature(obj):
-    """Changes beyond WSS/Compose labels are rejected, including extra mounts."""
+    """Only Docker's order of identical HostConfig.Binds may differ.
+
+    Preserve multiplicity and every byte of each bind entry. Mounts and all
+    other HostConfig, environment, command, and image values remain strict.
+    """
     env=environment(obj);env.pop('SMITE_FRP_STANDARD_WSS',None)
+    hostconfig=dict(obj['HostConfig'])
+    binds=hostconfig.get('Binds')
+    if binds is not None:
+        need(isinstance(binds,list) and all(isinstance(x,str) for x in binds),
+             'INVALID_HOST_BINDS')
+        hostconfig['Binds']=sorted(binds)
     return {'image':obj['Image'],'env':env,'mounts':sorted(obj['Mounts'],key=lambda m:m['Destination']),
-            'command':obj['Config']['Cmd'],'host':obj['HostConfig']}
+            'command':obj['Config']['Cmd'],'host':hostconfig}
 
 
 def no_tunnels():
