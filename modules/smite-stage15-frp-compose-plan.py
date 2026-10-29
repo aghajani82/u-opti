@@ -98,9 +98,7 @@ def validate_config(before: dict, after: dict) -> dict[str, str]:
                 or old_service.get("network_mode") != "host"
                 or old_service.get("ports")
                 or old_service.get("privileged")
-                or old_service.get("command") != [
-                    "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"
-                ]):
+                or old_service.get("command") not in control.SAFE_NODE_COMMANDS):
             raise Hold("STAGE15_SIGNED_BASE_COMPOSE_DRIFT")
         env = old_service.get("environment")
         if not isinstance(env, dict) or any(
