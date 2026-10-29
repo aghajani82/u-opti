@@ -46,6 +46,13 @@ class Upgrade(unittest.TestCase):
         # Regression: Smite engine_inventory() emits "not-installed" for
         # an unenrolled FRP engine, never "absent". Both preflight and
         # post-upgrade checks must use the exact API response value.
+        # Supply the minimal realistic inspect fields required by the real
+        # no-image-changing runtime signature (the older fixture only had Image).
+        self.obj.update({
+            'Config': {'Env': ['SMITE_AGENT_AUTH_MODE=strict'],
+                       'Cmd': list(u.h.SAFE_NODE_COMMANDS[1])},
+            'Mounts': [], 'HostConfig': {'NetworkMode': 'host'},
+        })
         observed=[]
         def signed_inventory(state):
             observed.append(state)
