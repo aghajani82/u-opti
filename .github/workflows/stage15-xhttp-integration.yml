@@ -1,0 +1,27 @@
+name: Stage15 XHTTP cross-repository security
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bridge-and-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 8edbd4032ae657fe2bb38cd9b3290de5f1e07a54
+          path: peer-smite
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo -n python3 -B tests/test-smite-stage15-xhttp-bridge.py
+          sudo -n python3 -B tests/test-smite-stage15-wss-edge.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
+          python3 -B tests/test-stage15-cross-repo.py peer-smite
+          sudo -n python3 -B peer-smite/tests/test_smite_xhttp_nginx_transaction.py

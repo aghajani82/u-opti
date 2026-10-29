@@ -126,7 +126,7 @@ MODULES=(
     "smite-compose-safe.py"
     "smite-stage15-wss.py"
     "smite-stage15-upgrade.py"
-    "smite-stage15-wss-edge.py"
+    "smite-stage15-wss-edge.py" "smite-stage15-xhttp-bridge.py" "smite-stage15-root-review.py"
     "smite-stage15-frp-wizard.sh"
     "smite-stage15-fetch-images.sh"
     "smite-rc2-frp-wss-edge-plan.py"

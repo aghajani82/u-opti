@@ -16,6 +16,14 @@ edge=wss.load('stage15_edge_render','smite-rc2-frp-wss-edge-plan.py')
 STATE=Path('/var/lib/u-opti/smite-stage15-wss-edge')
 
 
+def bridge_source(current, *, committed=False):
+    path=Path('/var/lib/u-opti/smite-stage15-xhttp-bridge')
+    if path.exists() or path.is_symlink():
+        bridge=wss.load('stage15_edge_bridge', 'smite-stage15-xhttp-bridge.py')
+        return bridge.original_backend(current, committed=committed)
+    return current
+
+
 def state():
     host.directory(STATE,private=True)
     doc=json.loads(host.file(STATE/'record.json',mode=0o600))
@@ -23,7 +31,7 @@ def state():
          and doc['schema']==1 and doc['state'] in ('PREPARED','COMMITTED','RECOVERING','ROLLED_BACK'), 'INVALID_EDGE_JOURNAL')
     edge.DOMAIN=wss.domain(doc['domain']);edge.kh_ip(doc['peer'])
     need(doc['new_map']==edge.render_map(doc['old_map'],doc['peer']),'EDGE_JOURNAL_MAP_DRIFT')
-    need(doc['alt']==edge.render_alt(host.file(edge.TLS_SOURCE).decode()),'EDGE_JOURNAL_ALT_DRIFT')
+    need(doc['alt']==edge.render_alt(bridge_source(host.file(edge.TLS_SOURCE)).decode()),'EDGE_JOURNAL_ALT_DRIFT')
     need(doc['mode'] in (0o600,0o640,0o644),'EDGE_MAP_MODE_DRIFT')
     return doc
 
@@ -32,7 +40,7 @@ def save(doc):wss.write_atomic(STATE/'record.json',(json.dumps(doc,sort_keys=Tru
 
 
 def protected(doc):
-    need(host.digest(host.file(edge.TLS_SOURCE))==doc['backend'] and
+    need(host.digest(bridge_source(host.file(edge.TLS_SOURCE),committed=True))==doc['backend'] and
          host.digest(host.file(edge.STREAM_SOURCE))==doc['stream'],'NGINX_SOURCE_DRIFT')
 
 
@@ -62,6 +70,7 @@ def restore(doc):
     # Edge rollback is only safe after all children and their FRPS owner are
     # removed. Otherwise KH would lose its active signed transport.
     wss.no_tunnels()
+    need(host.digest(host.file(edge.TLS_SOURCE))==doc['backend'], 'ROLLBACK_BRIDGE_FIRST')
     protected(doc)
     need(host.file(edge.FRP_MAP).decode() in (doc['old_map'],doc['new_map']),'EXTERNAL_MAP_DRIFT')
     if edge.ALT_CANDIDATE.exists() or edge.ALT_CANDIDATE.is_symlink():

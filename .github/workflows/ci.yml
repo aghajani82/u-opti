@@ -298,6 +298,7 @@ jobs:
       - name: Stage15 WSS rollback, upgrade and Compose preservation
         run: |
           sudo -n python3 -B tests/test-smite-stage15-wss.py -v
+          sudo -n python3 -B tests/test-smite-stage15-xhttp-bridge.py
           sudo -n python3 -B tests/test-smite-stage15-wss-edge.py -v
           sudo -n python3 -B tests/test-smite-stage15-upgrade.py -v
           bash -n modules/smite-stage15-frp-wizard.sh
