@@ -27,7 +27,7 @@ Smite Panel Create/Verify -> signed XHTTP proposal (30 s)
             -> strict Host/Origin/CSRF and single-use WebAuthn UV required
             -> independent IR FRPS live owner Ed25519 attestation
             -> independent KH Sanaei SQLite read-only inbound Ed25519 attestation
-            -> root-only read-only Panel SQLite lease reconciliation
+            -> root-only consistent read-only transaction against the live Panel SQLite volume
                + separate Root Ed25519 lease attestation
             -> pinned signature/evidence digest/nonce/expiry verification
             -> durable audit + evidence nonce consumption
@@ -119,7 +119,7 @@ The following requires separate approval and a checked IR/KH snapshot first:
    to the dedicated IR review service. A separately generated root lease
    signing key stays on IR. Never expose any private key to Panel JS/backend.
    Any Node maintenance/recreate requires a separate approved deployment.
-4. Create a root-private read-only *consistent SQLite view* of Panel tunnels
+4. Mount the authoritative live Panel SQLite volume read-only for Root and verify SQLite WAL sidecars, then obtain a fresh consistent read transaction of Panel tunnels
    and frp_proxy_leases on IR (including valid WAL companion files as needed).
    The review service must not query the unauthenticated Panel API or grant
    based only on the database; it corroborates live IR/KH signed attestations.
@@ -137,7 +137,7 @@ The following requires separate approval and a checked IR/KH snapshot first:
    `broker_key_path`, `ir_public_key_path`, `kh_public_key_path`,
    `lease_public_key_path`, `lease_private_key_path`,
    `node_ir`/`node_kh` {node_id,url,secret_path} and
-   `panel_snapshot_path`. All paths are fixed administrator-controlled.
+   `panel_live_db_path`. All paths are fixed administrator-controlled.
 8. Only after independent review: activate root-owned systemd UDS service
    and Nginx example with actual hostname/certificate. Verify private
    socket parent traversal by Nginx, never chmod Root secrets or bind TCP.
