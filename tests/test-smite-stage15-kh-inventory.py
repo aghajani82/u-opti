@@ -227,7 +227,7 @@ class KHInventoryTests(unittest.TestCase):
                     with self.assertRaises(m.Hold):
                         m.admit_after(before, tampered)
                     tampered = copy.deepcopy(after)
-                    tampered["mounts"][-1]["RW"] = True
+                    next(item for item in tampered["mounts"] if item["Destination"] == "/run/smite-sanaei-ro")["RW"] = True
                     with self.assertRaises(m.Hold):
                         m.admit_after(before, tampered)
                     tampered = copy.deepcopy(after)
