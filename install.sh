@@ -125,6 +125,7 @@ MODULES=(
     "smite-stage15-frp-host-executor.py"
     "smite-compose-safe.py"
     "smite-stage15-wss.py"
+    "smite-stage15-active-runtime.py"
     "smite-stage15-upgrade.py"
     "smite-stage15-wss-edge.py" "smite-stage15-xhttp-bridge.py" "smite-stage15-root-review.py"
     "smite-stage15-frp-wizard.sh"

@@ -116,6 +116,13 @@ def _json(data: bytes, expected: set[str]) -> dict:
 
 
 def _configuration() -> dict:
+    migration = Path('/var/lib/u-opti/smite-stage15-active-runtime')
+    if migration.exists() or migration.is_symlink():
+        try:
+            active = _load_module('broker_active_runtime', HERE / 'smite-stage15-active-runtime.py')
+            active.admission()
+        except Exception as exc:
+            raise BrokerHold('ACTIVE_RUNTIME_RECOVERY_REQUIRED') from exc
     _dir(CONFIG.parent, mode=0o700)
     config = _json(_file(CONFIG, mode=0o600), {
         "schema", "instance_id", "peer_uid", "peer_gid",

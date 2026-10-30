@@ -1,5 +1,10 @@
 # Stage15 active-owner continuation — 2026-10-30
 
+Update: an executable Panel-only migration candidate and recovery tests now
+exist. See [the migration runbook](SMITE-STAGE15-PANEL-MIGRATION.md). The
+missing-implementation notes below record the earlier review; live validation
+remains pending.
+
 Status: **HOLD — no approved active-runtime migration**. This is a source/test
 candidate, not an installation authorization. No IR/KH commands were executed.
 Grandoptical is outside scope. Do not run the old `smite-stage15-upgrade.py` on

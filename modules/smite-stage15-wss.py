@@ -194,8 +194,16 @@ def health(doc,enabled):
     for role in doc['roles']:
         for attempt in range(20):
             try:
-                obj=inspect(role);runtime(role,obj,enabled)
-                need(signature(obj)==doc['runtime'][role],'RUNTIME_SECURITY_DRIFT');break
+                obj=inspect(role)
+                expected=doc['runtime'][role]
+                migration=Path('/var/lib/u-opti/smite-stage15-active-runtime')
+                if role=='panel' and (migration.exists() or migration.is_symlink()):
+                    need(enabled,'ROLLBACK_ACTIVE_RUNTIME_FIRST')
+                    active=load('wss_active_runtime','smite-stage15-active-runtime.py')
+                    try:expected=active.expectation(doc,obj['Image'])
+                    except Exception:raise Hold('ACTIVE_RUNTIME_ADMISSION_FAILED')
+                runtime(role,obj,enabled,allowed_images={expected['image']} if role=='panel' and (migration.exists() or migration.is_symlink()) else None)
+                need(signature(obj)==expected,'RUNTIME_SECURITY_DRIFT');break
             except Hold:
                 if attempt==19:raise
                 time.sleep(3)

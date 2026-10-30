@@ -19,6 +19,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: |
+          sudo -n python3 -B tests/test-smite-stage15-active-runtime.py
+          python3 -B peer-smite/tests/test_signed_frp_boot_reapply_guard.py
           python3 -B tests/test-stage15-archive-provenance.py
           python3 -B tests/test-smite-stage15-bundle-verify.py
           sudo -n python3 -B tests/test-smite-stage15-root-review.py
@@ -28,3 +30,9 @@ jobs:
           sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
           python3 -B tests/test-stage15-cross-repo.py peer-smite
           sudo -n python3 -B peer-smite/tests/test_smite_xhttp_nginx_transaction.py
+  broker-directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo -n env GITHUB_ACTIONS=true bash tests/test-stage15-broker-directory-systemd.sh
