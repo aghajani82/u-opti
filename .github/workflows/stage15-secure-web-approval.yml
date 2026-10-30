@@ -21,13 +21,14 @@ jobs:
       - name: Compile and test independent approval primitives
         run: |
           set -euo pipefail
-          python3 -m py_compile modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py modules/smite-stage15-approval-queue.py modules/smite-stage15-passkey-enrollment.py modules/smite-stage15-web-service.py modules/smite-stage15-live-evidence.py modules/smite-stage15-web-launcher.py
+          python3 -m py_compile modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py modules/smite-stage15-approval-queue.py modules/smite-stage15-passkey-enrollment.py modules/smite-stage15-web-service.py modules/smite-stage15-live-evidence.py modules/smite-stage15-web-launcher.py modules/smite-stage15-web-bootstrap.py modules/smite-stage15-approval-key-enrollment.py
           python3 -B tests/test-smite-stage15-approval-evidence.py -v
           python3 -B tests/test-smite-stage15-web-approval.py -v
           python3 -B tests/test-smite-stage15-approval-queue.py -v
           python3 -B tests/test-smite-stage15-web-uds-integration.py -v
           python3 -B tests/test-smite-stage15-passkey-enrollment.py -v
           python3 -B tests/test-smite-stage15-live-evidence.py -v
+          python3 -B tests/test-smite-stage15-web-bootstrap.py -v
       - name: Refuse accidental root API or FRPS/FRPC edits in this feature
         run: |
           set -euo pipefail
