@@ -1,0 +1,33 @@
+# Stage15 Independent Web Approval (example ONLY; DO NOT INSTALL)
+
+# A dedicated HTTPS hostname and a trusted LE certificate MUST be reviewed
+# separately before installing this vhost. This is NOT a second TCP listener:
+# only the pre-existing, authorized Nginx TLS/443 listener may be used.
+#
+# Server name and certificate paths below are intentional placeholders.
+# Never enable this file or expose a Root management port by default.
+server {
+    listen 443 ssl;
+    server_name REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL;
+    ssl_certificate     /etc/letsencrypt/live/REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL/privkey.pem;
+
+    client_max_body_size 16k;
+    server_tokens off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://unix:/run/u-opti/smite-review/web-approval.sock:;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        # Never include a global proxy_set_header X-Forwarded-* here:
+        # the Root-only UDS review server rejects these headers entirely.
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-Forwarded-Proto "";
+        proxy_pass_request_headers on;
+        proxy_buffering off;
+        proxy_read_timeout 15s;
+        proxy_connect_timeout 2s;
+    }
+}
