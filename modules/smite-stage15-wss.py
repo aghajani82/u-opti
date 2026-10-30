@@ -51,7 +51,7 @@ def domain(value):
     return value
 
 
-def service_files(role,enrolled=True):
+def service_files(role,enrolled=True,inventory=False):
     if role=='node':return [NODE/'docker-compose.yml',NODE/'docker-compose.security-candidate.yml']+([NODE/'docker-compose.frp-stage15.yml'] if enrolled else [])
     return [PANEL/'docker-compose.yml',PANEL/'docker-compose.signed-control.yml']
 
@@ -74,7 +74,7 @@ def inspect(role):
     return data[0]
 
 
-def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None):
+def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None,inventory=False):
     need(obj['Image'] in (allowed_images if allowed_images is not None else {REVIEWED_IMAGES[role]}), 'UNREVIEWED_WSS_IMAGE')
     need(obj['Config']['Image']=='smite-'+role+':stage15-local','UNREVIEWED_IMAGE_REFERENCE')
     need(obj['HostConfig']['NetworkMode']=='host' and not obj['HostConfig'].get('PortBindings')
@@ -86,7 +86,7 @@ def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None):
     need(env.get('SMITE_FRP_STANDARD_WSS')=='1' if enabled else 'SMITE_FRP_STANDARD_WSS' not in env,'WSS_POLICY_DRIFT')
     labels=obj['Config'].get('Labels') or {}
     files=labels.get('com.docker.compose.project.config_files','').split(',')
-    wanted=[str(p) for p in service_files(role,enrolled)+([overlay(role)] if enabled else [])]
+    wanted=[str(p) for p in service_files(role,enrolled)+([overlay(role)] if enabled else [])+([NODE/'docker-compose.sanaei-inventory.yml'] if role=='node' and inventory else [])]
     need(files==wanted,'COMPOSE_ORDER_OR_FILES_DRIFT')
     mounts=obj['Mounts'];bydest={m['Destination']:m for m in mounts}
     need(len(bydest)==len(mounts),'DUPLICATE_RUNTIME_MOUNT')
@@ -109,6 +109,11 @@ def runtime(role,obj,enabled,healthy=True,*,enrolled=True,allowed_images=None):
     if role=='node' and not enrolled:
         required.pop('/usr/local/bin/frpc');required.pop('/usr/local/bin/frps')
         need(not any(p in bydest for p in ('/usr/local/bin/frpc','/usr/local/bin/frps')),'UNEXPECTED_ENGINE_MOUNTS')
+    if role=='node' and inventory:
+        need(env.get('SMITE_SANAEI_INVENTORY_ENABLED')=='true'
+             and env.get('SMITE_SANAEI_DB_PATH')=='/run/smite-sanaei-ro/x-ui.db',
+             'KH_INVENTORY_ENV_DRIFT')
+        required['/run/smite-sanaei-ro']=('/opt/3x-ui/instances/01/db',False)
     for dest,(source,rw) in required.items():
         m=bydest.get(dest,{})
         need(m.get('Source')==source and m.get('RW') is rw and m.get('Type')=='bind','SECURITY_MOUNT_DRIFT')
@@ -202,7 +207,18 @@ def health(doc,enabled):
                     active=load('wss_active_runtime','smite-stage15-active-runtime.py')
                     try:expected=active.expectation(doc,obj['Image'])
                     except Exception:raise Hold('ACTIVE_RUNTIME_ADMISSION_FAILED')
-                runtime(role,obj,enabled,allowed_images={expected['image']} if role=='panel' and (migration.exists() or migration.is_symlink()) else None)
+                kh_inv = False
+                inv_state=Path('/var/lib/u-opti/smite-stage15-kh-inventory')
+                if role=='node' and (inv_state.exists() or inv_state.is_symlink()):
+                    need(enabled, 'KH_INVENTORY_REQUIRES_WSS')
+                    inventory_mod=load('wss_kh_inventory','smite-stage15-kh-inventory.py')
+                    try:
+                        expected=inventory_mod.expectation(doc,obj['Image'])
+                        kh_inv=inventory_mod.record()['phase']=='COMMITTED'
+                    except Exception:
+                        raise Hold('KH_INVENTORY_ADMISSION_FAILED')
+                runtime(role,obj,enabled,inventory=kh_inv,
+                        allowed_images={expected['image']} if role=='panel' and (migration.exists() or migration.is_symlink()) else None)
                 need(signature(obj)==expected,'RUNTIME_SECURITY_DRIFT');break
             except Hold:
                 if attempt==19:raise
