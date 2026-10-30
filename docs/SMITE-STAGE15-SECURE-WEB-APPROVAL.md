@@ -62,6 +62,11 @@ U-OPTI:
 - `smite-stage15-web-approval.py`: isolated Passkey verifier and SQLite audit
   (single-use challenge; UV required; exact origin; spent challenge cannot be
   replayed). No HTTP service, no TrustedGrant issuance, no privileged mutation.
+- `smite-stage15-approval-queue.py`: inert immutable, root-private
+  per-digest proposal queue; authentic 30-second intents must be current at
+  staging. Reviews up to 600 seconds later verify the original signature but
+  **cannot** publish the old intent. Conflicting child staging stays HOLD.
+  It is not connected to the active broker yet.
 - associated offline negative tests and CI workflow. No modifications to the
   existing broker, FRPS, FRPC, Signed Pairing or existing replay ledger.
 
