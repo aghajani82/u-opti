@@ -18,6 +18,7 @@ spec = importlib.util.spec_from_file_location("kh_inventory_test",
 m = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = m
 spec.loader.exec_module(m)
+REAL_VALIDATE_COMPOSE = m.validate_compose
 
 class PowerLoss(BaseException):
     pass
@@ -271,19 +272,19 @@ class KHInventoryTests(unittest.TestCase):
                     after["services"]["smite-node"]["volumes"].append(new_mount)
                 with patch.object(m.h, "run", side_effect=[
                         json.dumps(before), json.dumps(after)]):
-                    m.validate_compose()
+                    REAL_VALIDATE_COMPOSE()
                 unsafe = copy.deepcopy(after)
                 unsafe["services"]["smite-node"]["volumes"][-1]["read_only"] = False
                 with patch.object(m.h, "run", side_effect=[
                         json.dumps(before), json.dumps(unsafe)]):
                     with self.assertRaises(m.Hold):
-                        m.validate_compose()
+                        REAL_VALIDATE_COMPOSE()
                 rogue = copy.deepcopy(after)
                 rogue["services"]["smite-node"]["environment"]["SMITE_AGENT_AUTH_MODE"] = "legacy"
                 with patch.object(m.h, "run", side_effect=[
                         json.dumps(before), json.dumps(rogue)]):
                     with self.assertRaises(m.Hold):
-                        m.validate_compose()
+                        REAL_VALIDATE_COMPOSE()
 
     def test_no_image_swap_in_root_runbook(self):
         source = (ROOT / "modules/smite-stage15-kh-inventory.py").read_text()
