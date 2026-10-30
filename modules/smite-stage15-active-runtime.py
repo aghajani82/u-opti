@@ -188,6 +188,34 @@ class Host:
             schema = db.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
         return dict(owner=rows[0][0], port=ports[0], rows_sha=h.digest(canonical(rows)), schema_sha=h.digest(canonical(schema)))
 
+    def node_tunnel_storage(self, node):
+        """Bind the existing tunnel registry to the mounted, persistent Node volume.
+
+        The running Node writes /var/lib/smite-node/tunnels.json, NOT the
+        /etc/smite-node config bind (/opt/smite-node/config on the host).
+        Never synthesize or copy a missing registry, and never trust a path
+        supplied by a tunnel request.
+        """
+        mounts = [item for item in node['Mounts']
+                  if item.get('Destination') == '/var/lib/smite-node']
+        need(len(mounts) == 1, 'NODE_TUNNEL_VOLUME_MOUNT_REQUIRED')
+        mount = mounts[0]
+        need(mount.get('Type') == 'volume' and mount.get('Name') == 'smite-node-data'
+             and mount.get('RW') is True and isinstance(mount.get('Source'), str),
+             'NODE_TUNNEL_VOLUME_UNTRUSTED')
+        source = Path(mount['Source'])
+        need(source.is_absolute() and '..' not in source.parts
+             and source.name == '_data' and source.parent.name == mount['Name'],
+             'NODE_TUNNEL_VOLUME_SOURCE_UNTRUSTED')
+        h.directory(source)
+        registry = source / 'tunnels.json'
+        content = h.file(registry, limit=1048576)
+        info = registry.lstat()
+        # Pin inode as well as bytes: a registry replaced during migration is
+        # drift even when a replacement happens to contain identical bytes.
+        return {'path': str(registry), 'sha': h.digest(content),
+                'inode': [info.st_dev, info.st_ino]}
+
     def protected(self):
         facts = self.db_facts(); node = w.inspect('node'); w.runtime('node', node, True)
         sys.path.insert(0, str(HERE))
@@ -198,9 +226,10 @@ class Host:
         start = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()[19]
         files = {}
         for path in (w.STATE / 'record.json', Path('/var/lib/u-opti/smite-stage15-wss-edge/record.json'),
-                     w.NODE / 'config/tunnels.json', b.KEY,
+                     b.KEY,
                      w.overlay('panel'), w.overlay('node')):
             files[str(path)] = h.digest(h.file(path, limit=262144))
+        tunnel_storage = self.node_tunnel_storage(node)
         trusted = Path('/etc/u-opti/smite/panel-trusted-nodes'); h.directory(trusted)
         for path in sorted(trusted.iterdir()): files[str(path)] = h.digest(h.file(path, limit=262144))
         ledger = b.LEDGER; h.file(ledger, mode=0o600, limit=80*1024*1024)
@@ -208,7 +237,8 @@ class Host:
         h.run(['nginx', '-t'])
         return dict(db=facts, node_id=node['Id'], node_pid=node['State']['Pid'], node_runtime=w.signature(node),
                     frp_processes=h.run(['ps', '-C', 'frps,frpc', '-o', 'pid=,comm=,lstart=']),
-                    owner_pid=pid, owner_start=start, files=files, broker_replay_inode=[st.st_dev, st.st_ino],
+                    owner_pid=pid, owner_start=start, files=files, node_tunnel_storage=tunnel_storage,
+                    broker_replay_inode=[st.st_dev, st.st_ino],
                     socket_dir_inode=[b.SOCKET.parent.stat().st_dev, b.SOCKET.parent.stat().st_ino],
                     nginx=h.digest(h.run(['nginx', '-T']).encode()), signed=w.protected(['panel', 'node']))
 
