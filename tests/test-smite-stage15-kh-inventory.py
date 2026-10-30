@@ -69,6 +69,7 @@ class KHInventoryTests(unittest.TestCase):
         self.wdoc = {"roles": ["node"], "state": "COMMITTED",
                      "runtime": {"node": copy.deepcopy(self.before)}}
         self.patches = [
+            patch.object(m.os, "uname", return_value=type("KHHost", (), {"nodename": "kh"})()),
             patch.object(m, "STATE", self.state),
             patch.object(m, "OVERLAY", self.overlay),
             patch.object(m.w, "STATE", self.wss),
