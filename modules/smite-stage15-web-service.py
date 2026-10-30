@@ -71,7 +71,8 @@ class IndependentApproval:
     def __init__(self, *, queue_dir: Path, broker_key: bytes, ledger,
                  credential_store, origin: str, evidence_provider=None,
                  grant_writer=None, ir_public_key: bytes = b"",
-                 kh_public_key: bytes = b"", root_check: bool = True):
+                 kh_public_key: bytes = b"", lease_public_key: bytes = b"",
+                 root_check: bool = True):
         gate = module("uopti_web_gate", "smite-stage15-web-approval.py")
         self.queue = module("uopti_web_queue", "smite-stage15-approval-queue.py")
         self.queue_dir = Path(queue_dir)
@@ -83,6 +84,7 @@ class IndependentApproval:
         self.credentials = credential_store
         self.origin, self.key = origin, broker_key
         self.ir_public_key, self.kh_public_key = ir_public_key, kh_public_key
+        self.lease_public_key = lease_public_key
         self.evidence_provider = evidence_provider
         self.grant_writer = grant_writer
         self.root_check = root_check
@@ -123,6 +125,7 @@ class IndependentApproval:
         credential_hash = self.ledger.consume(challenge_id, digest=digest,
             origin=self.origin, passkeys=self.credentials.encoded(),
             assertion=assertion, now=int(time.time()))
+        self.credentials.check_and_advance(credential_hash, assertion)
         if self.evidence_provider is None or self.grant_writer is None:
             raise ApprovalServiceHold("ROOT_INDEPENDENT_EVIDENCE_NOT_CONFIGURED")
         binding = self.pending(child)["binding"]
@@ -135,6 +138,7 @@ class IndependentApproval:
             digest=digest, credential_sha256=credential_hash,
             binding=binding, bundle=bundle,
             ir_public_key=self.ir_public_key, kh_public_key=self.kh_public_key,
+            lease_public_key=self.lease_public_key,
             now=int(time.time()))
         # Exclusive root-owned create. Any interruption after the durable
         # approval ledger commit is HOLD and requires explicit reconciliation.
