@@ -208,6 +208,7 @@ class ApprovalLedger:
     def record_verified_approval(self, *, digest: str, credential_sha256: str,
                                  binding: dict, bundle: dict,
                                  ir_public_key: bytes, kh_public_key: bytes,
+                                 lease_public_key: bytes | None = None,
                                  now: int | None = None) -> None:
         """Perform independent evidence verification and record approval; NO grant.
 
@@ -238,7 +239,8 @@ class ApprovalLedger:
             ))
             evidence_nonces = module.verify_bundle(
                 bundle, binding, ir_public_key=ir_public_key,
-                kh_public_key=kh_public_key, now=now, consumed_nonces=consumed,
+                kh_public_key=kh_public_key, lease_public_key=lease_public_key,
+                now=now, consumed_nonces=consumed,
             )
             for nonce in sorted(evidence_nonces):
                 self.conn.execute("INSERT INTO evidence_nonces(nonce) VALUES(?)", (nonce,))
