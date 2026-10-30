@@ -93,6 +93,8 @@ class LiveUDSTests(unittest.TestCase):
         self.server_module=service.module("uopti_web_gate","smite-stage15-web-approval.py")
         p=patch.object(self.server_module,"_server",return_value=fake_server)
         p.start();self.addCleanup(p.stop)
+        c=patch.object(self.server_module,"_credentials",return_value=[object()])
+        c.start();self.addCleanup(c.stop)
         self.fail_evidence=False
         def public(k):
             return k.public_key().public_bytes(
