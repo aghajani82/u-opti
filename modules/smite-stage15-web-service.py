@@ -84,6 +84,9 @@ class IndependentApproval:
         self.credentials = credential_store
         panel_url = urlsplit(panel_origin)
         if (panel_url.scheme != "https" or not panel_url.hostname
+                or not re.fullmatch(r"[a-z0-9.-]{4,253}",panel_url.hostname)
+                or panel_url.username or panel_url.password
+                or panel_url.netloc != panel_url.hostname
                 or panel_url.port not in (None,443)
                 or panel_url.path not in ("","/") or panel_url.query
                 or panel_url.fragment or panel_origin == origin):
