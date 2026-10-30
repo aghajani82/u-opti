@@ -726,7 +726,7 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             broker = importlib.util.module_from_spec(broker_spec)
             sys.modules[broker_spec.name] = broker
             broker_spec.loader.exec_module(broker)
-            with mock.patch.object(broker, "GRANTS", grants):
+            with patch.object(broker, "GRANTS", grants):
                 admitted = broker._approved_grant(proposal["child"])
                 self.assertEqual(admitted.child, proposal["child"])
                 self.assertEqual(admitted.port, proposal["port"])
