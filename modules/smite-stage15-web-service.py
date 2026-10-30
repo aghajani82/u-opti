@@ -218,6 +218,41 @@ button.onclick=async()=>{button.disabled=true;try{
 </script></body></html>"""
 
 
+ENROLL_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Root-only Passkey Enrollment</title><style nonce="__CSP_NONCE__">
+body{font:16px system-ui;background:#0e172b;color:white;max-width:650px;margin:3rem auto;padding:1rem}
+input,button{padding:.8rem;border-radius:.5rem}button{background:#536dff;color:white}
+pre{white-space:pre-wrap}
+</style></head><body><h1>Independent Passkey Enrollment</h1>
+<p>Requires a one-time root-console ticket. Never enter a Smite password here.</p>
+<label>One-time enrollment ticket <input id="ticket" type="password" autocomplete="off"></label>
+<button id="register">Register a passkey</button><pre id="status" role="status"></pre>
+<script nonce="__CSP_NONCE__">
+function bytes(b64){const s=b64.replace(/-/g,'+').replace(/_/g,'/');
+ const b=atob(s+'='.repeat((4-s.length%4)%4));return Uint8Array.from(b,c=>c.charCodeAt(0));}
+function encoded(a){let b='';for(const x of new Uint8Array(a))b+=String.fromCharCode(x);
+ return btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function post(url,data){const r=await fetch(url,{method:'POST',credentials:'omit',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+ if(!r.ok)throw Error('HOLD '+r.status);return r.json();}
+document.getElementById('register').onclick=async()=>{
+ const status=document.getElementById('status'),ticket=document.getElementById('ticket').value;
+ try{const begin=await post('/api/enroll/begin',{ticket});
+ const p=begin.options.publicKey;p.challenge=bytes(p.challenge);p.user.id=bytes(p.user.id);
+ p.excludeCredentials=(p.excludeCredentials||[]).map(c=>({...c,id:bytes(c.id)}));
+ const created=await navigator.credentials.create({publicKey:p});
+ const response={id:created.id,rawId:encoded(created.rawId),type:'public-key',
+ response:{clientDataJSON:encoded(created.response.clientDataJSON),
+ attestationObject:encoded(created.response.attestationObject)}};
+ await post('/api/enroll/complete',{ticket,ceremony:begin.ceremony,response});
+ status.textContent='Passkey registered. Keep an independent second passkey for recovery.';
+ }catch(e){status.textContent=String(e);}
+ document.getElementById('ticket').value='';
+};
+</script></body></html>"""
+
+
 class ApprovalHandler(BaseHTTPRequestHandler):
     server_version = "Independent-Approval/1"
     def log_message(self, format, *args):
@@ -252,7 +287,14 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             self._admit(mutate=False)
             u=urlsplit(self.path)
             q=parse_qs(u.query)
-            if u.path == "/review" and set(q)=={"child"} and len(q["child"])==1:
+            if u.path == "/enroll" and not q:
+                nonce=secrets.token_urlsafe(24)
+                page=ENROLL_HTML.replace("__CSP_NONCE__",nonce)
+                self._reply(200,page,html=True,csp=(
+                  "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                  "connect-src 'self'; form-action 'none'; style-src 'nonce-"+nonce+"'; "
+                  "script-src 'nonce-"+nonce+"'; object-src 'none'"))
+            elif u.path == "/review" and set(q)=={"child"} and len(q["child"])==1:
                 nonce=secrets.token_urlsafe(24)
                 html=HTML.replace("__CSP_NONCE__",nonce)
                 html=html.replace("__PANEL_ORIGIN__", self.server.application.panel_origin)
