@@ -30,6 +30,7 @@ jobs:
           python-version: '3.11'
       - run: |
           sudo -n python3 -B tests/test-smite-stage15-active-runtime.py
+          sudo -n python3 -B tests/test-smite-stage15-kh-inventory.py -v
           python3 -B peer-smite/tests/test_signed_frp_boot_reapply_guard.py
           python3 -B tests/test-stage15-archive-provenance.py
           python3 -B tests/test-smite-stage15-bundle-verify.py
