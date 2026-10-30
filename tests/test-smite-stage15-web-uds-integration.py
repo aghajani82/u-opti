@@ -95,6 +95,9 @@ class LiveUDSTests(unittest.TestCase):
         p.start();self.addCleanup(p.stop)
         c=patch.object(self.server_module,"_credentials",return_value=[object()])
         c.start();self.addCleanup(c.stop)
+        for name,value in (("_server",fake_server),("_credentials",[object()])):
+            local=patch.object(gate,name,return_value=value)
+            local.start();self.addCleanup(local.stop)
         self.fail_evidence=False
         def public(k):
             return k.public_key().public_bytes(
