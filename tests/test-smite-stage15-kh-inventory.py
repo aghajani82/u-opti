@@ -19,6 +19,7 @@ m = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = m
 spec.loader.exec_module(m)
 REAL_VALIDATE_COMPOSE = m.validate_compose
+REAL_WAIT_HEALTHY = m.wait_healthy
 
 class PowerLoss(BaseException):
     pass
@@ -114,6 +115,7 @@ class KHInventoryTests(unittest.TestCase):
             patch.object(m, "database", return_value=[15, 16, 17]),
             patch.object(m, "frpc", return_value="single-original-frpc"),
             patch.object(m, "validate_compose"),
+            patch.object(m, "wait_healthy"),
             patch.object(m.w, "runtime"),
             patch.object(m.w, "health"),
             patch.object(m.h, "signed_inventory", side_effect=lambda status: self.operations.append("signed-registry:" + status)),
@@ -367,7 +369,7 @@ class KHInventoryTests(unittest.TestCase):
         healthy = {"State": {"Running": True, "Health": {"Status": "healthy"}}}
         with patch.object(m.w, "inspect", side_effect=[starting, healthy]), \
              patch.object(m.time, "sleep") as sleeping:
-            m.wait_healthy()
+            REAL_WAIT_HEALTHY()
         sleeping.assert_called_once_with(3)
         self.assertEqual(self.operations, [])
 
