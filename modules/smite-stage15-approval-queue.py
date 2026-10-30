@@ -130,6 +130,12 @@ def stage(*, directory: Path, wire: bytes, key: bytes, now: int,
             if (not isinstance(previous, dict) or set(previous) != set(entry)
                     or previous.get("digest") != other.name[9:-5]):
                 raise QueueHold("CORRUPT_PENDING_QUEUE")
+            decision = closure(directory=directory,
+                               digest=previous["digest"],root_check=root_check)
+            if decision is not None:
+                if decision["child"] != previous["child"]:
+                    raise QueueHold("CLOSURE_IDENTITY_MISMATCH")
+                continue
             if other != target and previous["child"] == v["child"]:
                 raise QueueHold("CONCURRENT_CHILD_PENDING_REQUIRES_REVIEW")
         if target.exists() or target.is_symlink():
@@ -154,6 +160,8 @@ def review(*, directory: Path, digest: str, key: bytes, now: int,
     _trusted_directory(directory, root_check=root_check)
     if type(digest) is not str or not HEX.fullmatch(digest) or type(now) is not int:
         raise QueueHold("INVALID_REVIEW_CONTEXT")
+    if closure(directory=directory,digest=digest,root_check=root_check) is not None:
+        raise QueueHold("ALREADY_RECONCILED_REVIEW_CLOSED")
     encoded = _file(directory / ("proposal-" + digest + ".json"), root_check=root_check)
     try:
         entry = json.loads(encoded)
@@ -179,3 +187,88 @@ def review(*, directory: Path, digest: str, key: bytes, now: int,
         return {k: getattr(trusted, k) for k in c.TrustedGrant.__dataclass_fields__}
     except (ValueError, KeyError, TypeError, base64.binascii.Error) as exc:
         raise QueueHold("UNTRUSTED_PENDING_REVIEW") from exc
+
+
+def closure(*, directory: Path, digest: str, root_check: bool = True) -> dict | None:
+    """Read immutable root-only reconciliation receipt; no implicit expiry GC."""
+    directory=Path(directory)
+    _trusted_directory(directory,root_check=root_check)
+    if type(digest) is not str or not HEX.fullmatch(digest):
+        raise QueueHold("INVALID_CLOSURE_DIGEST")
+    target=directory / ("closed-"+digest+".json")
+    if not target.exists() and not target.is_symlink():
+        return None
+    try:
+        obj=json.loads(_file(target,root_check=root_check))
+    except (ValueError,TypeError,OSError) as exc:
+        raise QueueHold("CORRUPT_CLOSURE_RECEIPT") from exc
+    if (type(obj) is not dict or set(obj)!={"schema","digest","child",
+            "outcome","checked_at","evidence_sha256"}
+            or type(obj["schema"]) is not int or obj["schema"]!=1
+            or obj["digest"]!=digest
+            or type(obj["child"]) is not str or not IDENT.fullmatch(obj["child"])
+            or obj["outcome"]!="CONFIRMED_NOT_PUBLISHED"
+            or type(obj["checked_at"]) is not int or obj["checked_at"]<0
+            or type(obj["evidence_sha256"]) is not str
+            or not HEX.fullmatch(obj["evidence_sha256"])):
+        raise QueueHold("CORRUPT_CLOSURE_RECEIPT")
+    return obj
+
+
+def close_expired_after_reconciliation(
+    *, directory: Path, digest: str, key: bytes, now: int,
+    read_only_reconciler, root_check: bool = True
+) -> dict:
+    """Close ONLY expired + independently confirmed UNPUBLISHED proposals.
+
+    No file is removed. A durable 0600 receipt tombstones the proposal;
+    a crash before receipt leaves HOLD, and after receipt remains closed.
+    A reply timeout/ambiguous Broker result, a journal, consumed nonce,
+    unexpected route or unavailable evidence is NEVER auto-reconciled.
+    The observer must be a privileged read-only host inspector, NOT Panel.
+    """
+    directory=Path(directory)
+    _trusted_directory(directory,root_check=root_check)
+    if (root_check and os.geteuid()!=0) or not callable(read_only_reconciler):
+        raise QueueHold("INDEPENDENT_ROOT_RECONCILIATION_REQUIRED")
+    if type(now) is not int or type(digest) is not str or not HEX.fullmatch(digest):
+        raise QueueHold("INVALID_RECONCILIATION_CONTEXT")
+    lock=_locked(directory)
+    try:
+        old=closure(directory=directory,digest=digest,root_check=root_check)
+        if old is not None:
+            raise QueueHold("ALREADY_RECONCILED_DO_NOT_RETRY")
+        path=directory / ("proposal-"+digest+".json")
+        obj=json.loads(_file(path,root_check=root_check))
+        if (type(obj) is not dict or set(obj)!={
+            "schema","digest","child","staged_at","wire_b64"
+            } or type(obj["staged_at"]) is not int
+              or now-obj["staged_at"]<=MAX_REVIEW_AGE):
+            raise QueueHold("PENDING_NOT_YET_ELIGIBLE_FOR_CLOSURE")
+        binding=review(directory=directory,digest=digest,key=key,
+                       now=obj["staged_at"],root_check=root_check)
+        original=json.loads(base64.b64decode(obj["wire_b64"],validate=True))
+        # Read-only reconciliation executes under the queue lock. It may
+        # inspect local Nginx and broker replay ledger but MUST NEVER apply.
+        proof=read_only_reconciler(dict(binding), original["nonce"])
+        expected={"route":"ABSENT","journal":"ABSENT",
+                  "broker_nonce":"UNCONSUMED","checked_at":now,
+                  "binding_sha256":hashlib.sha256(json.dumps(binding,
+                      sort_keys=True,separators=(",",":"),ensure_ascii=True
+                      ).encode("ascii")).hexdigest()}
+        if type(proof) is not dict or proof!=expected:
+            raise QueueHold("UNRESOLVED_OR_AMBIGUOUS_ROUTE_HOLD")
+        receipt={"schema":1,"digest":digest,"child":obj["child"],
+                 "outcome":"CONFIRMED_NOT_PUBLISHED","checked_at":now,
+                 "evidence_sha256":hashlib.sha256(json.dumps(proof,
+                      sort_keys=True,separators=(",",":"),ensure_ascii=True
+                      ).encode("ascii")).hexdigest()}
+        raw=(json.dumps(receipt,sort_keys=True,separators=(",",":"))+"\n").encode("ascii")
+        _atomic_new(directory/("closed-"+digest+".json"),raw)
+        # Preserve original proposal bytes and decision for audit/rollback.
+        return receipt
+    except (KeyError,TypeError,ValueError,base64.binascii.Error) as exc:
+        raise QueueHold("UNTRUSTED_CLOSURE_CONTEXT") from exc
+    finally:
+        fcntl.flock(lock,fcntl.LOCK_UN)
+        os.close(lock)
