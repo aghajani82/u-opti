@@ -141,8 +141,9 @@ class CredentialStore:
             self.conn.execute("INSERT INTO ceremonies VALUES(?,?,?,?,0)",
                               (cid,digest,json.dumps(state),now+CEREMONY_TTL))
             self._audit("ENROLLMENT_CHALLENGE_ISSUED",digest,now)
+            option_data=dict(options)
             self.conn.execute("COMMIT")
-            return {"ceremony":cid,"options":json.loads(options.to_json())}
+            return {"ceremony":cid,"options":option_data}
         except Exception:
             self.conn.execute("ROLLBACK")
             raise
