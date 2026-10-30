@@ -18,6 +18,7 @@ import re
 import sqlite3
 import stat
 import sys
+import time
 
 HERE = Path(__file__).resolve().parent
 
@@ -433,6 +434,53 @@ def recreate(enabled):
     return h.run(cmd + ["up", "-d", "--no-build", "--no-deps", "--pull",
                         "never", "--force-recreate", "smite-node"], timeout=160)
 
+def wait_healthy():
+    """Wait only for the existing recreated Node to report healthy.
+
+    Docker Compose up -d does not wait for health checks. Never restart,
+    recreate or relax runtime admission while polling.
+    """
+    for attempt in range(21):
+        obj = w.inspect("node")
+        state = obj.get("State", {})
+        if state.get("Running") and state.get("Health", {}).get("Status") == "healthy":
+            return
+        if attempt < 20:
+            time.sleep(3)
+    raise Hold("KH_NODE_HEALTH_TIMEOUT")
+
+
+def finalize():
+    """Commit ONLY a proven, already-recreated KH inventory transaction.
+
+    No Compose, Docker or FRPC commands; the single permitted state mutation
+    is the durable receipt transition RECREATING -> COMMITTED. The unsigned,
+    signed and replay-negative Node HTTP checks still run before that write.
+    """
+    doc = record()
+    if doc["phase"] == "COMMITTED":
+        verify()
+        return
+    need(doc["phase"] == "RECREATING" and doc["after"] is None,
+         "KH_FORWARD_FINALIZE_PHASE_UNTRUSTED")
+    need(not exists(OVERLAY.with_name(OVERLAY.name + ".next"))
+         and not exists(STATE / "record.json.next")
+         and not exists(STATE.with_name(STATE.name + ".stage")),
+         "KH_FORWARD_FINALIZE_PENDING_WRITE")
+    validate_compose()
+    candidate = verify_runtime(doc, True)
+    need(frpc() == doc["frpc"], "FRPC_COMMAND_OR_NAMESPACE_DRIFT")
+    signed_inbounds()
+    need(w.protected(["node"]) == doc["protected"], "SIGNED_STORAGE_DRIFT")
+    # WSS health's normal admission needs a COMMITTED receipt. First prove
+    # signed registry readiness without changing the Node or its journal.
+    h.signed_inventory("ready")
+    doc["after"] = candidate
+    doc["phase"] = "COMMITTED"
+    save(doc)
+    w.health(w.read_record(), True)
+
+
 def apply():
     doc = plan()
     begin(doc)
@@ -440,6 +488,7 @@ def apply():
     doc["phase"] = "RECREATING"
     save(doc)
     recreate(True)  # only smite-node: one short FRPC interruption
+    wait_healthy()
     candidate = verify_runtime(doc, True)
     need(frpc() == doc["frpc"], "FRPC_COMMAND_OR_NAMESPACE_DRIFT")
     signed_inbounds()
@@ -506,14 +555,16 @@ def verify():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=("plan", "apply", "verify", "recover", "rollback"))
+    p.add_argument("action", choices=("plan", "apply", "finalize", "verify", "recover", "rollback"))
     a = p.parse_args()
     try:
         need(os.geteuid() == 0 and os.uname().nodename.split(".")[0].lower() == "kh",
              "KH_ROOT_ONLY")
-        if a.action in ("apply", "recover", "rollback"):
+        if a.action in ("apply", "finalize", "recover", "rollback"):
             need(sys.stdin.isatty(), "ROOT_TTY_APPROVAL_REQUIRED")
-            challenge = a.action.upper() + "-KH-INVENTORY-SNAPSHOT-CONSOLE-FRPC-INTERRUPTION"
+            challenge = (a.action.upper() + "-KH-INVENTORY-VERIFIED-NO-RECREATE"
+                         if a.action == "finalize" else
+                         a.action.upper() + "-KH-INVENTORY-SNAPSHOT-CONSOLE-FRPC-INTERRUPTION")
             need(input("Type " + challenge + ": ").strip() == challenge,
                  "ROOT_OPERATOR_CANCELLED")
         with h.exclusive(w.LOCK):
@@ -521,6 +572,8 @@ def main():
                 plan()
             elif a.action == "apply":
                 apply()
+            elif a.action == "finalize":
+                finalize()
             elif a.action == "verify":
                 verify()
             else:
