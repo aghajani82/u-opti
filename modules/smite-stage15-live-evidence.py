@@ -68,50 +68,104 @@ def _db_query(path: Path, sql: str, *args):
         raise LiveEvidenceHold("LEASE_SNAPSHOT_UNAVAILABLE") from exc
 
 
-def _lease(binding, db_path):
-    """Require an active unique DB lease corroborated by a live Node port."""
-    child_rows=_db_query(db_path,
-        "SELECT id,core,status,node_id,iran_node_id,foreign_node_id,spec FROM tunnels WHERE id=?",
-        binding["child"])
-    owner_rows=_db_query(db_path,
-        "SELECT id,core,status,node_id,iran_node_id,foreign_node_id,spec FROM tunnels WHERE id=?",
-        binding["owner"])
-    if len(child_rows)!=1 or len(owner_rows)!=1:
-        raise LiveEvidenceHold("LEASE_ROWS_NOT_UNIQUE")
-    child,owner=child_rows[0],owner_rows[0]
-    def pair(row):
-        return (row[4] or row[3],row[5])
-    if (child[1:3]!=("frp","active") or owner[1:3]!=("frp","active")
-            or pair(child)!=(binding["ir_node"],binding["kh_node"])
-            or pair(owner)!=(binding["ir_node"],binding["kh_node"])):
-        raise LiveEvidenceHold("LEASE_IDENTITY_OR_STATUS_MISMATCH")
+def _lease(binding, db_path, *, max_read_seconds=3.0):
+    """Read one consistent current SQLite transaction, never a stale cached row.
+
+    db_path MUST be an administrator-pinned read-only bind of the *live*
+    Panel volume, NOT an exported snapshot. Source/mount identity must be
+    confirmed during deployment. This routine does not trust timestamps on
+    old tunnels as a freshness signal: a healthy tunnel may be unchanged
+    for months. It opens the live SQLite DB anew for every approval and
+    requires an uninterrupted coherent transaction.
+    """
+    path=Path(db_path)
     try:
-        cs=json.loads(child[6]);ospec=json.loads(owner[6])
-    except (ValueError,TypeError) as exc:
-        raise LiveEvidenceHold("LEASE_SPEC_CORRUPT") from exc
-    if not isinstance(cs,dict) or not isinstance(ospec,dict):
-        raise LiveEvidenceHold("LEASE_SPEC_INVALID")
-    rows=_db_query(db_path,"SELECT tunnel_id,owner_tunnel_id,iran_node_id,foreign_node_id,remote_port FROM frp_proxy_leases WHERE iran_node_id=? AND remote_port=?",
-                   binding["ir_node"],binding["port"])
-    direct=binding["child"]==binding["owner"]
-    if direct:
-        if binding["lease"]!=binding["owner"] or rows:
-            raise LiveEvidenceHold("DIRECT_LEASE_CONFLICT")
-    else:
-        if (len(rows)!=1 or rows[0]!=(
-                binding["child"],binding["owner"],binding["ir_node"],
-                binding["kh_node"],binding["port"])
-                or cs.get("shared_frps_owner")!=binding["owner"]
-                or binding["lease"]!=binding["child"]):
-            raise LiveEvidenceHold("SHARED_LEASE_CONFLICT")
-    # The owner process/port is checked separately against a live IR Node
-    # attestation and is NOT inferred from this potentially writable DB.
-    if ospec.get("bind_port")!=7000:
-        raise LiveEvidenceHold("FRPS_OWNER_SPEC_MISMATCH")
-    return {"ir_node":binding["ir_node"],"kh_node":binding["kh_node"],
-            "owner":binding["owner"],"child":binding["child"],"lease":binding["lease"],
-            "port":binding["port"],"role":"direct" if direct else "shared",
-            "state":"active","unique":True,"owner_count":1,"proxy_port_count":1}
+        before=path.lstat()
+    except OSError as exc:
+        raise LiveEvidenceHold("LIVE_LEASE_SOURCE_UNAVAILABLE") from exc
+    if (not stat.S_ISREG(before.st_mode) or before.st_nlink!=1
+            or before.st_mode & 0o022 or not 0<before.st_size<=256*1024*1024
+            or type(max_read_seconds) not in (int,float) or not 0<max_read_seconds<=5):
+        raise LiveEvidenceHold("LIVE_LEASE_SOURCE_UNTRUSTED")
+    start=time.monotonic()
+    try:
+        with sqlite3.connect(path.absolute().as_uri()+"?mode=ro",uri=True,
+                             isolation_level=None,timeout=1) as db:
+            db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN")
+            registered=db.execute("PRAGMA database_list").fetchall()
+            if (len(registered)!=1 or Path(registered[0][2])!=path.absolute()):
+                raise LiveEvidenceHold("LEASE_DATABASE_ORIGIN_DRIFT")
+            # Fail closed on incompatible schema, malformed rows and missing
+            # unique index. Do NOT migrate/repair or write to Panel.
+            required={"tunnels":{"id","core","status","node_id",
+                                "iran_node_id","foreign_node_id","spec"},
+                      "frp_proxy_leases":{"tunnel_id","owner_tunnel_id",
+                                          "iran_node_id","foreign_node_id",
+                                          "remote_port"}}
+            for table,columns in required.items():
+                actual={row[1] for row in db.execute("PRAGMA table_info("+table+")")}
+                if not columns.issubset(actual):
+                    raise LiveEvidenceHold("LEASE_SCHEMA_INCOMPATIBLE")
+            if db.execute("PRAGMA quick_check(1)").fetchone()!=("ok",):
+                raise LiveEvidenceHold("LEASE_DATABASE_INTEGRITY_HOLD")
+            def query(sql,*values):
+                return db.execute(sql,values).fetchall()
+            child_rows=query(
+                "SELECT id,core,status,node_id,iran_node_id,foreign_node_id,spec "
+                "FROM tunnels WHERE id=?",binding["child"])
+            owner_rows=query(
+                "SELECT id,core,status,node_id,iran_node_id,foreign_node_id,spec "
+                "FROM tunnels WHERE id=?",binding["owner"])
+            if len(child_rows)!=1 or len(owner_rows)!=1:
+                raise LiveEvidenceHold("LEASE_ROWS_NOT_UNIQUE")
+            child,owner=child_rows[0],owner_rows[0]
+            def pair(row):
+                return (row[4] or row[3],row[5])
+            if (child[1:3]!=("frp","active") or owner[1:3]!=("frp","active")
+                    or pair(child)!=(binding["ir_node"],binding["kh_node"])
+                    or pair(owner)!=(binding["ir_node"],binding["kh_node"])):
+                raise LiveEvidenceHold("LEASE_IDENTITY_OR_STATUS_MISMATCH")
+            try:
+                cs=json.loads(child[6]);ospec=json.loads(owner[6])
+            except (ValueError,TypeError) as exc:
+                raise LiveEvidenceHold("LEASE_SPEC_CORRUPT") from exc
+            if not isinstance(cs,dict) or not isinstance(ospec,dict):
+                raise LiveEvidenceHold("LEASE_SPEC_INVALID")
+            rows=query("SELECT tunnel_id,owner_tunnel_id,iran_node_id,"
+                 "foreign_node_id,remote_port FROM frp_proxy_leases "
+                 "WHERE iran_node_id=? AND remote_port=?",
+                 binding["ir_node"],binding["port"])
+            direct=binding["child"]==binding["owner"]
+            if direct:
+                if binding["lease"]!=binding["owner"] or rows:
+                    raise LiveEvidenceHold("DIRECT_LEASE_CONFLICT")
+            else:
+                if (len(rows)!=1 or rows[0]!=(
+                        binding["child"],binding["owner"],binding["ir_node"],
+                        binding["kh_node"],binding["port"])
+                        or cs.get("shared_frps_owner")!=binding["owner"]
+                        or binding["lease"]!=binding["child"]):
+                    raise LiveEvidenceHold("SHARED_LEASE_CONFLICT")
+            if ospec.get("bind_port")!=7000:
+                raise LiveEvidenceHold("FRPS_OWNER_SPEC_MISMATCH")
+            # Only active read txn and a pinned independently mounted source
+            # can provide freshness. No timestamp is accepted from Panel API.
+            if time.monotonic()-start>max_read_seconds:
+                raise LiveEvidenceHold("LIVE_LEASE_READ_TOO_OLD")
+            after=path.lstat()
+            if (after.st_dev,after.st_ino)!=(before.st_dev,before.st_ino):
+                raise LiveEvidenceHold("LEASE_SOURCE_REPLACED_DURING_READ")
+            result={"ir_node":binding["ir_node"],"kh_node":binding["kh_node"],
+                "owner":binding["owner"],"child":binding["child"],
+                "lease":binding["lease"],"port":binding["port"],
+                "role":"direct" if direct else "shared",
+                "state":"active","unique":True,"owner_count":1,
+                "proxy_port_count":1}
+            db.execute("ROLLBACK")
+            return result
+    except sqlite3.Error as exc:
+        raise LiveEvidenceHold("LIVE_LEASE_TRANSACTION_UNAVAILABLE") from exc
 
 
 def _signed_headers(node_id,secret,body):
