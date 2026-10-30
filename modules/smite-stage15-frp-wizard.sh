@@ -21,6 +21,7 @@ smite_stage15_frp_wizard() {
         echo 'X) IR: roll back/recover Stage15 XHTTP bridge (remove managed routes first)'
         echo 'G) IR: review signed XHTTP proposal and independently approve root grant'
         echo 'D) Download/verify reviewed Stage15 FRP071 images (no install)'
+        echo 'A) Download/verify Secure Web Approval PREVIEW images (cache only; no install)'
         echo 'U) Upgrade original Stage15 images before installing FRP'
         echo 'R) Roll back image upgrade (before FRP/WSS)'
         echo '0) Back'
@@ -64,6 +65,9 @@ smite_stage15_frp_wizard() {
             d|D)
                 echo 'Downloads only; no running Smite container, identity or Replay will be changed.'
                 bash "$dir/smite-stage15-fetch-images.sh" || :;;
+            a|A)
+                echo 'PREVIEW ONLY: cache a pinned image ZIP; no live upgrade or Docker load.'
+                python3 -B "$dir/smite-stage15-web-approval-fetch.py" || :;;
             u|U)
                 archive="${SMITE_RC_BUNDLE_DIR:-}"
                 if [[ -z "$archive" ]]; then
