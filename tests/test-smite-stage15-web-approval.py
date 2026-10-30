@@ -20,6 +20,7 @@ def load(name, file):
     spec.loader.exec_module(m);return m
 gate = load("stage15_approval_test", "smite-stage15-web-approval.py")
 ev = load("stage15_evidence_test", "smite-stage15-approval-evidence.py")
+ORIGINAL_SERVER = gate._server
 
 class FakeServer:
     def authenticate_begin(self, credentials, user_verification):
@@ -98,10 +99,8 @@ class GateTests(unittest.TestCase):
 
     def test_pinned_origin_rejects_http(self):
         # Directly exercise origin policy, independent of the mocked server.
-        with patch.object(gate, "_server", wraps=gate._server):
-            # fido2 missing -> always HOLD; if present, HTTP is still HOLD.
-            with self.assertRaises(gate.WebApprovalHold):
-                gate._server("http://approval.example.org")
+        with self.assertRaises(gate.WebApprovalHold):
+            ORIGINAL_SERVER("http://approval.example.org")
 
     def test_durable_audit_retained_after_reopen(self):
         self.challenge()
