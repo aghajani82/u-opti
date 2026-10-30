@@ -116,6 +116,7 @@ class KHInventoryTests(unittest.TestCase):
             patch.object(m, "validate_compose"),
             patch.object(m.w, "runtime"),
             patch.object(m.w, "health"),
+            patch.object(m.h, "signed_inventory", side_effect=lambda status: self.operations.append("signed-registry:" + status)),
             patch.object(m.w, "inspect", side_effect=self.inspect),
             patch.object(m.w, "signature", side_effect=lambda _: copy.deepcopy(
                 self.after if self.mode == "after" else self.before)),
@@ -285,6 +286,100 @@ class KHInventoryTests(unittest.TestCase):
                         json.dumps(before), json.dumps(rogue)]):
                     with self.assertRaises(m.Hold):
                         REAL_VALIDATE_COMPOSE()
+
+    def test_recover_from_post_recreate_health_race_without_recreate(self):
+        # Docker Compose up -d completed; first immediate health admission
+        # failed before the Node reported healthy. A later fresh authenticated
+        # review is valid, but the journal MUST NOT be hand-edited.
+        with patch.object(m, "verify_runtime",
+                          side_effect=m.Hold("SERVICE_NOT_HEALTHY")):
+            with self.assertRaises(m.Hold):
+                m.apply()
+        self.assertEqual(self.mode, "after")
+        self.assertEqual(m.record()["phase"], "RECREATING")
+        self.assertIsNone(m.record()["after"])
+        before = list(self.operations)
+        m.finalize()
+        self.assertEqual(m.record()["phase"], "COMMITTED")
+        self.assertIsNotNone(m.record()["after"])
+        self.assertEqual(
+            sum(x.startswith("node-only-recreate:") for x in self.operations),
+            1,
+        )
+        self.assertEqual(
+            sum(x.startswith("node-only-recreate:") for x in before),
+            1,
+        )
+        self.assertIn("signed-get-replay", self.operations)
+        self.assertIn("signed-registry:ready", self.operations)
+        m.verify()
+
+    def test_finalization_not_allowed_before_recreation(self):
+        doc = m.plan()
+        m.begin(doc)
+        m.publish_overlay()
+        doc["phase"] = "RECREATING"
+        m.save(doc)
+        # The container is still on the original disabled inventory.
+        with self.assertRaises(m.Hold):
+            m.finalize()
+        self.assertEqual(m.record()["phase"], "RECREATING")
+        self.assertIsNone(m.record()["after"])
+        self.assertNotIn("signed-registry:ready", self.operations)
+
+    def test_finalization_requires_fresh_signed_inventory_proof(self):
+        doc = m.plan()
+        m.begin(doc)
+        m.publish_overlay()
+        doc["phase"] = "RECREATING"
+        m.save(doc)
+        self.mode = "after"
+        with patch.object(m, "signed_inbounds",
+                          side_effect=m.Hold("SIGNED_KH_INVENTORY_UNAVAILABLE")):
+            with self.assertRaises(m.Hold):
+                m.finalize()
+        self.assertEqual(m.record()["phase"], "RECREATING")
+        self.assertIsNone(m.record()["after"])
+        self.assertNotIn("signed-registry:ready", self.operations)
+
+    def test_finalization_refuses_security_drift_and_pending_write(self):
+        doc = m.plan()
+        m.begin(doc)
+        m.publish_overlay()
+        doc["phase"] = "RECREATING"
+        m.save(doc)
+        self.mode = "after"
+        with patch.object(m, "frpc", return_value="DIFFERENT"):
+            with self.assertRaises(m.Hold):
+                m.finalize()
+        with patch.object(m.w, "protected", return_value={"identity": "changed"}):
+            with self.assertRaises(m.Hold):
+                m.finalize()
+        pending = self.state / "record.json.next"
+        pending.write_bytes(b"unreviewed")
+        with self.assertRaises(m.Hold):
+            m.finalize()
+        self.assertEqual(m.record()["phase"], "RECREATING")
+        self.assertIsNone(m.record()["after"])
+
+    def test_waits_for_healthy_without_recreating_or_weakening_admission(self):
+        starting = {"State": {"Running": True, "Health": {"Status": "starting"}}}
+        healthy = {"State": {"Running": True, "Health": {"Status": "healthy"}}}
+        with patch.object(m.w, "inspect", side_effect=[starting, healthy]), \
+             patch.object(m.time, "sleep") as sleeping:
+            m.wait_healthy()
+        sleeping.assert_called_once_with(3)
+        self.assertEqual(self.operations, [])
+
+    def test_finalize_committed_receipt_is_read_only_and_idempotent(self):
+        m.apply()
+        previous = list(self.operations)
+        m.finalize()
+        self.assertEqual(m.record()["phase"], "COMMITTED")
+        self.assertEqual(
+            [x for x in self.operations if x.startswith("node-only-recreate:")],
+            [x for x in previous if x.startswith("node-only-recreate:")],
+        )
 
     def test_no_image_swap_in_root_runbook(self):
         source = (ROOT / "modules/smite-stage15-kh-inventory.py").read_text()
