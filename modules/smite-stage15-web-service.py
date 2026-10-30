@@ -108,6 +108,11 @@ class IndependentApproval:
                 meta = json.loads(self.queue._file(path, root_check=self.root_check))
                 if meta.get("child") == child:
                     digest = meta.get("digest")
+                    # A separately reconciled expired request is excluded
+                    # from new reviews, but its audit/proposal stays on disk.
+                    if self.queue.closure(directory=self.queue_dir,digest=digest,
+                                          root_check=self.root_check) is not None:
+                        continue
                     facts = self.queue.review(
                         directory=self.queue_dir, digest=digest, key=self.key,
                         now=int(time.time()), root_check=self.root_check)
