@@ -15,7 +15,7 @@ UMask=0077
 ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/smite-stage15-web-launcher.py --serve /etc/u-opti/smite/web-approval-config.json
 Restart=no
 TimeoutStartSec=15
-RuntimeDirectory=u-opti/smite-review
+RuntimeDirectory=u-opti-smite-review
 RuntimeDirectoryMode=0750
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -29,7 +29,9 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
 ReadWritePaths=/var/lib/u-opti/smite-web-approval
 ReadWritePaths=/etc/u-opti/smite/route-grants
-ReadWritePaths=/run/u-opti/smite-review
+ReadWritePaths=/run/u-opti-smite-review
+# Root launcher gives only this socket directory and the socket the
+# approved nginx worker GID (0750/0660). No group access to secret files.
 # Nginx worker access to the UDS parent and exact socket GID needs an
 # independently checked systemd group/ACL configuration; DO NOT relax
 # permissions on any Root secret, broker key or active route file.
