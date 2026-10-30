@@ -21,9 +21,10 @@ jobs:
       - name: Compile and test independent approval primitives
         run: |
           set -euo pipefail
-          python3 -m py_compile modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py
+          python3 -m py_compile modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py modules/smite-stage15-approval-queue.py
           python3 -B tests/test-smite-stage15-approval-evidence.py -v
           python3 -B tests/test-smite-stage15-web-approval.py -v
+          python3 -B tests/test-smite-stage15-approval-queue.py -v
       - name: Refuse accidental root API or FRPS/FRPC edits in this feature
         run: |
           set -euo pipefail
