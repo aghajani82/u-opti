@@ -51,7 +51,7 @@ def _open(path: Path, *, root_check=True):
             or (root_check and (info.st_uid!=0 or parent.st_uid!=0))):
         raise EnrollmentHold("UNTRUSTED_CREDENTIAL_STORE")
     conn=sqlite3.connect(p.absolute().as_uri()+"?mode=rw",uri=True,
-                         isolation_level=None,timeout=0.1)
+                         isolation_level=None,timeout=0.1,check_same_thread=False)
     conn.execute("PRAGMA busy_timeout=100")
     conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("PRAGMA synchronous=FULL")
