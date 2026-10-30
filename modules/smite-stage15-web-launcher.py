@@ -45,7 +45,7 @@ def load_config(path:Path):
     required={"schema","origin","panel_origin","socket_path","socket_gid",
               "queue_dir","ledger_path","credentials_path","broker_key_path",
               "ir_public_key_path","kh_public_key_path","lease_public_key_path",
-              "lease_private_key_path","node_ir","node_kh","panel_snapshot_path"}
+              "lease_private_key_path","node_ir","node_kh","panel_live_db_path"}
     if (type(c) is not dict or set(c)!=required or type(c["schema"]) is not int
             or c["schema"]!=1 or type(c["socket_gid"]) is not int
             or not 1<=c["socket_gid"]<=65535):
@@ -89,7 +89,7 @@ def serve(config_path:Path):
         raise LaunchHold("ROOT_APPROVAL_KEY_PINS_INVALID")
     credentials=enroll.CredentialStore(Path(c["credentials_path"]))
     ledger=gate.ApprovalLedger(Path(c["ledger_path"]))
-    sources={"ir":c["node_ir"],"kh":c["node_kh"],"db_path":c["panel_snapshot_path"]}
+    sources={"ir":c["node_ir"],"kh":c["node_kh"],"db_path":c["panel_live_db_path"]}
     def evidence(binding):
         return runtime.collect(binding,settings=sources,
                                root_private_key=Path(c["lease_private_key_path"]))
