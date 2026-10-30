@@ -1,0 +1,49 @@
+name: Stage15 XHTTP cross-repository security
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bridge-and-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 8edbd4032ae657fe2bb38cd9b3290de5f1e07a54
+          path: peer-smite
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 6981bd91b43811fad8847da9abd81ef99a921003
+          path: peer-smite-old
+      - name: Check unchanged Panel schema and old/new startup guards
+        run: |
+          cmp peer-smite-old/panel/app/models.py peer-smite/panel/app/models.py
+          cmp peer-smite-old/panel/app/database.py peer-smite/panel/app/database.py
+          python3 -B peer-smite-old/tests/test_signed_frp_boot_reapply_guard.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          sudo -n python3 -B tests/test-smite-stage15-active-runtime.py
+          sudo -n python3 -B tests/test-smite-stage15-kh-inventory.py -v
+          python3 -B peer-smite/tests/test_signed_frp_boot_reapply_guard.py
+          python3 -B tests/test-stage15-archive-provenance.py
+          python3 -B tests/test-smite-stage15-bundle-verify.py
+          sudo -n python3 -B tests/test-smite-stage15-root-review.py
+          sudo -n python3 -B tests/test-smite-stage15-xhttp-bridge.py
+          sudo -n python3 -B tests/test-smite-stage15-wss-edge.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
+          python3 -B tests/test-stage15-cross-repo.py peer-smite
+          sudo -n python3 -B peer-smite/tests/test_smite_xhttp_nginx_transaction.py
+  broker-directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo -n env GITHUB_ACTIONS=true bash tests/test-stage15-broker-directory-systemd.sh

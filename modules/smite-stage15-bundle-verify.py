@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 import re
 import sys
+import zlib
+import tarfile
 
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -95,15 +97,139 @@ def verify(*, folder: Path, source_sha: str, manifest_sha: str) -> dict:
     return doc
 
 
+def inspect_archive(path: Path, *, role: str, source_sha: str, image_id: str) -> dict:
+    """Bind Docker config to OCI index without extracting or executing archives.
+
+    Docker classic stores a config ID; containerd may report an OCI index ID.
+    Return both explicitly. Neither is a registry signature or deployment grant.
+    """
+    if role not in FILES or not HEX40.fullmatch(source_sha) or not IMAGE_ID.fullmatch(image_id):
+        raise BundleHold("Invalid archive identity request")
+    if path.is_symlink() or not path.is_file():
+        raise BundleHold("Missing or symlinked archive")
+    small, digests, sizes, unpacked = {}, {}, {}, {}
+    total = retained = expanded = 0
+    try:
+        with tarfile.open(path, "r|gz") as archive:
+            seen = set()
+            for member in archive:
+                name = member.name
+                if (name in seen or name.startswith("/") or ".." in name.split("/")
+                        or "\\" in name or len(seen) >= 4096):
+                    raise BundleHold("Duplicate or unsafe archive member")
+                seen.add(name)
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise BundleHold("Archive links and special files forbidden")
+                total += member.size
+                if total > 5_000_000_000:
+                    raise BundleHold("Expanded archive too large")
+                stream = archive.extractfile(member)
+                digest = hashlib.sha256()
+                data = bytearray() if member.size <= 1_000_000 else None
+                uncompressed = hashlib.sha256()
+                decoder = None
+                first = True
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    if first:
+                        decoder = zlib.decompressobj(31) if block.startswith(b"\x1f\x8b") else None
+                        first = False
+                    if decoder is None:
+                        uncompressed.update(block)
+                    else:
+                        pending = block
+                        while pending:
+                            output = decoder.decompress(pending, 1024 * 1024)
+                            expanded += len(output)
+                            if expanded > 5_000_000_000:
+                                raise BundleHold("Expanded layer limit exceeded")
+                            uncompressed.update(output)
+                            pending = decoder.unconsumed_tail
+                        if decoder.unused_data:
+                            raise BundleHold("Trailing compressed layer data")
+                    digest.update(block)
+                    if data is not None:
+                        data.extend(block)
+                if decoder is not None and not decoder.eof:
+                    raise BundleHold("Truncated compressed layer")
+                unpacked[name] = uncompressed.hexdigest()
+                digests[name], sizes[name] = digest.hexdigest(), member.size
+                if name.startswith("blobs/sha256/") and name != "blobs/sha256/" + digest.hexdigest():
+                    raise BundleHold("OCI blob content digest mismatch")
+                if data is not None:
+                    retained += len(data)
+                    if retained > 32_000_000:
+                        raise BundleHold("Archive metadata too large")
+                    small[name] = bytes(data)
+        def document(name):
+            return json.loads(small[name])
+        def descriptor(item):
+            value = item["digest"]
+            if not IMAGE_ID.fullmatch(value):
+                raise BundleHold("Unsupported OCI digest")
+            name = "blobs/sha256/" + value[7:]
+            if digests[name] != value[7:] or sizes[name] != item["size"]:
+                raise BundleHold("OCI descriptor mismatch")
+            return name
+        manifests = document("manifest.json")
+        if len(manifests) != 1 or manifests[0]["RepoTags"] != ["smite-" + role + ":stage15-local"]:
+            raise BundleHold("Unexpected Docker archive tag or image count")
+        docker = manifests[0]
+        config_name = docker["Config"]
+        config_id = "sha256:" + digests[config_name]
+        config = document(config_name)
+        if (config["architecture"] != "amd64" or config["os"] != "linux"
+                or config["config"]["Labels"]["org.opencontainers.image.revision"] != source_sha):
+            raise BundleHold("Image platform or source revision mismatch")
+        layers = docker["Layers"]
+        if not layers or len(set(layers)) != len(layers) or any(x not in digests for x in layers):
+            raise BundleHold("Missing or duplicate image layers")
+        if config["rootfs"]["diff_ids"] != ["sha256:" + unpacked[x] for x in layers]:
+            raise BundleHold("Docker layer content mismatch")
+        index_id = None
+        if "index.json" in small:
+            top = document("index.json")["manifests"]
+            if len(top) != 1:
+                raise BundleHold("Ambiguous OCI image index")
+            root_name = descriptor(top[0])
+            index_id = top[0]["digest"]
+            root = document(root_name)
+            if "manifests" in root:
+                selected = [x for x in root["manifests"] if x.get("platform") == {"architecture":"amd64", "os":"linux"}]
+                if len(selected) != 1:
+                    raise BundleHold("Ambiguous OCI runtime platform")
+                for item in root["manifests"]:
+                    descriptor(item)
+                root = document(descriptor(selected[0]))
+            if descriptor(root["config"]) != config_name:
+                raise BundleHold("OCI config differs from Docker config")
+            if [descriptor(x) for x in root["layers"]] != layers:
+                raise BundleHold("OCI layers differ from Docker layers")
+        if image_id not in (config_id, index_id):
+            raise BundleHold("Build image ID is not bound to archive")
+        return dict(role=role, source_commit=source_sha, config_id=config_id,
+                    index_id=index_id, build_image_id=image_id, activation_allowed=False)
+    except (KeyError, TypeError, ValueError, tarfile.TarError, zlib.error, EOFError) as exc:
+        if isinstance(exc, BundleHold):
+            raise
+        raise BundleHold("Invalid Docker/OCI archive") from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--folder", type=Path, required=True)
     p.add_argument("--source-sha", required=True)
     p.add_argument("--manifest-sha256", required=True)
+    p.add_argument("--inspect-archives", action="store_true")
     args = p.parse_args(argv)
     try:
-        verify(folder=args.folder, source_sha=args.source_sha,
+        doc = verify(folder=args.folder, source_sha=args.source_sha,
                manifest_sha=args.manifest_sha256)
+        if args.inspect_archives:
+            for role, item in doc["images"].items():
+                print(json.dumps(inspect_archive(args.folder / item["file"], role=role,
+                    source_sha=args.source_sha, image_id=item["local_image_id"]), sort_keys=True))
     except (BundleHold, OSError, TypeError) as exc:
         print("HOLD: " + str(exc), file=sys.stderr)
         return 2

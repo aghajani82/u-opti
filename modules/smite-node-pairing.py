@@ -610,6 +610,7 @@ def _patch_nginx_pairing(domain: str, ingress: str) -> tuple[bytes, bytes | None
 
 def enable_panel_field_trial(state: dict[str, str] | None = None) -> None:
     _field_trial_gate()
+    _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if current.get("SMITE_ROLE") != "panel-iran":
         raise WizardHold("Panel pairing activation is IR Panel only")
@@ -932,8 +933,17 @@ def _panel_to_ir_signed_probe(node_id: str) -> None:
         raise WizardHold("Panel-to-Iran signed HMAC probe failed")
 
 
+def _require_no_active_engine_overlays() -> None:
+    for path in (NODE_DIR / "docker-compose.frp-stage15.yml",
+                 NODE_DIR / "docker-compose.wss-stage15.yml",
+                 PANEL_DIR / "docker-compose.wss-stage15.yml"):
+        if path.exists() or path.is_symlink():
+            raise WizardHold("Roll back tunnels, WSS and FRP through their wizard before pairing reactivation")
+
+
 def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
     _field_trial_gate()
+    _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if current.get("SMITE_ROLE") != "panel-iran":
         raise WizardHold("This activation step currently admits only the co-located IR Node")
@@ -1076,6 +1086,10 @@ _STAGE15_IMAGE_IDS = {
 }
 
 
+# Additional independently verified pair, NOT a replacement or arbitrary tag.
+# Smite PR39 source 6981bd91; build 40830661751 / artifact 12878322384.
+_STAGE15_FRP071_IMAGE_IDS = {'panel': 'sha256:e2345c7a4bf17cd9507ecf065cc736f4c2abfbe276a8c334805f4e52bb3808b5', 'node': 'sha256:cf0f3b12fc2c31cb0847fd5206304837661019d8f604853a8e956448c2576265'}
+
 def _require_stage15_identity(role: str) -> str:
     if role not in _STAGE15_IMAGE_IDS:
         raise WizardHold("Unknown Stage15 image role")
@@ -1086,9 +1100,9 @@ def _require_stage15_identity(role: str) -> str:
                    timeout=10, capture=True)
     local = _run(["docker", "image", "inspect", "-f", "{{.Id}}", tag],
                  timeout=10, capture=True)
-    if running != expected or local != expected:
+    if running not in (expected, _STAGE15_FRP071_IMAGE_IDS[role]) or local != running:
         raise WizardHold("Stage15 running image and local tag must match the reviewed build")
-    return expected
+    return running
 
 
 def _require_stage15_foreign_compose(url: str, panel: str) -> None:
@@ -1390,6 +1404,7 @@ def activate_foreign_node_field_trial(
     Identity and Replay history are retained for operator reconciliation.
     """
     _field_trial_gate()
+    _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if reviewed_rc2:
         # In addition to the frozen exact image, every independently reviewed
@@ -1511,6 +1526,7 @@ def activate_foreign_node_field_trial(
 
 def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> None:
     _field_trial_gate()
+    _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if current.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Signed rollback is Standard mode only")

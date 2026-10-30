@@ -16,6 +16,10 @@ smite_install_clean_rc_broker_prepare() {
 }
 smite_install_clean_rc_broker_panel_mount() { return 0; }
 python3() {
+  if [[ " $* " == *"smite-compose-safe.py"* ]]; then
+    # Ordinary Compose admission is covered separately; this fixture has no daemon.
+    return 0
+  fi
   if [[ " $* " == *"smite-rc5-xhttp-broker-compose.py"* ]]; then
     return 0
   fi

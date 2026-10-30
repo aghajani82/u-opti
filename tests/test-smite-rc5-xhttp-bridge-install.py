@@ -7,7 +7,9 @@ import importlib.util
 import json
 from pathlib import Path
 import os
+import stat
 import sys
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,42 @@ spec2 = importlib.util.spec_from_file_location("rc5_fixture", PREVIOUS_SOURCE)
 fixture = importlib.util.module_from_spec(spec2)
 sys.modules[spec2.name] = fixture
 spec2.loader.exec_module(fixture)
+
+
+class HostDirectorySecurityTests(unittest.TestCase):
+    """Offline regression for Ubuntu root:root /run/lock 01777."""
+
+    def fake_stat(self, mode, uid=0, gid=0, kind=stat.S_IFDIR):
+        return SimpleNamespace(st_mode=kind | mode, st_uid=uid, st_gid=gid)
+
+    def test_exact_sticky_system_lock_directory_only(self):
+        self.assertEqual(tx.LOCK.parent, Path("/run/lock"))
+        with patch.object(Path, "lstat", return_value=self.fake_stat(0o1777)):
+            tx.trusted_lock_directory(Path("/run/lock"))
+            # A mode-01777 nginx directory is still untrusted.
+            with self.assertRaisesRegex(tx.Hold, "UNTRUSTED_DIRECTORY"):
+                tx.trusted_dir(Path("/etc/nginx"))
+            with self.assertRaisesRegex(tx.Hold, "UNEXPECTED_LOCK_DIRECTORY"):
+                tx.trusted_lock_directory(Path("/tmp"))
+            with self.assertRaisesRegex(tx.Hold, "UNEXPECTED_LOCK_DIRECTORY"):
+                tx.trusted_lock_directory(Path("/run/lock/../tmp"))
+
+    def test_lock_directory_rejects_noncanonical_modes_owners_and_symlinks(self):
+        candidates = [
+            self.fake_stat(0o0777),  # writable, but no sticky bit
+            self.fake_stat(0o2777),  # unexpected setgid
+            self.fake_stat(0o1775),
+            self.fake_stat(0o1755),
+            self.fake_stat(0o1777, uid=1),
+            self.fake_stat(0o1777, gid=1),
+            self.fake_stat(0o0777, kind=stat.S_IFLNK),
+            self.fake_stat(0o1777, kind=stat.S_IFREG),
+        ]
+        for state in candidates:
+            with self.subTest(mode=oct(state.st_mode), uid=state.st_uid, gid=state.st_gid):
+                with patch.object(Path, "lstat", return_value=state):
+                    with self.assertRaisesRegex(tx.Hold, "UNTRUSTED_LOCK_DIRECTORY"):
+                        tx.trusted_lock_directory(Path("/run/lock"))
 
 
 class BridgeInstallTests(unittest.TestCase):

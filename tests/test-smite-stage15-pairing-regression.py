@@ -24,6 +24,17 @@ storage = load('smite-node-auth-candidate')
 pairing = load('smite-node-pairing')
 
 
+class AdditionalReviewedPair(unittest.TestCase):
+    def test_new_pair_requires_both_running_and_tagged_exact_id(self):
+        for role, identity in pairing._STAGE15_FRP071_IMAGE_IDS.items():
+            with patch.object(pairing, '_run', side_effect=[identity,identity]):
+                self.assertEqual(pairing._require_stage15_identity(role),identity)
+            with patch.object(pairing, '_run', side_effect=[identity,'sha256:'+'0'*64]):
+                with self.assertRaises(pairing.WizardHold):pairing._require_stage15_identity(role)
+            with patch.object(pairing, '_run', return_value='sha256:'+'0'*64):
+                with self.assertRaises(pairing.WizardHold):pairing._require_stage15_identity(role)
+
+
 class StorageTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

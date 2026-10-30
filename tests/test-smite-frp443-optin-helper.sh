@@ -104,6 +104,22 @@ docker() {
     fi
     return 1
 }
+# The production Compose-preserving gate deliberately rejects paths outside
+# /opt/smite-node; the temporary CI fixture must never weaken that admission.
+if command python3 -B "$root/modules/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null 2>&1; then
+    echo "ERROR: privileged Compose guard accepted a temporary test path" >&2
+    exit 1
+fi
+# This isolated fixture only exercises deterministic Compose mount insertion;
+# stub the narrow config validation for its disposable /tmp path. All other
+# Python commands continue to execute for real, and production code is intact.
+python3() {
+    if [[ "$#" -eq 4 && "$1" == -B && "$2" == "$root/modules/smite-compose-safe.py" &&
+          "$3" == "$SMITE_NODE_COMPOSE" && "$4" == config ]]; then
+        return 0
+    fi
+    command python3 "$@"
+}
 smite_patch_compose_mounts
 grep -Fq "$SMITE_OVERLAY_DIR/node/frp_gateway_config.py:/app/app/frp_gateway_config.py:ro" "$SMITE_NODE_COMPOSE"
 grep -Fq "$SMITE_OVERLAY_DIR/node/core_adapters.py:/app/app/core_adapters.py:ro" "$SMITE_NODE_COMPOSE"

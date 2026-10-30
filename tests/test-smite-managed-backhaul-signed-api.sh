@@ -100,7 +100,7 @@ case "$replay_mode" in 0|1|stage15) ;; *) echo "HOLD: invalid CI replay mode" >&
 if [[ "$replay_mode" != 0 ]]; then
   if [[ "$replay_mode" == stage15 ]]; then
     [[ "$engine" == frp ]] || { echo 'HOLD: Stage15 replay lane requires FRP'; exit 2; }
-    expected_smite_sha="4e16633a304db6c03f7f2911cc7d77213b0c4ec1"
+    expected_smite_sha="6981bd91b43811fad8847da9abd81ef99a921003"
   else
     expected_smite_sha="02d05056d3a4baf577c9d3781d62af61c000f1ac"
   fi

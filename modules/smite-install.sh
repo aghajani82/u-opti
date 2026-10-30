@@ -695,7 +695,7 @@ EOF_RC_BROKER_KEY
     fi
     chmod 0600 "$SMITE_PANEL_DIR/.env" || return 1
 
-    docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" config >/dev/null || {
         echo "ERROR: Downloaded panel Compose file failed validation."
         return 1
     }
@@ -774,8 +774,8 @@ smite_install_clean_rc_broker_start_node_forwarding() {
     helper="$module_dir/smite-rc5-xhttp-broker-compose.py"
     [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
     python3 -B "$helper" node-env "$SMITE_NODE_DIR/.env" --enabled true || return 1
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
-       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
        ! docker exec smite-node python -c 'import os,socket,stat; p="/run/u-opti/smite/xhttp-broker.sock"; g=int(os.environ["SMITE_UOPTI_BROKER_GID"]); s=os.stat(p); assert os.environ["SMITE_UOPTI_ROUTE_BROKER_ENABLED"]=="true"; assert os.geteuid()==0 and os.getegid()==g; assert stat.S_ISSOCK(s.st_mode) and s.st_uid==0 and s.st_gid==g and stat.S_IMODE(s.st_mode)==0o660; c=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); c.settimeout(2); c.connect(p); c.close()'; then
         echo "HOLD: Broker socket forwarding verification failed; pausing Node forwarding." >&2
@@ -783,7 +783,7 @@ smite_install_clean_rc_broker_start_node_forwarding() {
             echo "CRITICAL: Could not disable Node Broker forwarding; manual review required." >&2
             return 1
         }
-        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+        if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; Broker forwarding is disabled on disk." >&2
             return 1
@@ -950,7 +950,7 @@ EOF_RC_KH_SANAEI
 
     chmod 0600 "$SMITE_NODE_DIR/.env" || return 1
 
-    docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null || {
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null || {
         echo "ERROR: Downloaded node Compose file failed validation."
         return 1
     }
@@ -1030,13 +1030,13 @@ SQL
 smite_recreate_with_overlays_noninteractive() {
     if smite_container_exists smite-panel && [ -f "$SMITE_PANEL_COMPOSE" ]; then
         echo "Recreating smite-panel with persistent compatibility overlays..."
-        docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel || return 1
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel || return 1
         smite_wait_healthy smite-panel 90 || return 1
     fi
 
     if smite_container_exists smite-node && [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "Recreating smite-node with persistent compatibility overlays..."
-        docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
         smite_wait_healthy smite-node 90 || return 1
     fi
 
@@ -1229,7 +1229,7 @@ smite_install_panel_iran() {
 
     echo
     echo "Starting Smite Panel on ${panel_host}:8000..."
-    if ! docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
         echo "ERROR: Failed to start Smite Panel."
         smite_install_pause
         return
@@ -1280,7 +1280,7 @@ smite_install_panel_iran() {
     fi
 
     echo "Starting Iran Smite Node..."
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start Smite Node."
         smite_install_pause
         return
@@ -1624,7 +1624,7 @@ smite_install_foreign_node() {
     fi
 
     echo "Starting Foreign Smite Node..."
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start the Foreign Smite Node."
         smite_install_pause
         return
@@ -1871,8 +1871,8 @@ smite_install_sanaei_foreign() {
         return
     fi
 
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
-       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
        ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'; then
         echo "HOLD: Read-only Sanaei mount did not pass container verification; restoring Node configuration." >&2
@@ -1881,7 +1881,7 @@ smite_install_sanaei_foreign() {
             smite_install_pause
             return
         }
-        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+        if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; backup retained at $backup" >&2
             smite_install_pause
@@ -1992,11 +1992,11 @@ smite_install_upgrade_signed_field_trial() {
 
     if smite_install_field_trial_patch_compose_image "$SMITE_PANEL_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE" "$SMITE_PANEL_IMAGE" &&
        smite_install_field_trial_patch_compose_image "$SMITE_NODE_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_NODE_IMAGE" "$SMITE_NODE_IMAGE" &&
-       docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null &&
-       docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null &&
-       docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" config >/dev/null &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel &&
        smite_wait_healthy smite-panel 90 &&
-       docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node &&
        smite_wait_healthy smite-node 90 &&
        [ "$(docker inspect -f '{{.Config.Image}}' smite-panel 2>/dev/null)" = "$SMITE_PANEL_IMAGE" ] &&
        [ "$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" = "$SMITE_NODE_IMAGE" ] &&
@@ -2018,14 +2018,14 @@ smite_install_upgrade_signed_field_trial() {
     fi
 
     echo "ROLLBACK: restoring rc.0 Compose and Panel DB..."
-    docker compose -f "$SMITE_PANEL_COMPOSE" stop smite-panel >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" stop smite-panel >/dev/null 2>&1 || true
     cp -a "$panel_bak" "$SMITE_PANEL_COMPOSE"
     cp -a "$node_bak" "$SMITE_NODE_COMPOSE"
     cp -a "$state_bak" "$SMITE_STATE_FILE"
     cp -a "$db_bak" "$db"
     rm -f "$db-wal" "$db-shm"
-    docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel >/dev/null 2>&1 || true
-    docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
     smite_wait_healthy smite-panel 90 >/dev/null 2>&1 || true
     smite_wait_healthy smite-node 90 >/dev/null 2>&1 || true
     rm -rf "$backup"
