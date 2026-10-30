@@ -202,6 +202,21 @@ class LiveUDSTests(unittest.TestCase):
             response=self.start()
         self.assertEqual(response.status_code,200,"; ".join(seen) or "Failure after _admit")
 
+    def test_failure_after_audit_before_grant_requires_explicit_review(self):
+        # Transaction status is durable; never auto-repeat an uncertain grant.
+        def crash(_binding):
+            raise RuntimeError("simulated filesystem crash at exclusive grant")
+        self.http.application.grant_writer=crash
+        started=self.start()
+        self.assertEqual(started.status_code,200)
+        cid=started.json()["challenge_id"]
+        self.assertEqual(self.finish(cid).status_code,409)
+        self.assertEqual(self.grants,[])
+        self.assertEqual(self.ledger.conn.execute(
+            "SELECT count(*) FROM approvals").fetchone()[0],1)
+        self.assertEqual(self.finish(cid).status_code,409)
+        self.assertEqual(self.start().status_code,409)
+
     def test_only_unix_socket_no_network_listener(self):
         import socket
         sock=self.http.socket
