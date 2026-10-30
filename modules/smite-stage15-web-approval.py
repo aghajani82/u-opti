@@ -111,7 +111,8 @@ class ApprovalLedger:
                 raise WebApprovalHold("UNTRUSTED_APPROVAL_LEDGER")
         elif root_check:
             raise WebApprovalHold("APPROVAL_LEDGER_NOT_BOOTSTRAPPED")
-        self.conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=0.15)
+        self.conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=0.15,
+                                    check_same_thread=False)
         self.conn.execute("PRAGMA busy_timeout=150")
         self.conn.execute("PRAGMA journal_mode=DELETE")
         self.conn.execute("PRAGMA synchronous=FULL")
