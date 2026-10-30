@@ -145,6 +145,41 @@ class KHInventoryTests(unittest.TestCase):
             m.rollback()
         self.assertEqual(self.mode, "after")
 
+    def test_atomic_overlay_partial_after_kill_recovers_without_recreate(self):
+        doc = m.plan()
+        m.begin(doc)
+        partial = self.overlay.with_name(self.overlay.name + ".next")
+        partial.write_bytes(m.OVERLAY_BYTES[:34])
+        partial.chmod(0o600)
+        m.rollback()
+        self.assertEqual(m.record()["phase"], "ROLLED_BACK")
+        self.assertFalse(partial.exists())
+        self.assertNotIn("node-only-recreate:True", self.operations)
+        self.assertNotIn("node-only-recreate:False", self.operations)
+
+    def test_truncated_or_unknown_overlay_denies_recovery(self):
+        doc = m.plan()
+        m.begin(doc)
+        partial = self.overlay.with_name(self.overlay.name + ".next")
+        partial.write_bytes(b"unexpected attacker content")
+        partial.chmod(0o600)
+        with self.assertRaises(m.Hold):
+            m.rollback()
+        self.assertTrue(partial.exists())
+        self.assertEqual(self.mode, "before")
+
+    def test_cutover_crash_after_node_restart_can_rollback(self):
+        with patch.object(m, "signed_inbounds", side_effect=PowerLoss("after up")):
+            with self.assertRaises(PowerLoss):
+                m.apply()
+        self.assertEqual(m.record()["phase"], "RECREATING")
+        self.assertEqual(self.mode, "after")
+        m.rollback()
+        self.assertEqual(m.record()["phase"], "ROLLED_BACK")
+        self.assertEqual(self.mode, "before")
+        self.assertEqual(self.operations.count("node-only-recreate:True"), 1)
+        self.assertEqual(self.operations.count("node-only-recreate:False"), 1)
+
     def test_computed_runtime_allows_only_existing_read_only_mount_delta(self):
         self.assertEqual(self.after["image"], self.before["image"])
         self.assertEqual(self.after["env"]["SMITE_SANAEI_INVENTORY_ENABLED"], "true")
