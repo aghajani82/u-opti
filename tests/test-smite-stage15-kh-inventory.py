@@ -240,6 +240,51 @@ class KHInventoryTests(unittest.TestCase):
                         m.baseline(tampered)
 
 
+
+    def test_effective_compose_unchanged_except_inventory_in_old_mount_or_absent(self):
+        for mounted in (False, True):
+            with self.subTest(mounted=mounted):
+                base_mounts = [{"type": "bind", "source": "/tmp/replay", "target": "/auth",
+                                "read_only": False}]
+                if mounted:
+                    base_mounts += [{"type": "bind",
+                                     "source": "/opt/smite-node/.sanaei-empty",
+                                     "target": m.TARGET, "read_only": True,
+                                     "bind": {"create_host_path": True}}]
+                before = {"services": {"smite-node": {
+                    "image": "smite-node:stage15-local",
+                    "environment": {"SMITE_SANAEI_INVENTORY_ENABLED": "false"},
+                    "volumes": base_mounts,
+                    "network_mode": "host",
+                }}, "networks": {}}
+                after = copy.deepcopy(before)
+                after["services"]["smite-node"]["environment"] = {
+                    "SMITE_SANAEI_INVENTORY_ENABLED": "true",
+                    "SMITE_SANAEI_DB_PATH": m.TARGET + "/x-ui.db",
+                }
+                new_mount = {"type": "bind", "source": str(m.DB_DIR),
+                             "target": m.TARGET, "read_only": True,
+                             "bind": {"create_host_path": False}}
+                if mounted:
+                    after["services"]["smite-node"]["volumes"][-1] = new_mount
+                else:
+                    after["services"]["smite-node"]["volumes"].append(new_mount)
+                with patch.object(m.h, "run", side_effect=[
+                        json.dumps(before), json.dumps(after)]):
+                    m.validate_compose()
+                unsafe = copy.deepcopy(after)
+                unsafe["services"]["smite-node"]["volumes"][-1]["read_only"] = False
+                with patch.object(m.h, "run", side_effect=[
+                        json.dumps(before), json.dumps(unsafe)]):
+                    with self.assertRaises(m.Hold):
+                        m.validate_compose()
+                rogue = copy.deepcopy(after)
+                rogue["services"]["smite-node"]["environment"]["SMITE_AGENT_AUTH_MODE"] = "legacy"
+                with patch.object(m.h, "run", side_effect=[
+                        json.dumps(before), json.dumps(rogue)]):
+                    with self.assertRaises(m.Hold):
+                        m.validate_compose()
+
     def test_no_image_swap_in_root_runbook(self):
         source = (ROOT / "modules/smite-stage15-kh-inventory.py").read_text()
         self.assertIn("--force-recreate", source)
