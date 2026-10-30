@@ -187,6 +187,13 @@ class LiveUDSTests(unittest.TestCase):
         self.assertEqual(self.grants,[])
         self.assertEqual(self.ledger.conn.execute("SELECT count(*) FROM approvals").fetchone()[0],0)
 
+    def test_challenge_direct_diagnostic_offline(self):
+        try:
+            reply=self.http.application.challenge(child="child-0001",digest=self.digest)
+        except Exception as exc:
+            raise AssertionError("Offline test challenge error: "+type(exc).__name__+": "+str(exc)) from exc
+        self.assertIn("challenge_id",reply)
+
     def test_only_unix_socket_no_network_listener(self):
         import socket
         sock=self.http.socket
