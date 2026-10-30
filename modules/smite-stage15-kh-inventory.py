@@ -271,7 +271,8 @@ def signed_inbounds():
 def plan():
     need(not exists(STATE) and not exists(STATE.with_name(STATE.name + ".stage")),
          "EXISTING_KH_INVENTORY_TRANSACTION")
-    need(not exists(OVERLAY), "INVENTORY_OVERLAY_ALREADY_EXISTS")
+    need(not exists(OVERLAY) and not exists(OVERLAY.with_name(OVERLAY.name + ".next")),
+         "INVENTORY_OVERLAY_ALREADY_EXISTS")
     need(os.geteuid() == 0 and os.uname().nodename.split(".")[0].lower() == "kh",
          "KH_ROOT_ONLY")
     wdoc = w.read_record()
@@ -302,6 +303,15 @@ def begin(doc):
     os.replace(stage, STATE)
     h.flush(STATE.parent)
 
+def publish_overlay():
+    # fsync then rename; SIGKILL cannot expose a truncated active overlay.
+    pending = OVERLAY.with_name(OVERLAY.name + ".next")
+    need(not exists(pending) and not exists(OVERLAY),
+         "UNEXPECTED_INVENTORY_OVERLAY")
+    h.new_file(pending, OVERLAY_BYTES, 0o600)
+    os.replace(pending, OVERLAY)
+    h.flush(OVERLAY.parent)
+
 def recreate(enabled):
     files = w.service_files("node") + [w.overlay("node")]
     if enabled:
@@ -315,7 +325,7 @@ def recreate(enabled):
 def apply():
     doc = plan()
     begin(doc)
-    h.new_file(OVERLAY, OVERLAY_BYTES, 0o600)
+    publish_overlay()
     doc["phase"] = "RECREATING"
     save(doc)
     recreate(True)  # only smite-node: one short FRPC interruption
@@ -330,6 +340,13 @@ def apply():
 def rollback():
     doc = record()
     need(doc["phase"] in PHASES, "INVENTORY_UNKNOWN_STATE")
+    pending = OVERLAY.with_name(OVERLAY.name + ".next")
+    if exists(pending):
+        need(doc["phase"] == "PREPARED", "UNRESOLVED_OVERLAY_WRITE")
+        raw = h.file(pending, mode=0o600, limit=len(OVERLAY_BYTES))
+        need(OVERLAY_BYTES.startswith(raw), "UNTRUSTED_OVERLAY_PARTIAL")
+        pending.unlink()
+        h.flush(pending.parent)
     if doc["phase"] == "ROLLED_BACK":
         verify_runtime(doc, False)
         w.health(w.read_record(), True)
