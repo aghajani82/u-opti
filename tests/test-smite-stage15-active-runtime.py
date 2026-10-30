@@ -217,6 +217,53 @@ class MigrationTests(unittest.TestCase):
             with patch.object(m.Host,'recoverable'),patch.object(m.h,'run',side_effect=run):
                 with self.assertRaises(m.h.Hold):m.Host().load_image(doc)
 
+    def test_node_tunnel_registry_is_bound_to_running_named_volume(self):
+        # The live Node persists this file in a Docker named volume, not in
+        # /opt/smite-node/config. The migration must bind the actual mount.
+        volume=self.root/'docker-volumes'/'smite-node-data'/'_data'
+        volume.mkdir(parents=True)
+        registry=volume/'tunnels.json'
+        registry.write_text('{"active-owner":{"core":"frp"}}')
+        node={'Mounts':[{'Destination':'/var/lib/smite-node',
+                         'Source':str(volume),'Name':'smite-node-data',
+                         'Type':'volume','RW':True}]}
+        proof=m.Host().node_tunnel_storage(node)
+        self.assertEqual(proof['path'],str(registry))
+        self.assertEqual(proof['sha'],m.h.digest(registry.read_bytes()))
+        self.assertEqual(proof['inode'],[registry.stat().st_dev,registry.stat().st_ino])
+        registry.write_text('{"changed-owner":{"core":"frp"}}')
+        self.assertNotEqual(m.Host().node_tunnel_storage(node)['sha'],proof['sha'])
+        replacement=volume/'replacement.tmp'
+        replacement.write_bytes(registry.read_bytes());replacement.replace(registry)
+        changed=m.Host().node_tunnel_storage(node)
+        self.assertNotEqual(changed['inode'],proof['inode'])
+
+    def test_node_tunnel_registry_missing_or_untrusted_volume_fails_closed(self):
+        volume=self.root/'docker-volumes'/'smite-node-data'/'_data'
+        volume.mkdir(parents=True)
+        good={'Destination':'/var/lib/smite-node','Source':str(volume),
+              'Name':'smite-node-data','Type':'volume','RW':True}
+        with self.assertRaises(m.h.Hold):
+            m.Host().node_tunnel_storage({'Mounts':[good]})
+        registry=volume/'tunnels.json'
+        registry.write_text('{"active-owner":{"core":"frp"}}')
+        for forged in [
+            dict(good, Type='bind'),
+            dict(good, Name='smite-node-data-shadow'),
+            dict(good, RW=False),
+            dict(good, Destination='/etc/smite-node'),
+            dict(good, Source=str(self.root/'other-volume'/'_data')),
+        ]:
+            with self.subTest(forged=forged):
+                with self.assertRaises(m.h.Hold):
+                    m.Host().node_tunnel_storage({'Mounts':[forged]})
+        with self.assertRaises(m.h.Hold):
+            m.Host().node_tunnel_storage({'Mounts':[good,good]})
+        registry.unlink()
+        registry.symlink_to(self.host.key)
+        with self.assertRaises(m.h.Hold):
+            m.Host().node_tunnel_storage({'Mounts':[good]})
+
     def test_real_database_gate_rejects_duplicate_owner_and_unsafe_startup(self):
         path=self.root/'panel.sqlite3'
         with sqlite3.connect(path) as db:
