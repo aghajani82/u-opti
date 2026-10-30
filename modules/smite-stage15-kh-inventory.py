@@ -334,21 +334,34 @@ def rollback():
         verify_runtime(doc, False)
         w.health(w.read_record(), True)
         return
-    obj = w.inspect("node")
-    need(w.signature(obj) in (doc["before"], doc["after"]),
-         "KH_RUNTIME_EXTERNAL_DRIFT")
-    if doc["phase"] == "PREPARED" and w.signature(obj) == doc["before"]:
-        doc["phase"] = "ROLLED_BACK"
-        save(doc)
+    current = None
+    try:
+        obj = w.inspect("node")
+        current = w.signature(obj)
+        need(current in (doc["before"], doc["after"]),
+             "KH_RUNTIME_EXTERNAL_DRIFT")
+    except Hold:
+        # Docker can remove the old container before power fails. Recovery
+        # may repair ONLY that incomplete state, with no competing FRPC.
+        need(doc["phase"] in ("RECREATING", "RECOVERING"),
+             "KH_NODE_MISSING_AFTER_COMMIT")
+        need(h.run(["docker", "ps", "-aq", "--filter",
+                    "name=^/smite-node$"]) == "",
+             "KH_CONTAINER_UNKNOWN_DURING_RECOVERY")
+        need(h.run(["pgrep", "-x", "frpc"]) == "",
+             "FRPC_RUNNING_WITHOUT_NODE")
+    if current == doc["before"]:
+        # Already restored (or cutover never started): no second interruption.
+        verify_runtime(doc, False)
     else:
         doc["phase"] = "RECOVERING"
         save(doc)
         recreate(False)
         verify_runtime(doc, False)
-        need(frpc() == doc["frpc"], "FRPC_ROLLBACK_DRIFT")
-        need(w.protected(["node"]) == doc["protected"], "SIGNED_STORAGE_DRIFT")
-        doc["phase"] = "ROLLED_BACK"
-        save(doc)
+    need(frpc() == doc["frpc"], "FRPC_ROLLBACK_DRIFT")
+    need(w.protected(["node"]) == doc["protected"], "SIGNED_STORAGE_DRIFT")
+    doc["phase"] = "ROLLED_BACK"
+    save(doc)
     w.health(w.read_record(), True)
 
 def verify():
