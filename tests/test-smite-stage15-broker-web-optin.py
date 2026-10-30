@@ -47,6 +47,8 @@ class BrokerOptInTests(unittest.TestCase):
             ("WEB_MODE_MARKER",self.marker),("WEB_QUEUE_DIR",self.dir/"queue")):
             p=patch.object(broker,target,value);p.start();self.addCleanup(p.stop)
         p=patch.object(broker,"_dir");p.start();self.addCleanup(p.stop)
+        p=patch.object(broker,"_contract_module",return_value=contract)
+        p.start();self.addCleanup(p.stop)
         p=patch.object(broker,"_load_module",side_effect=loader)
         p.start();self.addCleanup(p.stop)
         p=patch.object(broker,"_file",side_effect=lambda path,mode,max_size=4096:path.read_bytes())
