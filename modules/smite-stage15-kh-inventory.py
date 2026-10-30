@@ -186,53 +186,64 @@ def admit_after(before, observed):
     need(normalized["mounts"] == before["mounts"],
          "INVENTORY_EXISTING_MOUNTS_CHANGED")
 
-    # Normalize ONLY the target entry in Binds/Mounts; everything else must
-    # be byte-for-byte equal to the immutable original WSS HostConfig.
-    changes = 0
+    # Docker may move a short-syntax *old* bind to structured Mounts when
+    # the new overlay uses long syntax. Normalize across BOTH collections.
+    old_host = before["host"]
+    new_host = normalized["host"]
+    old_hits = []
+    new_hits = []
     for key in ("Binds", "Mounts"):
-        old_entries = before["host"].get(key)
-        new_entries = normalized["host"].get(key)
-        if not isinstance(new_entries, list):
-            need(new_entries == old_entries, "INVENTORY_HOST_MOUNT_DRIFT")
-            continue
-        target_entries = []
-        for item in new_entries:
-            if key == "Binds" and isinstance(item, str):
-                if item.startswith(str(DB_DIR) + ":" + TARGET + ":"):
+        previous_values = old_host.get(key)
+        current_values = new_host.get(key)
+        need(previous_values is None or isinstance(previous_values, list),
+             "INVENTORY_OLD_HOST_FORMAT")
+        need(current_values is None or isinstance(current_values, list),
+             "INVENTORY_NEW_HOST_FORMAT")
+        for i, item in enumerate(previous_values or []):
+            if key == "Binds":
+                need(isinstance(item, str), "INVENTORY_OLD_BIND_INVALID")
+                if ":" + TARGET + ":" in item:
+                    need(item == "/opt/smite-node/.sanaei-empty:" + TARGET + ":ro",
+                         "INVENTORY_OLD_BIND_UNTRUSTED")
+                    old_hits.append((key, i, item))
+            elif isinstance(item, dict):
+                if item.get("Target", item.get("Destination")) == TARGET:
+                    need(item.get("Type") == "bind"
+                         and item.get("Source") == "/opt/smite-node/.sanaei-empty"
+                         and item.get("ReadOnly") is True,
+                         "INVENTORY_OLD_STRUCTURED_BIND_UNTRUSTED")
+                    old_hits.append((key, i, item))
+        for i, item in enumerate(current_values or []):
+            if key == "Binds":
+                need(isinstance(item, str), "INVENTORY_NEW_BIND_INVALID")
+                if ":" + TARGET + ":" in item:
                     need(item == str(DB_DIR) + ":" + TARGET + ":ro",
                          "INVENTORY_UNSAFE_BIND_OPTIONS")
-                    target_entries.append(item)
-            if key == "Mounts" and isinstance(item, dict):
+                    new_hits.append((key, i, item))
+            elif isinstance(item, dict):
                 if item.get("Target", item.get("Destination")) == TARGET:
-                    need(item.get("Type") == "bind" and item.get("Source") == str(DB_DIR)
+                    need(item.get("Type") == "bind"
+                         and item.get("Source") == str(DB_DIR)
                          and item.get("ReadOnly") is True
                          and not item.get("BindOptions", {}).get("CreateMountpoint", False),
                          "INVENTORY_HOST_BIND_UNTRUSTED")
-                    target_entries.append(item)
-        need(len(target_entries) <= 1, "INVENTORY_DUPLICATE_HOST_BIND")
-        if target_entries:
-            changes += 1
-            index = new_entries.index(target_entries[0])
-            old_target = []
-            if isinstance(old_entries, list):
-                for candidate in old_entries:
-                    if key == "Binds" and isinstance(candidate, str):
-                        if ":" + TARGET + ":" in candidate:
-                            old_target.append(candidate)
-                    if key == "Mounts" and isinstance(candidate, dict):
-                        if candidate.get("Target", candidate.get("Destination")) == TARGET:
-                            old_target.append(candidate)
-            need(len(old_target) == (1 if previous else 0),
-                 "INVENTORY_OLD_HOST_TARGET_DRIFT")
-            if old_target:
-                new_entries[index] = old_target[0]
+                    new_hits.append((key, i, item))
+    need(len(old_hits) == (1 if previous else 0) and len(new_hits) == 1,
+         "INVENTORY_HOST_BIND_COUNT_DRIFT")
+    key, i, _ = new_hits[0]
+    new_host[key].pop(i)
+    if old_hits:
+        key, i, item = old_hits[0]
+        if new_host.get(key) is None:
+            new_host[key] = []
+        new_host[key].insert(i, copy.deepcopy(item))
+    for key in ("Binds", "Mounts"):
+        if old_host.get(key) is None and new_host.get(key) == []:
+            if key in old_host:
+                new_host[key] = None
             else:
-                new_entries.pop(index)
-            if old_entries is None and not new_entries:
-                normalized["host"][key] = None
-        need(normalized["host"].get(key) == old_entries,
-             "INVENTORY_HOST_BIND_OTHER_CHANGE")
-    need(changes == 1, "INVENTORY_NO_REVIEWED_HOST_BIND")
+                new_host.pop(key, None)
+    need(new_host == old_host, "INVENTORY_HOST_BIND_OTHER_CHANGE")
     need(normalized == before, "INVENTORY_UNRELATED_RUNTIME_DRIFT")
     return observed
 
