@@ -685,7 +685,7 @@ def install_grant(data: dict[str, object], *, confirmed_child: str,
     grants = _grant_context(root)
     grant = _checked_grant(data, confirmed_child=confirmed_child)
     target = grants / f"{grant['child']}.json"
-    encoded = (json.dumps(grant, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    encoded = (json.dumps({"schema": 1, **grant}, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
     _write_new(target, encoded, 0o600)
     return {
         "TRUSTED_GRANT": "INSTALLED_ROOT_OPERATOR_APPROVED",
