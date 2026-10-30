@@ -44,6 +44,7 @@ OVERLAY_BYTES = (
     "  smite-node:\n"
     "    environment:\n"
     '      SMITE_SANAEI_INVENTORY_ENABLED: "true"\n'
+    '      SMITE_SANAEI_DB_PATH: "/run/smite-sanaei-ro/x-ui.db"\n'
     "    volumes:\n"
     "      - type: bind\n"
     "        source: /opt/3x-ui/instances/01/db\n"
@@ -132,61 +133,153 @@ def database():
         raise Hold("SANAEI_WAL_READ_UNAVAILABLE") from exc
     return [st.st_dev, DB_DIR.stat().st_ino, st.st_ino]
 
-def expected_signature(before):
-    need(before["image"] == EXPECTED_IMAGE, "NODE_IMAGE_DRIFT")
-    after = copy.deepcopy(before)
-    need(after["env"].get("SMITE_SANAEI_INVENTORY_ENABLED") == "false"
-         and after["env"].get("SMITE_SANAEI_DB_PATH") == TARGET + "/x-ui.db",
+def baseline(before):
+    need(before["image"] == EXPECTED_IMAGE
+         and before["env"].get("SMITE_SANAEI_INVENTORY_ENABLED") == "false"
+         and before["env"].get("SMITE_SANAEI_DB_PATH", TARGET + "/x-ui.db") == TARGET + "/x-ui.db",
          "INVENTORY_BASELINE_DRIFT")
-    after["env"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "true"
-    mounts = [m for m in after["mounts"] if m["Destination"] == TARGET]
-    need(len(mounts) == 1 and mounts[0]["Type"] == "bind"
-         and mounts[0]["RW"] is False, "INVENTORY_MOUNT_BASELINE_DRIFT")
-    previous = mounts[0]["Source"]
-    need(previous == "/opt/smite-node/.sanaei-empty", "INVENTORY_SOURCE_DRIFT")
-    mounts[0]["Source"] = str(DB_DIR)
-    binds = after["host"].get("Binds")
-    need(isinstance(binds, list), "INVENTORY_BINDS_MISSING")
-    old = previous + ":" + TARGET + ":ro"
-    new = str(DB_DIR) + ":" + TARGET + ":ro"
-    need(binds.count(old) == 1 and new not in binds, "INVENTORY_BIND_DRIFT")
-    binds[binds.index(old)] = new
-    after["host"]["Binds"] = sorted(binds)
-    return after
+    old_mount = [item for item in before["mounts"] if item["Destination"] == TARGET]
+    need(len(old_mount) <= 1, "INVENTORY_MOUNT_DUPLICATED")
+    if old_mount:
+        need(old_mount[0]["Type"] == "bind" and old_mount[0]["RW"] is False
+             and old_mount[0]["Source"] == "/opt/smite-node/.sanaei-empty",
+             "INVENTORY_MOUNT_BASELINE_DRIFT")
+    return old_mount[0] if old_mount else None
+
+
+def admit_after(before, observed):
+    """Prove *every* actual Docker field: only reviewed env/bind delta allowed.
+
+    Docker Compose can represent new long bind syntax in HostConfig.Mounts
+    rather than Binds. Never predict unknown Docker-generated host fields.
+    Bind the verified observed signature only at successful COMMIT.
+    """
+    previous = baseline(before)
+    need(set(observed) == set(before) and observed["image"] == EXPECTED_IMAGE
+         and observed["command"] == before["command"],
+         "INVENTORY_UNREVIEWED_NODE_CHANGE")
+    normalized = copy.deepcopy(observed)
+    env = normalized["env"]
+    need(env.get("SMITE_SANAEI_INVENTORY_ENABLED") == "true"
+         and env.get("SMITE_SANAEI_DB_PATH") == TARGET + "/x-ui.db",
+         "INVENTORY_NEW_ENV_UNTRUSTED")
+    env["SMITE_SANAEI_INVENTORY_ENABLED"] = "false"
+    if "SMITE_SANAEI_DB_PATH" not in before["env"]:
+        env.pop("SMITE_SANAEI_DB_PATH")
+    need(env == before["env"], "INVENTORY_EXTRA_ENV_DELTA")
+    new_mount = [item for item in normalized["mounts"]
+                 if item["Destination"] == TARGET]
+    need(len(new_mount) == 1 and new_mount[0]["Type"] == "bind"
+         and new_mount[0]["Source"] == str(DB_DIR)
+         and new_mount[0]["RW"] is False
+         and new_mount[0].get("Propagation") in ("rprivate", ""),
+         "INVENTORY_NEW_MOUNT_UNTRUSTED")
+    if previous:
+        replacement = copy.deepcopy(new_mount[0])
+        replacement["Source"] = previous["Source"]
+        need(replacement == previous, "INVENTORY_MOUNT_ATTRIBUTES_CHANGED")
+        normalized["mounts"][normalized["mounts"].index(new_mount[0])] = replacement
+    else:
+        need(new_mount[0].get("Mode") in ("ro", ""),
+             "INVENTORY_MOUNT_MODE_UNTRUSTED")
+        normalized["mounts"].remove(new_mount[0])
+    need(normalized["mounts"] == before["mounts"],
+         "INVENTORY_EXISTING_MOUNTS_CHANGED")
+
+    # Normalize ONLY the target entry in Binds/Mounts; everything else must
+    # be byte-for-byte equal to the immutable original WSS HostConfig.
+    changes = 0
+    for key in ("Binds", "Mounts"):
+        old_entries = before["host"].get(key)
+        new_entries = normalized["host"].get(key)
+        if not isinstance(new_entries, list):
+            need(new_entries == old_entries, "INVENTORY_HOST_MOUNT_DRIFT")
+            continue
+        target_entries = []
+        for item in new_entries:
+            if key == "Binds" and isinstance(item, str):
+                if item.startswith(str(DB_DIR) + ":" + TARGET + ":"):
+                    need(item == str(DB_DIR) + ":" + TARGET + ":ro",
+                         "INVENTORY_UNSAFE_BIND_OPTIONS")
+                    target_entries.append(item)
+            if key == "Mounts" and isinstance(item, dict):
+                if item.get("Target", item.get("Destination")) == TARGET:
+                    need(item.get("Type") == "bind" and item.get("Source") == str(DB_DIR)
+                         and item.get("ReadOnly") is True
+                         and not item.get("BindOptions", {}).get("CreateMountpoint", False),
+                         "INVENTORY_HOST_BIND_UNTRUSTED")
+                    target_entries.append(item)
+        need(len(target_entries) <= 1, "INVENTORY_DUPLICATE_HOST_BIND")
+        if target_entries:
+            changes += 1
+            index = new_entries.index(target_entries[0])
+            old_target = []
+            if isinstance(old_entries, list):
+                for candidate in old_entries:
+                    if key == "Binds" and isinstance(candidate, str):
+                        if ":" + TARGET + ":" in candidate:
+                            old_target.append(candidate)
+                    if key == "Mounts" and isinstance(candidate, dict):
+                        if candidate.get("Target", candidate.get("Destination")) == TARGET:
+                            old_target.append(candidate)
+            need(len(old_target) == (1 if previous else 0),
+                 "INVENTORY_OLD_HOST_TARGET_DRIFT")
+            if old_target:
+                new_entries[index] = old_target[0]
+            else:
+                new_entries.pop(index)
+            if old_entries is None and not new_entries:
+                normalized["host"][key] = None
+        need(normalized["host"].get(key) == old_entries,
+             "INVENTORY_HOST_BIND_OTHER_CHANGE")
+    need(changes == 1, "INVENTORY_NO_REVIEWED_HOST_BIND")
+    need(normalized == before, "INVENTORY_UNRELATED_RUNTIME_DRIFT")
+    return observed
+
 
 def validate_compose():
-    command = w.compose("node", True, ["config", "--format", "json"])
-    before = json.loads(h.run(command))
+    before = json.loads(h.run(w.compose("node", True, ["config", "--format", "json"])))
     after = json.loads(h.run(
         w.compose("node", True, ["-f", "-", "config", "--format", "json"]),
         input=OVERLAY_BYTES.decode()))
     old = before["services"]["smite-node"]
-    new = after["services"]["smite-node"]
     a = copy.deepcopy(after)
-    a_service = a["services"]["smite-node"]
-    need(old.get("environment", {}).get("SMITE_SANAEI_INVENTORY_ENABLED") == "false"
-         and new.get("environment", {}).get("SMITE_SANAEI_INVENTORY_ENABLED") == "true",
-         "INVENTORY_ENV_DELTA_INVALID")
-    a_service["environment"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "false"
+    new = a["services"]["smite-node"]
+    old_env = old["environment"]
+    new_env = new["environment"]
+    need(old_env.get("SMITE_SANAEI_INVENTORY_ENABLED") == "false"
+         and old_env.get("SMITE_SANAEI_DB_PATH", TARGET + "/x-ui.db") == TARGET + "/x-ui.db"
+         and new_env.get("SMITE_SANAEI_INVENTORY_ENABLED") == "true"
+         and new_env.get("SMITE_SANAEI_DB_PATH") == TARGET + "/x-ui.db",
+         "INVENTORY_COMPOSE_ENV_UNTRUSTED")
+    new_env["SMITE_SANAEI_INVENTORY_ENABLED"] = "false"
+    if "SMITE_SANAEI_DB_PATH" not in old_env:
+        new_env.pop("SMITE_SANAEI_DB_PATH")
     old_vol = old["volumes"]
-    new_vol = a_service["volumes"]
-    need(isinstance(old_vol, list) and isinstance(new_vol, list)
-         and len(old_vol) == len(new_vol), "INVENTORY_UNEXPECTED_MOUNT_COUNT")
-    old_mount = [m for m in old_vol if m.get("target") == TARGET]
-    new_mount = [m for m in new_vol if m.get("target") == TARGET]
-    need(len(old_mount) == len(new_mount) == 1
-         and old_mount[0].get("source") == "/opt/smite-node/.sanaei-empty"
-         and old_mount[0].get("read_only") is True
-         and new_mount[0].get("source") == str(DB_DIR)
-         and new_mount[0].get("read_only") is True
-         and new_mount[0].get("bind", {}).get("create_host_path") is False,
+    new_vol = new["volumes"]
+    need(isinstance(old_vol, list) and isinstance(new_vol, list),
+         "INVENTORY_COMPOSE_MOUNTS_MISSING")
+    old_target = [v for v in old_vol if v.get("target") == TARGET]
+    new_target = [v for v in new_vol if v.get("target") == TARGET]
+    need(len(old_target) <= 1 and len(new_target) == 1
+         and new_target[0].get("source") == str(DB_DIR)
+         and new_target[0].get("type") == "bind"
+         and new_target[0].get("read_only") is True
+         and new_target[0].get("bind", {}).get("create_host_path") is False,
          "INVENTORY_COMPOSE_BIND_UNTRUSTED")
-    idx = new_vol.index(new_mount[0])
-    original = copy.deepcopy(new_mount[0])
-    original["source"] = old_mount[0]["source"]
-    original["bind"] = old_mount[0].get("bind", {})
-    new_vol[idx] = original
+    index = new_vol.index(new_target[0])
+    if old_target:
+        need(len(old_vol) == len(new_vol)
+             and old_target[0].get("source") == "/opt/smite-node/.sanaei-empty"
+             and old_target[0].get("read_only") is True,
+             "INVENTORY_COMPOSE_OLD_MOUNT_DRIFT")
+        new_vol[index] = copy.deepcopy(old_target[0])
+    else:
+        need(len(new_vol) == len(old_vol) + 1,
+             "INVENTORY_UNEXPECTED_EXTRA_MOUNTS")
+        new_vol.pop(index)
     need(a == before, "INVENTORY_COMPOSE_UNRELATED_DRIFT")
+
 
 def frpc():
     node = w.inspect("node")
@@ -222,7 +315,9 @@ def bound(doc):
          "KH_WSS_NOT_COMMITTED")
     need(doc["wss_sha"] == digest(h.file(w.STATE / "record.json", mode=0o600))
          and receipt["runtime"]["node"] == doc["before"]
-         and expected_signature(doc["before"]) == doc["after"],
+         and (doc["after"] is None or
+              admit_after(doc["before"], doc["after"]) == doc["after"])
+         and (doc["phase"] != "COMMITTED" or doc["after"] is not None),
          "INVENTORY_WSS_BINDING_DRIFT")
     need(w.protected(["node"]) == doc["protected"], "SIGNED_STORAGE_DRIFT")
     need(database() == doc["db"], "SANAEI_DATABASE_INODE_DRIFT")
@@ -254,12 +349,17 @@ def expectation(wss_doc, image):
 def verify_runtime(doc, after):
     obj = w.inspect("node")
     w.runtime("node", obj, True, inventory=after)
-    need(w.signature(obj) == doc["after" if after else "before"],
-         "KH_NODE_RUNTIME_SIGNATURE_DRIFT")
+    actual = w.signature(obj)
+    if after:
+        admit_after(doc["before"], actual)
+        if doc["after"] is not None:
+            need(actual == doc["after"], "KH_MIGRATED_RUNTIME_DRIFT")
+    else:
+        need(actual == doc["before"], "KH_NODE_RUNTIME_SIGNATURE_DRIFT")
     need(h.run(["docker", "image", "inspect", "smite-node:stage15-local",
                 "--format", "{{.Id}}"]) == EXPECTED_IMAGE,
          "KH_IMAGE_TAG_DRIFT")
-    return obj
+    return actual
 
 def signed_inbounds():
     # Exercises the real loopback signed HTTP endpoint AND durable replay.
@@ -292,7 +392,7 @@ def plan():
     return dict(schema=1, phase="PREPARED",
                 wss_sha=digest(h.file(w.STATE / "record.json", mode=0o600)),
                 protected=w.protected(["node"]), db=db, before=before,
-                after=expected_signature(before), frpc=probe,
+                after=None, frpc=probe,
                 overlay_sha=digest(OVERLAY_BYTES))
 
 def begin(doc):
@@ -329,10 +429,11 @@ def apply():
     doc["phase"] = "RECREATING"
     save(doc)
     recreate(True)  # only smite-node: one short FRPC interruption
-    verify_runtime(doc, True)
+    candidate = verify_runtime(doc, True)
     need(frpc() == doc["frpc"], "FRPC_COMMAND_OR_NAMESPACE_DRIFT")
     signed_inbounds()
     need(w.protected(["node"]) == doc["protected"], "SIGNED_STORAGE_DRIFT")
+    doc["after"] = candidate
     doc["phase"] = "COMMITTED"
     save(doc)
     w.health(w.read_record(), True)
@@ -366,8 +467,10 @@ def rollback():
         need("frpc" not in processes, "FRPC_RUNNING_WITHOUT_NODE")
     else:
         current = w.signature(obj)
-        need(current in (doc["before"], doc["after"]),
-             "KH_RUNTIME_EXTERNAL_DRIFT")
+        if current != doc["before"]:
+            admit_after(doc["before"], current)
+            if doc["after"] is not None:
+                need(current == doc["after"], "KH_RUNTIME_EXTERNAL_DRIFT")
     if current == doc["before"]:
         # Already restored (or cutover never started): no second interruption.
         verify_runtime(doc, False)
