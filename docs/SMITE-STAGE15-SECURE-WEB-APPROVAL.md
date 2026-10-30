@@ -195,3 +195,136 @@ but does not substitute for physical Passkey/browser UV or real IR/KH E2E.
 
 No source-only test proves live FRP continuity; that must be checked during
 the separately approved field trial.
+
+
+## Final pre-deployment review for proposed approve.kolbe1.ir (NOT ACTIVATED)
+
+`approve.kolbe1.ir` is proposed only. Independent passkey Origin is exactly
+`https://approve.kolbe1.ir` and must differ from the currently deployed
+Smite Panel Origin. Do not publish DNS, request a live certificate, configure
+Nginx or set `VITE_STAGE15_APPROVAL_ORIGIN` in this PR.
+
+**Read-only IR preflight before approval:** record `nginx -T` and
+`nginx -t` outputs (do not reload), inspect all `listen 443` /
+`server_name` entries for duplicate `approve.kolbe1.ir`, verify the
+current Panel domain and current numeric XHTTP route includes are intact.
+Check existing wildcard/default server and TLS certificate paths; certificate
+must belong to the new host. Nginx SNI virtual host reuses *existing*
+443; no extra public listening port. Record read-only `ss -lntp`,
+`getent group`/Nginx worker GID, Socket parent traversal and group.
+If DNS is Cloudflare-proxied, explicitly review origin/TLS, access control,
+WebAuthn Host/Origin forwarding and trust boundary first; do not assume proxy
+mode. These live checks were NOT performed from GitHub CI.
+
+**Fix in source:** choose a separate runtime directory
+`/run/u-opti-smite-review`, mode `0750`; the launcher sets ONLY this
+directory and `web-approval.sock` to the approved Nginx worker GID.
+Socket mode is `0660`; the independent Root audit, credential and HMAC
+files remain `0600/0400` inside separate `0700` Root directories.
+Broker's `/run/u-opti/smite/xhttp-broker.sock` and its GID are untouched.
+Review systemd `RuntimeDirectory` / `ReadWritePaths` / sandbox before
+activation; `Restart=no` deliberately requires manual reconciliation if
+the root review service crashes. Never chmod secrets to Nginx's group.
+Use explicit static templates in `docs/examples/` only after approval.
+
+### Expired queue / uncertain result
+
+Expired proposals are **never garbage-collected, overwritten or retried**.
+They remain visible as HOLD until an exceptional, independent reconciliation.
+For a proposal older than ten minutes, the root-only CLI
+`smite-stage15-approval-reconcile.py --close-expired SHA256` may create
+a durable closure receipt **only** if all current root-side read-only checks
+prove: root grant absent, route file absent, transaction journal absent,
+original signed nonce unconsumed in the broker ledger, and `nginx -T`
+contains no matching route/path. It requires local IR root TTY and an
+explicit `REVIEW SHA256` confirmation. Any incomplete or uncertain
+inspection, route or journal found, consumed nonce, or changed Nginx
+configuration -> HOLD, no deletion and no reapplication.
+`closed-<digest>.json` preserves the decision; the original
+`proposal-<digest>.json` remains for audit. A subsequent *new* signed
+intent for the child may stage only after a verified closure. This
+exceptional root recovery flow is **not** part of normal tunnel creation.
+
+### Lease consistency and freshness
+
+The approval root collector must read the **authoritative live mounted**
+Panel SQLite database read-only, not a periodically exported or cached file.
+Production config calls this `panel_live_db_path`; a stale export path is
+not a supported source. Each review opens one new SQLite `mode=ro`
+connection and one bounded (`<=3 s`) consistent `BEGIN` transaction:
+schema, `quick_check`, owner/child identity, status and unique lease
+read within the same transaction. It rejects changed source inode,
+non-regular/symlink paths, unavailable WAL, changed or incompatible
+schema and uncommitted/invalid state. The read-only mount must expose
+consistent SQLite WAL/SHM companion files where needed; do not copy a
+live `*.db` independently of its WAL into the reviewer.
+The source mount identity, exact Docker volume and ability to see a
+harmless **committed** lease change must be verified read-only at rollout:
+the application cannot cryptographically prove that an operator supplied
+the *live* volume rather than a stale copy of it. If that proof is
+unavailable: HOLD, do not enable the service.
+
+### Safe image migration: two explicit maintenance boundaries
+
+No changes to currently active images in this PR. Record precise current
+IR and KH image IDs, `docker inspect` mounts/Env/network/PIDs,
+Signed Pairing and Replay identity files, WSS/FRPS owner/child inventory,
+active routes, listener PIDs and reversible image digests before any step.
+Snapshot IR and KH and perform a recovery rehearsal on disposable clones.
+Stage future signed images by digest; never use mutable `latest`.
+
+1. **Root reviewer deployment (IR host, separate service):** inert
+   bootstrap first, independent keys/read-only Panel volume, then
+   dedicated Nginx vhost and UDS service only after TLS and hostname approval.
+   Broker opt-in marker is final, not first; old root-console flow stays
+   available before opt-in.
+2. **Panel upgrade (IR):** replacing only `smite-panel` likely requires
+   a controlled container recreate/restart (short management UI disruption).
+   Do NOT recreate/restart `smite-node` as part of this step; inspect
+   Compose's true dependency graph first and use a one-service migration.
+   If Compose would restart the Node: HOLD and redesign plan.
+3. **Node upgrade (IR and KH):** the new Signed Agent read-only attestation
+   endpoint and separate key mount are inside the Node image. Deploying them
+   may require restarting/recreating each `smite-node`. The live IR FRPS
+   owner is tied to IR Node and the KH FRPC singleton to KH Node. Therefore
+   such a recreation **may interrupt all three active client tunnels**;
+   zero-downtime cannot be promised. **Never perform it automatically.**
+   Obtain explicit approval for a maintenance window, actual exact
+   container-impact map and per-node rollback. If the stated goal remains
+   strictly no interruption, this is a deployment blocker and a separate
+   non-disruptive evidence adapter design must be reviewed first.
+4. After each *approved* migration, verify unchanged FRPS singleton
+   `FRP-IR-KH-45121`, Signed Pairing/replay identity, 45121,
+   38658, 28897 loopback listeners, XHTTP paths, WSS control, all three
+   real client connections and no new FRPS process. Reapply of the FRPS
+   Owner is forbidden. An unexpectedly changed PID/route, broken signed
+   proof or missing recovery point requires stop and rollback.
+5. Only after all security preflight and Passkey registration pass may
+   the operator approve the review service/Panel opt-in. Fourth tunnel
+   requires a **new** unused Child ID, Lease, port and path; create,
+   Verify, XHTTP choose, independent Passkey approval and automatic
+   one-time publish; confirm client data transfer. Old three remain
+   connected through the same shared FRPS Owner.
+
+### Rollback gates
+
+Review service failure: disable only the independent service + new vhost
+and the broker root-owned opt-in marker via an approved transaction,
+retain audit/nonce/queue/grant evidence. Panel failure: restore pinned
+previous Panel image **without** touching the Node, FRPS Owner or Replay.
+Node migration failure: stop immediately; restore only the affected
+pinned previous Node image and exact retained volumes/config *under the
+approved maintenance/rollback plan* and reconcile any WSS/FRPC/FRPS
+runtime disruption. Never restore a stale nonce/replay DB separately;
+missing or old replay state is quarantine/HOLD, not automatic repair.
+Avoid touching Grandoptical throughout.
+
+### Acceptance criteria for first live fourth tunnel
+
+Both independent Admin Passkeys (main + backup) registered/recoverable,
+valid TLS/Origin and CSRF checks, signed IR/KH/lease evidence fresh,
+no unmanaged/second FRPS, exact one-use broker grant and nonce, published
+new route, real VLESS+XHTTP traffic succeeds, and continuous/reverified
+operation of existing 45121, 38658 and 28897. Record all exact image IDs,
+Node/FRPS/FRPC PIDs and before/after public checks. **Nothing in this
+draft claims those live conditions have passed.**
