@@ -217,6 +217,15 @@ class LiveUDSTests(unittest.TestCase):
         self.assertEqual(self.finish(cid).status_code,409)
         self.assertEqual(self.start().status_code,409)
 
+    def test_malicious_parent_origin_refused(self):
+        with self.assertRaises(service.ApprovalServiceHold):
+            service.IndependentApproval(
+                queue_dir=self.q,broker_key=self.key,ledger=self.ledger,
+                credential_store=MockCredentialStore(),
+                origin="https://review.example.invalid",
+                panel_origin="https://panel.example.invalid';window.evil=1",
+                root_check=False)
+
     def test_only_unix_socket_no_network_listener(self):
         import socket
         sock=self.http.socket
