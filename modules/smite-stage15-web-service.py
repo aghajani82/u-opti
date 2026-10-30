@@ -69,7 +69,7 @@ class IndependentApproval:
     """Transport-agnostic lifecycle; all authority resides on root side."""
 
     def __init__(self, *, queue_dir: Path, broker_key: bytes, ledger,
-                 credential_store, origin: str, evidence_provider=None,
+                 credential_store, origin: str, panel_origin: str, evidence_provider=None,
                  grant_writer=None, ir_public_key: bytes = b"",
                  kh_public_key: bytes = b"", lease_public_key: bytes = b"",
                  root_check: bool = True):
@@ -82,7 +82,14 @@ class IndependentApproval:
             raise ApprovalServiceHold("INVALID_BROKER_KEY")
         self.gate, self.ledger = gate, ledger
         self.credentials = credential_store
+        panel_url = urlsplit(panel_origin)
+        if (panel_url.scheme != "https" or not panel_url.hostname
+                or panel_url.port not in (None,443)
+                or panel_url.path not in ("","/") or panel_url.query
+                or panel_url.fragment or panel_origin == origin):
+            raise ApprovalServiceHold("INVALID_INDEPENDENT_PANEL_ORIGIN")
         self.origin, self.key = origin, broker_key
+        self.panel_origin = panel_url.scheme + "://" + panel_url.netloc
         self.ir_public_key, self.kh_public_key = ir_public_key, kh_public_key
         self.lease_public_key = lease_public_key
         self.evidence_provider = evidence_provider
@@ -158,7 +165,7 @@ class IndependentApproval:
 # service itself has no TLS: the reviewed reverse proxy must terminate TLS.
 HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Independent XHTTP Approval</title><style>
+<title>Independent XHTTP Approval</title><style nonce="__CSP_NONCE__">
 body{font:16px system-ui;background:#0e172b;color:#f4f7ff;max-width:670px;margin:3rem auto;padding:1rem}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1b2a45;padding:1.2rem;border-radius:.6rem}
 button{background:#536dff;color:white;border:0;padding:1rem;border-radius:.6rem;cursor:pointer}
@@ -167,7 +174,7 @@ button:disabled{opacity:.4}#message{margin:1rem 0}
 <p>Verify the exact owner, child, lease, port, path and independent evidence hashes.</p>
 <pre id="facts">Loading…</pre><button id="approve" disabled>Verify passkey & approve</button>
 <p id="message" role="status"></p>
-<script>
+<script nonce="__CSP_NONCE__">
 const search=new URLSearchParams(location.search),child=search.get('child');
 const digestText=document.getElementById('facts'),button=document.getElementById('approve');
 const message=document.getElementById('message');
@@ -205,7 +212,7 @@ button.onclick=async()=>{button.disabled=true;try{
   if(window.opener)window.opener.postMessage({
     type:'u-opti:stage15:root-review:v1',status:'approved',
     child:outcome.child,port:outcome.port,path:outcome.path,
-    digest:outcome.digest},location.origin);
+    digest:outcome.digest},'__PANEL_ORIGIN__');
 }catch(e){message.textContent='HOLD / Requires Review: '+String(e);}
 };
 </script></body></html>"""
@@ -216,11 +223,12 @@ class ApprovalHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return  # Do not log credentials, queries, signatures or raw response.
 
-    def _reply(self, status: int, data, *, html=False):
+    def _reply(self, status: int, data, *, html=False, csp=None):
         raw = data.encode("utf-8") if html else json.dumps(data, separators=(",",":")).encode("utf-8")
         self.send_response(status)
         for k,v in SAFE.items():
-            self.send_header(k, "text/html; charset=utf-8" if k=="Content-Type" and html else v)
+            self.send_header(k, (csp if k=="Content-Security-Policy" and csp else
+                                 "text/html; charset=utf-8" if k=="Content-Type" and html else v))
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -245,7 +253,13 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             u=urlsplit(self.path)
             q=parse_qs(u.query)
             if u.path == "/review" and set(q)=={"child"} and len(q["child"])==1:
-                self._reply(200,HTML,html=True)
+                nonce=secrets.token_urlsafe(24)
+                html=HTML.replace("__CSP_NONCE__",nonce)
+                html=html.replace("__PANEL_ORIGIN__", self.server.application.panel_origin)
+                self._reply(200,html,html=True,csp=(
+                  "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                  "connect-src 'self'; form-action 'none'; style-src 'nonce-"+nonce+"'; "
+                  "script-src 'nonce-"+nonce+"'; object-src 'none'"))
             elif u.path=="/api/pending" and set(q)=={"child"} and len(q["child"])==1:
                 self._reply(200,self.server.application.pending(q["child"][0]))
             else:
