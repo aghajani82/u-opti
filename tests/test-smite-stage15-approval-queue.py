@@ -82,4 +82,57 @@ class QueueTests(unittest.TestCase):
         with self.assertRaisesRegex(q.QueueHold,"UNTRUSTED_PENDING_DIRECTORY"):
             self.stage(self.wire())
 
+
+    def reconciliation(self, binding, nonce, now, *, route="ABSENT", journal="ABSENT", broker="UNCONSUMED"):
+        self.assertEqual(nonce,"1"*32)
+        return {"route":route,"journal":journal,"broker_nonce":broker,
+                "checked_at":now,
+                "binding_sha256":hashlib.sha256(
+                    json.dumps(binding,sort_keys=True,separators=(",",":"),
+                               ensure_ascii=True).encode("ascii")).hexdigest()}
+
+    def test_expired_unknown_is_never_deleted_or_auto_retried(self):
+        digest=self.stage(self.wire())
+        self.assertEqual(len(list(self.dir.glob("proposal-*.json"))),1)
+        now=self.now+601
+        for route,journal,broker in (
+            ("UNKNOWN","ABSENT","UNCONSUMED"),
+            ("ABSENT","PREPARED","UNCONSUMED"),
+            ("ABSENT","ABSENT","CONSUMED"),
+            ("PUBLISHED","COMMITTED","CONSUMED"),
+        ):
+            with self.subTest((route,journal,broker)),self.assertRaises(q.QueueHold):
+                q.close_expired_after_reconciliation(directory=self.dir,digest=digest,
+                    key=self.key,now=now,root_check=False,
+                    read_only_reconciler=lambda b,n:self.reconciliation(
+                        b,n,now,route=route,journal=journal,broker=broker))
+        self.assertTrue((self.dir/("proposal-"+digest+".json")).exists())
+        self.assertEqual(list(self.dir.glob("closed-*.json")),[])
+
+    def test_only_verified_absent_unconsumed_expired_can_close(self):
+        digest=self.stage(self.wire())
+        now=self.now+601
+        receipt=q.close_expired_after_reconciliation(directory=self.dir,
+              digest=digest,key=self.key,now=now,root_check=False,
+              read_only_reconciler=lambda b,n:self.reconciliation(b,n,now))
+        self.assertEqual(receipt["outcome"],"CONFIRMED_NOT_PUBLISHED")
+        self.assertTrue((self.dir/("proposal-"+digest+".json")).exists())
+        with self.assertRaises(q.QueueHold):self.review(digest,now)
+        with self.assertRaises(q.QueueHold):
+            q.close_expired_after_reconciliation(directory=self.dir,
+                digest=digest,key=self.key,now=now,root_check=False,
+                read_only_reconciler=lambda b,n:self.reconciliation(b,n,now))
+        # A newly signed fresh intent may stage after independent closure
+        self.now+=1000
+        replacement=self.wire(nonce="4"*32)
+        self.assertNotEqual(self.stage(replacement),digest)
+        self.assertEqual(len(list(self.dir.glob("proposal-*.json"))),2)
+
+    def test_unexpired_proposal_cannot_be_closed(self):
+        digest=self.stage(self.wire())
+        now=self.now+10
+        with self.assertRaises(q.QueueHold):
+            q.close_expired_after_reconciliation(directory=self.dir,digest=digest,
+                key=self.key,now=now,root_check=False,read_only_reconciler=lambda b,n:None)
+
 if __name__=="__main__":unittest.main()
