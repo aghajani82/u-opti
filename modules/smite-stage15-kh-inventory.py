@@ -337,9 +337,6 @@ def rollback():
     current = None
     try:
         obj = w.inspect("node")
-        current = w.signature(obj)
-        need(current in (doc["before"], doc["after"]),
-             "KH_RUNTIME_EXTERNAL_DRIFT")
     except Hold:
         # Docker can remove the old container before power fails. Recovery
         # may repair ONLY that incomplete state, with no competing FRPC.
@@ -348,8 +345,12 @@ def rollback():
         need(h.run(["docker", "ps", "-aq", "--filter",
                     "name=^/smite-node$"]) == "",
              "KH_CONTAINER_UNKNOWN_DURING_RECOVERY")
-        need(h.run(["pgrep", "-x", "frpc"]) == "",
-             "FRPC_RUNNING_WITHOUT_NODE")
+        processes = h.run(["ps", "-e", "-o", "comm="]).splitlines()
+        need("frpc" not in processes, "FRPC_RUNNING_WITHOUT_NODE")
+    else:
+        current = w.signature(obj)
+        need(current in (doc["before"], doc["after"]),
+             "KH_RUNTIME_EXTERNAL_DRIFT")
     if current == doc["before"]:
         # Already restored (or cutover never started): no second interruption.
         verify_runtime(doc, False)
