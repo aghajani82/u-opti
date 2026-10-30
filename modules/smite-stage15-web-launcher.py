@@ -65,6 +65,15 @@ def serve(config_path:Path):
     if os.geteuid()!=0 or os.uname().nodename.split(".")[0].lower()!="ir":
         raise LaunchHold("IR_ROOT_SERVICE_ONLY")
     c=load_config(config_path)
+    # Isolated runtime directory: do not traverse/chgrp existing FRPS or
+    # broker socket parents. Grant Nginx only the reviewed socket GID.
+    if c["socket_path"]!="/run/u-opti-smite-review/web-approval.sock":
+        raise LaunchHold("UNAPPROVED_SOCKET_LOCATION")
+    parent=Path(c["socket_path"]).parent
+    st=parent.lstat()
+    if (not stat.S_ISDIR(st.st_mode) or st.st_uid!=0
+            or stat.S_IMODE(st.st_mode)!=0o750):
+        raise LaunchHold("REVIEW_SOCKET_DIRECTORY_UNTRUSTED")
     gate=load("root_service_gate","smite-stage15-web-approval.py")
     enroll=load("root_service_enrollment","smite-stage15-passkey-enrollment.py")
     srv=load("root_service_http","smite-stage15-web-service.py")
@@ -94,7 +103,10 @@ def serve(config_path:Path):
              evidence_provider=evidence,grant_writer=grant)
     try:
         with srv.ApprovalUDSServer(c["socket_path"],app) as http:
+            os.chown(parent,0,c["socket_gid"])
+            os.chmod(parent,0o750)
             os.chown(c["socket_path"],0,c["socket_gid"])
+            os.chmod(c["socket_path"],0o660)
             http.serve_forever(poll_interval=.2)
     finally:
         ledger.close()
