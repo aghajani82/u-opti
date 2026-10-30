@@ -130,6 +130,13 @@ class FetchTests(unittest.TestCase):
         with self.assertRaisesRegex(web_fetch.Hold, "UNSAFE_FILE"):
             self.verify(target, zsha, msha)
 
+    def test_wizard_adds_separate_preview_fetch_without_changing_legacy_upgrade(self):
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertIn("A) Download/verify Secure Web Approval PREVIEW", wizard)
+        self.assertIn('python3 -B "$dir/smite-stage15-web-approval-fetch.py"', wizard)
+        self.assertIn('bash "$dir/smite-stage15-fetch-images.sh"', wizard)
+        self.assertIn('python3 -B "$dir/smite-stage15-upgrade.py" apply', wizard)
+
     def test_cache_only_does_not_publish_runtime_changes(self):
         text = (HERE / "modules/smite-stage15-web-approval-fetch.py").read_text()
         self.assertNotIn("docker load", text.lower())
