@@ -84,5 +84,39 @@ class LeaseTests(unittest.TestCase):
                 m._node_attestation({"node_id":"node-ir-0001","url":url,
                     "secret_path":"/nonexistent"},"frps_owner",38658)
 
+
+    def test_missing_or_incompatible_lease_schema_holds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing=Path(tmp)/"stale.db"
+            with sqlite3.connect(missing) as db:
+                db.execute("CREATE TABLE tunnels(id TEXT)")
+            with self.assertRaises(m.LiveEvidenceHold):
+                m._lease(self.binding,missing)
+
+    def test_current_committed_lease_change_is_seen_not_stale(self):
+        self.assertEqual(m._lease(self.binding,self.db)["state"],"active")
+        self.conn.execute("UPDATE frp_proxy_leases SET remote_port=39001")
+        self.conn.commit()
+        with self.assertRaises(m.LiveEvidenceHold):
+            m._lease(self.binding,self.db)
+
+    def test_expired_consistency_read_budget_holds(self):
+        with patch.object(m.time,"monotonic",side_effect=[10.0,20.0]):
+            with self.assertRaisesRegex(m.LiveEvidenceHold,"READ_TOO_OLD"):
+                m._lease(self.binding,self.db,max_read_seconds=3)
+
+    def test_untrusted_symlink_lease_source_holds(self):
+        alias=self.db.with_name("alias.db")
+        alias.symlink_to(self.db)
+        with self.assertRaisesRegex(m.LiveEvidenceHold,"SOURCE_UNTRUSTED"):
+            m._lease(self.binding,alias)
+
+    def test_updated_owner_status_is_not_accepted_from_old_snapshot(self):
+        self.assertEqual(m._lease(self.binding,self.db)["role"],"shared")
+        self.conn.execute("UPDATE tunnels SET status='error' WHERE id='child-0001'")
+        self.conn.commit()
+        with self.assertRaisesRegex(m.LiveEvidenceHold,"STATUS_MISMATCH"):
+            m._lease(self.binding,self.db)
+
 if __name__=="__main__":
     unittest.main()
