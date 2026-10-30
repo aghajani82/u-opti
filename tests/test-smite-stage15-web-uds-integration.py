@@ -187,6 +187,21 @@ class LiveUDSTests(unittest.TestCase):
         self.assertEqual(self.grants,[])
         self.assertEqual(self.ledger.conn.execute("SELECT count(*) FROM approvals").fetchone()[0],0)
 
+    def test_request_header_diagnostic_offline(self):
+        seen=[]
+        original=service.ApprovalHandler._admit
+        def checked(handler,*,mutate):
+            try: return original(handler,mutate=mutate)
+            except Exception as exc:
+                seen.append(type(exc).__name__+":"+str(exc)+
+                            " host="+str(handler.headers.get("Host"))+
+                            " origin="+str(handler.headers.get("Origin"))+
+                            " content-type="+str(handler.headers.get("Content-Type")))
+                raise
+        with patch.object(service.ApprovalHandler,"_admit",checked):
+            response=self.start()
+        self.assertEqual(response.status_code,200,"; ".join(seen) or "Failure after _admit")
+
     def test_challenge_direct_diagnostic_offline(self):
         try:
             reply=self.http.application.challenge(child="child-0001",digest=self.digest)
