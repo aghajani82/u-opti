@@ -718,13 +718,24 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(result["EVIDENCE_VERIFICATION"], "OPERATOR_ASSERTED")
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
             stored = json.loads(target.read_text())
-            self.assertEqual(stored, proposal)
+            self.assertEqual(stored, {"schema": 1, **proposal})
+            # Regression: a root-issued grant must pass the running broker's
+            # strict versioned on-disk schema, not just the provisioner.
+            broker_path = repo / "modules/smite-rc5-xhttp-root-broker.py"
+            broker_spec = importlib.util.spec_from_file_location("grant_broker_reader_test", broker_path)
+            broker = importlib.util.module_from_spec(broker_spec)
+            sys.modules[broker_spec.name] = broker
+            broker_spec.loader.exec_module(broker)
+            with mock.patch.object(broker, "GRANTS", grants):
+                admitted = broker._approved_grant(proposal["child"])
+                self.assertEqual(admitted.child, proposal["child"])
+                self.assertEqual(admitted.port, proposal["port"])
             with self.assertRaisesRegex(provisioner.ProvisionHold,
                                         "BROKER_TARGET_EXISTS_REQUIRES_REVIEW"):
                 provisioner.install_grant(
                     proposal, confirmed_child=proposal["child"], root=root,
                 )
-            self.assertEqual(json.loads(target.read_text()), proposal)
+            self.assertEqual(json.loads(target.read_text()), {"schema": 1, **proposal})
 
             revoked = provisioner.revoke_grant(proposal["child"], root=root)
             self.assertEqual(revoked["TRUSTED_GRANT"], "REVOKED")
