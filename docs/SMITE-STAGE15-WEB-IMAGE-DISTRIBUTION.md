@@ -52,7 +52,7 @@ After a separate source deployment of the reviewed U-OPTI branch, on
 python3 -B /PATH/TO/REVIEWED/U-OPTI/modules/smite-stage15-web-approval-fetch.py
 ```
 
-This is a *placeholder path*, not a command to run now. The host must have
+This is a *placeholder path*, not a command to run now. Once the reviewed U-OPTI source is separately installed, Stage15 FRP wizard option **A** calls exactly this cache-only verifier; existing options **D** (older FRP071) and **U** (legacy upgrade, forbidden with live tunnels) are unchanged. The host must have
 short hostname `ir` or `kh`, root access, amd64 and enough private disk
 space. The script fetches **only** the immutable ZIP from the pinned GitHub
 Release URL; verifies ZIP SHA256, manifest SHA256, source commit, schema,
