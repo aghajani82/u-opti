@@ -149,7 +149,8 @@ class ApprovalLedger:
         except Exception:
             self.conn.execute("ROLLBACK")
             raise
-        return {"challenge_id": challenge_id, "options": json.loads(options.to_json())}
+        option_data = dict(options) if hasattr(options, "keys") else json.loads(options.to_json())
+        return {"challenge_id": challenge_id, "options": option_data}
 
     def consume(self, challenge_id: str, *, digest: str, origin: str,
                 passkeys: list[str], assertion: dict,
