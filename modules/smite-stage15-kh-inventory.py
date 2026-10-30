@@ -303,7 +303,7 @@ def begin(doc):
     h.flush(STATE.parent)
 
 def recreate(enabled):
-    files = w.service_files("node")
+    files = w.service_files("node") + [w.overlay("node")]
     if enabled:
         files.append(OVERLAY)
     cmd = ["docker", "compose"]
