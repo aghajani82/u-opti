@@ -14,7 +14,10 @@ persistently without recreating that container. The older RC5 helper edits
 
 The KH inventory transaction changes neither original Compose nor .env.
 Its dedicated read-only Compose overlay only enables the inventory flag and
-replaces the existing mount source with /opt/3x-ui/instances/01/db.
+adds a read-only bind to /opt/3x-ui/instances/01/db if the old
+mount was absent, or replaces the existing approved dummy mount source.
+Both baseline layouts are admitted only after strict Compose and runtime
+delta checks; all other volume mounts remain byte-identical.
 A full effective Compose comparison must show exactly these two differences;
 Docker may not create missing host paths. The directory mount includes x-ui.db,
 x-ui.db-wal and x-ui.db-shm. SQLite reads use mode=ro/query_only with no
