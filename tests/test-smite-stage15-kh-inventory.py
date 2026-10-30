@@ -22,31 +22,65 @@ spec.loader.exec_module(m)
 class PowerLoss(BaseException):
     pass
 
-def fake_signature():
+def fake_signature(*, mounted=False):
+    mounts = [
+        {"Destination": "/var/lib/smite-node/auth",
+         "Source": "/var/lib/u-opti/smite-node-security/replay",
+         "RW": True, "Type": "bind"},
+    ]
+    binds = ["/var/lib/u-opti/smite-node-security/replay:/var/lib/smite-node/auth:rw"]
+    if mounted:
+        mounts.append({
+            "Destination": "/run/smite-sanaei-ro",
+            "Source": "/opt/smite-node/.sanaei-empty",
+            "RW": False, "Type": "bind", "Mode": "ro",
+            "Propagation": "rprivate",
+        })
+        binds.append("/opt/smite-node/.sanaei-empty:/run/smite-sanaei-ro:ro")
     return {
         "image": m.EXPECTED_IMAGE,
         "env": {"SMITE_SANAEI_INVENTORY_ENABLED": "false",
-                "SMITE_SANAEI_DB_PATH": "/run/smite-sanaei-ro/x-ui.db",
                 "SMITE_AGENT_AUTH_MODE": "strict",
                 "SMITE_NODE_PANEL_AUTH_MODE": "signed"},
-        "mounts": [
-            {"Destination": "/run/smite-sanaei-ro",
-             "Source": "/opt/smite-node/.sanaei-empty",
-             "RW": False, "Type": "bind", "Mode": "ro", "Propagation": "rprivate"},
-            {"Destination": "/var/lib/smite-node/auth",
-             "Source": "/var/lib/u-opti/smite-node-security/replay",
-             "RW": True, "Type": "bind"},
-        ],
+        "mounts": sorted(mounts, key=lambda x: x["Destination"]),
         "command": ["uvicorn", "main:app", "--host", "127.0.0.1",
                     "--port", "8888"],
         "host": {
-            "Binds": [
-                "/opt/smite-node/.sanaei-empty:/run/smite-sanaei-ro:ro",
-                "/var/lib/u-opti/smite-node-security/replay:/var/lib/smite-node/auth:rw",
-            ],
+            "Binds": sorted(binds),
+            "Mounts": None,
             "NetworkMode": "host", "Privileged": False, "PortBindings": {},
         },
     }
+
+
+def simulated_after(before, *, long_mount=False):
+    result = copy.deepcopy(before)
+    result["env"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "true"
+    result["env"]["SMITE_SANAEI_DB_PATH"] = "/run/smite-sanaei-ro/x-ui.db"
+    target = "/run/smite-sanaei-ro"
+    items = [v for v in result["mounts"] if v["Destination"] == target]
+    if items:
+        items[0]["Source"] = str(m.DB_DIR)
+        old = "/opt/smite-node/.sanaei-empty:" + target + ":ro"
+        result["host"]["Binds"].remove(old)
+    else:
+        result["mounts"].append({
+            "Destination": target, "Source": str(m.DB_DIR),
+            "Type": "bind", "RW": False, "Mode": "ro",
+            "Propagation": "rprivate",
+        })
+    new = str(m.DB_DIR) + ":" + target + ":ro"
+    if long_mount:
+        result["host"]["Mounts"] = [{
+            "Target": target, "Source": str(m.DB_DIR), "Type": "bind",
+            "ReadOnly": True, "BindOptions": {"CreateMountpoint": False},
+        }]
+    else:
+        result["host"]["Binds"].append(new)
+        result["host"]["Binds"].sort()
+    result["mounts"] = sorted(result["mounts"], key=lambda x: x["Destination"])
+    return result
+
 
 @unittest.skipUnless(os.geteuid() == 0, "root-owned receipt fixture")
 class KHInventoryTests(unittest.TestCase):
@@ -62,7 +96,7 @@ class KHInventoryTests(unittest.TestCase):
         (self.wss / "record.json").write_text("original immutable WSS record")
         (self.wss / "record.json").chmod(0o600)
         self.before = fake_signature()
-        self.after = m.expected_signature(self.before)
+        self.after = simulated_after(self.before)
         self.mode = "before"
         self.operations = []
         self.power = False
@@ -180,21 +214,31 @@ class KHInventoryTests(unittest.TestCase):
         self.assertEqual(self.operations.count("node-only-recreate:True"), 1)
         self.assertEqual(self.operations.count("node-only-recreate:False"), 1)
 
-    def test_computed_runtime_allows_only_existing_read_only_mount_delta(self):
-        self.assertEqual(self.after["image"], self.before["image"])
-        self.assertEqual(self.after["env"]["SMITE_SANAEI_INVENTORY_ENABLED"], "true")
-        self.assertEqual(self.after["mounts"][0]["RW"], False)
-        self.assertEqual(self.after["mounts"][0]["Source"], str(m.DB_DIR))
-        self.assertEqual(self.after["mounts"][1], self.before["mounts"][1])
-        self.assertEqual(self.after["host"]["NetworkMode"], "host")
-        changed = copy.deepcopy(self.before)
-        changed["mounts"][0]["RW"] = True
-        with self.assertRaises(m.Hold):
-            m.expected_signature(changed)
-        changed = copy.deepcopy(self.before)
-        changed["env"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "true"
-        with self.assertRaises(m.Hold):
-            m.expected_signature(changed)
+    def test_only_reviewed_env_and_bind_delta_admitted_for_absent_or_dummy_mount(self):
+        self.assertIs(m.admit_after(self.before, self.after), self.after)
+        for mounted in (False, True):
+            for long_mount in (False, True):
+                with self.subTest(mounted=mounted, long_mount=long_mount):
+                    before = fake_signature(mounted=mounted)
+                    after = simulated_after(before, long_mount=long_mount)
+                    self.assertEqual(m.admit_after(before, after), after)
+                    tampered = copy.deepcopy(after)
+                    tampered["host"]["NetworkMode"] = "bridge"
+                    with self.assertRaises(m.Hold):
+                        m.admit_after(before, tampered)
+                    tampered = copy.deepcopy(after)
+                    tampered["mounts"][-1]["RW"] = True
+                    with self.assertRaises(m.Hold):
+                        m.admit_after(before, tampered)
+                    tampered = copy.deepcopy(after)
+                    tampered["env"]["SMITE_AGENT_AUTH_MODE"] = "legacy"
+                    with self.assertRaises(m.Hold):
+                        m.admit_after(before, tampered)
+                    tampered = copy.deepcopy(before)
+                    tampered["env"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "true"
+                    with self.assertRaises(m.Hold):
+                        m.baseline(tampered)
+
 
     def test_no_image_swap_in_root_runbook(self):
         source = (ROOT / "modules/smite-stage15-kh-inventory.py").read_text()
