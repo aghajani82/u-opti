@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: '3.11'
       - run: |
+          python3 -B tests/test-stage15-archive-provenance.py
+          python3 -B tests/test-smite-stage15-bundle-verify.py
+          sudo -n python3 -B tests/test-smite-stage15-root-review.py
           sudo -n python3 -B tests/test-smite-stage15-xhttp-bridge.py
           sudo -n python3 -B tests/test-smite-stage15-wss-edge.py
           sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py
