@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
+import sys
 import json
 import os
 from pathlib import Path
@@ -31,6 +33,10 @@ CHALLENGE_TTL = 90
 SCHEMA = """CREATE TABLE IF NOT EXISTS challenges(
     id TEXT PRIMARY KEY, digest TEXT NOT NULL, state TEXT NOT NULL,
     expires INTEGER NOT NULL, consumed INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS successful_passkeys(
+    digest TEXT NOT NULL, credential_sha256 TEXT NOT NULL,
+    PRIMARY KEY(digest,credential_sha256));
+CREATE TABLE IF NOT EXISTS evidence_nonces(nonce TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS approvals(
     digest TEXT PRIMARY KEY, credential_sha256 TEXT NOT NULL,
     approved_at INTEGER NOT NULL);
@@ -187,12 +193,23 @@ class ApprovalLedger:
                 self.conn.execute("ROLLBACK")
                 raise
             raise WebApprovalHold("INDEPENDENT_PASSKEY_REJECTED") from exc
-        return hashlib.sha256(credential.credential_id).hexdigest()
+        credential_hash = hashlib.sha256(credential.credential_id).hexdigest()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            self.conn.execute("INSERT OR IGNORE INTO successful_passkeys(digest,credential_sha256) VALUES(?,?)",
+                              (digest, credential_hash))
+            self._record(digest, "PASSKEY_VERIFIED", now)
+            self.conn.execute("COMMIT")
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
+        return credential_hash
 
     def record_verified_approval(self, *, digest: str, credential_sha256: str,
-                                 evidence_nonces: frozenset[str],
+                                 binding: dict, bundle: dict,
+                                 ir_public_key: bytes, kh_public_key: bytes,
                                  now: int | None = None) -> None:
-        """Only call AFTER independently verified evidence; no grants here.
+        """Perform independent evidence verification and record approval; NO grant.
 
         This ledger records unique proof nonces independently of the existing
         route broker's nonce.db. The publisher must still use its separate
@@ -200,18 +217,29 @@ class ApprovalLedger:
         """
         now = int(time.time()) if now is None else now
         if (type(digest) is not str or not HEX.fullmatch(digest)
-                or type(credential_sha256) is not str or not HEX.fullmatch(credential_sha256)
-                or type(evidence_nonces) is not frozenset or len(evidence_nonces) != 3
-                or any(type(n) is not str or not re.fullmatch(r"[0-9a-f]{32}", n) for n in evidence_nonces)):
+                or type(credential_sha256) is not str or not HEX.fullmatch(credential_sha256)):
             raise WebApprovalHold("UNVERIFIED_APPROVAL_CONTEXT")
+        path = Path(__file__).with_name("smite-stage15-approval-evidence.py")
+        spec = importlib.util.spec_from_file_location("stage15_independent_review_evidence", path)
+        if spec is None or spec.loader is None:
+            raise WebApprovalHold("INDEPENDENT_EVIDENCE_VERIFIER_MISSING")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            self.conn.execute("CREATE TABLE IF NOT EXISTS evidence_nonces(nonce TEXT PRIMARY KEY)")
             if not self.conn.execute(
-                "SELECT 1 FROM audit WHERE digest=? AND event='CHALLENGE_CONSUMED'",
-                (digest,)
+                "SELECT 1 FROM successful_passkeys WHERE digest=? AND credential_sha256=?",
+                (digest, credential_sha256)
             ).fetchone():
                 raise WebApprovalHold("UNAUTHENTICATED_APPROVAL")
+            consumed = frozenset(n for (n,) in self.conn.execute(
+                "SELECT nonce FROM evidence_nonces"
+            ))
+            evidence_nonces = module.verify_bundle(
+                bundle, binding, ir_public_key=ir_public_key,
+                kh_public_key=kh_public_key, now=now, consumed_nonces=consumed,
+            )
             for nonce in sorted(evidence_nonces):
                 self.conn.execute("INSERT INTO evidence_nonces(nonce) VALUES(?)", (nonce,))
             self.conn.execute("INSERT INTO approvals(digest,credential_sha256,approved_at) VALUES(?,?,?)",
