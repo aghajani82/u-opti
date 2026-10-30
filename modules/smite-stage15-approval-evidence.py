@@ -104,6 +104,7 @@ def _proof(proof: object, *, kind: str, node: str,
 
 def verify_bundle(bundle: object, binding: dict[str, Any], *,
                   ir_public_key: bytes, kh_public_key: bytes,
+                  lease_public_key: bytes | None = None,
                   now: int | None = None,
                   consumed_nonces: frozenset[str] = frozenset()) -> frozenset[str]:
     """Verify three fresh Node-signed attestations, never Panel declarations.
@@ -124,7 +125,8 @@ def verify_bundle(bundle: object, binding: dict[str, Any], *,
     inbound = _proof(bundle["kh_inbound"], kind="xhttp_inbound", node=binding["kh_node"],
                      public_key=kh_public_key, now=now, used_nonces=used)
     lease = _proof(bundle["ir_lease"], kind="active_lease", node=binding["ir_node"],
-                   public_key=ir_public_key, now=now, used_nonces=used)
+                   public_key=lease_public_key if lease_public_key is not None else ir_public_key,
+                   now=now, used_nonces=used)
     expected_owner = {"tunnel_id": binding["owner"], "control_port": 7000,
                       "proxy_port": binding["port"]}
     expected_inbound = {"port": binding["port"], "listen": "127.0.0.1",
