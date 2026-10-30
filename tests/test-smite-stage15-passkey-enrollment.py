@@ -44,6 +44,41 @@ class EnrollmentTests(unittest.TestCase):
         with self.assertRaises(en.EnrollmentHold):
             self.store.enroll_begin("invalid",origin="https://review.example.invalid",now=now)
 
+    def test_completed_registration_consumes_only_root_ticket_once(self):
+        from fido2.server import Fido2Server
+        class FakeCredential:
+            credential_id=b"physical-key-simulator"
+            def __bytes__(self):return b"root-test-credential-opaque"
+        class FakeAuthentication:
+            credential_data=FakeCredential()
+            counter=1
+            def is_user_verified(self):return True
+        token=self.store.ticket(root_tty=True)
+        begin=self.store.enroll_begin(token,origin="https://review.example.invalid")
+        with patch.object(Fido2Server,"register_complete",return_value=FakeAuthentication()):
+            self.store.enroll_complete(begin["ceremony"],{"id":"synthetic"},token,
+                origin="https://review.example.invalid")
+        self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0],1)
+        with self.assertRaises(en.EnrollmentHold):
+            self.store.enroll_begin(token,origin="https://review.example.invalid")
+        with self.assertRaises(en.EnrollmentHold):
+            self.store.enroll_complete(begin["ceremony"],{},token,
+                origin="https://review.example.invalid")
+
+    def test_registration_without_uv_stays_holding(self):
+        from fido2.server import Fido2Server
+        class FakeAuthentication:
+            credential_data=object()
+            counter=0
+            def is_user_verified(self):return False
+        token=self.store.ticket(root_tty=True)
+        begin=self.store.enroll_begin(token,origin="https://review.example.invalid")
+        with patch.object(Fido2Server,"register_complete",return_value=FakeAuthentication()):
+            with self.assertRaises(en.EnrollmentHold):
+                self.store.enroll_complete(begin["ceremony"],{},token,
+                    origin="https://review.example.invalid")
+        self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0],0)
+
     def test_ticket_survives_process_reopen(self):
         token=self.store.ticket(root_tty=True)
         self.store.close()
