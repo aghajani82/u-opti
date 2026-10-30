@@ -26,6 +26,7 @@ jobs:
           python3 -B tests/test-smite-stage15-web-approval.py -v
           python3 -B tests/test-smite-stage15-approval-queue.py -v
           python3 -B tests/test-smite-stage15-web-uds-integration.py -v
+          python3 -B tests/test-smite-stage15-passkey-enrollment.py -v
       - name: Refuse accidental root API or FRPS/FRPC edits in this feature
         run: |
           set -euo pipefail
