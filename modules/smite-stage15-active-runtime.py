@@ -16,6 +16,9 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import socket
+import stat
+import errno
 import sys
 import time
 
@@ -143,7 +146,7 @@ def execute(host, action, folder=None):
         return doc
     need(action in ('rollback', 'recover'), 'UNKNOWN_RUNTIME_ACTION')
     host.check(doc); host.recoverable(doc)
-    if doc['phase'] == 'PREPARING':
+    if doc['phase'] == 'PREPARING' or (doc['phase'] == 'ROLLED_BACK' and not doc['backups']):
         # No target mutation is possible before durable BACKED_UP. Keep partial
         # backups for audit; do not restore any image, configuration or DB.
         host.files(doc, 'before'); host.health(doc, False)
@@ -177,7 +180,8 @@ class Host:
                  and spec.get('local_ip', '127.0.0.1') == '127.0.0.1', 'OWNER_SPEC_UNAPPROVED')
             need(db.execute('SELECT count(*) FROM frp_proxy_leases').fetchone()[0] == 0, 'CHILD_LEASE_PRESENT')
             for key, raw in db.execute('SELECT key,value FROM settings'):
-                value = json.loads(raw)
+                if key not in ('frp', 'tunnel'): continue
+                value = (json.loads(raw) if raw is not None else None) or {}
                 if key == 'frp': need(isinstance(value, dict) and not value.get('enabled'), 'LEGACY_FRP_ENABLED')
                 if key == 'tunnel': need(isinstance(value, dict) and not value.get('auto_reapply_enabled'), 'AUTO_REAPPLY_ENABLED')
             need(db.execute('SELECT count(*) FROM core_reset_config WHERE enabled=1').fetchone()[0] == 0, 'CORE_RESET_ENABLED')
@@ -307,11 +311,17 @@ class Host:
         need(h.run(['systemctl', 'is-active', p.SERVICE_NAME]) == 'active', 'BROKER_NOT_ACTIVE')
 
     def broker(self, enabled):
+        config = json.loads(h.file(b.CONFIG, mode=0o600))
+        gid = config['peer_gid']
+        before = socket_identity(b.SOCKET, gid) if not enabled else None
         h.run(['systemctl', 'restart' if enabled else 'stop', p.SERVICE_NAME])
         if enabled:
             self.broker_check()
-            config = json.loads(h.file(b.CONFIG, mode=0o600))
-            p._wait_for_broker_socket(b.SOCKET.parent, config['peer_gid'])
+            p._wait_for_broker_socket(b.SOCKET.parent, gid)
+        else:
+            need(h.run(['systemctl', 'show', p.SERVICE_NAME, '--property=ActiveState', '--value']) == 'inactive'
+                 and h.run(['systemctl', 'show', p.SERVICE_NAME, '--property=MainPID', '--value']) == '0', 'BROKER_NOT_STOPPED')
+            remove_stopped_socket(b.SOCKET, before, gid)
 
     def files(self, doc, side):
         for path, mode in zip(TARGETS, MODES):
@@ -385,6 +395,30 @@ class Host:
         dns = doc['runtime']['env']['PANEL_DOMAIN']
         h.run(['curl', '--noproxy', '*', '--fail', '--silent', '--max-time', '12', '--resolve', dns + ':443:127.0.0.1', '--output', '/dev/null', 'https://' + dns + '/'], timeout=18)
         self.check(doc)
+
+
+def socket_identity(path, gid):
+    if not present(path): return None
+    info = path.lstat()
+    need(stat.S_ISSOCK(info.st_mode) and info.st_uid == 0 and info.st_gid == gid
+         and stat.S_IMODE(info.st_mode) == 0o660 and info.st_nlink == 1, 'UNTRUSTED_BROKER_SOCKET')
+    return (info.st_dev, info.st_ino)
+
+
+def remove_stopped_socket(path, before, gid):
+    """Only after systemd proves service inactive/MainPID=0. No live socket unlink."""
+    if not present(path): return
+    need(before is not None and socket_identity(path, gid) == before, 'BROKER_SOCKET_REPLACED')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(1)
+        try:
+            connection.connect(str(path))
+        except OSError as exc:
+            need(exc.errno == errno.ECONNREFUSED, 'BROKER_SOCKET_STATE_UNCERTAIN')
+        else:
+            raise h.Hold('BROKER_SOCKET_STILL_LISTENING')
+    need(socket_identity(path, gid) == before, 'BROKER_SOCKET_REPLACED')
+    path.unlink(); h.flush(path.parent)
 
 
 def file_sha(path):

@@ -77,7 +77,10 @@ its target writes. Partial pin replacements are recognized and recoverable.
 on stop. An unchanged Node bind mount would then point to a detached directory.
 Before stopping Broker, the transaction installs the precisely reviewed unit
 with `RuntimeDirectoryPreserve=yes`, daemon-reloads it and verifies that property.
-It checks the directory inode throughout. Existing Node socket/key mounts,
+It checks the directory inode throughout. After systemd proves the service
+inactive with MainPID=0, it removes only the exact root-owned stale socket inode
+that refuses connections; a live/replaced/untrusted socket causes HOLD. This
+handles legacy Broker termination without deleting the bind-mounted directory. Existing Node socket/key mounts,
 primary UID/GID and absence of unreviewed unit drop-ins are preflight conditions.
 Rollback deliberately retains this one reviewed unit setting; reverting it
 would break the unchanged Node mount. The original unit is retained in the

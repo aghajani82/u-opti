@@ -15,6 +15,16 @@ jobs:
           repository: aghajani82/Smite
           ref: 8edbd4032ae657fe2bb38cd9b3290de5f1e07a54
           path: peer-smite
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 6981bd91b43811fad8847da9abd81ef99a921003
+          path: peer-smite-old
+      - name: Check unchanged Panel schema and old/new startup guards
+        run: |
+          cmp peer-smite-old/panel/app/models.py peer-smite/panel/app/models.py
+          cmp peer-smite-old/panel/app/database.py peer-smite/panel/app/database.py
+          python3 -B peer-smite-old/tests/test_signed_frp_boot_reapply_guard.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

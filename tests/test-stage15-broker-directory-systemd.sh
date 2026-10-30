@@ -16,13 +16,10 @@ cleanup() {
 }
 trap cleanup EXIT
 cat > "$lab/server.py" <<'PY'
-import socket,sys,os,signal
+import socket,sys,os
 path=sys.argv[1]
 if os.path.exists(path):os.unlink(path)
-s=socket.socket(socket.AF_UNIX);s.bind(path);s.listen(4)
-def stop(*args):
-    s.close();os.unlink(path);raise SystemExit(0)
-signal.signal(signal.SIGTERM,stop)
+s=socket.socket(socket.AF_UNIX);s.bind(path);os.chmod(path,0o660);s.listen(4)
 while True:
     c,_=s.accept();c.sendall(b'OK');c.close()
 PY
@@ -46,6 +43,16 @@ printf '\nRuntimeDirectoryPreserve=yes\n' >> "$path"
 systemctl daemon-reload
 [[ $(systemctl show "$unit" --property=RuntimeDirectoryPreserve --value) == yes ]]
 systemctl stop "$unit"
+# SIGTERM intentionally leaves the stale socket, as the legacy broker does.
+python3 - "$runtime/broker.sock" <<'PY'
+import importlib.util,pathlib,sys
+spec=importlib.util.spec_from_file_location('fixture_migration',pathlib.Path('modules/smite-stage15-active-runtime.py').resolve())
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+p=pathlib.Path(sys.argv[1]);before=m.socket_identity(p,0)
+assert before is not None
+m.remove_stopped_socket(p,before,0)
+assert not p.exists()
+PY
 [[ $(stat -c '%d:%i' "$runtime") == "$before" ]]
 systemctl start "$unit"
 for attempt in {1..50}; do [[ -S "$lab/view/broker.sock" ]] && break; sleep 0.1; done

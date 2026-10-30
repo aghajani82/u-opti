@@ -180,6 +180,33 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual(expected['image'],m.CONFIG_ID)
                 with self.assertRaises(m.h.Hold):m.expectation({'runtime':{'panel':doc['runtime']}},'sha256:'+'f'*64)
                 with self.assertRaises(m.h.Hold):m.expectation({'runtime':{'panel':{'image':'wrong'}}},m.CONFIG_ID)
+    def test_live_socket_never_unlinked_and_only_stale_exact_inode_removed(self):
+        import socket
+        path=self.root/'broker.sock'
+        try:server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        except PermissionError:
+            if os.environ.get('GITHUB_ACTIONS')=='true':raise
+            self.skipTest('Local sandbox forbids AF_UNIX; mandatory in GitHub CI')
+        self.addCleanup(server.close);server.bind(str(path));path.chmod(0o660);server.listen(2)
+        identity=m.socket_identity(path,0)
+        with self.assertRaises(m.h.Hold):m.remove_stopped_socket(path,identity,0)
+        self.assertTrue(path.exists());server.close()
+        with self.assertRaises(m.h.Hold):m.remove_stopped_socket(path,(identity[0],identity[1]+1),0)
+        self.assertTrue(path.exists());m.remove_stopped_socket(path,identity,0)
+        self.assertFalse(path.exists())
+
+    def test_regular_file_cannot_be_removed_as_stale_socket(self):
+        path=self.root/'broker.sock';path.write_bytes(b'keep');path.chmod(0o660)
+        with self.assertRaises(m.h.Hold):m.socket_identity(path,0)
+        self.assertEqual(path.read_bytes(),b'keep')
+
+    def test_ordinary_backup_failure_keeps_preparing_and_recovery_is_idempotent(self):
+        with patch.object(self.host,'backup',side_effect=OSError('fixture disk full')):
+            with self.assertRaises(OSError):m.execute(self.host,'apply')
+        self.assertEqual(m.record()['phase'],'PREPARING')
+        m.execute(self.host,'recover');m.execute(self.host,'recover')
+        self.assertEqual(self.host.image,m.OLD);self.assertEqual(self.host.pid,31515)
+
     def test_invalid_loaded_image_is_rejected(self):
         doc=self.host.doc
         for identity,source in [(m.CONFIG_ID,'0'*40),('sha256:'+'f'*64,m.SOURCE)]:
