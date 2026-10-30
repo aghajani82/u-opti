@@ -45,7 +45,7 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("Group=root",unit)
         self.assertIn("Restart=no",unit)
         self.assertIn("ProtectSystem=strict",unit)
-        self.assertNotIn("ReadWritePaths=/etc/u-opti/smite",unit)
+        self.assertNotIn("ReadWritePaths=/etc/u-opti/smite\\n",unit+"\\n")
         self.assertIn("ReadWritePaths=/etc/u-opti/smite/route-grants",unit)
 
     def test_production_lease_requires_live_file_not_snapshot_export(self):
