@@ -29,7 +29,12 @@ restarts briefly. FRPS Owner is neither recreated nor applied. One FRPC in the
 Node's PID/mount namespace, unchanged FRPC command and unchanged signed storage
 are required. The old WSS receipt remains byte-identical; a separate
 root-only KH receipt explicitly binds the sole allowed Node signature delta.
-Incomplete migration states fail closed.
+Incomplete migration states fail closed. Docker Compose up -d does not
+wait for Node Health; the updated Apply waits a bounded interval for Healthy
+before the first Runtime admission. If an older Apply already recreated the
+correct Node but stopped with SERVICE_NOT_HEALTHY, never retry Apply or edit the
+journal. Review the intact RECREATING state and use the separately approved
+forward-finalization gate described below.
 
 Journal: /var/lib/u-opti/smite-stage15-kh-inventory/record.json
 Phases: PREPARED -> RECREATING -> COMMITTED
@@ -56,6 +61,26 @@ KH — Verify (the signed loopback endpoint and replay rejection are tested):
 
     python3 -B /usr/local/lib/u-opti/modules/smite-stage15-kh-inventory.py verify
     python3 -B /usr/local/lib/u-opti/modules/smite-stage15-wss.py verify
+
+KH — Forward-finalize an already recreated, fully verified Node, only
+after a genuine post-cutover SERVICE_NOT_HEALTHY race and a separate Root TTY
+approval (no Docker recreation, FRPC restart or Owner apply):
+
+    python3 -B /usr/local/lib/u-opti/modules/smite-stage15-kh-inventory.py finalize
+
+The exact root challenge is:
+FINALIZE-KH-INVENTORY-VERIFIED-NO-RECREATE.
+This action is permitted ONLY for RECREATING with no recorded after-signature
+and no pending writes; it independently validates the immutable WSS journal,
+read-only Sanaei DB/inodes/WAL, effective Compose, reviewed image, all Node
+environment/mount/runtime differences, singleton FRPC command/namespace,
+protected identity/replay, signed inbound 45121:/45121/www, unsigned rejection
+and duplicate-nonce rejection, then signed FRP inventory readiness. Only
+after every check succeeds may it atomically commit the new Node signature
+to the KH inventory receipt. A second committed invocation performs verify
+only; it is not another cutover. Verify WSS and the signed GUI from IR after
+finalization. Any HOLD requires operator review; do not delete/edit the receipt
+or blindly retry.
 
 KH — Recover interrupted migration, only with fresh Root TTY approval
 (rollback to prior Node; never retry Apply):
