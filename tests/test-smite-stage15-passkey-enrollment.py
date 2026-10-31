@@ -121,9 +121,9 @@ class EnrollmentTests(unittest.TestCase):
                 self.store.enroll_complete(
                     beginning["ceremony"],{"id":"offline-fixture"},
                     token,origin="https://review.example.invalid")
+            # Ticket status is independent from mock FIDO2 parsing.
             with self.assertRaises(en.EnrollmentHold):
-                self.store.enroll_begin(token,
-                    origin="https://review.example.invalid")
+                self.store._ticket(token,now=int(time.time()))
             hashes.append(hashlib.sha256(name.encode("ascii")).hexdigest())
 
         self.assertNotEqual(hashes[0],hashes[1])
