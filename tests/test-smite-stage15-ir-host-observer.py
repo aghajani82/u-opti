@@ -33,7 +33,8 @@ class IRObserverTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root=Path(tmp.name)
         self.file=self.root/"tunnels.json"
-        self.doc={ir.OWNER_ID: {
+        self.owner_id="123e4567-e89b-42d3-a456-426614174000"
+        self.doc={self.owner_id: {
             "core":"frp", "spec":{"mode":"server","bind_port":7000}}}
         self.write_registry()
         proc=self.root/"proc"/"541"
@@ -68,7 +69,7 @@ class IRObserverTests(unittest.TestCase):
 
     def collect(self,port=38658,**kwargs):
         with patch.object(ir,"REGISTRY",self.file):
-            return ir.collect_ir(node_id="node-ir-0001",port=port,
+            return ir.collect_ir(node_id="node-ir-0001",owner_id=self.owner_id,port=port,
                 runner=self.fake_command,proc_root=self.proc_root,
                 registry_path=self.file,require_host=False,**kwargs)
 
@@ -85,12 +86,12 @@ class IRObserverTests(unittest.TestCase):
     def test_unknown_registry_layout_or_wrong_owner_holds(self):
         for doc in (
             {"owners": {}},
-            {"tunnels": {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000}}}},
-            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"client","bind_port":7000}}},
-            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7010}}},
-            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000}},
+            {"tunnels": {self.owner_id: {"core":"frp", "spec":{"mode":"server","bind_port":7000}}}},
+            {self.owner_id: {"core":"frp", "spec":{"mode":"client","bind_port":7000}}},
+            {self.owner_id: {"core":"frp", "spec":{"mode":"server","bind_port":7010}}},
+            {self.owner_id: {"core":"frp", "spec":{"mode":"server","bind_port":7000}},
              "second-owner": {"core":"frp", "spec":{"mode":"server","bind_port":7000}}},
-            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000},
+            {self.owner_id: {"core":"frp", "spec":{"mode":"server","bind_port":7000},
                             "status":"active"}},
         ):
             self.doc=doc
@@ -144,7 +145,7 @@ class IRObserverTests(unittest.TestCase):
         with patch.object(ir.os,"geteuid",return_value=0),\
              patch.object(ir.socket,"gethostname",return_value="grandoptical"):
             with self.assertRaisesRegex(ir.ObserverHold,"IR_ROOT_ONLY"):
-                ir.collect_ir(node_id="node-ir-0001",port=38658,
+                ir.collect_ir(node_id="node-ir-0001",owner_id=self.owner_id,port=38658,
                     runner=self.fake_command,proc_root=self.proc_root)
 
     def test_pair_with_kh_synthetic_evidence_remains_offline_only(self):
@@ -165,7 +166,7 @@ class IRObserverTests(unittest.TestCase):
         }
         pin=lambda key:key.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)
         binding={"ir_node":"node-ir-0001","kh_node":"node-kh-0001",
-                 "owner":ir.OWNER_ID,"child":"child-frp10","lease":"child-frp10",
+                 "owner":self.owner_id,"child":"child-frp10","lease":"child-frp10",
                  "port":38658,"path":"/38658/shop"}
         used=host.verify_offline_pair(pair=pair,binding=binding,
              ir_host_public=pin(ir_key),kh_host_public=pin(kh_key),now=1001)
