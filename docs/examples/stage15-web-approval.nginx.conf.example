@@ -1,13 +1,20 @@
 # Stage15 Independent Web Approval (example ONLY; DO NOT INSTALL)
 
-# A dedicated HTTPS hostname and a trusted LE certificate MUST be reviewed
-# separately before installing this vhost. This is NOT a second TCP listener:
-# only the pre-existing, authorized Nginx TLS/443 listener may be used.
+# IR currently owns public 443 with nginx STREAM + ssl_preread SNI dispatch.
+# A new HTTP "listen 443 ssl" would conflict with the live STREAM socket.
+# This example intentionally uses an INVALID port placeholder until the
+# operator has read-only-audited the existing STREAM map, default route,
+# backend assignment and selected an unused 127.0.0.1-only TLS port.
 #
-# Server name and certificate paths below are intentional placeholders.
-# Never enable this file or expose a Root management port by default.
+# Once separately approved, add ONLY the exact approval SNI mapping to
+# the existing reviewed STREAM dispatcher. Never add a second public
+# 443 listener, change the default SNI route, or modify FRP tunnel targets.
+# A dedicated hostname and trusted LE certificate require separate approval.
+# Domain, local port, and certificate paths remain placeholders: nginx -t
+# MUST FAIL before review/substitution. Never install this example as-is.
+# Root-only web service stays behind its protected Unix domain socket.
 server {
-    listen 443 ssl;
+    listen 127.0.0.1:REVIEW_ONLY_TLS_LOOPBACK_PORT ssl;
     server_name REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL;
     ssl_certificate     /etc/letsencrypt/live/REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL/privkey.pem;
