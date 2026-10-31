@@ -143,10 +143,27 @@ its sanitized IR facts with synthetic KH host facts through the
 separate, **non-production** host-origin Ed25519 verifier. The old
 Node-signed verifier still rejects those host-origin fixtures.
 
-**Critical unresolved host admission gates:** The exact live
-`tunnels.json` schema on IR has not been read/reviewed in this
-development turn. The prototype deliberately accepts a single strict
-*test fixture* schema and HOLDS on unknown formats. It does **not**
+**Source format verified, live host not yet verified:** Smite's
+`node/app/core_adapters.py` at the previously deployed Stage15 source
+`8edbd4032ae657fe2bb38cd9b3290de5f1e07a54` and Smite PR #41
+both use `AdapterManager._save_tunnels()` to persist the top-level
+`{tunnel_id: {"core": core, "spec": spec}}` mapping directly to
+`/var/lib/smite-node/tunnels.json`. There is **no** outer `"tunnels"`
+wrapper. The earlier offline observer incorrectly assumed one and
+would HOLD on legitimate persisted data. The corrected strict parser and
+`tests/test-smite-stage15-ir-registry-lease-offline.py` now use the actual
+source-defined structure, reject the wrapper, and combine one local
+FRPS owner fixture with a *separate* authoritative Panel SQLite owner,
+child and unique `frp_proxy_leases` fixture. Tests reject wrong owner,
+stale/inactive Panel rows, missing or wrong child leases, wrong port and
+mismatched Node identities. A KH-managed child may have no key in IR's
+locally persisted registry; its lease lives in Panel SQLite.
+
+**Critical unresolved host admission gates:** The actual contents,
+permissions and source mount of the current IR live `tunnels.json`
+have **not** been independently sampled in this development turn.
+A source-defined schema does not prove the currently mounted volume
+contains that schema or the configured owner. It does **not**
 prove that an IR registry entry is an authoritative active child lease,
 nor that a given child is linked to the FRPS Owner. The `node_id`
 input is not independently pinned to a trusted root identity yet.
