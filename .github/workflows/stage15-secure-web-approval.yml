@@ -1,0 +1,41 @@
+name: Stage15 Secure Web Approval (isolated)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  approval-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated crypto and Passkey verifier
+        run: python3 -m pip install 'cryptography==46.0.4' 'fido2==2.0.0' 'httpx==0.28.1'
+      - name: Compile and test independent approval primitives
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py modules/smite-stage15-approval-queue.py modules/smite-stage15-passkey-enrollment.py modules/smite-stage15-web-service.py modules/smite-stage15-live-evidence.py modules/smite-stage15-web-launcher.py modules/smite-stage15-web-bootstrap.py modules/smite-stage15-approval-key-enrollment.py modules/smite-stage15-approval-reconcile.py modules/smite-stage15-live-migration-gate.py
+          python3 -B tests/test-smite-stage15-approval-evidence.py -v
+          python3 -B tests/test-smite-stage15-web-approval.py -v
+          python3 -B tests/test-smite-stage15-approval-queue.py -v
+          python3 -B tests/test-smite-stage15-web-uds-integration.py -v
+          python3 -B tests/test-smite-stage15-passkey-enrollment.py -v
+          python3 -B tests/test-smite-stage15-live-evidence.py -v
+          python3 -B tests/test-smite-stage15-web-bootstrap.py -v
+          python3 -B tests/test-smite-stage15-approval-reconcile.py -v
+          python3 -B tests/test-smite-stage15-deployment-contract.py -v
+          python3 -B tests/test-smite-stage15-live-migration-gate.py -v
+          python3 -B tests/test-smite-stage15-no-restart-boundary.py -v
+          python3 -B tests/test-smite-stage15-host-evidence-offline.py -v
+          python3 -B tests/test-smite-stage15-broker-web-optin.py -v
+      - name: Refuse accidental root API or FRPS/FRPC edits in this feature
+        run: |
+          set -euo pipefail
+          ! grep -R -E '0[.]0[.]0[.]0|subprocess[.]run\(.*frp|execute\(.*frp' modules/smite-stage15-approval-evidence.py modules/smite-stage15-web-approval.py

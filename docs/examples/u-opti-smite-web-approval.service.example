@@ -1,0 +1,40 @@
+# Stage15 Independent Web Approval — REVIEWED EXAMPLE ONLY
+# DO NOT INSTALL, ENABLE OR START without explicit IR snapshot,
+# TLS origin/certificate approval and exact owner/child preservation preflight.
+# Needs the dedicated root-only config + pinned credentials and Node keys.
+[Unit]
+Description=U-OPTI Stage15 independent Root Passkey route approval (UNDEPLOYED)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/smite-stage15-web-launcher.py --serve /etc/u-opti/smite/web-approval-config.json
+Restart=no
+TimeoutStartSec=15
+RuntimeDirectory=u-opti-smite-review
+RuntimeDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/u-opti/smite-web-approval
+ReadWritePaths=/etc/u-opti/smite/route-grants
+ReadWritePaths=/run/u-opti-smite-review
+# Root launcher gives only this socket directory and the socket the
+# approved nginx worker GID (0750/0660). No group access to secret files.
+# Nginx worker access to the UDS parent and exact socket GID needs an
+# independently checked systemd group/ACL configuration; DO NOT relax
+# permissions on any Root secret, broker key or active route file.
+
+[Install]
+WantedBy=multi-user.target

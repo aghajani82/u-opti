@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Offline fault-injection for cache-only Secure Web Approval image fetching."""
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import stat
+import tempfile
+import unittest
+from unittest.mock import patch
+import zipfile
+
+HERE = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "web_fetch", HERE / "modules/smite-stage15-web-approval-fetch.py"
+)
+web_fetch = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(web_fetch)
+
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+class FetchTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.images = {
+            "panel": b"mock-panel-image" * 200,
+            "node": b"mock-node-image" * 300,
+        }
+        self.manifest = {
+            "schema": 1,
+            "kind": "smite_offline_preview_images",
+            "source_repo": "aghajani82/Smite",
+            "source_commit": web_fetch.SOURCE_SHA,
+            "proposed_version": "2.0.0-rc.0",
+            "image_format": "docker-save-gzip",
+            "signed": False,
+            "registry_digest_verified": False,
+            "runtime_security_verified": False,
+            "activation_allowed": False,
+            "images": {
+                role: {
+                    "file": f"smite-{role}-stage15.docker.tar.gz",
+                    "archive_sha256": digest(data),
+                    "bytes": len(data),
+                    "local_image_id": "sha256:" + (("a" if role == "panel" else "b") * 64),
+                }
+                for role, data in self.images.items()
+            },
+        }
+
+    def makezip(self, *, override=None, extra=None):
+        if override:
+            for key, value in override.items():
+                self.manifest[key] = value
+        raw = (json.dumps(self.manifest, sort_keys=True) + "\n").encode()
+        path = self.root / "artifact.zip"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as z:
+            z.writestr("stage15-images.json", raw)
+            for role, payload in self.images.items():
+                z.writestr(f"smite-{role}-stage15.docker.tar.gz", payload)
+            if extra:
+                z.writestr(extra, b"unexpected")
+        return path, digest(path.read_bytes()), digest(raw)
+
+    def verify(self, path, zip_sha, manifest_sha):
+        return web_fetch.verify_zip(
+            path, zip_sha=zip_sha,
+            manifest_sha=manifest_sha, source=web_fetch.SOURCE_SHA
+        )
+
+    def test_valid_exact_pair_and_verified_extraction(self):
+        path, zsha, msha = self.makezip()
+        manifest = self.verify(path, zsha, msha)
+        stage = self.root / "stage"
+        stage.mkdir()
+        (stage / web_fetch.ZIP_NAME).write_bytes(path.read_bytes())
+        with patch.object(web_fetch, "MANIFEST_SHA256", msha):
+            web_fetch.extract_to(stage, manifest)
+        self.assertEqual((stage / web_fetch.FILES[1]).read_bytes(), self.images["panel"])
+        self.assertEqual((stage / web_fetch.FILES[2]).read_bytes(), self.images["node"])
+
+    def test_wrong_zip_digest_fails(self):
+        path, _, msha = self.makezip()
+        with self.assertRaisesRegex(web_fetch.Hold, "ZIP_SHA256_MISMATCH"):
+            self.verify(path, "0" * 64, msha)
+
+    def test_wrong_manifest_digest_fails_even_if_zip_is_trusted(self):
+        path, zsha, _ = self.makezip()
+        with self.assertRaisesRegex(web_fetch.Hold, "MANIFEST_SHA256_MISMATCH"):
+            self.verify(path, zsha, "0" * 64)
+
+    def test_disabled_deployment_flag_is_mandatory(self):
+        path, zsha, msha = self.makezip(override={"activation_allowed": True})
+        with self.assertRaisesRegex(web_fetch.Hold, "UNTRUSTED_PREVIEW_MANIFEST"):
+            self.verify(path, zsha, msha)
+
+    def test_wrong_source_fails(self):
+        path, zsha, msha = self.makezip(override={"source_commit": "0" * 40})
+        with self.assertRaisesRegex(web_fetch.Hold, "UNTRUSTED_PREVIEW_MANIFEST"):
+            self.verify(path, zsha, msha)
+
+    def test_image_content_tamper_fails(self):
+        self.manifest["images"]["node"]["archive_sha256"] = "0" * 64
+        path, zsha, msha = self.makezip()
+        with self.assertRaisesRegex(web_fetch.Hold, "IMAGE_SHA256_MISMATCH"):
+            self.verify(path, zsha, msha)
+
+    def test_wrong_image_id_fails(self):
+        self.manifest["images"]["node"]["local_image_id"] = "untrusted"
+        path, zsha, msha = self.makezip()
+        with self.assertRaisesRegex(web_fetch.Hold, "UNTRUSTED_IMAGE_METADATA"):
+            self.verify(path, zsha, msha)
+
+    def test_zip_extra_member_fails(self):
+        path, zsha, msha = self.makezip(extra="../escape")
+        with self.assertRaisesRegex(web_fetch.Hold, "UNEXPECTED_ZIP_MEMBERS"):
+            self.verify(path, zsha, msha)
+
+    def test_symlinked_zip_fails(self):
+        path, zsha, msha = self.makezip()
+        target = self.root / "link.zip"
+        target.symlink_to(path)
+        with self.assertRaisesRegex(web_fetch.Hold, "UNSAFE_FILE"):
+            self.verify(target, zsha, msha)
+
+    def test_wizard_adds_separate_preview_fetch_without_changing_legacy_upgrade(self):
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertIn("A) Download/verify Secure Web Approval PREVIEW", wizard)
+        self.assertIn('python3 -B "$dir/smite-stage15-web-approval-fetch.py"', wizard)
+        self.assertIn('bash "$dir/smite-stage15-fetch-images.sh"', wizard)
+        self.assertIn('python3 -B "$dir/smite-stage15-upgrade.py" apply', wizard)
+
+    def test_stage15_menu_entry_is_connected_without_replacing_existing_routes(self):
+        menu = (HERE / "modules/smite-backhaul-management.sh").read_text()
+        self.assertIn('echo "8) Resume interrupted clean-RC IR test install"', menu)
+        self.assertIn('echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"', menu)
+        self.assertIn('read -rp "Choose [0-9]: " choice || return', menu)
+        self.assertIn('source "$SMITE_BH_DIR/smite-stage15-frp-wizard.sh"', menu)
+        self.assertIn("smite_stage15_frp_wizard", menu)
+        self.assertIn('smite_managed_bh_menu', menu)
+        self.assertIn('smite_tw_menu', menu)
+        self.assertIn('docker_smite_advanced_menu', menu)
+        self.assertIn('echo "HOLD: Stage15 modules missing."', menu)
+
+    def test_normal_installer_and_updater_ship_cache_only_helper(self):
+        fetcher = "smite-stage15-web-approval-fetch.py"
+        install = (HERE / "install.sh").read_text()
+        updater = (HERE / "u-opti").read_text()
+        self.assertEqual(install.count('"' + fetcher + '"'), 1)
+        # Update inventories: downloaded names, URL map, stage map and rollback list.
+        self.assertEqual(updater.count('"' + fetcher + '"'), 4)
+        self.assertIn(
+            '["' + fetcher + '"]="$BASE_URL/modules/' + fetcher + '"',
+            updater,
+        )
+        self.assertIn(
+            '["' + fetcher + '"]="$TEMP_DIR/' + fetcher + '"',
+            updater,
+        )
+
+    def test_migration_gate_wizard_and_install_inventories(self):
+        helper = "smite-stage15-live-migration-gate.py"
+        install = (HERE / "install.sh").read_text()
+        updater = (HERE / "u-opti").read_text()
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertEqual(install.count('"' + helper + '"'), 1)
+        self.assertEqual(updater.count('"' + helper + '"'), 4)
+        self.assertIn('["' + helper + '"]="$BASE_URL/modules/' + helper + '"', updater)
+        self.assertIn('["' + helper + '"]="$TEMP_DIR/' + helper + '"', updater)
+        self.assertIn("P) Read-only IR/KH migration isolation check", wizard)
+        self.assertIn('python3 -B "$dir/' + helper + '" audit', wizard)
+        self.assertIn("UNSIGNED_PREVIEW_ACTIVATION=DENIED",
+                      (HERE / "modules" / helper).read_text())
+
+    def test_legacy_upgrader_is_blocked_by_existing_frp_or_wss_state(self):
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertEqual(
+            wizard.count("HOLD: Legacy image upgrade/rollback forbidden"), 2
+        )
+        self.assertEqual(
+            wizard.count("-e /var/lib/u-opti/smite-stage15-frp-engine"), 2
+        )
+        self.assertEqual(
+            wizard.count("-e /var/lib/u-opti/smite-stage15-wss"), 2
+        )
+
+    def test_cache_only_does_not_publish_runtime_changes(self):
+        text = (HERE / "modules/smite-stage15-web-approval-fetch.py").read_text()
+        self.assertNotIn("docker load", text.lower())
+        self.assertNotIn("docker compose up", text.lower())
+        self.assertIn("PREVIEW_ACTIVATION_ALLOWED=NO", text)
+        self.assertIn("FRPS_FRPC_RESTART=NO", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

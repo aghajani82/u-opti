@@ -32,6 +32,8 @@ KEY = Path("/etc/u-opti/smite/route-broker.key")
 GRANTS = Path("/etc/u-opti/smite/route-grants")
 LEDGER = Path("/var/lib/u-opti/smite-xhttp-broker/nonce.db")
 SOCKET = Path("/run/u-opti/smite/xhttp-broker.sock")
+WEB_MODE_MARKER = Path("/etc/u-opti/smite/web-approval-mode.json")
+WEB_QUEUE_DIR = Path("/var/lib/u-opti/smite-xhttp-broker/approval-pending")
 ENGINE_LOCK = Path("/run/lock/u-opti-smite-engine.lock")
 HELPER = Path("/usr/local/libexec/smite-xhttp-nginx-route")
 PLANNER = Path("/usr/local/libexec/smite_xhttp_nginx_plan.py")
@@ -249,6 +251,22 @@ def stage_approval_request(wire: bytes, key: bytes, hint: dict) -> None:
                    seen_nonces=frozenset(), now=int(time.time()))
     directory = LEDGER.parent
     _dir(directory, mode=0o700)
+    # Independent Web Approval is explicitly opt-in. Default behavior is
+    # exactly the existing authenticated root TTY review. The marker is
+    # root-owned and NEVER received from the Panel or Node request.
+    marker = WEB_MODE_MARKER
+    if marker.exists() or marker.is_symlink():
+        mode = _json(_file(marker, mode=0o600), {"schema", "enabled", "queue_dir"})
+        if (type(mode["schema"]) is not int or mode["schema"] != 1
+                or mode["enabled"] is not True
+                or mode["queue_dir"] != str(WEB_QUEUE_DIR)):
+            raise BrokerHold("WEB_APPROVAL_MARKER_UNTRUSTED")
+        queue = _load_module(
+            "uopti_stage15_independent_queue",
+            HERE / "smite-stage15-approval-queue.py")
+        queue.stage(directory=Path(mode["queue_dir"]), wire=wire,
+                    key=key, now=int(time.time()))
+        return
     target = directory / "approval-request.json"
     writer = _load_module("uopti_broker_request_writer", HERE / "smite-rc5-xhttp-bridge-install.py")
     if target.exists() or target.is_symlink():

@@ -1,0 +1,36 @@
+name: Stage15 Secure Web Approval image fetch (cache-only)
+
+on:
+  pull_request:
+    paths:
+      - 'modules/smite-stage15-web-approval-fetch.py'
+      - 'modules/smite-backhaul-management.sh'
+      - 'install.sh'
+      - 'u-opti'
+      - 'tests/test-smite-stage15-web-approval-fetch.py'
+      - '.github/workflows/stage15-web-approval-image-fetch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-fault-injection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax check (fetcher + shell menus and installers)
+        run: |
+          python3 -m py_compile modules/smite-stage15-web-approval-fetch.py tests/test-smite-stage15-web-approval-fetch.py
+          bash -n modules/smite-backhaul-management.sh modules/smite-stage15-frp-wizard.sh install.sh u-opti
+      - name: Manifest, ZIP, source and no-runtime-change regression
+        run: python3 -B tests/test-smite-stage15-web-approval-fetch.py -v
+      - name: No live targets or Docker activity
+        run: |
+          test ! -e /run/u-opti-smite-review/web-approval.sock
+          echo 'CACHE_ONLY_TESTS=PASS'
+          echo 'LIVE_DEPLOYMENT=NOT_PERFORMED'
