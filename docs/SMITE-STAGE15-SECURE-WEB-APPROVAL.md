@@ -160,6 +160,24 @@ The following requires separate approval and a checked IR/KH snapshot first:
 the development turn.** Placeholder `https://review.example.invalid` is
 used exclusively in offline tests, not as a real browser certificate.
 
+## Offline two-Passkey rehearsal — no real enrollment yet
+
+A source-only regression now exercises *two distinct simulated FIDO2
+credentials*, each enrolled with a separate one-use Root TTY ticket.
+It verifies that both survive a credential-store reopen, revoking the
+primary retains the active spare, double revocation fails, and failed
+user-verification during a second registration never corrupts the
+existing credential. The cryptographic registration completion is
+mocked **only in this CI test**. No physical Passkey, browser, real HTTPS
+Origin, real Node, root service, grant, or fourth FRP route is used.
+
+The **next physical Passkey test** is NOT yet authorized on live hosts.
+It requires a separately isolated HTTPS RP Origin, two accessible
+independent authenticators, a verified recovery path, and a disposable
+clone that cannot submit a real Broker grant. Keep `approve.kolbe1.ir`
+unpublished and the production opt-in marker absent until the separate
+deployment admission and real IR/KH evidence gates pass.
+
 ## Rollback and interruption
 
 - Before deployment: abandon draft PR branches. No host rollback necessary.
