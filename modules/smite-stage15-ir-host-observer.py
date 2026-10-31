@@ -2,8 +2,10 @@
 """IR-only read-only FRPS owner observer (OFFLINE REVIEW PROTOTYPE).
 
 No signing, no HTTP, no grants, no FRP/Node/Panel mutations. This is not
-a production attestation source. Its strict registry schema is hypothetical
-until independently verified against the actual IR host. Incompatible state
+a production attestation source. The flat registry format is confirmed from Smite source and a read-only IR
+operator inventory (one owner UUID, FRPS server at control port 7000).
+Host-local owner UUID MUST match a separately validated Panel Lease; no
+human-facing tunnel display label may substitute for an internal ID. Incompatible state
 HOLDs; never attempt repair/reapply or infer a missing owner from sockets.
 """
 from __future__ import annotations
@@ -19,7 +21,6 @@ import subprocess
 import time
 
 NODE_IMAGE = "sha256:cf0f3b12fc2c31cb0847fd5206304837661019d8f604853a8e956448c2576265"
-OWNER_ID = "FRP-IR-KH-45121"
 REGISTRY = Path("/var/lib/docker/volumes/smite-node-data/_data/tunnels.json")
 PORTS = (7000, 28897, 38658, 45121)
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -121,7 +122,7 @@ def start_ticks(pid, proc_root=Path("/proc")):
         raise ObserverHold("FRPS_PROCESS_GENERATION_UNAVAILABLE") from exc
 
 
-def registry_owner(raw, expected_owner=OWNER_ID):
+def registry_owner(raw, *, expected_owner):
     """Parse the *actual* Smite AdapterManager persistent JSON format.
 
     Smite node/app/core_adapters.py _save_tunnels serializes
@@ -179,7 +180,7 @@ def read_registry(path=REGISTRY):
         raise ObserverHold("IR_REGISTRY_UNAVAILABLE") from exc
 
 
-def collect_ir(*, node_id, port, runner=command, proc_root=Path("/proc"),
+def collect_ir(*, node_id, owner_id, port, runner=command, proc_root=Path("/proc"),
                registry_path=REGISTRY, require_host=True):
     """Return non-secret unsignable facts after fixed-source observations.
 
@@ -192,6 +193,10 @@ def collect_ir(*, node_id, port, runner=command, proc_root=Path("/proc"),
              "IR_ROOT_ONLY")
     need(type(node_id) is str and bool(IDENT.fullmatch(node_id)),
          "IR_UNPINNED_NODE_ID")
+    # Caller must obtain owner_id from separately verified, live Panel Lease;
+    # a human-readable tunnel name is NOT its stable internal identifier.
+    need(type(owner_id) is str and bool(IDENT.fullmatch(owner_id)),
+         "IR_OWNER_ID_NOT_PINNED")
     need(type(port) is int and port in PORTS and port != 7000,
          "IR_UNAPPROVED_PROXY_PORT")
     need(not require_host or registry_path == REGISTRY,
@@ -205,7 +210,7 @@ def collect_ir(*, node_id, port, runner=command, proc_root=Path("/proc"),
     tick = start_ticks(pid,proc_root=proc_root)
     need(listeners(runner("ss","-Hlntp")) == pid, "FRPS_PROCESS_NOT_SOCKET_OWNER")
     blob, info = read_registry(registry_path)
-    owner = registry_owner(blob)
+    owner = registry_owner(blob, expected_owner=owner_id)
     current = registry_path.lstat()
     need((current.st_dev,current.st_ino) == (info.st_dev,info.st_ino)
          and start_ticks(pid,proc_root=proc_root) == tick,
