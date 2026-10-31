@@ -223,6 +223,14 @@ class CredentialStore:
         try:
             row=self.conn.execute("SELECT revoked FROM credentials WHERE id_hash=?",(credential_hash,)).fetchone()
             if row is None or row[0]:raise EnrollmentHold("CREDENTIAL_NOT_ACTIVE")
+            # Never silently revoke the last usable Passkey. Backup must
+            # already be enrolled, not merely a pending ticket/ceremony.
+            # Count inside BEGIN IMMEDIATE to serialize with other revokes.
+            active=self.conn.execute(
+                "SELECT COUNT(*) FROM credentials WHERE revoked=0"
+            ).fetchone()[0]
+            if active<2:
+                raise EnrollmentHold("LAST_PASSKEY_RECOVERY_REQUIRED")
             self.conn.execute("UPDATE credentials SET revoked=1 WHERE id_hash=?",(credential_hash,))
             self._audit("PASSKEY_REVOKED",credential_hash,int(time.time()))
             self.conn.execute("COMMIT")
