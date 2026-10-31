@@ -269,8 +269,9 @@ docker_smite_management_menu() {
         echo "7) Independent Engines (Backhaul review)"
         echo "8) Resume interrupted clean-RC IR test install"
         echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"
+        echo "G) تأیید پورت و مسیر تانل (Stage15 / IR)"
         echo "0) Back"
-        read -rp "Choose [0-9]: " choice || return
+        read -rp "Choose [0-9/G]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
@@ -346,6 +347,15 @@ docker_smite_management_menu() {
                 else
                     echo "HOLD: Stage15 modules missing."
                 fi
+                ;;
+            g|G)
+                if [ -s "$SMITE_BH_DIR/smite-stage15-root-review.py" ] &&
+                   [ ! -L "$SMITE_BH_DIR/smite-stage15-root-review.py" ]; then
+                    python3 -B "$SMITE_BH_DIR/smite-stage15-root-review.py" || :
+                else
+                    echo "HOLD: Stage15 root review module missing or symlinked."
+                fi
+                read -rp "Press Enter to return..." || return
                 ;;
             0) return ;;
             *) echo "Invalid selection." ;;

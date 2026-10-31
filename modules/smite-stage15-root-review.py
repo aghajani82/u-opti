@@ -41,8 +41,18 @@ def review():
         digest=b.hashlib.sha256(wire).hexdigest()
         print('SIGNED PANEL PROPOSAL — review against trusted IR/KH evidence.')
         print('Role: '+('DIRECT OWNER' if facts['owner']==facts['child'] else 'SHARED CHILD'))
+        print('Tunnel ID: '+facts['child'])
+        print('Tunnel name: unavailable in the signed proposal; identify by ID.')
+        print('IR node ID: '+facts['ir_node'])
+        print('KH node ID: '+facts['kh_node'])
+        print('Port: '+str(facts['port']))
+        print('Path: '+facts['path'])
+        print('Signed request expires at (Unix seconds): '+str(hint['expires_at']))
+        print('Full signed binding and evidence hashes:')
         print(json.dumps(facts,sort_keys=True,indent=2))
-        if input('Type APPROVE '+digest+': ').strip()!='APPROVE '+digest:
+        print('First compare with current trusted Signed IR owner, Signed KH inbound and active lease.')
+        print('1) Approve this exact request   0) Cancel (default)')
+        if input('Choose [1/0]: ').strip()!='1':
             raise b.BrokerHold('OPERATOR_CANCELLED')
         contract.admit(wire,key=key,expected=proposal,seen_nonces=frozenset(),now=int(time.time()))
         if b._file(request,mode=0o600)!=wire:
