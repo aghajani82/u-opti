@@ -47,6 +47,42 @@ class LeaseTests(unittest.TestCase):
         self.assertEqual(result["role"],"shared")
         self.assertEqual(result["state"],"active")
 
+    def test_panel_owner_mode_absent_is_supported(self):
+        # Read-only IR audit: Panel omitted mode but stored integer 7000.
+        self.assertEqual(m._lease(self.binding, self.db)["role"], "shared")
+
+    def test_panel_owner_explicit_server_mode_is_supported(self):
+        self.conn.execute("UPDATE tunnels SET spec=? WHERE id=?",
+                          (json.dumps({"mode": "server", "bind_port": 7000}),
+                           "owner-0001"))
+        self.conn.commit()
+        self.assertEqual(m._lease(self.binding, self.db)["state"], "active")
+
+    def test_panel_owner_explicit_client_mode_fails_closed(self):
+        self.conn.execute("UPDATE tunnels SET spec=? WHERE id=?",
+                          (json.dumps({"mode": "client", "bind_port": 7000}),
+                           "owner-0001"))
+        self.conn.commit()
+        with self.assertRaisesRegex(m.LiveEvidenceHold, "FRPS_OWNER_SPEC_MISMATCH"):
+            m._lease(self.binding, self.db)
+
+    def test_panel_owner_invalid_control_port_or_mode_fails_closed(self):
+        for spec in (
+            {"bind_port": "7000"},
+            {"bind_port": None},
+            {"bind_port": True},
+            {"bind_port": 7001},
+            {"mode": None, "bind_port": 7000},
+            {"mode": "", "bind_port": 7000},
+        ):
+            with self.subTest(spec=spec):
+                self.conn.execute("UPDATE tunnels SET spec=? WHERE id=?",
+                                  (json.dumps(spec), "owner-0001"))
+                self.conn.commit()
+                with self.assertRaisesRegex(m.LiveEvidenceHold,
+                                            "FRPS_OWNER_SPEC_MISMATCH"):
+                    m._lease(self.binding, self.db)
+
     def test_direct_no_child_lease(self):
         self.conn.execute("DELETE FROM frp_proxy_leases")
         self.conn.commit()
