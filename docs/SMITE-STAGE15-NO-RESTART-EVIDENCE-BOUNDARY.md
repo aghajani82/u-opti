@@ -208,6 +208,29 @@ closed. The **Node registry still independently requires**
 `spec.mode="server"`, and the live FRPS PID/listener checks are unchanged.
 These changes do not authorize Web Approval or a fourth tunnel.
 
+## Three-route lease schema and uniqueness guard (2026-10-31)
+
+Offline regression fixtures now cover the **direct** owner route
+`45121 /45121/www` (no child lease) and the two **shared** child routes
+`38658 /38658/shop` and `28897 /28897/blog` (one child lease per
+`iran_node_id,remote_port`) as three distinct admission cases for the
+same UUID-identified FRPS owner. The IR Node's flat registry contains
+only that owner; never invent child registry entries to make the tests
+pass. An extra lease for the direct port or a mismatched child-owner
+association fails closed. These are synthetic fixtures only and do not
+prove real client connectivity or the future fourth route.
+
+The live `_lease` verifier previously checked the necessary columns and
+matching lease row but did **not actually verify the unique index**, despite
+saying it did. It now requires a non-partial SQLite UNIQUE index whose
+key columns are exactly `(iran_node_id,remote_port)`, read as part
+of the existing read-only transaction. Missing, partial, or incorrectly
+keyed indexes cause `LEASE_UNIQUE_INDEX_MISSING` without schema
+migration or writes. This matches Smite's `FrpProxyLease` model
+`uq_frp_ir_remote_port`. The actual live IR Panel index structure
+still needs read-only operator verification before enabling Web Approval.
+A green GitHub test only validates test fixtures.
+
 ## Choice B — approved bounded maintenance (no zero-downtime guarantee)
 
 If the operator accepts a brief interruption instead, review exact signed
