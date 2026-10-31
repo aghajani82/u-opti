@@ -119,7 +119,7 @@ def safe_db_path(db_path, ui):
     except OSError as exc:
         raise ObserverHold("SANAEI_DB_UNAVAILABLE") from exc
     need(stat.S_ISREG(meta.st_mode) and meta.st_nlink == 1
-         and meta.st_uid == 0 and not meta.st_mode & 0o022
+         and meta.st_uid == os.geteuid() and not meta.st_mode & 0o022
          and 0 < meta.st_size < 128 * 1024 * 1024,
          "SANAEI_DB_UNTRUSTED")
     # Do not mistake a copied, stale x-ui.db for the mounted live source.
