@@ -50,7 +50,15 @@ const out=document.getElementById("result");
 const register=document.getElementById("register"), login=document.getElementById("login");
 async function post(path, obj){
  const r=await fetch(path,{method:"POST",cache:"no-store",credentials:"omit",headers:{"Content-Type":"application/json","X-Lab-CSRF":csrf},body:JSON.stringify(obj)});
- if(!r.ok) throw new Error("TEST_HOLD_HTTP_"+r.status);
+ if(!r.ok) {
+   let reason="UNCLASSIFIED";
+   try {
+     const body=await r.json();
+     if (body && typeof body.reason==="string" && /^[A-Z0-9_]{3,64}$/.test(body.reason))
+       reason=body.reason;
+   } catch (_) { /* Do not reflect server response text. */ }
+   throw new Error("TEST_HOLD_HTTP_"+r.status+"_"+reason);
+ }
  return r.json();
 }
 async function refresh(){
@@ -165,6 +173,38 @@ class State:
                 return {"status":"LOCAL_AUTHENTICATION_PASS_NO_GRANT"}
             raise ValueError("UNKNOWN_ACTION")
 
+# Strict allowlist: expose only a nonsensitive rejection category, never raw
+# WebAuthn assertion data, credential IDs, challenges, signatures or exception text.
+REJECTION_REASONS = {
+    "Unknown credential ID.": "UNKNOWN_CREDENTIAL_ID",
+    "Wrong challenge in response.": "CHALLENGE_MISMATCH",
+    "Invalid origin in CollectedClientData.": "CLIENT_ORIGIN_REJECTED",
+    "Wrong RP ID hash in response.": "RP_ID_MISMATCH",
+    "Invalid signature.": "SIGNATURE_REJECTED",
+    "User verification required, but user verified flag not set.": "UV_REQUIRED",
+    "User verification required, but User Verified flag not set.": "UV_REQUIRED",
+    "User Present flag not set.": "UP_REQUIRED",
+    "Incorrect type in CollectedClientData.": "CLIENT_TYPE_REJECTED",
+    "CHALLENGE_EXPIRED_OR_REPLAY": "CHALLENGE_EXPIRED_OR_REPLAY",
+    "ORIGIN_OR_CSRF_REJECTED": "HTTP_ORIGIN_OR_CSRF_REJECTED",
+    "INVALID_RESPONSE": "MALFORMED_RESPONSE",
+    "INVALID_CONTENT_LENGTH": "INVALID_CONTENT_LENGTH",
+    "NO_REGISTERED_PASSKEY": "NO_REGISTERED_PASSKEY",
+    "MAX_TWO_TEST_PASSKEYS": "MAX_TWO_TEST_PASSKEYS",
+    "UNKNOWN_ACTION": "UNKNOWN_ACTION",
+    "UNEXPECTED_DATA": "UNEXPECTED_DATA",
+    "HOST_NOT_LOCALHOST": "HOST_NOT_LOCALHOST",
+    "AUTH_HEADERS_FORBIDDEN": "AUTH_HEADERS_FORBIDDEN",
+    "PROXY_HEADERS_FORBIDDEN": "PROXY_HEADERS_FORBIDDEN",
+    "URL_PARAMETER_FORBIDDEN": "URL_PARAMETER_FORBIDDEN",
+}
+def public_rejection_reason(exc):
+    if isinstance(exc, json.JSONDecodeError):
+        return "MALFORMED_JSON"
+    if isinstance(exc, ValueError):
+        return REJECTION_REASONS.get(str(exc), "VERIFICATION_REJECTED")
+    return "MALFORMED_ASSERTION"
+
 class Handler(BaseHTTPRequestHandler):
     server_version="PasskeyLocalOnly"
     sys_version=""
@@ -232,8 +272,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 result=self.server.state.complete(kind,payload)
             self.answer(200,result)
-        except (ValueError,TypeError,KeyError,IndexError,json.JSONDecodeError):
-            self.answer(409,{"status":"LOCAL_TEST_HOLD"})
+        except (ValueError,TypeError,KeyError,IndexError,json.JSONDecodeError) as exc:
+            self.answer(409,{"status":"LOCAL_TEST_HOLD",
+                             "reason":public_rejection_reason(exc)})
 
     def do_OPTIONS(self):
         self.answer(405,{"status":"LOCAL_TEST_HOLD"})
