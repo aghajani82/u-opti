@@ -97,6 +97,37 @@ The current Node verifier and production signer were **not modified**;
 the previous requirement for genuine Node-signed proofs remains fail-closed.
 The existing live host's three FRP tunnels remain out of scope of the test.
 
+## KH read-only runtime observation prototype (2026-10-31; offline CI only)
+
+The source-only library `modules/smite-stage15-kh-host-observer.py` now
+separately examines Docker's actual `smite-node` / `3xui-01` metadata,
+the expected single Xray process and exact loopback listener, and three
+existing FRPC processes, then reads Sanaei SQLite `inbounds` through a
+new read-only transaction including WAL visibility. It returns only
+sanitized XHTTP port/path, process generation/container identity and a hash
+of the sanitized inbound view. Tests use a **temporary** SQLite database
+and injected `docker inspect`, `docker top`, `ss` and `/proc` results;
+they do not contact IR or KH. No raw UUID, config, password or database
+is exported. It does not make signed evidence or provision a grant.
+
+The current prototype deliberately permits only a pinned
+`3xui-01` mount at `/etc/x-ui` and source `x-ui.db`, which must be verified
+against the real KH Compose/Docker mount layout **before** any host trial;
+unknown layouts HOLD. The current three-process FRPC requirement is a
+**baseline-only** gate: a fourth tunnel may require a new reviewed expected
+process count/lease reconciliation and must not be deployed with this
+hardcoded three-child assertion. Identifying a mounted SQLite source does
+not itself establish that it is up-to-date or authoritative; a separate
+controlled freshness/recovery check and full observer audit are required.
+Observations are not cryptographic Node proofs.
+
+**Still absent:** an independently observed IR owner/registry binding,
+host-key enrollment and trusted transport, durable nonce receipt, a
+reviewed root host-origin verifier, real IR/KH mount/lease inventory and a
+disposable-clone end-to-end rehearsal. The Root Web Approval launcher and
+its existing Node-signed evidence contract are unchanged. Zero service
+restarts is a design requirement, **not** a tested live result.
+
 ## Choice B — approved bounded maintenance (no zero-downtime guarantee)
 
 If the operator accepts a brief interruption instead, review exact signed
