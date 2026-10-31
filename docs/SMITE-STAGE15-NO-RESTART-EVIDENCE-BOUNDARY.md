@@ -128,6 +128,35 @@ disposable-clone end-to-end rehearsal. The Root Web Approval launcher and
 its existing Node-signed evidence contract are unchanged. Zero service
 restarts is a design requirement, **not** a tested live result.
 
+## IR read-only FRPS owner observation (2026-10-31; offline CI only)
+
+`modules/smite-stage15-ir-host-observer.py` and
+`tests/test-smite-stage15-ir-host-observer.py` now exercise a separate
+IR observer against mocked Docker/host/process state and a temporary
+owner registry. This library requires the pinned current Node image, one
+healthy live `smite-node`, its exact Docker volume, one FRPS process
+and four loopback sockets on 7000, 45121, 38658 and 28897 owned by
+the same PID; it records Linux process start ticks, immutable container
+ID and a SHA256 of the registry. It never starts, stops, recreates,
+signs or publishes anything. The cross-host offline fixture test pairs
+its sanitized IR facts with synthetic KH host facts through the
+separate, **non-production** host-origin Ed25519 verifier. The old
+Node-signed verifier still rejects those host-origin fixtures.
+
+**Critical unresolved host admission gates:** The exact live
+`tunnels.json` schema on IR has not been read/reviewed in this
+development turn. The prototype deliberately accepts a single strict
+*test fixture* schema and HOLDS on unknown formats. It does **not**
+prove that an IR registry entry is an authoritative active child lease,
+nor that a given child is linked to the FRPS Owner. The `node_id`
+input is not independently pinned to a trusted root identity yet.
+Before any future host-based signing or Web Approval, review the
+actual in-container registry format, compare it with the authoritative
+Panel SQLite live leases in an atomic read boundary, review the real
+IR/KH mount paths, and implement durable nonce receipts. All unknown,
+stale or competing observations must HOLD. No runnable live adapter,
+secret key provisioning, network listener or grant integration exists.
+
 ## Choice B — approved bounded maintenance (no zero-downtime guarantee)
 
 If the operator accepts a brief interruption instead, review exact signed
