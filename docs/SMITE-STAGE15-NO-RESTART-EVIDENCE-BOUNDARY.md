@@ -179,6 +179,35 @@ IR/KH mount paths, and implement durable nonce receipts. All unknown,
 stale or competing observations must HOLD. No runnable live adapter,
 secret key provisioning, network listener or grant integration exists.
 
+## IR owner Panel/Node mode compatibility (operator-verified 2026-10-31)
+
+Further read-only IR audits confirmed that the UUID-keyed Node registry
+contains exactly one `frp` owner with `spec.mode="server"` and
+`spec.bind_port=7000`; the Panel stores the same UUID as an active
+FRP tunnel, with two linked child leases at 28897 and 38658. The Panel
+owner's `spec` **omits** the `mode` key, but its `bind_port` is
+the **integer** 7000 (not a string). This is compatible with Smite's
+`panel/app/routers/tunnels.py` flow: Panel persists the operator
+spec and creates a separate Node `server_spec` whose mode is set to
+`server` before the signed apply.
+
+The earlier ad-hoc read-only audit reported
+`OWNER_SERVER_7000=False` solely because it required
+`Panel.spec.mode == "server"`, a condition NOT enforced by the
+underlying `smite-stage15-live-evidence.py::_lease`. That report was a
+**false HOLD due to an over-strict diagnostic**, not evidence the FRPS
+listener or child lease was broken.
+
+To prevent regression, `_lease` now accepts *only* absent
+`Panel.spec.mode` or an explicit `"server"` mode, while still requiring
+the exact integer control port `7000`, unique active owner/child records,
+matching IR/KH identities, owner UUID and child lease association, and
+a fresh coherent read-only SQLite transaction. Explicit `"client"`,
+`null`, or any other mode and malformed/missing/wrong bind port HOLD
+closed. The **Node registry still independently requires**
+`spec.mode="server"`, and the live FRPS PID/listener checks are unchanged.
+These changes do not authorize Web Approval or a fourth tunnel.
+
 ## Choice B — approved bounded maintenance (no zero-downtime guarantee)
 
 If the operator accepts a brief interruption instead, review exact signed
