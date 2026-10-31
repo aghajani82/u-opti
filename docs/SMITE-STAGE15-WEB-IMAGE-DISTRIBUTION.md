@@ -22,7 +22,7 @@ The successful isolated build job also emitted the exact `stage15-images.json`
 SHA256:
 `8c1e86220090ad960344d938c1d1d4c30ab656b07c54aff22a16e5d61482b4eb`.
 
-## Separate, reviewed preservation gate — STILL PENDING
+## Separate, reviewed preservation gate — VERIFIED FOR CACHE-ONLY
 
 A maintainer must preserve **the exact existing artifact ZIP bytes** in a
 public, disposable **prerelease**, named
@@ -39,7 +39,7 @@ asset must be re-downloaded and hash-checked against the pinned ZIP digest.
 Do not use a GitHub API token on IR/KH, do not upload an artifact ZIP to
 either server, and do not promote via a mutable branch or tag.
 
-**The prerelease is NOT confirmed published yet.** The fetcher intentionally
+**The pinned prerelease was published on 2026-10-31** with the exact ZIP asset (373124715 bytes) and SHA256 `d7a5ab438b45bd05a46b42e97c9d925c3379adc6a06057e542b38091829bf63a`, verified using the GitHub Release metadata and the independent IR/KH download-only verifier. The fetcher intentionally
 HOLDs on HTTP 404 or any mismatch; it never falls back to an Actions
 download, different image, branch, latest, GHCR tag, or unpinned URL.
 
@@ -92,5 +92,13 @@ or signed Replay. Grandoptical is excluded.
    `PREVIEW_ACTIVATION_ALLOWED=NO`.
 4. Runtime and the three active routes are unchanged.
 
-Only then mark image acquisition complete. **Migration and enabling Web
-Approval remain distinct later gates.**
+Operator evidence on 2026-10-31: independent IR and KH cache-only fetch and
+verification both PASS; a guarded local menu patch added `9 -> A` and was
+exercised on both hosts without Docker load, Compose or FRPS/FRPC restart.
+The draft PR integrates those menu changes with first-install and updater
+manifests to prevent the next reviewed source update from dropping the helper.
+This operator observation is not an authenticated traffic check or permission
+to migrate any running containers.
+
+Image acquisition is complete for the disposable IR/KH field trial.
+**Migration and enabling Web Approval remain distinct later gates.**

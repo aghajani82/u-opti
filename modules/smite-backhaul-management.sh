@@ -268,8 +268,9 @@ docker_smite_management_menu() {
         echo "6) Advanced & Legacy Tools"
         echo "7) Independent Engines (Backhaul review)"
         echo "8) Resume interrupted clean-RC IR test install"
+        echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"
         echo "0) Back"
-        read -rp "Choose [0-8]: " choice || return
+        read -rp "Choose [0-9]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
@@ -335,6 +336,15 @@ docker_smite_management_menu() {
                     echo "HOLD: Clean IR recovery module is missing; update U-OPTI first."
                     echo "Expected module: $SMITE_BH_DIR/smite-clean-ir-resume.sh"
                     read -rp "Press Enter to return..."
+                fi
+                ;;
+            9)
+                if [ -s "$SMITE_BH_DIR/smite-stage15-frp-wizard.sh" ] &&
+                   [ -s "$SMITE_BH_DIR/smite-stage15-web-approval-fetch.py" ]; then
+                    source "$SMITE_BH_DIR/smite-stage15-frp-wizard.sh"
+                    smite_stage15_frp_wizard
+                else
+                    echo "HOLD: Stage15 modules missing."
                 fi
                 ;;
             0) return ;;

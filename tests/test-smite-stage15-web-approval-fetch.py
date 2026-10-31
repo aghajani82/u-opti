@@ -137,6 +137,34 @@ class FetchTests(unittest.TestCase):
         self.assertIn('bash "$dir/smite-stage15-fetch-images.sh"', wizard)
         self.assertIn('python3 -B "$dir/smite-stage15-upgrade.py" apply', wizard)
 
+    def test_stage15_menu_entry_is_connected_without_replacing_existing_routes(self):
+        menu = (HERE / "modules/smite-backhaul-management.sh").read_text()
+        self.assertIn('echo "8) Resume interrupted clean-RC IR test install"', menu)
+        self.assertIn('echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"', menu)
+        self.assertIn('read -rp "Choose [0-9]: " choice || return', menu)
+        self.assertIn('source "$SMITE_BH_DIR/smite-stage15-frp-wizard.sh"', menu)
+        self.assertIn("smite_stage15_frp_wizard", menu)
+        self.assertIn('smite_managed_bh_menu', menu)
+        self.assertIn('smite_tw_menu', menu)
+        self.assertIn('docker_smite_advanced_menu', menu)
+        self.assertIn('echo "HOLD: Stage15 modules missing."', menu)
+
+    def test_normal_installer_and_updater_ship_cache_only_helper(self):
+        fetcher = "smite-stage15-web-approval-fetch.py"
+        install = (HERE / "install.sh").read_text()
+        updater = (HERE / "u-opti").read_text()
+        self.assertEqual(install.count('"' + fetcher + '"'), 1)
+        # Update inventories: downloaded names, URL map, stage map and rollback list.
+        self.assertEqual(updater.count('"' + fetcher + '"'), 4)
+        self.assertIn(
+            '["' + fetcher + '"]="$BASE_URL/modules/' + fetcher + '"',
+            updater,
+        )
+        self.assertIn(
+            '["' + fetcher + '"]="$TEMP_DIR/' + fetcher + '"',
+            updater,
+        )
+
     def test_cache_only_does_not_publish_runtime_changes(self):
         text = (HERE / "modules/smite-stage15-web-approval-fetch.py").read_text()
         self.assertNotIn("docker load", text.lower())
