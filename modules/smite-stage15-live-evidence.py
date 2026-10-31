@@ -147,7 +147,14 @@ def _lease(binding, db_path, *, max_read_seconds=3.0):
                         or cs.get("shared_frps_owner")!=binding["owner"]
                         or binding["lease"]!=binding["child"]):
                     raise LiveEvidenceHold("SHARED_LEASE_CONFLICT")
-            if ospec.get("bind_port")!=7000:
+            # Panel keeps the operator's original spec, where "mode" is
+            # commonly ABSENT; the Node apply/registry sets "server" on its
+            # separate runtime copy. Never mistake absence in Panel for a
+            # client-mode FRPS. Reject an explicit contradictory mode, and
+            # require the exact integer control port on the Panel side.
+            if (type(ospec.get("bind_port")) is not int
+                    or ospec["bind_port"] != 7000
+                    or ("mode" in ospec and ospec["mode"] != "server")):
                 raise LiveEvidenceHold("FRPS_OWNER_SPEC_MISMATCH")
             # Only active read txn and a pinned independently mounted source
             # can provide freshness. No timestamp is accepted from Panel API.
