@@ -71,6 +71,32 @@ Minimum proof boundaries before any code can be admitted:
 exists, and `LIVE_MIGRATION_AUTHORIZED=NO`.** In particular, do not
 modify `smite-stage15-live-evidence.py` to trust local unsigned facts.
 
+## Offline host-origin signature prototype (2026-10-31, NOT DEPLOYABLE)
+
+`modules/smite-stage15-host-evidence-offline.py` and
+`tests/test-smite-stage15-host-evidence-offline.py` define a separate
+**offline-only** Ed25519 host-origin envelope, NOT a Node-signed proof.
+The distinct `u-opti:stage15:host-review-evidence:offline-v1` audience,
+`ir_host` / `kh_host` roles, independent pins and exact runtime-generation
+fields prevent a host fixture from being confused with the existing Node
+attestation verifier. The offline verifier checks 30-second expiry, signature,
+binding, independent keys and provided consumed nonces. Synthetic negative tests
+cover signature alteration, wrong pins, stale and replayed proofs, mismatched
+path/port/owner, invalid FRPS listeners and missing KH inventory facts.
+
+**This prototype accepts caller-supplied test facts and has no live observer,
+no trusted process/registry or SQLite/WAL source, no server or transport, no
+persistent anti-replay ledger, and no independent host root keys.** It cannot
+authenticate real IR/KH runtime and must not be wired into the Root grant
+writer or the Web Approval service. Returning an in-memory set of used nonces
+does not provide durability. Until separately reviewed collectors, key
+management, authenticated transport, durable replay and isolated clone E2E
+are implemented, the host route is `HOLD`.
+
+The current Node verifier and production signer were **not modified**;
+the previous requirement for genuine Node-signed proofs remains fail-closed.
+The existing live host's three FRP tunnels remain out of scope of the test.
+
 ## Choice B — approved bounded maintenance (no zero-downtime guarantee)
 
 If the operator accepts a brief interruption instead, review exact signed
