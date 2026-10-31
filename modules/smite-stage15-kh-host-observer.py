@@ -137,7 +137,9 @@ def safe_db_path(db_path, ui):
                 rel = db.relative_to(root)
             except ValueError:
                 continue
-            if rel.parts and not any(x in (".", "..") for x in rel.parts):
+            # Do not accept an unrelated x-ui.db under another live mount.
+            # This exact Sanaei mount contract must be reviewed on KH first.
+            if m.get("Destination") == "/etc/x-ui" and rel.parts == ("x-ui.db",):
                 trusted.append(root)
     need(len(trusted) == 1, "SANAEI_AUTHORITATIVE_MOUNT_UNVERIFIED")
     for suffix, max_size in (("-wal", 128 * 1024 * 1024),
