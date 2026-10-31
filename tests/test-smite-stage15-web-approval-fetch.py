@@ -141,7 +141,7 @@ class FetchTests(unittest.TestCase):
         menu = (HERE / "modules/smite-backhaul-management.sh").read_text()
         self.assertIn('echo "8) Resume interrupted clean-RC IR test install"', menu)
         self.assertIn('echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"', menu)
-        self.assertIn('read -rp "Choose [0-9]: " choice || return', menu)
+        self.assertIn('read -rp "Choose [0-9/G]: " choice || return', menu)
         self.assertIn('source "$SMITE_BH_DIR/smite-stage15-frp-wizard.sh"', menu)
         self.assertIn("smite_stage15_frp_wizard", menu)
         self.assertIn('smite_managed_bh_menu', menu)
