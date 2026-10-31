@@ -51,7 +51,7 @@ class RegistryLeaseCompatibility(unittest.TestCase):
             db.execute("INSERT INTO tunnels VALUES (?,?,?,?,?,?,?)",
                       (self.owner,"frp","active","node-ir-0001",
                        "node-ir-0001","node-kh-0001",
-                       json.dumps({"mode":"server","bind_port":7000})))
+                       json.dumps({"bind_port":7000})))
             db.execute("INSERT INTO tunnels VALUES (?,?,?,?,?,?,?)",
                       (self.child,"frp","active","node-ir-0001",
                        "node-ir-0001","node-kh-0001",
@@ -74,6 +74,32 @@ class RegistryLeaseCompatibility(unittest.TestCase):
 
     def test_flat_node_registry_maps_to_unique_active_panel_lease(self):
         self.assert_matched()
+
+    def test_panel_mode_absent_node_mode_server_is_the_valid_split(self):
+        # Panel persists the operator's spec, Node persists the applied spec.
+        # Explicit Node server mode is mandatory despite absent Panel mode.
+        self.assert_matched()
+        self.registry[self.owner]["spec"].pop("mode")
+        with self.assertRaisesRegex(ir.ObserverHold,
+                                    "IR_OWNER_REGISTRY_NOT_SINGLETON"):
+            self.assert_matched()
+
+    def test_explicit_contradictory_panel_mode_holds(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE tunnels SET spec=? WHERE id=?",
+                       (json.dumps({"mode":"client", "bind_port":7000}),
+                        self.owner))
+        with self.assertRaisesRegex(leases.LiveEvidenceHold,
+                                    "FRPS_OWNER_SPEC_MISMATCH"):
+            self.assert_matched()
+
+    def test_missing_panel_port_holds_even_with_valid_node_registry(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE tunnels SET spec=? WHERE id=?",
+                       (json.dumps({}), self.owner))
+        with self.assertRaisesRegex(leases.LiveEvidenceHold,
+                                    "FRPS_OWNER_SPEC_MISMATCH"):
+            self.assert_matched()
 
     def test_child_lease_is_in_panel_not_required_in_ir_registry(self):
         # Actual AdapterManager persists its local config. A KH-owned child
