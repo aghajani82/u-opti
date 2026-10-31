@@ -23,7 +23,7 @@ HOST = "127.0.0.1"
 PORT = 8765
 ORIGIN = f"http://localhost:{PORT}"
 MAX_BYTES = 16384
-TTL = 120
+TTL = 300
 
 PAGE = r'''<!doctype html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -104,6 +104,7 @@ class State:
         self.server=Fido2Server(
             PublicKeyCredentialRpEntity(id="localhost",name="Temporary Local Passkey Test"),
             verify_origin=lambda origin: origin==ORIGIN)
+        self.server.timeout=240_000  # hybrid QR/PIN flow, shorter than TTL
         self.user_id=secrets.token_bytes(32)
         self.csrf=secrets.token_urlsafe(32)
         self.credentials={}
@@ -123,8 +124,13 @@ class State:
             elif kind=="authenticate":
                 if not self.credentials:
                     raise ValueError("NO_REGISTERED_PASSKEY")
+                # This test registers discoverable (resident) passkeys.
+                # Omit allowCredentials so the phone can discover the RP's
+                # passkey during hybrid QR authentication. This does NOT
+                # relax validation: authenticate_complete below still checks
+                # the signature against registered credential public keys.
                 options,server_state=self.server.authenticate_begin(
-                    list(self.credentials.values()),user_verification="required")
+                    user_verification="required")
             else:
                 raise ValueError("UNKNOWN_ACTION")
             ceremony=secrets.token_hex(16)
