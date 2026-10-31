@@ -159,11 +159,16 @@ stale/inactive Panel rows, missing or wrong child leases, wrong port and
 mismatched Node identities. A KH-managed child may have no key in IR's
 locally persisted registry; its lease lives in Panel SQLite.
 
-**Critical unresolved host admission gates:** The actual contents,
-permissions and source mount of the current IR live `tunnels.json`
-have **not** been independently sampled in this development turn.
-A source-defined schema does not prove the currently mounted volume
-contains that schema or the configured owner. It does **not**
+**IR live observation (read-only, 2026-10-31):** The operator verified
+that `smite-node-data` mounted at `/var/lib/smite-node` holds a flat
+`tunnels.json` with exactly one persisted FRP server whose `spec.mode`
+is `server` and `spec.bind_port` is 7000. Its **actual key is a UUID**,
+not the human-facing `FRP-IR-KH-45121` alias previously hardcoded
+in the offline observer. The observer now requires an explicit pinned
+`owner_id`; it never guesses it from a display name. A missing/mismatched
+Panel lease still HOLDS. The operator audit did **not** independently
+verify the matching Panel `tunnels.id`, the `frp_proxy_leases.owner_tunnel_id`,
+the Node's cryptographic identity, or real client traffic. It does **not**
 prove that an IR registry entry is an authoritative active child lease,
 nor that a given child is linked to the FRPS Owner. The `node_id`
 input is not independently pinned to a trusted root identity yet.
