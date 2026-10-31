@@ -151,6 +151,40 @@ alone proves signed cryptographic verification. Keep all project-specific
 physical acceptance rows below marked **NOT RUN/BLOCKED** until separately
 executed and observed in the isolated lab.
 
+## Localhost Yandex-to-Android FIDO2 smoke test (operator-reported, 2026-10-31)
+
+Using the separate, RAM-only `tests/labs/passkey_local_lab.py` tool on
+the operator's Windows 10 laptop (not a disposable VM), the operator
+reported **`FILE_HASH=PASS`** and successful registration of one
+cross-device Android passkey in Yandex at `http://localhost:8765`.
+After selecting the matching credential, the local server returned
+**`LOCAL_AUTHENTICATION_PASS_NO_GRANT`**, registered count **1**,
+authenticated count **1**, and lab label **`STAGE15-BBB33D`**.
+The QR scan and phone biometric/PIN prompt completed. The lab calls
+`Fido2Server.authenticate_complete` with its in-memory registered
+credential public keys; a success is useful evidence of signature,
+challenge, RP ID, Origin and user-verification enforcement in **this
+standalone localhost lab**.
+
+One earlier attempt returned
+`TEST_HOLD_HTTP_409_UNKNOWN_CREDENTIAL_ID` after a QR/phone prompt.
+The operator reports having selected an older `Test Only` credential;
+that explanation is plausible but is not independently established by
+sensitive credential logs. Registration was repeated in new RAM-only
+sessions and the later correct-credential login passed.
+
+**Scope/limits:** this was ordinary HTTP on the browser's trustworthy
+`localhost` exception, not the separately trusted HTTPS-origin lab.
+The laptop was not an offline/disposable host. Only one physical
+authenticator was used; backup, second-key independence, revocation,
+real Root Approval tickets, production pairing/leases, deployment
+TLS/UDS/systemd and IR/KH Node-signed runtime were **not tested**.
+The standalone harness has no grant issuer, production credentials or
+FRP client and returned `NO_GRANT`; this is **not evidence that a
+deployed approval server cannot grant**. Do not mark the isolated
+physical-lab acceptance table below PASS on the strength of this smoke
+test, and do not permit production rollout or fourth-tunnel publication.
+
 ## Acceptance record — explicitly pending
 
 | Check | Source CI status | Physical/browser status |
