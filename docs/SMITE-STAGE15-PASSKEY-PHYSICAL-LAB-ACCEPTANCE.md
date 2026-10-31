@@ -74,6 +74,61 @@ For a later *separately approved* physical test on the disposable host:
    installed on IR/KH/Grandoptical and no live broker grants/routes
    or Node restart occurred. Preserve sanitized outcome only.
 
+## Disposable standalone browser test harness (source-only preview)
+
+A separate **test-only** implementation exists in
+`tests/labs/stage15-passkey-https-lab.py`, with a small HTML/JS browser
+front end beside it. It uses the pinned `fido2==2.0.0` server verifier,
+performs real WebAuthn `register_begin/register_complete` and
+`authenticate_begin/authenticate_complete` calls, requires UV, consumes
+short-lived challenges before verification, and stores at most two test
+credential public keys **only in process memory**. It exposes test
+counters and `LAB_AUTHENTICATED_NO_GRANT`, **not** any TrustedGrant.
+
+The standalone process cannot speak to Smite Panel, IR/KH Node, FRP,
+Broker or Nginx: it has no such imports/config/credentials/paths, no
+persistent DB, and no outbound network calls. It serves only
+`127.0.0.1:443` over HTTPS, with exact WebAuthn Origin
+`https://passkey-lab.test` and Host admission. It requires explicit
+`--isolated-lab`, a **separately generated** test-only certificate and
+private key, and `I_CONFIRM_DISPOSABLE_OFFLINE_LAB`. Known production
+hostnames are rejected. A confirmation string cannot prove isolation;
+verify the actual disposable VM network and filesystems yourself first.
+Never run the harness on IR/KH/Grandoptical or on a host with access
+to their data, secrets or network.
+
+After the operator separately provisions a disposable *offline* VM and
+its locally trusted test-only TLS certificate/hostname, the generic
+launch form **on the disposable VM ONLY** is:
+
+```text
+python3 tests/labs/stage15-passkey-https-lab.py --isolated-lab \
+  /absolute/path/to/LAB_ONLY_certificate.pem \
+  /absolute/path/to/LAB_ONLY_privatekey.pem \
+  I_CONFIRM_DISPOSABLE_OFFLINE_LAB
+```
+
+This is **not** a command to run now on IR or KH. Binding privileged
+port 443 may require separate operator-selected VM permission; do not
+change production Nginx, firewall or systemd to make it work. The
+test-only hostname must resolve to loopback solely on the disposable
+host, and the browser must trust the disposable CA **without a TLS
+warning bypass**. Do not use an existing production LE certificate.
+Open `https://passkey-lab.test` in the disposable browser, register
+two separate physical authenticators, and authenticate with each.
+The credential public keys exist only in lab RAM but a newly created
+test RP credential can remain in the authenticator until the operator
+manually deletes it. Never put any real secret in the test harness.
+
+CI tests only mock the FIDO2 cryptography and issue local ephemeral-port
+HTTP requests to inspect Origin, Host, cookie, CSRF and replay denial.
+A passing CI **does not establish** physical verification, local TLS
+trust, hardware independence, or isolation of the real VM. When
+`fido2==2.0.0` or the browser lacks required WebAuthn methods, the
+manual lab must HOLD; never replace production proof with the fake.
+This harness does not implement the production root ticket / approval
+UI and must not be used to evaluate a live Passkey enrollment release.
+
 ## Acceptance record — explicitly pending
 
 | Check | Source CI status | Physical/browser status |
