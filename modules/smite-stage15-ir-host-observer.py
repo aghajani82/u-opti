@@ -170,7 +170,7 @@ def read_registry(path=REGISTRY):
         raise ObserverHold("IR_REGISTRY_UNAVAILABLE") from exc
 
 
-def collect_ir(*, node_id, runner=command, proc_root=Path("/proc"),
+def collect_ir(*, node_id, port, runner=command, proc_root=Path("/proc"),
                registry_path=REGISTRY, require_host=True):
     """Return non-secret unsignable facts after fixed-source observations.
 
@@ -183,6 +183,10 @@ def collect_ir(*, node_id, runner=command, proc_root=Path("/proc"),
              "IR_ROOT_ONLY")
     need(type(node_id) is str and bool(IDENT.fullmatch(node_id)),
          "IR_UNPINNED_NODE_ID")
+    need(type(port) is int and port in PORTS and port != 7000,
+         "IR_UNAPPROVED_PROXY_PORT")
+    need(not require_host or registry_path == REGISTRY,
+         "IR_REGISTRY_PATH_UNTRUSTED")
     start = time.monotonic()
     node_container = inspect_node(runner)
     proc = processes(runner("docker","top","smite-node","-eo","pid,comm"))
@@ -201,7 +205,7 @@ def collect_ir(*, node_id, runner=command, proc_root=Path("/proc"),
          "IR_NODE_CONTAINER_REPLACED")
     need(time.monotonic()-start <= 5, "IR_OBSERVATION_STALE")
     return {"node":node_id, "tunnel_id":owner,
-            "control_port":7000, "proxy_port":45121,
+            "control_port":7000, "proxy_port":port,
             "owner_pid":pid, "owner_start_ticks":tick,
             "node_container_id":node_container,
             "registry_sha256":hashlib.sha256(blob).hexdigest(),
