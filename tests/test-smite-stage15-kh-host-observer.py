@@ -63,7 +63,7 @@ class KHObserverTests(unittest.TestCase):
             db.execute("DELETE FROM inbounds")
             db.executemany("INSERT INTO inbounds VALUES(?,?,?,?,?)",self.rows)
 
-    def run(self,*argv):
+    def mock_runner(self,*argv):
         if argv==("docker","inspect","smite-node"):
             return json.dumps([self.node])
         if argv==("docker","inspect","3xui-01"):
@@ -79,7 +79,7 @@ class KHObserverTests(unittest.TestCase):
     def collect(self,**kwargs):
         return m.collect_kh(node_id="node-kh-0001",port=38658,
                             path="/38658/shop",db_path=self.db,
-                            proc_root=self.proc,runner=self.run,
+                            proc_root=self.proc,runner=self.mock_runner,
                             require_host=False,**kwargs)
 
     def test_reads_live_sqlite_and_xray_and_redacts_credentials(self):
@@ -165,7 +165,7 @@ class KHObserverTests(unittest.TestCase):
                  patch.object(m.socket,"gethostname",return_value="grandoptical"):
                 m.collect_kh(node_id="node-kh-0001",port=38658,
                              path="/38658/shop",db_path=self.db,
-                             runner=self.run,proc_root=self.proc)
+                             runner=self.mock_runner,proc_root=self.proc)
 
     def test_source_has_no_signing_grant_or_service_entrypoint(self):
         source=PATH.read_text()
