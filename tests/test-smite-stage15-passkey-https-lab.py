@@ -58,6 +58,22 @@ class LabTests(unittest.TestCase):
         self.lab=lab.LabState()
         self.lab.server=FakeFido2()
 
+    def test_pinned_real_fido2_registration_options_are_browser_json(self):
+        # No hardware is involved, but unlike the mock tests this invokes
+        # the actual installed fido2==2.0.0 library's register_begin and
+        # JSON serialization used by the browser.
+        real=lab.LabState()
+        challenge=real.start("register")
+        self.assertEqual(len(challenge["ceremony"]),32)
+        options=challenge["options"]["publicKey"]
+        self.assertTrue(options["challenge"])
+        self.assertEqual(options["rp"]["id"],"passkey-lab.test")
+        self.assertTrue(options["user"]["id"])
+        self.assertEqual(
+            options["authenticatorSelection"]["userVerification"],"required")
+        self.assertEqual(real.status()["registered_credentials"],0)
+        self.assertEqual(real.status()["grant_writer"],"ABSENT")
+
     def test_real_fido2_mock_register_two_and_verify_no_grant(self):
         for _ in range(2):
             p=self.lab.start("register")
