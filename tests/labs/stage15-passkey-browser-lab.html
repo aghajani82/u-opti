@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Standalone Passkey Lab — NO LIVE GRANTS</title>
+<script src="/lab.js" defer></script>
+</head>
+<body>
+<h1>Isolated HTTPS Passkey Browser Lab</h1>
+<p><strong>Disposable test machine only. No IR/KH, no Smite Panel, no broker, no route publication.</strong></p>
+<p>This lab holds credentials in server process memory only. Restarting it loses
+the lab registration state. A successful sign-in is NOT an approval to publish a tunnel.</p>
+<p>Use two physically separate authenticators (or separately audited independent
+devices); two different credential IDs alone cannot prove independent hardware.</p>
+<section>
+<h2>Browser compatibility</h2>
+<p id="readiness">Checking secure context and WebAuthn API…</p>
+</section>
+<section>
+<h2>Register two independent test Passkeys</h2>
+<button id="primary" type="button">1. Register primary authenticator</button>
+<button id="backup" type="button">2. Register backup authenticator</button>
+</section>
+<section>
+<h2>Verify authentication</h2>
+<button id="signin" type="button">3. Authenticate using either registered Passkey</button>
+</section>
+<section>
+<h2>Lab status (no secrets)</h2>
+<p id="status" role="status" aria-live="polite">Not started</p>
+<button id="refresh" type="button">Refresh test counters</button>
+</section>
+<p>Security key prompts are supplied by your browser/OS. Never copy credentials,
+PINs or challenge JSON into chat/issues. Stop this disposable service after testing.</p>
+</body>
+</html>
