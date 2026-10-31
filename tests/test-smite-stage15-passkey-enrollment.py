@@ -106,8 +106,13 @@ class EnrollmentTests(unittest.TestCase):
         hashes=[]
         for name in names:
             token=self.store.ticket(root_tty=True)
-            beginning=self.store.enroll_begin(
-                token,origin="https://review.example.invalid")
+            # Existing simulated bytes are intentionally NOT valid
+            # AttestedCredentialData. Mock only that parsing boundary;
+            # real hardware FIDO2 parsing still needs a separate E2E test.
+            with patch("fido2.webauthn.AttestedCredentialData",
+                       side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))):
+                beginning=self.store.enroll_begin(
+                    token,origin="https://review.example.invalid")
             with patch.object(Fido2Server,"register_complete",
                               return_value=FakeAuthentication(name)):
                 self.store.enroll_complete(
@@ -156,8 +161,10 @@ class EnrollmentTests(unittest.TestCase):
             self.store.enroll_complete(first["ceremony"],{"id":"offline"},
                 primary,origin="https://review.example.invalid")
         backup=self.store.ticket(root_tty=True)
-        second=self.store.enroll_begin(backup,
-            origin="https://review.example.invalid")
+        with patch("fido2.webauthn.AttestedCredentialData",
+                   side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))):
+            second=self.store.enroll_begin(backup,
+                origin="https://review.example.invalid")
         with patch.object(Fido2Server,"register_complete",return_value=NotVerified()):
             with self.assertRaises(en.EnrollmentHold):
                 self.store.enroll_complete(second["ceremony"],{"id":"offline"},
