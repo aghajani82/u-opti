@@ -32,7 +32,7 @@ class DeployContractTests(unittest.TestCase):
         # IR public 443 is already owned by nginx stream ssl_preread.
         # Reject accidental HTTP vhosts on the same public listener.
         self.assertIn("listen 127.0.0.1:REVIEW_ONLY_TLS_LOOPBACK_PORT ssl;",vhost)
-        self.assertNotRegex(vhost,r"(?m)^\\s*listen\\s+(?:443|0\\.0\\.0\\.0:443|\\[::\\]:443)\\s+ssl\\s*;")
+        self.assertNotRegex(vhost,r"(?m)^\s*listen\s+(?:443|0\.0\.0\.0:443|\[::\]:443)\s+ssl\s*;")
         self.assertNotIn("listen 443 ssl;",vhost)
         self.assertNotIn("stream {",vhost)
         self.assertIn("REVIEW_HOSTNAME_REQUIRES_OPERATOR_APPROVAL",vhost)
