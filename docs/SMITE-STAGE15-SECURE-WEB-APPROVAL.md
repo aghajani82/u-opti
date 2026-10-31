@@ -201,6 +201,22 @@ shutoff and genuine hardware enrollment are not exercised here. Two
 distinct credential IDs also do **not** prove two physically independent
 authenticators; that must be checked in the live browser acceptance test.
 
+## Physical browser Passkey lab admission (offline-only preparation)
+
+The separate acceptance procedure in
+`docs/SMITE-STAGE15-PASSKEY-PHYSICAL-LAB-ACCEPTANCE.md` pins a disposable
+`https://passkey-lab.test` origin, trusted test-only TLS, two distinct
+physical authenticators with real UV, recovery with the spare, and an
+entirely synthetic no-grant evidence boundary. The **static** manifest
+`docs/examples/stage15-passkey-browser-lab.json` and
+`modules/smite-stage15-passkey-lab-gate.py` are CI-reviewed data only.
+Their test suite fails closed on production hostnames, non-loopback
+binds, production secrets/DB, real IR/KH access, broker access, grant
+writer, or publication enabled. It does not create an HTTPS listener,
+certificate, credential, grant or published route. Real browser/hardware
+evidence remains **NOT RUN** and requires a separate isolated setup.
+The dedicated approval domain and all current IR/KH routes remain unchanged.
+
 ## Rollback and interruption
 
 - Before deployment: abandon draft PR branches. No host rollback necessary.
