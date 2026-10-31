@@ -129,6 +129,28 @@ manual lab must HOLD; never replace production proof with the fake.
 This harness does not implement the production root ticket / approval
 UI and must not be used to evaluate a live Passkey enrollment release.
 
+## Third-party browser/phone WebAuthn smoke test (operator-reported, 2026-10-31)
+
+The operator tested **Yandex 26 on Windows 10** at the separate public
+WebAuthn demonstration site `webauthn.io`. Browser feature detection
+reported hybrid cross-device transports available, while the local
+user-verifying platform authenticator was unavailable. The operator
+reported that WebAuthn registration and subsequent authentication
+both succeeded; a QR code appeared, the Android phone scanned it,
+and a phone fingerprint-or-PIN verification was completed before the
+demo showed its successful logged-in screen. This is useful **manual
+evidence that this browser/phone combination can complete a cross-device
+WebAuthn flow**.
+
+The browser/phone test did **not** involve the project's own HTTPS lab,
+approval server, Root TTY tickets, two independent hardware credentials,
+the backup/recovery flow, authentic Node-signed evidence, IR/KH, grants
+or route publication. No raw authenticator assertions were captured in
+the project and no claim is made that browser-reported feature support
+alone proves signed cryptographic verification. Keep all project-specific
+physical acceptance rows below marked **NOT RUN/BLOCKED** until separately
+executed and observed in the isolated lab.
+
 ## Acceptance record — explicitly pending
 
 | Check | Source CI status | Physical/browser status |
