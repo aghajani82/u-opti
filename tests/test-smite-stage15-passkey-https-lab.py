@@ -199,5 +199,168 @@ class LabTests(unittest.TestCase):
         self.assertNotIn('("0.0.0.0",PORT)',raw)
 
 
+# The operator completed a real Android/QR signature verification on the
+# separate localhost tool. These synthetic *negative* tests protect its
+# state machine and HTTP admission; they are NOT real authenticator tests.
+LOCAL_FILE=ROOT/"tests/labs/passkey_local_lab.py"
+LOCAL_SPEC=importlib.util.spec_from_file_location("smite_localhost_passkey_lab",LOCAL_FILE)
+local=importlib.util.module_from_spec(LOCAL_SPEC)
+LOCAL_SPEC.loader.exec_module(local)
+
+
+class FakeLocalVerifier:
+    """Only models verifier accept/reject. Never claim crypto coverage."""
+    class Credential:
+        credential_id=b"known-id"
+
+    def register_begin(self,user,credentials,resident_key_requirement,user_verification):
+        assert resident_key_requirement=="required" and user_verification=="required"
+        assert user.display_name.startswith("STAGE15-")
+        return {"publicKey":{"challenge":"mock-registration"}},{"kind":"register"}
+
+    def register_complete(self,state,response):
+        assert state=={"kind":"register"}
+        if response.get("proof")!="UV":
+            raise ValueError("Invalid signature.")
+        class Verified:
+            credential_data=FakeLocalVerifier.Credential()
+            def is_user_verified(self): return True
+        return Verified()
+
+    def authenticate_begin(self,user_verification):
+        assert user_verification=="required"
+        return {"publicKey":{"challenge":"mock-login"}},{"kind":"authenticate"}
+
+    def authenticate_complete(self,state,credentials,response):
+        assert state=={"kind":"authenticate"}
+        if response.get("proof")!="SIGNED_UV":
+            raise ValueError("Invalid signature.")
+        for cred in credentials:
+            if cred.credential_id==response.get("credential_id"):
+                return cred
+        raise ValueError("Unknown credential ID.")
+
+
+class LocalhostSecurityTests(unittest.TestCase):
+    def setUp(self):
+        self.state=local.State()
+        self.state.server=FakeLocalVerifier()
+
+    def register(self):
+        start=self.state.start("register")
+        payload={"ceremony":start["ceremony"],"response":{"proof":"UV"}}
+        self.assertEqual(self.state.complete("register",payload)["status"],
+                         "LOCAL_REGISTER_PASS")
+        return payload
+
+    def test_real_fido2_begin_options_enforce_uv_resident_key_and_exact_rp(self):
+        real=local.State()
+        options=real.start("register")["options"]["publicKey"]
+        self.assertEqual(options["rp"]["id"],"localhost")
+        self.assertEqual(options["authenticatorSelection"]["userVerification"],"required")
+        self.assertEqual(options["authenticatorSelection"]["residentKey"],"required")
+        self.assertEqual(real.authenticated,0)
+
+    def test_registration_and_authentication_are_one_time(self):
+        registration=self.register()
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("register",registration)
+        start=self.state.start("authenticate")
+        payload={"ceremony":start["ceremony"],
+                 "response":{"proof":"SIGNED_UV","credential_id":b"known-id"}}
+        self.assertEqual(self.state.complete("authenticate",payload)["status"],
+                         "LOCAL_AUTHENTICATION_PASS_NO_GRANT")
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("authenticate",payload)
+        self.assertEqual(self.state.authenticated,1)
+
+    def test_unknown_credential_and_invalid_signature_fail_closed(self):
+        self.register()
+        start=self.state.start("authenticate")
+        unknown={"ceremony":start["ceremony"],
+                 "response":{"proof":"SIGNED_UV","credential_id":b"stale-id"}}
+        with self.assertRaisesRegex(ValueError,"Unknown credential ID"):
+            self.state.complete("authenticate",unknown)
+        self.assertEqual(self.state.authenticated,0)
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("authenticate",unknown)
+        start=self.state.start("authenticate")
+        invalid={"ceremony":start["ceremony"],
+                 "response":{"proof":"FORGED","credential_id":b"known-id"}}
+        with self.assertRaisesRegex(ValueError,"Invalid signature"):
+            self.state.complete("authenticate",invalid)
+        invalid["response"]["proof"]="SIGNED_UV"
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("authenticate",invalid)
+        self.assertEqual(self.state.authenticated,0)
+        self.assertEqual(local.public_rejection_reason(
+            ValueError("Unknown credential ID.")),"UNKNOWN_CREDENTIAL_ID")
+        self.assertEqual(local.public_rejection_reason(
+            ValueError("untrusted secret data")),"VERIFICATION_REJECTED")
+
+    def test_expired_and_superseded_challenges_are_rejected(self):
+        self.register()
+        start=self.state.start("authenticate")
+        kind, saved, _=self.state.pending[start["ceremony"]]
+        self.state.pending[start["ceremony"]]=(kind,saved,time.monotonic()-2)
+        reply={"ceremony":start["ceremony"],
+               "response":{"proof":"SIGNED_UV","credential_id":b"known-id"}}
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("authenticate",reply)
+        first=self.state.start("authenticate")
+        newer=self.state.start("authenticate")
+        reply["ceremony"]=first["ceremony"]
+        with self.assertRaisesRegex(ValueError,"CHALLENGE_EXPIRED_OR_REPLAY"):
+            self.state.complete("authenticate",reply)
+        reply["ceremony"]=newer["ceremony"]
+        self.assertEqual(self.state.complete("authenticate",reply)["status"],
+                         "LOCAL_AUTHENTICATION_PASS_NO_GRANT")
+
+    def test_http_rejects_forged_origin_cookie_proxy_and_replay(self):
+        server=local.ThreadingHTTPServer(("127.0.0.1",0),local.Handler)
+        server.state=self.state
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        self.addCleanup(worker.join,2)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=2)
+        self.addCleanup(conn.close)
+        def req(path, data, headers):
+            hdr={"Host":"localhost:8765","Content-Type":"application/json",**headers}
+            conn.request("POST",path,json.dumps(data),hdr)
+            resp=conn.getresponse()
+            return resp.status,json.loads(resp.read())
+        good={"Origin":"http://localhost:8765","X-Lab-CSRF":self.state.csrf}
+        for attack in ({"Origin":"https://approve.kolbe1.ir"},
+                       {"X-Lab-CSRF":"invalid"},
+                       {"Cookie":"session=forged"},
+                       {"Authorization":"Bearer forged"},
+                       {"X-Forwarded-Host":"localhost:8765"},
+                       {"Host":"ir.kolbe1.ir"},
+                       {"Content-Type":"text/plain"}):
+            code,_=req("/api/register/start",{},dict(good,**attack))
+            with self.subTest(attack=attack):
+                self.assertEqual(code,409)
+        code,started=req("/api/register/start",{},good)
+        self.assertEqual(code,200)
+        response={"ceremony":started["ceremony"],"response":{"proof":"UV"}}
+        code,done=req("/api/register/complete",response,good)
+        self.assertEqual(code,200)
+        self.assertEqual(done["status"],"LOCAL_REGISTER_PASS")
+        code,denied=req("/api/register/complete",response,good)
+        self.assertEqual(code,409)
+        self.assertEqual(denied["reason"],"CHALLENGE_EXPIRED_OR_REPLAY")
+        self.assertEqual(self.state.authenticated,0)
+
+    def test_localhost_source_has_no_grant_or_production_service_calls(self):
+        raw=LOCAL_FILE.read_text(encoding="utf-8")
+        for forbidden in ("subprocess.run(", "requests.post(", "httpx.post(",
+                          "install_grant(", "docker restart", "nginx -s reload"):
+            self.assertNotIn(forbidden,raw)
+        self.assertIn('HOST = "127.0.0.1"',raw)
+        self.assertIn('verify_origin=lambda origin: origin==ORIGIN',raw)
+
+
 if __name__=="__main__":
     unittest.main()
