@@ -101,6 +101,45 @@ class RegistryLeaseCompatibility(unittest.TestCase):
                                     "FRPS_OWNER_SPEC_MISMATCH"):
             self.assert_matched()
 
+    def test_three_existing_routes_direct_plus_two_shared_leases(self):
+        # The real field trial has a direct owner route at 45121, plus
+        # separate KH child leases for 38658 and 28897. No child registry
+        # entry is required on the IR Node. This is a synthetic DB only.
+        child2="child-blog-002"
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO tunnels VALUES (?,?,?,?,?,?,?)",
+                       (child2,"frp","active","node-ir-0001",
+                        "node-ir-0001","node-kh-0001",
+                        json.dumps({"shared_frps_owner":self.owner})))
+            db.execute("INSERT INTO frp_proxy_leases VALUES (?,?,?,?,?)",
+                       (child2,self.owner,"node-ir-0001","node-kh-0001",28897))
+        self.assert_matched()  # 38658/shop shared
+        blog={**self.binding,"child":child2,"lease":child2,
+              "port":28897,"path":"/28897/blog"}
+        self.assertEqual(leases._lease(blog,self.db)["role"],"shared")
+        direct={**self.binding,"child":self.owner,"lease":self.owner,
+                "port":45121,"path":"/45121/www"}
+        self.assertEqual(leases._lease(direct,self.db)["role"],"direct")
+        self.assertEqual(ir.registry_owner(json.dumps(self.registry).encode(),
+                                          expected_owner=self.owner),self.owner)
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE frp_proxy_leases SET owner_tunnel_id=?"
+                       " WHERE tunnel_id=?",("stale-owner",child2))
+        with self.assertRaisesRegex(leases.LiveEvidenceHold,"SHARED_LEASE_CONFLICT"):
+            leases._lease(blog,self.db)
+        # The independent first child remains valid on that committed view.
+        self.assert_matched()
+
+    def test_direct_route_requires_no_proxy_lease_for_45121(self):
+        direct={**self.binding,"child":self.owner,"lease":self.owner,
+                "port":45121,"path":"/45121/www"}
+        self.assertEqual(leases._lease(direct,self.db)["role"],"direct")
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO frp_proxy_leases VALUES (?,?,?,?,?)",
+                       ("rogue",self.owner,"node-ir-0001","node-kh-0001",45121))
+        with self.assertRaisesRegex(leases.LiveEvidenceHold,"DIRECT_LEASE_CONFLICT"):
+            leases._lease(direct,self.db)
+
     def test_child_lease_is_in_panel_not_required_in_ir_registry(self):
         # Actual AdapterManager persists its local config. A KH-owned child
         # need not exist as a key in the IR Node's tunnels.json.
