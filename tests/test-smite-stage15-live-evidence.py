@@ -24,7 +24,9 @@ class LeaseTests(unittest.TestCase):
             iran_node_id TEXT,foreign_node_id TEXT,spec TEXT);
             CREATE TABLE frp_proxy_leases(
             tunnel_id TEXT,owner_tunnel_id TEXT,iran_node_id TEXT,
-            foreign_node_id TEXT,remote_port INTEGER);""")
+            foreign_node_id TEXT,remote_port INTEGER);
+            CREATE UNIQUE INDEX uq_ir_port ON frp_proxy_leases(
+                iran_node_id,remote_port);""")
         self.conn=conn
         self.addCleanup(conn.close)
         self.binding={"ir_node":"node-ir-0001","kh_node":"node-kh-0001",
@@ -128,6 +130,28 @@ class LeaseTests(unittest.TestCase):
                 db.execute("CREATE TABLE tunnels(id TEXT)")
             with self.assertRaises(m.LiveEvidenceHold):
                 m._lease(self.binding,missing)
+
+    def test_unique_lease_index_is_required(self):
+        self.assertEqual(m._lease(self.binding,self.db)["role"],"shared")
+        self.conn.execute("DROP INDEX uq_ir_port")
+        self.conn.commit()
+        with self.assertRaisesRegex(m.LiveEvidenceHold,"LEASE_UNIQUE_INDEX_MISSING"):
+            m._lease(self.binding,self.db)
+
+    def test_partial_unique_lease_index_does_not_suffice(self):
+        self.conn.execute("DROP INDEX uq_ir_port")
+        self.conn.execute("CREATE UNIQUE INDEX uq_partial ON frp_proxy_leases"
+                          "(iran_node_id,remote_port) WHERE remote_port>0")
+        self.conn.commit()
+        with self.assertRaisesRegex(m.LiveEvidenceHold,"LEASE_UNIQUE_INDEX_MISSING"):
+            m._lease(self.binding,self.db)
+
+    def test_wrong_unique_index_columns_do_not_suffice(self):
+        self.conn.execute("DROP INDEX uq_ir_port")
+        self.conn.execute("CREATE UNIQUE INDEX uq_remote_only ON frp_proxy_leases(remote_port)")
+        self.conn.commit()
+        with self.assertRaisesRegex(m.LiveEvidenceHold,"LEASE_UNIQUE_INDEX_MISSING"):
+            m._lease(self.binding,self.db)
 
     def test_current_committed_lease_change_is_seen_not_stale(self):
         self.assertEqual(m._lease(self.binding,self.db)["state"],"active")
