@@ -139,6 +139,8 @@ class EnrollmentTests(unittest.TestCase):
                                   (hashes[1],)).fetchone(), (0,))
         with self.assertRaises(en.EnrollmentHold):
             reopened.revoke(hashes[0],root_tty=True)
+        with self.assertRaisesRegex(en.EnrollmentHold,"LAST_PASSKEY_RECOVERY_REQUIRED"):
+            reopened.revoke(hashes[1],root_tty=True)
 
     def test_failed_second_registration_does_not_consume_existing_spare(self):
         """Invalid UV leaves prior credential intact and does not grant."""
@@ -197,14 +199,64 @@ class EnrollmentTests(unittest.TestCase):
                 origin="https://review.example.invalid",now=now+200)
         self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0],0)
 
-    def test_revocation_requires_local_root_and_is_durable(self):
-        h="b"*64
+    def test_revocation_requires_root_tty_and_a_distinct_backup(self):
+        primary="b"*64
+        backup="c"*64
         self.store.conn.execute("INSERT INTO credentials VALUES(?,?,?, ?,?,0)",
-                                (h,b"opaque-credential",0,"spare",1000))
-        with self.assertRaises(en.EnrollmentHold):self.store.revoke(h,root_tty=False)
-        self.store.revoke(h,root_tty=True)
-        self.assertEqual(self.store.encoded(),[])
-        with self.assertRaises(en.EnrollmentHold):self.store.revoke(h,root_tty=True)
+                                (primary,b"opaque-primary",0,"primary",1000))
+        with self.assertRaisesRegex(en.EnrollmentHold,"REVOCATION_REQUIRES_ROOT_TTY"):
+            self.store.revoke(primary,root_tty=False)
+        with self.assertRaisesRegex(en.EnrollmentHold,"LAST_PASSKEY_RECOVERY_REQUIRED"):
+            self.store.revoke(primary,root_tty=True)
+        self.assertEqual(len(self.store.encoded()),1)
+        self.assertEqual(
+            self.store.conn.execute("SELECT COUNT(*) FROM audit WHERE event='PASSKEY_REVOKED'").fetchone()[0],
+            0,
+        )
+        self.store.conn.execute("INSERT INTO credentials VALUES(?,?,?, ?,?,0)",
+                                (backup,b"opaque-backup",0,"backup",1000))
+        self.store.revoke(primary,root_tty=True)
+        self.assertEqual(len(self.store.encoded()),1)
+        with self.assertRaisesRegex(en.EnrollmentHold,"LAST_PASSKEY_RECOVERY_REQUIRED"):
+            self.store.revoke(backup,root_tty=True)
+        with self.assertRaisesRegex(en.EnrollmentHold,"CREDENTIAL_NOT_ACTIVE"):
+            self.store.revoke(primary,root_tty=True)
+        self.assertEqual(
+            self.store.conn.execute("SELECT COUNT(*) FROM audit WHERE event='PASSKEY_REVOKED'").fetchone()[0],
+            1,
+        )
+
+    def test_last_passkey_guard_survives_database_reopen(self):
+        h="d"*64
+        self.store.conn.execute("INSERT INTO credentials VALUES(?,?,?, ?,?,0)",
+                                (h,b"opaque-final",0,"last",1000))
+        self.store.close()
+        reopened=en.CredentialStore(self.db,root_check=False)
+        self.addCleanup(reopened.close)
+        with self.assertRaisesRegex(en.EnrollmentHold,"LAST_PASSKEY_RECOVERY_REQUIRED"):
+            reopened.revoke(h,root_tty=True)
+        self.assertEqual(reopened.conn.execute(
+            "SELECT revoked FROM credentials WHERE id_hash=?",(h,)).fetchone(),(0,))
+
+    def test_pending_recovery_ticket_is_not_an_enrolled_backup(self):
+        h="e"*64
+        self.store.conn.execute("INSERT INTO credentials VALUES(?,?,?, ?,?,0)",
+                                (h,b"opaque-primary",0,"primary",1000))
+        unused_ticket=self.store.ticket(root_tty=True)
+        self.assertTrue(unused_ticket)
+        with self.assertRaisesRegex(en.EnrollmentHold,"LAST_PASSKEY_RECOVERY_REQUIRED"):
+            self.store.revoke(h,root_tty=True)
+        self.assertEqual(len(self.store.encoded()),1)
+
+    def test_unknown_or_already_revoked_passkey_stays_blocked(self):
+        h="f"*64
+        self.store.conn.execute("INSERT INTO credentials VALUES(?,?,?, ?,?,1)",
+                                (h,b"opaque-revoked",0,"revoked",1000))
+        with self.assertRaisesRegex(en.EnrollmentHold,"CREDENTIAL_NOT_ACTIVE"):
+            self.store.revoke(h,root_tty=True)
+        with self.assertRaisesRegex(en.EnrollmentHold,"CREDENTIAL_NOT_ACTIVE"):
+            self.store.revoke("0"*64,root_tty=True)
+
 
 if __name__=="__main__":
     unittest.main()
