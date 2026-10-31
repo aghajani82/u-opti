@@ -110,7 +110,10 @@ class EnrollmentTests(unittest.TestCase):
             # AttestedCredentialData. Mock only that parsing boundary;
             # real hardware FIDO2 parsing still needs a separate E2E test.
             with patch("fido2.webauthn.AttestedCredentialData",
-                       side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))):
+                       side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))), \
+                 patch.object(Fido2Server,"register_begin",
+                       return_value=({"publicKey":{"challenge":"offline-only"}},
+                                     {"challenge":"offline-only"})):
                 beginning=self.store.enroll_begin(
                     token,origin="https://review.example.invalid")
             with patch.object(Fido2Server,"register_complete",
@@ -162,7 +165,10 @@ class EnrollmentTests(unittest.TestCase):
                 primary,origin="https://review.example.invalid")
         backup=self.store.ticket(root_tty=True)
         with patch("fido2.webauthn.AttestedCredentialData",
-                   side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))):
+                   side_effect=lambda raw: SimpleNamespace(credential_id=bytes(raw))), \
+             patch.object(Fido2Server,"register_begin",
+                   return_value=({"publicKey":{"challenge":"offline-only"}},
+                                 {"challenge":"offline-only"})):
             second=self.store.enroll_begin(backup,
                 origin="https://review.example.invalid")
         with patch.object(Fido2Server,"register_complete",return_value=NotVerified()):
