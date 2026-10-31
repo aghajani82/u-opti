@@ -33,8 +33,8 @@ class IRObserverTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root=Path(tmp.name)
         self.file=self.root/"tunnels.json"
-        self.doc={"tunnels": {ir.OWNER_ID: {
-            "core":"frp", "spec":{"mode":"server","bind_port":7000}}}}
+        self.doc={ir.OWNER_ID: {
+            "core":"frp", "spec":{"mode":"server","bind_port":7000}}}
         self.write_registry()
         proc=self.root/"proc"/"541"
         proc.mkdir(parents=True)
@@ -83,9 +83,16 @@ class IRObserverTests(unittest.TestCase):
         self.assertEqual(self.collect(port=45121)["proxy_port"],45121)
 
     def test_unknown_registry_layout_or_wrong_owner_holds(self):
-        for doc in ({"owners":{}},{"tunnels":[]},
-                    {"tunnels":{"other":{"core":"frp","spec":{"mode":"server","bind_port":7000}}}},
-                    {"tunnels":{ir.OWNER_ID:{"core":"frp","spec":{"mode":"client","bind_port":7000}}}}):
+        for doc in (
+            {"owners": {}},
+            {"tunnels": {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000}}}},
+            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"client","bind_port":7000}}},
+            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7010}}},
+            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000}},
+             "second-owner": {"core":"frp", "spec":{"mode":"server","bind_port":7000}}},
+            {ir.OWNER_ID: {"core":"frp", "spec":{"mode":"server","bind_port":7000},
+                            "status":"active"}},
+        ):
             self.doc=doc
             self.write_registry()
             with self.subTest(doc=doc),self.assertRaises(ir.ObserverHold):
