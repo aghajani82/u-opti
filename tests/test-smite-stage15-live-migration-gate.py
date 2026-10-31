@@ -61,8 +61,17 @@ class GateTests(unittest.TestCase):
             gate.listener_pids(sockets +
                 '\nLISTEN 0 4096 127.0.0.1:9999 0.0.0.0:* users:(("frps",pid=131,fd=4))',
                 gate.OWNER_PORTS, "frps")
-        with self.assertRaisesRegex(gate.Hold, "OWNER_SOCKET_DRIFT"):
+        with self.assertRaisesRegex(gate.Hold, "UNEXPECTED_OWNER_LISTENER"):
             gate.listener_pids(sockets.replace('127.0.0.1:38658', '127.0.0.1:38659'),
+                               gate.OWNER_PORTS, "frps")
+
+    def test_public_frps_listener_is_rejected(self):
+        sockets = "\n".join(
+            f'LISTEN 0 4096 127.0.0.1:{port} 0.0.0.0:* users:(("frps",pid=131,fd=3))'
+            for port in gate.OWNER_PORTS
+        )
+        with self.assertRaisesRegex(gate.Hold, "PUBLIC_OR_NON_LOOPBACK_FRPS"):
+            gate.listener_pids(sockets.replace("127.0.0.1:7000", "0.0.0.0:7000"),
                                gate.OWNER_PORTS, "frps")
 
     def test_ir_audit_is_read_only_and_blocks_preview(self):
