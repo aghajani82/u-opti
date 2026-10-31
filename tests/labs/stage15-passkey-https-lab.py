@@ -102,7 +102,13 @@ class LabState:
             # Starting a new one invalidates the prior request.
             self.pending.clear()
             self.pending[challenge]=(kind,state,time.monotonic()+MAX_AGE)
-            return {"ceremony":challenge,"options":json.loads(opts.to_json())}
+            # python-fido2 2.0.0 credential options are Mapping-style,
+            # not guaranteed to expose .to_json(). The mock may provide
+            # .to_json() to keep old isolated test fixtures compatible.
+            data=dict(opts) if hasattr(opts,"keys") else json.loads(opts.to_json())
+            if type(data) is not dict or "publicKey" not in data:
+                raise LabHold("LAB_WEBAUTHN_OPTIONS_UNAVAILABLE")
+            return {"ceremony":challenge,"options":data}
 
     def complete(self,kind,ceremony,response):
         if (kind not in ("register","authenticate")
