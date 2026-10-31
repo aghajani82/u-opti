@@ -77,6 +77,11 @@ smite_stage15_frp_wizard() {
                     python3 -B "$dir/smite-stage15-live-migration-gate.py" audit || :
                 fi;;
             u|U)
+                if [[ -e /var/lib/u-opti/smite-stage15-frp-engine || -L /var/lib/u-opti/smite-stage15-frp-engine || \
+                      -e /var/lib/u-opti/smite-stage15-wss || -L /var/lib/u-opti/smite-stage15-wss ]]; then
+                    echo 'HOLD: Legacy image upgrade/rollback forbidden with existing FRP/WSS state.'
+                    continue
+                fi
                 archive="${SMITE_RC_BUNDLE_DIR:-}"
                 if [[ -z "$archive" ]]; then
                     echo 'Checking pinned FRP071 prerelease asset cache / downloading once...'
@@ -84,7 +89,13 @@ smite_stage15_frp_wizard() {
                     archive=/var/lib/u-opti/smite-stage15-frp071-images
                 fi
                 python3 -B "$dir/smite-stage15-upgrade.py" apply --images "$archive" || :;;
-            r|R) python3 -B "$dir/smite-stage15-upgrade.py" rollback || :;;
+            r|R)
+                if [[ -e /var/lib/u-opti/smite-stage15-frp-engine || -L /var/lib/u-opti/smite-stage15-frp-engine || \
+                      -e /var/lib/u-opti/smite-stage15-wss || -L /var/lib/u-opti/smite-stage15-wss ]]; then
+                    echo 'HOLD: Legacy image upgrade/rollback forbidden with existing FRP/WSS state.'
+                    continue
+                fi
+                python3 -B "$dir/smite-stage15-upgrade.py" rollback || :;;
             0) return;;
             *) echo 'Invalid choice';;
         esac
