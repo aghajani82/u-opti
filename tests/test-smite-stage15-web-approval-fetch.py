@@ -179,6 +179,18 @@ class FetchTests(unittest.TestCase):
         self.assertIn("UNSIGNED_PREVIEW_ACTIVATION=DENIED",
                       (HERE / "modules" / helper).read_text())
 
+    def test_legacy_upgrader_is_blocked_by_existing_frp_or_wss_state(self):
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertEqual(
+            wizard.count("HOLD: Legacy image upgrade/rollback forbidden"), 2
+        )
+        self.assertEqual(
+            wizard.count("-e /var/lib/u-opti/smite-stage15-frp-engine"), 2
+        )
+        self.assertEqual(
+            wizard.count("-e /var/lib/u-opti/smite-stage15-wss"), 2
+        )
+
     def test_cache_only_does_not_publish_runtime_changes(self):
         text = (HERE / "modules/smite-stage15-web-approval-fetch.py").read_text()
         self.assertNotIn("docker load", text.lower())
