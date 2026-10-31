@@ -178,6 +178,29 @@ clone that cannot submit a real Broker grant. Keep `approve.kolbe1.ir`
 unpublished and the production opt-in marker absent until the separate
 deployment admission and real IR/KH evidence gates pass.
 
+## Last-active-Passkey recovery guard (offline review, 2026-10-31)
+
+The Root TTY `--revoke` path now **HOLDs** with
+`LAST_PASSKEY_RECOVERY_REQUIRED` when revocation would leave zero active
+credentials. A pending enrollment ticket is **not** a backup. The guard
+counts active credentials inside the same immediate SQLite transaction
+as the revocation and audit entry; failure rolls back the entire operation.
+Synthetic CI checks cover one-key denial, two-key revocation, persistence
+after reopening the store, a pending recovery ticket, missing/already
+revoked credentials, and preservation of the last active key.
+
+**This is an accidental-lockout guard, not a compromise response.** If
+the **only** credential is lost or compromised, an operator must fail
+closed by taking the independently reviewed approval service out of
+service / disabling the explicit opt-in marker under an approved incident
+procedure; do not keep accepting a stolen credential because the
+revocation UI cannot proceed. Register and verify a different recovery
+Passkey via a root-console one-use ticket **before** revoking the
+compromised key; do not hand-edit the credentials DB. Production incident
+shutoff and genuine hardware enrollment are not exercised here. Two
+distinct credential IDs also do **not** prove two physically independent
+authenticators; that must be checked in the live browser acceptance test.
+
 ## Rollback and interruption
 
 - Before deployment: abandon draft PR branches. No host rollback necessary.
