@@ -45,6 +45,7 @@ small {color:#435371}
 "use strict";
 let csrf = null;
 let busy = false;
+let phase = "idle";
 const out=document.getElementById("result");
 const register=document.getElementById("register"), login=document.getElementById("login");
 async function post(path, obj){
@@ -62,22 +63,31 @@ async function run(kind){
  if(busy)return;
  busy=true; register.disabled=login.disabled=true;
  try {
+  phase="preflight";
   if(!window.isSecureContext || location.origin!=="http://localhost:8765") throw Error("ORIGIN_OR_SECURE_CONTEXT_HOLD");
   if(typeof PublicKeyCredential==="undefined" || !navigator.credentials || typeof PublicKeyCredential.parseCreationOptionsFromJSON!=="function" || typeof PublicKeyCredential.parseRequestOptionsFromJSON!=="function") throw Error("BROWSER_WEBAUTHN_API_HOLD");
+  phase="start";
   const start=await post("/api/"+kind+"/start",{});
   out.textContent="در انتظار انتخاب گوشی و تأیید اثر انگشت یا PIN...";
+  // python-fido2 wraps browser-ready creation/request fields in "publicKey".
+  // Browser parse*OptionsFromJSON expects only that INNER object, not the wrapper.
+  if (!start.options || typeof start.options.publicKey!=="object" || !start.options.publicKey)
+    throw Error("SERVER_WEBAUTHN_OPTIONS_HOLD");
+  phase="parse_options";
   const opts=kind==="register"
-    ? PublicKeyCredential.parseCreationOptionsFromJSON(start.options)
-    : PublicKeyCredential.parseRequestOptionsFromJSON(start.options);
+    ? PublicKeyCredential.parseCreationOptionsFromJSON(start.options.publicKey)
+    : PublicKeyCredential.parseRequestOptionsFromJSON(start.options.publicKey);
+  phase="device";
   const c=kind==="register"
     ? await navigator.credentials.create({publicKey:opts})
     : await navigator.credentials.get({publicKey:opts});
   if(!c || typeof c.toJSON!=="function") throw Error("AUTHENTICATOR_RESULT_HOLD");
+  phase="complete";
   const done=await post("/api/"+kind+"/complete",{ceremony:start.ceremony,response:c.toJSON()});
   out.textContent=done.status+" ✅\n"+await refresh();
  } catch(err) {
-  out.textContent="HOLD: "+(err && err.name ? err.name : "UnknownError")+"\n"+(err && /^TEST_HOLD|^LAB_OFFLINE|^BROWSER_|^ORIGIN_/.test(err.message||"") ? err.message : "عملیات تکمیل نشد؛ بدون تغییر روی سرورها.");
- } finally {busy=false;register.disabled=login.disabled=false;}
+  out.textContent="HOLD: "+(err && err.name ? err.name : "UnknownError")+" | STAGE="+phase+"\n"+(err && /^TEST_HOLD|^LAB_OFFLINE|^BROWSER_|^ORIGIN_|^SERVER_WEBAUTHN/.test(err.message||"") ? err.message : "عملیات تکمیل نشد؛ بدون تغییر روی سرورها.");
+ } finally {busy=false;phase="idle";register.disabled=login.disabled=false;}
 }
 register.onclick=()=>run("register");login.onclick=()=>run("authenticate");
 (async()=>{
