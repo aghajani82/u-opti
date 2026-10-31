@@ -65,7 +65,7 @@ async function refresh(){
  const r=await fetch("/api/status",{cache:"no-store",credentials:"omit"});
  if(!r.ok) throw new Error("LAB_OFFLINE");
  const s=await r.json();csrf=s.csrf;
- return "تعداد Passkeyهای ثبت‌شده در آزمایش: "+s.registered+" | ورود موفق: "+s.authenticated;
+ return "تعداد Passkeyهای ثبت‌شده در آزمایش: "+s.registered+" | ورود موفق: "+s.authenticated+" | نام کلید این نوبت: "+s.lab_label;
 }
 async function run(kind){
  if(busy)return;
@@ -114,6 +114,9 @@ class State:
             verify_origin=lambda origin: origin==ORIGIN)
         self.server.timeout=240_000  # hybrid QR/PIN flow, shorter than TTL
         self.user_id=secrets.token_bytes(32)
+        # Visible nonsecret session marker distinguishes newer phone passkeys
+        # from stale localhost credentials left by prior RAM-only runs.
+        self.lab_label="STAGE15-"+secrets.token_hex(3).upper()
         self.csrf=secrets.token_urlsafe(32)
         self.credentials={}
         self.pending={}
@@ -125,7 +128,8 @@ class State:
                 if len(self.credentials)>=2:
                     raise ValueError("MAX_TWO_TEST_PASSKEYS")
                 user=PublicKeyCredentialUserEntity(
-                    id=self.user_id,name="local-test",display_name="Local Test Only")
+                    id=self.user_id,name="local-"+self.lab_label,
+                    display_name=self.lab_label)
                 options,server_state=self.server.register_begin(
                     user,credentials=list(self.credentials.values()),
                     resident_key_requirement="required",user_verification="required")
@@ -249,6 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                 with self.server.state.lock:
                     self.answer(200,{"registered":len(self.server.state.credentials),
                         "authenticated":self.server.state.authenticated,
+                        "lab_label":self.server.state.lab_label,
                         "csrf":self.server.state.csrf,
                         "root_grants":"NONE", "tunnel_changes":"NONE"})
             else:
