@@ -106,7 +106,7 @@ class KHObserverTests(unittest.TestCase):
         self.write_db()
         with self.assertRaisesRegex(m.ObserverHold,"SANAEI_XHTTP_DUPLICATE"):
             self.collect()
-        self.rows=self.rows[1:]
+        self.rows=[row for row in self.rows if row[0] != 38658]
         self.write_db()
         with self.assertRaisesRegex(m.ObserverHold,"SANAEI_XHTTP_INBOUND_NOT_UNIQUE"):
             self.collect()
