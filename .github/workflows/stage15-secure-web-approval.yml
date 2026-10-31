@@ -33,6 +33,7 @@ jobs:
           python3 -B tests/test-smite-stage15-deployment-contract.py -v
           python3 -B tests/test-smite-stage15-live-migration-gate.py -v
           python3 -B tests/test-smite-stage15-no-restart-boundary.py -v
+          python3 -B tests/test-smite-stage15-host-evidence-offline.py -v
           python3 -B tests/test-smite-stage15-broker-web-optin.py -v
       - name: Refuse accidental root API or FRPS/FRPC edits in this feature
         run: |
