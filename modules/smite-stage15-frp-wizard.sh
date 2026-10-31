@@ -22,6 +22,7 @@ smite_stage15_frp_wizard() {
         echo 'G) IR: review signed XHTTP proposal and independently approve root grant'
         echo 'D) Download/verify reviewed Stage15 FRP071 images (no install)'
         echo 'A) Download/verify Secure Web Approval PREVIEW images (cache only; no install)'
+        echo 'P) Read-only IR/KH migration isolation check (no deployment)'
         echo 'U) Upgrade original Stage15 images before installing FRP'
         echo 'R) Roll back image upgrade (before FRP/WSS)'
         echo '0) Back'
@@ -68,6 +69,13 @@ smite_stage15_frp_wizard() {
             a|A)
                 echo 'PREVIEW ONLY: cache a pinned image ZIP; no live upgrade or Docker load.'
                 python3 -B "$dir/smite-stage15-web-approval-fetch.py" || :;;
+            p|P)
+                echo 'READ ONLY: verify current IR/KH isolation; preview deployment remains denied.'
+                if [[ ! -f "$dir/smite-stage15-live-migration-gate.py" || -L "$dir/smite-stage15-live-migration-gate.py" ]]; then
+                    echo 'HOLD: Migration gate module missing or untrusted.'
+                else
+                    python3 -B "$dir/smite-stage15-live-migration-gate.py" audit || :
+                fi;;
             u|U)
                 archive="${SMITE_RC_BUNDLE_DIR:-}"
                 if [[ -z "$archive" ]]; then
