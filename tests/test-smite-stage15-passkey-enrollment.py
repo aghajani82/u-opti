@@ -79,6 +79,95 @@ class EnrollmentTests(unittest.TestCase):
                     origin="https://review.example.invalid")
         self.assertEqual(self.store.conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0],0)
 
+    def test_two_independent_passkeys_survive_reopen_and_single_revocation(self):
+        """Offline simulated registrations, NOT physical WebAuthn validation.
+
+        Primary and spare use independent one-time root tickets; revoking
+        one credential must not disable its distinct enrolled backup.
+        """
+        from fido2.server import Fido2Server
+        import hashlib
+
+        class FakeCredential:
+            def __init__(self, name):
+                self.credential_id=name.encode("ascii")
+            def __bytes__(self):
+                # This test does not claim the bytes are real FIDO2 data.
+                return b"simulated-credential-"+self.credential_id
+
+        class FakeAuthentication:
+            def __init__(self, name):
+                self.credential_data=FakeCredential(name)
+                self.counter=1
+            def is_user_verified(self):
+                return True
+
+        names=("primary-physical-key-sim","spare-physical-key-sim")
+        hashes=[]
+        for name in names:
+            token=self.store.ticket(root_tty=True)
+            beginning=self.store.enroll_begin(
+                token,origin="https://review.example.invalid")
+            with patch.object(Fido2Server,"register_complete",
+                              return_value=FakeAuthentication(name)):
+                self.store.enroll_complete(
+                    beginning["ceremony"],{"id":"offline-fixture"},
+                    token,origin="https://review.example.invalid")
+            with self.assertRaises(en.EnrollmentHold):
+                self.store.enroll_begin(token,
+                    origin="https://review.example.invalid")
+            hashes.append(hashlib.sha256(name.encode("ascii")).hexdigest())
+
+        self.assertNotEqual(hashes[0],hashes[1])
+        self.assertEqual(len(self.store.encoded()),2)
+        self.store.close()
+        reopened=en.CredentialStore(self.db,root_check=False)
+        self.addCleanup(reopened.close)
+        self.assertEqual(len(reopened.encoded()),2)
+        reopened.revoke(hashes[0],root_tty=True)
+        self.assertEqual(len(reopened.encoded()),1)
+        self.assertEqual(
+            reopened.conn.execute("SELECT revoked FROM credentials WHERE id_hash=?",
+                                  (hashes[1],)).fetchone(), (0,))
+        with self.assertRaises(en.EnrollmentHold):
+            reopened.revoke(hashes[0],root_tty=True)
+
+    def test_failed_second_registration_does_not_consume_existing_spare(self):
+        """Invalid UV leaves prior credential intact and does not grant."""
+        from fido2.server import Fido2Server
+        class FakeCredential:
+            credential_id=b"primary-test"
+            def __bytes__(self):
+                return b"simulated-primary"
+        class Verified:
+            credential_data=FakeCredential()
+            counter=0
+            def is_user_verified(self):
+                return True
+        class NotVerified:
+            credential_data=FakeCredential()
+            counter=0
+            def is_user_verified(self):
+                return False
+        primary=self.store.ticket(root_tty=True)
+        first=self.store.enroll_begin(primary,
+            origin="https://review.example.invalid")
+        with patch.object(Fido2Server,"register_complete",return_value=Verified()):
+            self.store.enroll_complete(first["ceremony"],{"id":"offline"},
+                primary,origin="https://review.example.invalid")
+        backup=self.store.ticket(root_tty=True)
+        second=self.store.enroll_begin(backup,
+            origin="https://review.example.invalid")
+        with patch.object(Fido2Server,"register_complete",return_value=NotVerified()):
+            with self.assertRaises(en.EnrollmentHold):
+                self.store.enroll_complete(second["ceremony"],{"id":"offline"},
+                    backup,origin="https://review.example.invalid")
+        self.assertEqual(len(self.store.encoded()),1)
+        self.assertEqual(
+            self.store.conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0],
+            1,
+        )
+
     def test_ticket_survives_process_reopen(self):
         token=self.store.ticket(root_tty=True)
         self.store.close()
