@@ -76,6 +76,7 @@ def listener_pids(output: str, ports: tuple[int, ...], executable: str) -> dict[
         matches = re.findall(r'"' + re.escape(executable) + r'",pid=(\d+)', fields[5])
         if matches:
             all_matching.add(port)
+            need(fields[3] == f"127.0.0.1:{port}", "PUBLIC_OR_NON_LOOPBACK_FRPS")
         if port in observed:
             observed[port].update(int(value) for value in matches)
     need(all_matching.issubset(set(ports)), "UNEXPECTED_OWNER_LISTENER")
