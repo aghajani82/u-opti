@@ -31,7 +31,7 @@ class RegistryLeaseCompatibility(unittest.TestCase):
         temp=tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.db=Path(temp.name)/"panel.db"
-        self.owner=ir.OWNER_ID
+        self.owner="123e4567-e89b-42d3-a456-426614174000"
         self.child="child-frp10"
         self.binding={
             "ir_node":"node-ir-0001","kh_node":"node-kh-0001",
@@ -63,7 +63,7 @@ class RegistryLeaseCompatibility(unittest.TestCase):
 
     def assert_matched(self):
         raw=json.dumps(self.registry).encode()
-        owner=ir.registry_owner(raw)
+        owner=ir.registry_owner(raw, expected_owner=self.binding["owner"])
         lease=leases._lease(self.binding,self.db)
         self.assertEqual(owner,self.binding["owner"])
         self.assertEqual(lease["owner"],owner)
@@ -80,6 +80,13 @@ class RegistryLeaseCompatibility(unittest.TestCase):
         # need not exist as a key in the IR Node's tunnels.json.
         self.assertEqual(set(self.registry),{self.owner})
         self.assert_matched()
+
+    def test_friendly_name_is_not_an_internal_lease_owner(self):
+        # A UI label must not be silently substituted for the UUID.
+        self.binding["owner"] = "FRP-IR-KH-45121"
+        with self.assertRaisesRegex(ir.ObserverHold,
+                                    "IR_OWNER_REGISTRY_NOT_SINGLETON"):
+            self.assert_matched()
 
     def test_wrong_owner_in_registry_holds(self):
         self.registry={"not-the-owner":self.registry[self.owner]}
