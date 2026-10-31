@@ -107,6 +107,27 @@ def _lease(binding, db_path, *, max_read_seconds=3.0):
                 actual={row[1] for row in db.execute("PRAGMA table_info("+table+")")}
                 if not columns.issubset(actual):
                     raise LiveEvidenceHold("LEASE_SCHEMA_INCOMPATIBLE")
+            # The uniqueness constraint is part of Smite's real Panel
+            # schema: UNIQUE(iran_node_id, remote_port). Presence of
+            # columns and a single matching row does not prove uniqueness.
+            # Check schema from the SAME current read transaction, never
+            # migrate, create an index, or trust a stale exported snapshot.
+            found_unique=False
+            for index in db.execute("PRAGMA index_list('frp_proxy_leases')"):
+                if len(index)<5 or index[2]!=1 or index[4]!=0:
+                    continue
+                index_name=index[1]
+                if type(index_name) is not str or not index_name:
+                    raise LiveEvidenceHold("LEASE_UNIQUE_INDEX_UNTRUSTED")
+                quoted=index_name.replace('"','""')
+                info=db.execute('PRAGMA index_xinfo("'+quoted+'")').fetchall()
+                # Key columns only; exclude included/non-key index data.
+                columns=[item[2] for item in info if len(item)>5 and item[5]==1]
+                if len(columns)==2 and set(columns)=={"iran_node_id","remote_port"}:
+                    found_unique=True
+                    break
+            if not found_unique:
+                raise LiveEvidenceHold("LEASE_UNIQUE_INDEX_MISSING")
             if db.execute("PRAGMA quick_check(1)").fetchone()!=("ok",):
                 raise LiveEvidenceHold("LEASE_DATABASE_INTEGRITY_HOLD")
             def query(sql,*values):
