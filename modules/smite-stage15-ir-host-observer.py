@@ -122,33 +122,42 @@ def start_ticks(pid, proc_root=Path("/proc")):
 
 
 def registry_owner(raw, expected_owner=OWNER_ID):
-    """Contract for test fixtures only; unknown live schemas HOLD closed.
+    """Parse the *actual* Smite AdapterManager persistent JSON format.
 
-    Do not support guessy fallbacks or accept a remote assertion as registry.
-    Full Panel owner/child lease reconciliation is NOT implemented here.
+    Smite node/app/core_adapters.py _save_tunnels serializes
+    self.tunnel_configs = {tunnel_id: {"core": str, "spec": dict}}
+    as the top-level mapping. Never trust JSON status as a live owner proof.
+    Require process ownership, a fresh signed Lease read and separate KH
+    inbound evidence before any grant could become permissible.
     """
+    need(type(expected_owner) is str and bool(IDENT.fullmatch(expected_owner)),
+         "IR_OWNER_ID_UNTRUSTED")
     try:
         document = json.loads(raw)
     except (ValueError, UnicodeDecodeError, TypeError) as exc:
         raise ObserverHold("IR_REGISTRY_MALFORMED") from exc
-    need(type(document) is dict and set(document) == {"tunnels"}
-         and type(document["tunnels"]) is dict,
+    need(type(document) is dict and 1 <= len(document) <= 64,
          "IR_REGISTRY_SCHEMA_NOT_REVIEWED")
-    matches = [value for name,value in document["tunnels"].items()
-               if name == expected_owner]
-    need(len(matches) == 1 and type(matches[0]) is dict,
-         "IR_OWNER_REGISTRY_MISSING")
-    owner = matches[0]
-    spec = owner.get("spec")
-    need(owner.get("core") == "frp" and type(spec) is dict
-         and spec.get("mode") == "server"
-         and type(spec.get("bind_port")) is int
-         and spec["bind_port"] == 7000,
-         "IR_OWNER_REGISTRY_DRIFT")
-    # Strict schema identifies a candidate only; no owner->child lease proof.
-    need(not any(name == expected_owner and value is not owner
-                 for name,value in document["tunnels"].items()),
-         "IR_OWNER_DUPLICATE")
+    # No synthetic wrapper: {"tunnels": {...}} is NOT the live format.
+    need("tunnels" not in document, "IR_REGISTRY_WRAPPER_NOT_SUPPORTED")
+    servers = []
+    for tunnel_id, config in document.items():
+        need(type(tunnel_id) is str and bool(IDENT.fullmatch(tunnel_id))
+             and type(config) is dict
+             and set(config) == {"core", "spec"}
+             and type(config["core"]) is str
+             and type(config["spec"]) is dict,
+             "IR_REGISTRY_ENTRY_UNTRUSTED")
+        spec = config["spec"]
+        if config["core"] == "frp" and spec.get("mode") == "server":
+            need(type(spec.get("bind_port")) is int
+                 and spec["bind_port"] == 7000,
+                 "IR_FRPS_REGISTRY_SERVER_DRIFT")
+            servers.append(tunnel_id)
+    need(servers == [expected_owner], "IR_OWNER_REGISTRY_NOT_SINGLETON")
+    # Child FRP leases are not guaranteed to be persisted on the IR Node.
+    # Never require child keys in this file, or infer leases from their
+    # absence. Authoritative lease reconciliation is on the live Panel DB.
     return expected_owner
 
 
