@@ -165,6 +165,20 @@ class FetchTests(unittest.TestCase):
             updater,
         )
 
+    def test_migration_gate_wizard_and_install_inventories(self):
+        helper = "smite-stage15-live-migration-gate.py"
+        install = (HERE / "install.sh").read_text()
+        updater = (HERE / "u-opti").read_text()
+        wizard = (HERE / "modules/smite-stage15-frp-wizard.sh").read_text()
+        self.assertEqual(install.count('"' + helper + '"'), 1)
+        self.assertEqual(updater.count('"' + helper + '"'), 4)
+        self.assertIn('["' + helper + '"]="$BASE_URL/modules/' + helper + '"', updater)
+        self.assertIn('["' + helper + '"]="$TEMP_DIR/' + helper + '"', updater)
+        self.assertIn("P) Read-only IR/KH migration isolation check", wizard)
+        self.assertIn('python3 -B "$dir/' + helper + '" audit', wizard)
+        self.assertIn("UNSIGNED_PREVIEW_ACTIVATION=DENIED",
+                      (HERE / "modules" / helper).read_text())
+
     def test_cache_only_does_not_publish_runtime_changes(self):
         text = (HERE / "modules/smite-stage15-web-approval-fetch.py").read_text()
         self.assertNotIn("docker load", text.lower())
