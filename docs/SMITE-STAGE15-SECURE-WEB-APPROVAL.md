@@ -264,6 +264,23 @@ the application cannot cryptographically prove that an operator supplied
 the *live* volume rather than a stale copy of it. If that proof is
 unavailable: HOLD, do not enable the service.
 
+### Live IR/KH field-trial migration boundary (2026-10-31; source-only)
+
+Read-only operator audits (not a deploy or client-data E2E test) confirmed:
+
+- IR `smite-panel` image `sha256:4abfd55d5c18d95119f8bae4c790cb2b687c54355836ea5529c8aff8a53dcd09` is healthy with zero restarts. Its effective three-file Compose graph contains **only** `smite-panel`, has **no** `depends_on`, and uses `network_mode: host`.
+- IR `smite-node` and KH `smite-node` are both healthy at `sha256:cf0f3b12fc2c31cb0847fd5206304837661019d8f604853a8e956448c2576265`, zero restarts. IR's one FRPS process owns the control socket 7000 and child sockets 45121, 38658, 28897; its PID belongs to `smite-node` **and not** `smite-panel`.
+- KH `smite-node` contains **three** FRPC processes (expected for the three active child paths), `3xui-01` is running, Signed WSS and Sanaei Inventory journals are COMMITTED. Do **not** consolidate the three FRPC processes.
+- IR Stage15 active runtime / WSS / edge / XHTTP bridge journals are COMMITTED. Four IR Trusted Grants and six XHTTP route-directory entries exist; never assume an empty grant/route tree. The Bridge journal filename is `journal.json`, unlike the other Stage15 `record.json` receipts.
+- Separate consistent SQLite backup API snapshots of IR Panel+Replay+Broker nonce and KH Replay+Sanaei DB, plus password-protected GPG security backups on both hosts and a separately encrypted KH tunnel registry, were operator-verified. These backups **do not** imply a replay-safe restore, an atomic cross-database snapshot, or a successful disposable-clone recovery rehearsal. The original root broker ledger and signed replay inodes must not be silently replaced or rolled back.
+- Root-only IR broker is active; the web-approval marker and pending queue were not configured at audit time. Those facts must be rechecked immediately before any future approved rollout.
+
+The narrow IR Panel process/Compose isolation is now **observed**, not merely inferred. This does **not** mean a new Panel image is approved: preview ZIP/source checks are not signed image attestation and do not prove UI/db/API compatibility or a reversible live one-service migration. The existing `smite-stage15-active-runtime.py` migration admission predates active child leases and XHTTP routes and is **not** reusable for a new Panel cutover; legacy paired menu `U` is also forbidden.
+
+Source-only safety helper `modules/smite-stage15-live-migration-gate.py audit` checks current IR/KH host/Node/Panel image identities, IR Compose-only isolation and exact FRPS ownership, KH three FRPC and listeners. It executes read-only Docker/ss commands and always reports `UNSIGNED_PREVIEW_ACTIVATION=DENIED`, `NODE_RECREATE_WITHOUT_MAINTENANCE=BLOCKED` and `LIVE_MIGRATION_AUTHORIZED=NO` even on audit PASS. It is **not** an apply/dry-run/rollback command. It must not be installed or run as part of this PR's source-only work without independent review; a later field-trial run still requires fresh attestations.
+
+**HOLD on Node image rollout:** current FRPS/FRPC live inside the Node containers. A Node restart/recreate can break all three tunnels. No transaction/copy-based rollback makes that change zero-downtime; do not advertise it. With an absolute no-interruption requirement, separately design/review a non-disruptive independent evidence adapter or defer Node deployment. With an approved maintenance window, separately verify signed candidate images, rehearse exact previous-image/volume rollback on disposable clones, and obtain explicit host-specific authorization before any cutover. Physical Passkey and fourth-tunnel tests remain pending.
+
 ### Safe image migration: two explicit maintenance boundaries
 
 No changes to currently active images in this PR. Record precise current
