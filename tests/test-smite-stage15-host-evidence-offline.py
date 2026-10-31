@@ -31,7 +31,7 @@ class HostEvidencePrototypeTests(unittest.TestCase):
         self.kh_pin = self.kh_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.binding = {
             "ir_node": "node-ir-0001", "kh_node": "node-kh-0001",
-            "owner": "FRP-IR-KH-45121", "child": "frp10", "lease": "frp10",
+            "owner": "FRP-IR-KH-45121", "child": "child-frp10", "lease": "child-frp10",
             "port": 38658, "path": "/38658/shop",
         }
         self.ir_facts = {
