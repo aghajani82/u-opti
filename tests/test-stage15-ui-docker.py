@@ -17,6 +17,8 @@ with tempfile.TemporaryDirectory() as tmp:
  try:
   docker('run','-d','--name',name,'--network','none','python:3.11-alpine','python3','-m','http.server','8765','--bind','127.0.0.1','--directory','/app/static')
   docker('cp',str(p)+'/.',name+':/app')
+  # Docker cp preserves runner checkout modes; normalize ONLY this disposable fixture.
+  docker('exec',name,'python3','-c',"import os,pathlib; r=pathlib.Path('/app'); paths=[r,*r.rglob('*')]; [(os.chown(p,0,0),os.chmod(p,0o755 if p.is_dir() else 0o644)) for p in paths]")
   before=json.loads(docker('inspect',name))[0]
   def worker(action,**kw):
    payload=json.dumps(dict(action=action,backend=m['backend_sha256'],**kw)).encode()
