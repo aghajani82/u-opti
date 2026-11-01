@@ -193,7 +193,7 @@ python3() {
     return 99
 }
 review_menu="$(printf 'G\n\n0\n' | docker_smite_management_menu)"
-grep -Fq 'G) تأیید پورت و مسیر تانل' <<< "$review_menu"
+grep -Fq 'G) Approve FRP Port + Path (Stage15 / IR)' <<< "$review_menu"
 test "$(grep -c '^ROOT_REVIEW_ONLY$' <<< "$review_menu")" = 1
 # Missing helper: no fallback to RC2, install, or web approval.
 SMITE_BH_DIR="$tmp/missing"
