@@ -1084,15 +1084,15 @@ smite_install_panel_iran() {
     echo "TCP/443 gateway configuration is handled as a separate step."
     echo
 
-    smite_install_require_tools || { smite_install_pause; return; }
-    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return; }
+    smite_install_require_tools || { smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
+    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
 
     if smite_container_exists smite-panel || smite_container_exists smite-node || \
        [ -f "$SMITE_PANEL_COMPOSE" ] || [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "ERROR: An existing Smite installation was detected."
         echo "Use Status/Repair instead of the fresh installer."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     local panel_domain node_name
@@ -1106,7 +1106,7 @@ smite_install_panel_iran() {
     if ! smite_install_validate_domain "$panel_domain"; then
         echo "ERROR: Invalid panel domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "Iran node name [node-ir]: " node_name
@@ -1114,7 +1114,7 @@ smite_install_panel_iran() {
     if ! smite_install_validate_name "$node_name"; then
         echo "ERROR: Invalid node name. Use letters, numbers, dot, dash, or underscore."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1137,7 +1137,7 @@ smite_install_panel_iran() {
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
         echo "No Private Network installation was started."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     case "$connection_choice" in
@@ -1154,14 +1154,14 @@ smite_install_panel_iran() {
             if ! smite_install_validate_ipv4 "$panel_private_ip"; then
                 echo "ERROR: Invalid Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$panel_private_ip"; then
                 echo "ERROR: Private IPv4 address is not configured on this server:"
                 echo "       $panel_private_ip"
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             panel_host="0.0.0.0"
@@ -1169,7 +1169,7 @@ smite_install_panel_iran() {
         *)
             echo "ERROR: Invalid connection mode."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             ;;
     esac
 
@@ -1200,34 +1200,34 @@ smite_install_panel_iran() {
         if ! smite_install_clean_rc_preflight "panel-iran" "$connection_mode"; then
             echo "HOLD: Clean RC prerequisites not met; no service started."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
         echo "HOLD: Unknown Smite install profile."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" || {
         echo "ERROR: Failed to create Smite directories."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     if ! smite_install_panel_files "$panel_domain" "$panel_host"; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_cli_tools; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_pull_images true; then
         echo "ERROR: Failed to pull the validated Smite images."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo
@@ -1235,24 +1235,24 @@ smite_install_panel_iran() {
     if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
         echo "ERROR: Failed to start Smite Panel."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-panel 90 || ! smite_wait_panel_api; then
         echo "ERROR: Smite Panel did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-panel; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_NODE_DIR/certs" || {
         echo "ERROR: Failed to create the Smite node certificate directory."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     echo "Downloading the Iran-node CA certificate from the local panel..."
@@ -1261,13 +1261,13 @@ smite_install_panel_iran() {
         -o "$SMITE_NODE_DIR/certs/ca.crt"; then
         echo "ERROR: Failed to obtain the Iran-node CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! grep -q "BEGIN CERTIFICATE" "$SMITE_NODE_DIR/certs/ca.crt"; then
         echo "ERROR: The panel returned an invalid CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_node_files \
@@ -1279,32 +1279,32 @@ smite_install_panel_iran() {
         "$panel_private_ip" \
         "$connection_mode"; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo "Starting Iran Smite Node..."
     if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start Smite Node."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Smite Node did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_broker_start_node_forwarding; then
             echo "ERROR: Root Broker/Node channel did not pass verification."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     fi
 
@@ -1315,14 +1315,14 @@ smite_install_panel_iran() {
         echo "ERROR: The Iran node did not register with the local panel."
         echo "Check: docker logs smite-node"
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_apply_compatibility; then
         echo "ERROR: U-OPTI compatibility preparation failed."
         echo "The expected upstream source blocks may have changed."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1333,7 +1333,7 @@ smite_install_panel_iran() {
         if ! smite_wait_node_registration_local "$node_name"; then
             echo "ERROR: Node registration was not restored after compatibility activation."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
         if smite_set_local_control_address "$node_name"; then
             echo "Panel control address set to local node API (127.0.0.1:8888)."
@@ -1351,6 +1351,7 @@ smite_install_panel_iran() {
         "$panel_private_ip" \
         "" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
+        if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
 
     echo
@@ -1385,7 +1386,10 @@ smite_install_panel_iran() {
     read -rp "Create a Smite admin account now? [y/N]: " create_admin
     case "$create_admin" in
         y|Y|yes|YES)
-            smite_install_create_admin || echo "HOLD: Smite admin account was not created."
+            smite_install_create_admin || {
+                echo "HOLD: Smite admin account was not created."
+                if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
+            }
             ;;
     esac
 
@@ -1411,14 +1415,14 @@ smite_install_foreign_node() {
     echo "Choose Standard HTTPS or Private Network transport."
     echo
 
-    smite_install_require_tools || { smite_install_pause; return; }
-    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return; }
+    smite_install_require_tools || { smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
+    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
 
     if smite_container_exists smite-node || [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "ERROR: An existing Smite node installation was detected."
         echo "Use Status/Repair instead of the fresh installer."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     local panel_domain foreign_domain node_name temp_ca
@@ -1435,7 +1439,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_domain "$panel_domain"; then
         echo "ERROR: Invalid panel domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "This foreign server domain (example: kh.example.com): " foreign_domain
@@ -1443,7 +1447,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_domain "$foreign_domain"; then
         echo "ERROR: Invalid foreign-server domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "Foreign node name [node-kh]: " node_name
@@ -1451,7 +1455,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_name "$node_name"; then
         echo "ERROR: Invalid node name."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1472,7 +1476,7 @@ smite_install_foreign_node() {
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
         echo "No Private Network installation was started."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     case "$connection_choice" in
@@ -1491,7 +1495,7 @@ smite_install_foreign_node() {
             if ! smite_install_validate_ipv4 "$panel_private_ip"; then
                 echo "ERROR: Invalid Iran Panel Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             read -rp "This Foreign server Private IPv4 address: " foreign_private_ip
@@ -1500,14 +1504,14 @@ smite_install_foreign_node() {
             if ! smite_install_validate_ipv4 "$foreign_private_ip"; then
                 echo "ERROR: Invalid Foreign Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$foreign_private_ip"; then
                 echo "ERROR: Foreign Private IPv4 address is not configured on this server:"
                 echo "       $foreign_private_ip"
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             panel_address="${panel_private_ip}:8000"
@@ -1518,7 +1522,7 @@ smite_install_foreign_node() {
         *)
             echo "ERROR: Invalid connection mode."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             ;;
     esac
 
@@ -1548,24 +1552,24 @@ smite_install_foreign_node() {
         if ! smite_install_clean_rc_preflight "foreign" "$connection_mode"; then
             echo "HOLD: Clean RC prerequisites not met; no service started."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
         echo "HOLD: Unknown Smite install profile."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || {
         echo "ERROR: Failed to create Smite node directories."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     temp_ca="$(mktemp)" || {
         echo "ERROR: Failed to create temporary CA file."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1589,14 +1593,14 @@ smite_install_foreign_node() {
         fi
 
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" != clean-rc ] && ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
         rm -f "$temp_ca"
         echo "ERROR: The panel returned an invalid Foreign-node CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_node_files \
@@ -1610,44 +1614,44 @@ smite_install_foreign_node() {
 
         rm -f "$temp_ca"
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     rm -f "$temp_ca"
 
     if ! smite_install_cli_tools; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_pull_images false; then
         echo "ERROR: Failed to pull the validated Smite node image."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo "Starting Foreign Smite Node..."
     if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start the Foreign Smite Node."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Foreign Smite Node did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_apply_compatibility; then
         echo "ERROR: U-OPTI compatibility preparation failed."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1673,6 +1677,7 @@ smite_install_foreign_node() {
         "$panel_private_ip" \
         "$foreign_private_ip" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
+        if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
 
     echo
@@ -2070,6 +2075,7 @@ smite_install_selected_fresh() (
         echo 'HOLD: existing Smite container; fresh installation refused'; return 2
     fi
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
+    local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
     local SMITE_FIELD_TRIAL_SOURCE_SHA=25ff25585be3f7ff1c8b73b39a23d0509f9a2312
     local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.6

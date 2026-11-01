@@ -78,7 +78,7 @@ jobs:
       - name: Installer fixture regressions
         run: |
           set -euo pipefail
-          bash tests/test-smite-selected-install.sh
+          sudo -n bash tests/test-smite-selected-install.sh
           bash tests/test-smite-clean-install.sh
           bash tests/test-smite-clean-iran-pending.sh
           bash tests/test-smite-clean-rc-nginx-preflight.sh

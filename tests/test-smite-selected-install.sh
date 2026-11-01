@@ -5,6 +5,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 source "$ROOT/modules/smite-install.sh"
+# Exercise actual early failure branches with a successful UI pause.
+clear() { :; }
+smite_install_pause() { :; }
+smite_install_require_tools() { return 1; }
+SMITE_INSTALL_PROFILE=stable
+SMITE_INSTALL_FAILURE_CODE=2
+for entry in smite_install_panel_iran smite_install_foreign_node; do
+    if "$entry" > "$TMP/failure.log"; then
+        echo "FAIL: $entry swallowed dependency failure"; exit 1
+    fi
+done
+unset SMITE_INSTALL_FAILURE_CODE
 SMITE_STATE_FILE="$TMP/state.env"
 SMITE_PANEL_DIR="$TMP/panel"
 SMITE_NODE_DIR="$TMP/node"

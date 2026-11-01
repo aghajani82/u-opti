@@ -101,9 +101,10 @@ Observe CI on the commit containing these new installer changes before promotion
    image tags and the old offline archive. It must NOT be used for RC6. The new
    entry deliberately refuses existing/partial state. A minimal authenticated
    recovery/rollback path and failure-injection tests are required before main
-   promotion. Existing installer functions can also return success after pausing
-   on an error; explicit failure propagation remains to qualify. Do not claim a
-   successful fresh-install transaction from wrapper fixture tests.
+   promotion. Selected RC6 error/cancel paths now return nonzero even after a
+   successful UI pause; state-save/admin errors also refuse success. Historical
+   menu return conventions remain unchanged. Early dependency-failure tests
+   exercise both real entry functions. This is not transaction recovery.
 2. **Fresh-host wizard/end-to-end qualification remains incomplete.** Existing
    role screens safely navigate and use HOLD where signed state is unproven.
    Qualify IR-first/KH-first, pairing, inventory, owner/child, G/1, fresh publish,
@@ -142,3 +143,23 @@ file is the recovery point if the interactive session stops.
 Preserve Grandoptical, all existing tunnels including the newly successful field
 test, FRPS Owner, FRPCs, Signed Pairing, Replay, TrustedGrants and Nginx state.
 No new mandatory Backhaul dependency and no automatic public ports.
+
+## Continuation — 2026-11-02
+
+Remote HEAD 6619733e92403e1641d897ad2f0450da12dc4b00 had 23/25 checks
+successful. Two failures were diagnosed, not waived:
+- bash-validation job 124896332597: wizard-preservation pin still expected the
+  installer before the reviewed RC6 entry. Re-reviewed bounded diff and updated
+  only that file's blob pin; all independent wizard pins remain unchanged.
+- anonymous-signed-pair job 124896332237: isolated dispatcher fixture ran as
+  non-root. It now runs with sudo on the disposable Actions runner. The real
+  root guard remains unchanged. Signature, image pull, real first boot and
+  identity/replay checks passed before that fixture failed.
+
+Local selected dispatch, legacy clean install, pending IR, historical RC1 resume,
+Nginx prerequisite, console-only and role-guard regressions passed after fixes.
+Smite selected HEAD remains 25ff25585be3f7ff1c8b73b39a23d0509f9a2312;
+all 19 checks visible on that commit (including publisher jobs) were successful.
+Observe the new U-OPTI commit's CI before declaring those failures resolved.
+Partial RC6 recovery and real fresh-host testing remain blockers. No live host,
+merge, stable release, tag move or historical deletion in this continuation.

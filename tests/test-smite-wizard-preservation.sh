@@ -20,6 +20,9 @@
 # intentional direct-Docker-Compose -> smite-compose-safe.py substitutions.
 # That helper preserves existing active signed, FRP and WSS Compose overlays;
 # this SHA pin still fails closed for any future unreviewed installer edit.
+# 2026-11-02: reviewed selected RC6 fresh-only entry, immutable source/manifest,
+# local Docker scope and selected-only error propagation. Historical recovery
+# pins and independent wizards are unchanged; dispatch/refusal tests cover RC6.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -39,7 +42,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-d08fa17104a24791c6867362145bf16af9ebe265 modules/smite-install.sh
+fae947aec0ad6624847a9b2498f2610702b3589c modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
