@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package an exact already-built static frontend; no image/runtime mutation."""
 import hashlib,json,os,pathlib,subprocess,sys,zipfile
-SOURCE='aec8a5f7e7a91a9e59fd968ef0f7570fdd995d57'
+SOURCE='3969855298ce7e63ea8a3f7824a0ae20aea09b2c'
 def main():
     repo,out=map(pathlib.Path,sys.argv[1:])
     def git(*args):return subprocess.check_output(['git','-C',str(repo),*args]).decode().strip()

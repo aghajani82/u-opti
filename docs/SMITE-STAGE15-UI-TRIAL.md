@@ -1,6 +1,6 @@
 # Static UI trial — IR only, four active FRP paths preserved
 
-Candidate frontend: Smite `aec8a5f7e7a91a9e59fd968ef0f7570fdd995d57`.
+Candidate frontend: Smite `3969855298ce7e63ea8a3f7824a0ae20aea09b2c`.
 This is an opt-in test bundle, not a stable release or authorization to deploy.
 The supplied helper is standalone and is not installed/enabled by default.
 
@@ -38,6 +38,7 @@ entries. Replace `BUNDLE.zip` and `EXPECTED_SHA256` with the delivered filename
 and checksum; use the same values for every command. No commands target KH.
 
 ```bash
+set -euo pipefail
 # IR — verify download before extracting the reviewed helper
 printf '%s  %s\n' 'EXPECTED_SHA256' 'BUNDLE.zip' | sha256sum -c -
 unzip -p BUNDLE.zip ui-trial.py > ui-trial.py
@@ -76,3 +77,27 @@ workspace. A disposable Docker HTTP-serving test is included in the dedicated CI
 Host transaction commands are tested with a mocked Docker boundary. Actual
 IR serving/cache behavior and runtime identity therefore still require the separately approved preflight and operator browser test. If this
 layout is refused, stop and review a Panel-only migration separately.
+
+## Trial v2 admission and field acceptance
+
+This bundle supersedes the aec8a5f7 UI candidate and adds the compact sidebar.
+The sidebar still scrolls on short viewports so controls remain accessible.
+This is not a stable version bump. Do not mix the v1 helper/receipt with v2.
+If `/var/lib/u-opti/smite-ui-trial` already exists, Backup deliberately HOLDs;
+do not delete it or bypass the guard. Review that transaction before another
+trial. The v2 helper cannot roll back a v1 receipt: retain the original bundle
+and helper for its original transaction.
+
+The dedicated CI tests actual Docker static HTTP serving, apply and rollback,
+plus host transaction fault injection, role gates, root review and nonce replay.
+No live admission is claimed. After approved installation, verify the compact
+sidebar at desktop/mobile heights, Persian XHTTP help, Verify success, and the
+final publication button without closing the dialog after G. A fresh request
+is still required for publication. An ambiguous result must remain HOLD.
+
+Record before and after: four existing children/leases and successful client
+traffic, existing Owner, then the fifth child's name/node/port/path, Verify,
+ROOT_GRANT_APPROVED, publication result and real v2rayN VLESS/XHTTP traffic.
+Stop on any existing-tunnel regression; do not recreate Owner/Node/FRPC or
+restore an old security database. Final stable release and merge stay blocked
+until this field test and explicit operator approval.

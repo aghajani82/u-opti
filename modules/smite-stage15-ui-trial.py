@@ -14,7 +14,7 @@ import sys
 import tempfile
 import zipfile
 
-SOURCE = 'aec8a5f7e7a91a9e59fd968ef0f7570fdd995d57'
+SOURCE = '3969855298ce7e63ea8a3f7824a0ae20aea09b2c'
 STATE = Path('/var/lib/u-opti/smite-ui-trial')
 ENGINE_LOCK = Path('/run/lock/u-opti-smite-engine.lock')
 LIMIT = 32 * 1024 * 1024

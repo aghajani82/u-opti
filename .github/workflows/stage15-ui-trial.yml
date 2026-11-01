@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: aec8a5f7e7a91a9e59fd968ef0f7570fdd995d57
+          ref: 3969855298ce7e63ea8a3f7824a0ae20aea09b2c
           path: peer-smite
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -29,15 +29,15 @@ jobs:
           sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
       - name: Build exact frontend; optional web approval disabled
         run: |
-          python3 -B tools/build-stage15-ui-bundle.py peer-smite out/smite-ui-aec8a5f7-trial-v1.zip
+          python3 -B tools/build-stage15-ui-bundle.py peer-smite out/smite-ui-39698552-trial-v2.zip
           cd peer-smite/frontend
           npx tsc --noEmit
           npx esbuild src/utils/frpSharedChildEdit.ts --bundle --platform=node --format=cjs --outfile=tests/frpSharedChildEdit.generated.cjs
-          node --test tests/frpSharedChildEdit.test.cjs
+          node --test tests/frpSharedChildEdit.test.cjs tests/sidebarLayout.test.cjs
       - name: Disposable Docker static-serving transaction
-        run: python3 -B tests/test-stage15-ui-docker.py peer-smite out/smite-ui-aec8a5f7-trial-v1.zip
+        run: python3 -B tests/test-stage15-ui-docker.py peer-smite out/smite-ui-39698552-trial-v2.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: smite-ui-aec8a5f7-trial-v1
+          name: smite-ui-39698552-trial-v2
           path: out/*
           retention-days: 90
