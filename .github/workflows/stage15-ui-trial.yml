@@ -1,0 +1,43 @@
+name: Stage15 static UI trial and role navigation
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui-trial:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: aec8a5f7e7a91a9e59fd968ef0f7570fdd995d57
+          path: peer-smite
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Security and navigation regressions (no live hosts)
+        run: |
+          sudo -n python3 -B tests/test-smite-stage15-ui-trial.py -v
+          sudo -n python3 -B tests/test-smite-guided-frp.py -v
+          bash tests/test-smite-tunnel-wizard.sh
+          sudo -n python3 -B tests/test-smite-stage15-root-review.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py
+          sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
+      - name: Build exact frontend; optional web approval disabled
+        run: |
+          python3 -B tools/build-stage15-ui-bundle.py peer-smite out/smite-ui-aec8a5f7-trial-v1.zip
+          cd peer-smite/frontend
+          npx tsc --noEmit
+          npx esbuild src/utils/frpSharedChildEdit.ts --bundle --platform=node --format=cjs --outfile=tests/frpSharedChildEdit.generated.cjs
+          node --test tests/frpSharedChildEdit.test.cjs
+      - name: Disposable Docker static-serving transaction
+        run: python3 -B tests/test-stage15-ui-docker.py peer-smite out/smite-ui-aec8a5f7-trial-v1.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smite-ui-aec8a5f7-trial-v1
+          path: out/*
+          retention-days: 90
