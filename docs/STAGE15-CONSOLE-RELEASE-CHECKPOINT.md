@@ -38,25 +38,98 @@ they are not candidates for default installation.
 - No live host action, restart, main merge, tag move, version bump, stable
   publication, old PR closure, artifact deletion or branch deletion.
 
-## Remaining gates — do not label this ready to publish
+## RC6 checkpoint — 2026-11-01 (supersedes earlier PR-body status)
 
-1. Observe CI on the exact two selected release branch HEADs and fix any failure.
-2. Finish the first-install wizard; existing guided screens are safe navigation
-   and some signed/application states remain HOLD. Do not turn process presence
-   into signed approval. Existing G validator remains the authority.
-3. Prepare exact selected Panel/Node images, manifest and signature verification.
-   Current stable installer still points to upstream Smite 0.1.7. Do not point it
-   at an unbuilt/unverified candidate, mutable tag or experimental preview pair.
-4. Qualify fresh IR-first and KH-first install, pairing, inventory, owner/child,
-   G/fresh publication, reboot preservation and rollback on disposable fixtures.
-   Existing active-host migration is separate; never use the no-child upgrader.
-5. Inventory remaining GHCR packages and transient artifacts, expiration and all
-   references. Only propose deletion after proving unused and retaining rollback.
-6. Finalize versioning and release trigger review. U-OPTI main changes to VERSION,
-   CHANGELOG.md or release.yml can publish automatically. Merge and stable release
-   require explicit final operator approval of exact commits and effects.
-7. After approved merge/release, reconcile old Draft PRs and proposed branch cleanup;
-   do not close or delete them merely because selected branches now exist.
+Status: **HOLD_WITH_EXACT_BLOCKERS**. The operator has authorized candidate
+publication and subsequent main merge/final release after technical gates pass.
+No further permission is needed for those authorized repository actions.
+Live IR/KH and Grandoptical changes remain prohibited.
+
+Selected Smite PR #42 HEAD: `25ff25585be3f7ff1c8b73b39a23d0509f9a2312`.
+Selected U-OPTI PR #75 parent before this checkpoint:
+`ddc08a98200baa429743959508a8f218d23cdc57`. The commit containing this document
+and its later descendants are the continuation point; refresh HEAD and CI.
+Both selected PRs are still draft and unmerged. Main bases remain Smite
+`4f91c5f341e810e545d75e93719c6ae3aaca69f3` and U-OPTI
+`f989863b7d5ee3043122ffc7ebcb1925bf6fe144`. VERSION remains 0.16.7.
+
+### Published and independently verified
+
+- Immutable tag/prerelease: https://github.com/aghajani82/Smite/releases/tag/v2.0.0-rc.6
+  targets the exact Smite HEAD above. Do not move/rebuild this tag.
+- Publisher: https://github.com/aghajani82/Smite/actions/runs/41301898391 — PASS.
+- Panel: `ghcr.io/aghajani82/smite-panel@sha256:1e5b34652abe24c5c1971dbbdb579bb270c6c571d289198ed15cd0373da1a0f4`
+- Node: `ghcr.io/aghajani82/smite-node@sha256:60a7027b56b17ceb46348f7e107a3361723a95a9b1712634dc8d90b31f928388`
+- Exact manifest is committed at `modules/smite-selected-candidate.json`.
+  SHA-256: `26d4a50e23b6707b414a81ae9b2ca4aaa45e491481d2eb487010dcb7540ab04c`.
+  Candidate booleans remain false; do not alter signed provenance semantics.
+- Publisher ZIP artifact 13081652784 expires 2026-11-08T11:28:17Z.
+  SHA-256: `8b81cca7de56a82b6d6eff5f32e6077fa015583a7dc00a3fcd7b764e746705c1`.
+  ZIP and extracted manifest hashes were independently computed and matched.
+- Independent real Cosign verification:
+  https://github.com/aghajani82/Smite/actions/runs/41321919595 — PASS.
+  Logs report immutable digest signatures and same reviewed source/tag verified;
+  `INDEPENDENT_REAL_COSIGN_GATE=PASS`, `DEPLOYMENT_AUTHORIZED=NO`.
+- Anonymous registry verification/pull, image labels, real container first boot,
+  official FRP bytes and Node identity/replay/paused rollback:
+  https://github.com/aghajani82/u-opti/actions/runs/41322198699 — PASS.
+  Prior run 41322076001 failed because the archived first-boot fixture expected
+  rc.0. The fixture now checks exact rc.6; authentication assertions are intact.
+  This is Ubuntu 24.04 CI, NOT a real VPS network install or reboot test.
+
+### Bounded installer changes in this draft
+
+Fresh menu entries prepare the exact signed RC6 pair with templates and CLI from
+its immutable source. Cosign 3.0.6 is privately downloaded and hash checked.
+Existing or partial install paths (including broken symlinks), existing Smite
+containers, unavailable Docker state, or failed signature/hash checks refuse
+installation. Docker is restricted to the local socket. RC6 variables are scoped
+so historical RC1 recovery/upgrade paths keep their original pins. Existing
+explicit offline clean-RC behavior is retained. No active-host migration exists.
+
+New isolated control-flow tests cover IR/KH dispatch, refusal cases, cancellation
+and legacy scoping. They mock host operations and are not end-to-end installation.
+Local update file-list (7), source pin (4), first-install adoption (9), update
+transaction (11), rollback retention (3) tests passed. Clean-install, pending IR,
+Nginx preflight, registry admission, guided-role and console-only tests passed.
+Observe CI on the commit containing these new installer changes before promotion.
+
+### Exact remaining gates
+
+1. **RC6 partial-install recovery is not qualified.**
+   `modules/smite-clean-ir-resume.sh` requires rc.1 environment versions, local
+   image tags and the old offline archive. It must NOT be used for RC6. The new
+   entry deliberately refuses existing/partial state. A minimal authenticated
+   recovery/rollback path and failure-injection tests are required before main
+   promotion. Existing installer functions can also return success after pausing
+   on an error; explicit failure propagation remains to qualify. Do not claim a
+   successful fresh-install transaction from wrapper fixture tests.
+2. **Fresh-host wizard/end-to-end qualification remains incomplete.** Existing
+   role screens safely navigate and use HOLD where signed state is unproven.
+   Qualify IR-first/KH-first, pairing, inventory, owner/child, G/1, fresh publish,
+   restart/reboot persistence and rollback. Do not equate process presence with
+   signed approval or replay protection.
+3. **Real clean Ubuntu 24.04 VPS test remains PENDING**, to be performed by the
+   operator after repository preparation. Five-tunnel live success is operator
+   reported; it is not evidence of installation from main on a fresh host.
+4. Main merge, final version/changelog/release trigger review, final stable release
+   and post-merge CI remain undone. U-OPTI main VERSION/CHANGELOG/release.yml edits
+   can publish automatically. Do not call the current RC6 prerelease stable.
+5. Complete GHCR/transient artifact reference and rollback inventory before any
+   cleanup. Retain experimental/history branches and old PRs until supersession
+   is proved. No branch/tag/artifact deletion or old PR closure has occurred.
+
+### Historical preservation
+
+Archive: https://github.com/aghajani82/Smite/releases/tag/archive-stage15-reviewed-8edbd403-v1
+
+Original outer ZIP SHA-256:
+`55a4f55ebe6f14929c65fb05da96b60ea49f58480b3db9a46bf23c1395273575`.
+Original inner ZIP SHA-256:
+`d250b0fd27ae362bc4008b9e62208f94ae92fb71273d66bee83c9bcdcd1f75d9`.
+Archive manifest SHA-256:
+`5f909e4fa5c7b3428eaa4e33a4024ea6740fec828388762c3765a590c4267f1d`.
+Preserve exact bytes without rebuild; this archive never replaces RC6 images.
 
 ## Resume protocol
 

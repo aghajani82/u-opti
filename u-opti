@@ -744,6 +744,7 @@ print(sha)
                 "smite-clean-image-pair.py"
                 "smite-registry-pair-admission.py"
                 "smite-field-trial-candidate.json"
+                "smite-selected-candidate.json"
                 "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
@@ -931,6 +932,7 @@ print(sha)
                 ["smite-clean-image-pair.py"]="$BASE_URL/modules/smite-clean-image-pair.py"
                 ["smite-registry-pair-admission.py"]="$BASE_URL/modules/smite-registry-pair-admission.py"
                 ["smite-field-trial-candidate.json"]="$BASE_URL/modules/smite-field-trial-candidate.json"
+                ["smite-selected-candidate.json"]="$BASE_URL/modules/smite-selected-candidate.json"
                 ["u-opti-update-transaction.py"]="$BASE_URL/modules/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$BASE_URL/modules/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
@@ -1041,6 +1043,7 @@ print(sha)
                 ["smite-clean-image-pair.py"]="$TEMP_DIR/smite-clean-image-pair.py"
                 ["smite-registry-pair-admission.py"]="$TEMP_DIR/smite-registry-pair-admission.py"
                 ["smite-field-trial-candidate.json"]="$TEMP_DIR/smite-field-trial-candidate.json"
+                ["smite-selected-candidate.json"]="$TEMP_DIR/smite-selected-candidate.json"
                 ["u-opti-update-transaction.py"]="$TEMP_DIR/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$TEMP_DIR/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
@@ -1356,6 +1359,7 @@ print(sha)
                 "smite-clean-image-pair.py"
                 "smite-registry-pair-admission.py"
                 "smite-field-trial-candidate.json"
+                "smite-selected-candidate.json"
                 "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
@@ -1480,7 +1484,7 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "smite-selected-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"

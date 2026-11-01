@@ -51,6 +51,9 @@ smite_install_field_trial_verify_candidate() {
     helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     verifier="$helper_dir/smite-registry-pair-admission.py"
     manifest="$helper_dir/smite-field-trial-candidate.json"
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        manifest="$helper_dir/smite-selected-candidate.json"
+    fi
 
     [ -f "$verifier" ] && [ ! -L "$verifier" ] &&
     [ -f "$manifest" ] && [ ! -L "$manifest" ] || {
@@ -2033,6 +2036,77 @@ smite_install_upgrade_signed_field_trial() {
     smite_install_pause
 }
 
+# Selected fresh-host entry. Subshell scope prevents RC6 settings from leaking
+# into historical recovery/upgrade operations in this same management session.
+smite_install_selected_fresh() (
+    local role="$1" module_dir workdir containers path confirm
+    case "$role" in panel-iran|foreign) ;; *) return 2 ;; esac
+    # Preserve the explicitly requested historical offline entry unchanged.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
+        return
+    fi
+    [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
+    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC6 images qualify amd64 only'; return 2; }
+    unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+    export DOCKER_HOST=unix:///var/run/docker.sock
+    # Even an incomplete installation is preserved. This is not an upgrader.
+    for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo 'HOLD: existing/partial Smite state; use reviewed recovery, never reinstall'
+            return 2
+        fi
+    done
+    echo 'Selected Smite 2.0.0-rc.6: fresh-host qualification candidate, not yet stable.'
+    echo 'Existing installations and live tunnels are not migrated by this entry.'
+    read -rp 'Prepare verified RC6 fresh installation? [y/N]: ' confirm || return 2
+    case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
+    smite_install_require_tools || return 2
+    smite_install_ensure_docker || return 2
+    containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
+        echo 'HOLD: local Docker state unavailable'; return 2;
+    }
+    if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
+        echo 'HOLD: existing Smite container; fresh installation refused'; return 2
+    fi
+    local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
+    local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
+    local SMITE_FIELD_TRIAL_SOURCE_SHA=25ff25585be3f7ff1c8b73b39a23d0509f9a2312
+    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.6
+    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.6
+    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=26d4a50e23b6707b414a81ae9b2ca4aaa45e491481d2eb487010dcb7540ab04c
+    local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+    # Templates and CLI are from the very same immutable application source.
+    # Template image names stay upstream-shaped until strict digest replacement.
+    local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_VERSION=2.0.0-rc.6
+    local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    umask 077
+    workdir="$(mktemp -d)" || return 2
+    trap 'rm -rf -- "$workdir"' EXIT
+    # Do not overwrite an installed verifier. Use a private, hash-checked copy.
+    curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 \
+        https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64 \
+        -o "$workdir/cosign" || return 2
+    [ "$(sha256sum "$workdir/cosign" | awk '{print $1}')" = "$SMITE_FIELD_TRIAL_COSIGN_SHA256" ] || {
+        echo 'HOLD: Cosign binary hash mismatch'; return 2;
+    }
+    chmod 0700 "$workdir/cosign" || return 2
+    local PATH="$workdir:$PATH"
+    smite_install_clean_rc_preflight "$role" standard || return 2
+    if [ "$role" = panel-iran ]; then
+        [ -f "$module_dir/smite-clean-rc-preflight.sh" ] && [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || return 2
+        source "$module_dir/smite-clean-rc-preflight.sh" || return 2
+        if ! smite_clean_rc_nginx_paths_ready; then
+            smite_clean_rc_prepare_gateway_packages || return 2
+        fi
+        smite_install_panel_iran
+    else
+        smite_install_foreign_node
+    fi
+)
+
 show_smite_install_menu() {
     while true; do
         clear
@@ -2054,8 +2128,8 @@ show_smite_install_menu() {
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
-            1) smite_install_panel_iran ;;
-            2) smite_install_foreign_node ;;
+            1) smite_install_selected_fresh panel-iran ;;
+            2) smite_install_selected_fresh foreign ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
             5) smite_install_upgrade_signed_field_trial ;;

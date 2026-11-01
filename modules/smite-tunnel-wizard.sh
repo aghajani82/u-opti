@@ -922,13 +922,13 @@ smite_tw_stage_status() {
 
 smite_tw_stage_help() {
     case "$1:$2" in
-        ir:0) echo 'Open the existing Panel. Check all four active leases before adding the fifth.' ;;
+        ir:0) echo 'Open the existing Panel. Check every existing active lease before adding a new tunnel.' ;;
         ir:1) echo 'Keep current HTTPS/WSS Gateway. Use Stage15 V to verify XHTTP bridge; do not reconfigure it.' ;;
         ir:2) echo 'Keep the current shared FRPS Owner. Select that owner in Panel; never create/reapply a replacement.' ;;
         ir:3) echo 'Panel > Tunnels: create only the new Child using the existing owner and a fresh signed KH inbound.' ;;
         ir:4) echo 'Panel > XHTTP: select exact node, port and path, prepare request; G here approves via existing reviewer.'
               echo 'After ROOT_GRANT_APPROVED return to Panel and create a FRESH publish request, then Verify.'
-              echo 'Expired/changed/replayed requests remain denied. Check real VLESS/XHTTP and the four previous tunnels.' ;;
+              echo 'Expired/changed/replayed requests remain denied. Check real VLESS/XHTTP and all existing tunnels.' ;;
         kh:0) echo 'Keep current Smite Node and Signed Pairing. Check node status in Panel; do not reinstall.' ;;
         kh:1) echo 'Use existing Sanaei management to check service status. Do not reset existing inbounds.' ;;
         kh:2) echo 'In Sanaei, inspect/create only the intended new inbound. Match port, XHTTP path, transport and security.' ;;
