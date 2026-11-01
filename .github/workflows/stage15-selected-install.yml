@@ -60,7 +60,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B tests/stage15_frp_image_gate.py
-          bash tests/stage16_isolated_firstboot.sh
+          # Preserve every archived check; expect this exact RC6 instead of rc.0.
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          source=Path('tests/stage16_isolated_firstboot.sh').read_text()
+          old='assert version == "2.0.0-rc.0", version'
+          assert source.count(old)==1
+          Path(os.environ['RUNNER_TEMP'],'rc6-firstboot.sh').write_text(source.replace(old,'assert version == "2.0.0-rc.6", version'))
+          PY
+          bash "$RUNNER_TEMP/rc6-firstboot.sh"
       - name: Actual Node identity replay and paused rollback
         if: github.event_name == 'pull_request'
         working-directory: peer-smite
