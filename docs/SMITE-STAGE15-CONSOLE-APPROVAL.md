@@ -56,6 +56,36 @@ No live IR/KH inventory status was inspected in this change. Repository tests
 are evidence of code behavior, not proof of the deployed runtime. Existing
 inventory migration remains separate and is not invoked by either G entry.
 
+## Field trial: fourth FRP route (operator-reported, 2026-11-01)
+
+The IR/KH field trial was performed outside CI and confirms the practical
+operator path, not a signed release or general production readiness:
+
+- KH `smite-node` reported healthy, with
+  `SMITE_SANAEI_INVENTORY_ENABLED=true` and read-only Sanaei SQLite mount.
+  Inventory reader returned approved XHTTP inbounds. A fourth inbound at
+  port `45122` with path `/45122/store` was subsequently observed.
+- IR Panel retrieved the same KH inventory through authenticated Signed
+  Node GET before the fourth route was created.
+- A shared FRPS child named `FRP-IR-KH-45122` was created under the
+  existing `FRP-IR-KH-45121` owner. The Panel reported the child active.
+- The Panel prompted for independent approval. The IR root-console
+  operator used shortcut `G` with numeric confirmation and observed
+  `ROOT_GRANT_APPROVED; ROUTE_NOT_CHANGED`.
+- The operator submitted a **fresh** Panel XHTTP publication request and
+  reported a successful real VLESS/XHTTP client connection through
+  `02ir.kolbe1.ir:443`.
+
+Source control follow-up: persist the terminal-safe English
+`G) Approve FRP Port + Path (Stage15 / IR)` label and a Persian-language
+in-Panel publication guide (in Smite PR #41). These UI changes do not
+change signed request, lease, grant, replay or root broker contracts.
+
+Scope and evidence limits: the above are operator-provided live results;
+the helper itself does not attest the real client data plane. No new
+FRPS owner, Passkey deployment, Grandoptical change, automatic retry,
+production merge or image rollout is authorized by this field-trial record.
+
 ## Validation
 
 Root-review tests cover simple approval, full signed binding display, cancellation,
