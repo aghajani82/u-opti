@@ -578,7 +578,7 @@ smite_write_state() {
     mkdir -p "$SMITE_STATE_DIR" || return 1
     chmod 0700 "$SMITE_STATE_DIR" || return 1
 
-    cat > "$SMITE_STATE_FILE" <<EOF_STATE
+    cat > "$SMITE_STATE_FILE" <<EOF_STATE || return 1
 # Managed by U-OPTI. No secrets are stored here.
 SMITE_ROLE=$role
 SMITE_CONNECTION_MODE=$connection_mode
@@ -2085,6 +2085,7 @@ smite_install_selected_fresh() (
     # Templates and CLI are from the very same immutable application source.
     # Template image names stay upstream-shaped until strict digest replacement.
     local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
     local SMITE_UPSTREAM_VERSION=2.0.0-rc.6
     local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2

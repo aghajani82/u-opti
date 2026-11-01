@@ -17,6 +17,16 @@ for entry in smite_install_panel_iran smite_install_foreign_node; do
     fi
 done
 unset SMITE_INSTALL_FAILURE_CODE
+# A failed state write must not be masked by a successful chmod.
+(
+    SMITE_STATE_DIR="$TMP/state"
+    SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
+    cat() { return 1; }
+    chmod() { :; }
+    if smite_write_state foreign panel.example node-kh kh.example standard; then
+        echo 'FAIL: state write error was swallowed'; exit 1
+    fi
+)
 SMITE_STATE_FILE="$TMP/state.env"
 SMITE_PANEL_DIR="$TMP/panel"
 SMITE_NODE_DIR="$TMP/node"
@@ -46,6 +56,7 @@ smite_install_clean_rc_preflight() {
     [ "$SMITE_FIELD_TRIAL_SOURCE_SHA" = 25ff25585be3f7ff1c8b73b39a23d0509f9a2312 ]
     [ "$SMITE_FIELD_TRIAL_PUBLISH_REF" = refs/tags/v2.0.0-rc.6 ]
     [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.6 ]
+    [ "$SMITE_UPSTREAM_REF" = "$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
     [ "$(command sha256sum "$ROOT/modules/smite-selected-candidate.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
