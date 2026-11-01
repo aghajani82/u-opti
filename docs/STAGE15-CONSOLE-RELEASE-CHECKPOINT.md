@@ -1,5 +1,31 @@
 # Console-only release checkpoint — 2026-11-01
 
+## Current continuation — 2026-11-02 (supersedes historical gates below)
+
+The operator explicitly requested interrupted-RC6 rollback completion, then
+main merge/release, and real Ubuntu testing **after** main distribution. Do not
+request this permission again. Real VPS success is still not claimed.
+
+The new fresh-only journal and Install Components option 7 quarantine owned
+files and retain containers/volumes without deleting data. Active/paired,
+completed, foreign or replaced state is refused. A rollback interrupted between
+rename and checkpoint is retryable. Historical RC1 recovery is untouched.
+See `docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md` for exact scope and limitations.
+Local failure-injection and installation regressions pass. The dedicated CI
+workflow must verify actual disposable Docker retention before merge.
+
+Also fixed an actual installer conflict: setting DOCKER_HOST caused the existing
+Compose safety helper to reject fresh installation. The selected entry now
+clears ambient overrides and pins Docker commands to the local socket. A unique
+transaction-scoped Node volume prevents retry from adopting archived identity.
+The retained inert broker group is reused on retry without changing the broker.
+
+Prepared U-OPTI version: 0.17.0. Application images remain immutable Smite RC6
+at source 25ff25585be3f7ff1c8b73b39a23d0509f9a2312; no tag move or rebuild.
+Before merging, refresh both PR HEADs and CI, and verify the new recovery job.
+After merging verify main and the automated U-OPTI release; report
+READY_FOR_FRESH_HOST_TEST, not STABLE_RELEASE_COMPLETE. No live host action.
+
 ## Binding product decision
 
 Passkey and independent Secure Web Approval were rejected by the operator.

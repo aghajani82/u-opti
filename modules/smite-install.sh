@@ -719,12 +719,19 @@ smite_install_clean_rc_broker_prepare() {
         return 1
     }
     gid=""
-    for candidate in $(seq 39100 39999); do
-        if ! getent group "$candidate" >/dev/null 2>&1; then
-            gid="$candidate"
-            break
-        fi
-    done
+    # A fresh rollback retains the inert dedicated group. Reuse its exact GID
+    # on retry; allocating a different one would fail the broker's own guard.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] && getent group u-opti-smite-peer >/dev/null 2>&1; then
+        gid="$(getent group u-opti-smite-peer | awk -F: '$1 == "u-opti-smite-peer" && $3 ~ /^[0-9]+$/ && $4 == "" {print $3}')"
+        [[ "$gid" =~ ^[0-9]+$ ]] && [ "$gid" -ge 1 ] && [ "$gid" -lt 65536 ] || return 1
+    else
+        for candidate in $(seq 39100 39999); do
+            if ! getent group "$candidate" >/dev/null 2>&1; then
+                gid="$candidate"
+                break
+            fi
+        done
+    fi
     [ -n "$gid" ] || { echo "HOLD: No dedicated Broker peer GID available." >&2; return 1; }
     python3 -B "$helper" --peer-gid "$gid" --confirm-local-root || return 1
     SMITE_UOPTI_BROKER_GID="$gid"
@@ -856,6 +863,12 @@ smite_install_node_files() {
         return 1
     fi
 
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        # A fresh retry must never adopt a retained previous Node identity volume.
+        [[ "${COMPOSE_PROJECT_NAME:-}" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 1
+        [ "$(grep -c '^    name: smite-node-data$' "$SMITE_NODE_COMPOSE")" = 1 ] || return 1
+        sed -i "s/^    name: smite-node-data$/    name: ${COMPOSE_PROJECT_NAME}_node-data/" "$SMITE_NODE_COMPOSE" || return 1
+    fi
     smite_install_core_optional_frp_prepare "$SMITE_NODE_COMPOSE" smite-node || return 1
 
     if [ "$connection_mode" = standard ]; then
@@ -1193,7 +1206,7 @@ smite_install_panel_iran() {
     read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
     case "$confirm" in
         y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return ;;
+        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
     esac
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1545,7 +1558,7 @@ smite_install_foreign_node() {
     read -rp "Install the Foreign Smite Node? [y/N]: " confirm
     case "$confirm" in
         y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return ;;
+        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
     esac
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -2043,6 +2056,15 @@ smite_install_upgrade_signed_field_trial() {
 
 # Selected fresh-host entry. Subshell scope prevents RC6 settings from leaking
 # into historical recovery/upgrade operations in this same management session.
+smite_install_selected_paths() {
+    [ "$SMITE_PANEL_DIR" = /opt/smite ] &&
+    [ "$SMITE_NODE_DIR" = /opt/smite-node ] &&
+    [ "$SMITE_OVERLAY_DIR" = /opt/u-opti-smite ] &&
+    [ "$SMITE_STATE_FILE" = /etc/u-opti/smite/state.env ] &&
+    [ "$SMITE_PANEL_COMPOSE" = /opt/smite/docker-compose.yml ] &&
+    [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
+}
+
 smite_install_selected_fresh() (
     local role="$1" module_dir workdir containers path confirm
     case "$role" in panel-iran|foreign) ;; *) return 2 ;; esac
@@ -2051,10 +2073,12 @@ smite_install_selected_fresh() (
         if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
         return
     fi
+    smite_install_selected_paths || { echo 'HOLD: RC6 recovery requires standard managed paths'; return 2; }
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
     [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC6 images qualify amd64 only'; return 2; }
-    unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-    export DOCKER_HOST=unix:///var/run/docker.sock
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
+    # The guarded Compose helper chooses the local socket itself and rejects
+    # all ambient Docker overrides. Read-only inventory below pins it too.
     # Even an incomplete installation is preserved. This is not an upgrader.
     for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
         if [ -e "$path" ] || [ -L "$path" ]; then
@@ -2074,6 +2098,7 @@ smite_install_selected_fresh() (
     if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
         echo 'HOLD: existing Smite container; fresh installation refused'; return 2
     fi
+    docker() { command docker --host unix:///var/run/docker.sock "$@"; }
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
@@ -2108,10 +2133,36 @@ smite_install_selected_fresh() (
         if ! smite_clean_rc_nginx_paths_ready; then
             smite_clean_rc_prepare_gateway_packages || return 2
         fi
-        smite_install_panel_iran
-    else
-        smite_install_foreign_node
     fi
+    local installer_pid="$BASHPID" transaction
+    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid")" || return 2
+    [[ "$transaction" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+    # Inherited lock stays held by installer children if the menu shell dies.
+    local rc6_lock
+    exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+    flock -n "$rc6_lock" || return 2
+    export COMPOSE_PROJECT_NAME="$transaction"
+    if [ "$role" = panel-iran ]; then
+        smite_install_panel_iran || return 2
+    else
+        smite_install_foreign_node || return 2
+    fi
+    python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
+)
+
+smite_install_selected_rollback() (
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+    local module_dir answer
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" status || return 2
+    echo 'Only an interrupted fresh RC6 install can be rolled back.'
+    echo 'Completed installs, pairing, grants, routes and foreign containers are refused.'
+    echo 'Files, containers and volumes are retained. Packages/images are not uninstalled.'
+    read -rp 'Type ROLLBACK-RC6 to quarantine the interrupted install: ' answer || return 2
+    [ "$answer" = ROLLBACK-RC6 ] || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" rollback --confirm "$answer" || return 2
+    echo 'Rollback complete. Retry Install Components 1 (IR) or 2 (KH).'
+    smite_install_pause
 )
 
 show_smite_install_menu() {
@@ -2128,10 +2179,11 @@ show_smite_install_menu() {
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
+        echo "7) Recover interrupted RC6 install (retain data / rollback)"
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-6]: " smite_install_choice
+        read -rp "Please enter your selection [0-7]: " smite_install_choice
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
@@ -2141,6 +2193,7 @@ show_smite_install_menu() {
             4) smite_install_sanaei_foreign ;;
             5) smite_install_upgrade_signed_field_trial ;;
             6) smite_foreign_gateway_configure ;;
+            7) smite_install_selected_rollback ;;
             0) break ;;
             *)
                 echo

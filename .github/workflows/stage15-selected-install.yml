@@ -5,6 +5,9 @@ on:
       - 'modules/smite-selected-candidate.json'
       - 'modules/smite-install.sh'
       - 'tests/test-smite-selected-install.sh'
+      - 'modules/smite-rc6-install-journal.py'
+      - 'tests/test-smite-rc6-install-journal.py'
+      - 'tests/test-smite-rc6-docker-retention.py'
       - '.github/workflows/stage15-selected-install.yml'
   workflow_dispatch:
 permissions:
@@ -75,9 +78,12 @@ jobs:
         if: github.event_name == 'pull_request'
         working-directory: peer-smite
         run: bash tests/stage23_node_identity_rollback.sh
+      - name: RC6 rollback retains real disposable Docker data
+        run: sudo -n python3 -B tests/test-smite-rc6-docker-retention.py
       - name: Installer fixture regressions
         run: |
           set -euo pipefail
+          sudo -n python3 -B tests/test-smite-rc6-install-journal.py
           sudo -n bash tests/test-smite-selected-install.sh
           bash tests/test-smite-clean-install.sh
           bash tests/test-smite-clean-iran-pending.sh

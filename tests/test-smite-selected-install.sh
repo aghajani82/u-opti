@@ -4,7 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-source "$ROOT/modules/smite-install.sh"
+# Replace only the fixed lock path in a temporary copy; production path guard
+# is exercised below. All operations stay inside this fixture.
+sed "s@/var/lib/u-opti/rc6-install-journal/operation.lock@$TMP/operation.lock@g" "$ROOT/modules/smite-install.sh" > "$TMP/installer.sh"
+source "$TMP/installer.sh"
+ln -s "$ROOT/modules/smite-clean-rc-preflight.sh" "$TMP/smite-clean-rc-preflight.sh"
+# The production guard rejects symlink helpers; copy the fixture dependency.
+rm "$TMP/smite-clean-rc-preflight.sh"
+cp "$ROOT/modules/smite-clean-rc-preflight.sh" "$TMP/smite-clean-rc-preflight.sh"
 # Exercise actual early failure branches with a successful UI pause.
 clear() { :; }
 smite_install_pause() { :; }
@@ -32,6 +39,9 @@ SMITE_PANEL_DIR="$TMP/panel"
 SMITE_NODE_DIR="$TMP/node"
 SMITE_OVERLAY_DIR="$TMP/overlay"
 SMITE_INSTALL_PROFILE=stable
+# Fixture paths must be rejected by the real production guard.
+if smite_install_selected_paths; then echo 'FAIL: nonstandard paths accepted'; exit 1; fi
+smite_install_selected_paths() { :; }
 smite_install_require_tools() { :; }
 smite_install_ensure_docker() { :; }
 smite_clean_rc_nginx_paths_ready() { return 0; }
@@ -60,9 +70,20 @@ smite_install_clean_rc_preflight() {
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
     [ "$(command sha256sum "$ROOT/modules/smite-selected-candidate.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
-    [ "$DOCKER_HOST" = unix:///var/run/docker.sock ]
+    [ -z "${DOCKER_HOST:-}" ]
     [ -z "${DOCKER_CONTEXT:-}" ]
     [ "${FAIL_SIGNATURE:-0}" = 0 ] || return 2
+}
+python3() {
+    if [[ "$*" == *smite-rc6-install-journal.py* ]]; then
+        case "$*" in
+            *' begin '*) echo uopti_rc6_0123456789abcdef0123456789abcdef ;;
+            *' commit') : ;;
+            *) return 98 ;;
+        esac
+        return
+    fi
+    command python3 "$@"
 }
 smite_install_panel_iran() { echo panel >> "$TMP/dispatch"; }
 smite_install_foreign_node() { echo foreign >> "$TMP/dispatch"; }
