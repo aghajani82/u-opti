@@ -269,7 +269,7 @@ docker_smite_management_menu() {
         echo "7) Independent Engines (Backhaul review)"
         echo "8) Resume interrupted clean-RC IR test install"
         echo "9) Stage15 FRP / Secure Web Approval tools (experimental)"
-        echo "G) تأیید پورت و مسیر تانل (Stage15 / IR)"
+        echo "G) Approve FRP Port + Path (Stage15 / IR)"
         echo "0) Back"
         read -rp "Choose [0-9/G]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
