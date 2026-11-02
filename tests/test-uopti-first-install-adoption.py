@@ -251,13 +251,13 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
             # Deliberately make apt-get fail if invoked; this is a no-package
             # legacy transfer even if jq or sqlite3 is missing.
             script = (
-                "set -eu\\n"
-                + f"INSTALL_PATH={str(path)!r}\\n"
-                + "U_OPTI_ADOPT_EXISTING=YES\\n"
-                + "MISSING_PACKAGES=(jq sqlite3)\\n"
-                + 'apt-get() { echo "UNEXPECTED_APT_CALL"; return 99; }\\n'
+                "set -eu\n"
+                + f"INSTALL_PATH={str(path)!r}\n"
+                + "U_OPTI_ADOPT_EXISTING=YES\n"
+                + "MISSING_PACKAGES=(jq sqlite3)\n"
+                + 'apt-get() { echo "UNEXPECTED_APT_CALL"; return 99; }\n'
                 + body
-                + 'echo "PACKAGE_SCOPE=READ_ONLY"\\n'
+                + 'echo "PACKAGE_SCOPE=READ_ONLY"\n'
             )
             result = subprocess.run(["bash", "-c", script],
                                     capture_output=True, text=True, timeout=10)
