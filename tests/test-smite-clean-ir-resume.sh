@@ -163,5 +163,7 @@ grep -Fq 'user: "0:${SMITE_UOPTI_BROKER_GID:-0}"' "$SMITE_NODE_COMPOSE"
 grep -Fq -- '- /run/u-opti/smite:/run/u-opti/smite:ro' "$SMITE_NODE_COMPOSE"
 grep -Fq 'source "$SMITE_BH_DIR/smite-clean-ir-resume.sh"' "$ROOT/modules/smite-backhaul-management.sh"
 grep -Fq 'read -rp "Press Enter to return..."' "$ROOT/modules/smite-backhaul-management.sh"
-grep -Fq '|| "$FILE" = "smite-clean-ir-resume.sh"' "$ROOT/u-opti"
+# The updater now represents absent optional modules with durable
+# absence markers instead of enumerating every newly added module by name.
+grep -Fq ': > "$BACKUP_DIR/.${FILE}-was-missing" || BACKUP_OK=false' "$ROOT/u-opti"
 echo 'SMITE_CLEAN_IR_EXPLICIT_RESUME_AND_FAIL_CLOSED_TESTS=PASS'
