@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.2] - 2026-11-02
+
+### Fixed
+
+- Upgrade backup no longer mistakes legitimate absence of newer optional Smite/Backhaul modules on older U-OPTI installations for a corrupt installation. Mandatory baseline modules still fail closed.
+- The one-time, explicitly approved legacy-adoption installer uses durable old-file backups and a recoverable transaction, and skips host package installation/upgrades during adoption.
+- Added regression coverage for the four modules absent on v0.16.7, core-module drift, and avoiding host package changes.
+
+### Legacy migration
+
+- **Already installed v0.16.7 menu code cannot be repaired remotely.** If its Update U-OPTI menu stops at backup, use the documented **one-time legacy-adoption** command from the official updated installer; do not fabricate placeholder modules or bypass backup checks. After adoption, normal menu updates are available.
+- This is a file-only U-OPTI maintenance release. No Smite/FRP/Sanaei containers, Nginx routes, TLS, or running host services are restarted or migrated by its source publication.
+
 ## [0.17.1] - 2026-11-02
 
 ### Fixed

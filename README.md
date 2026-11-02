@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.1**
+Ubuntu Server Optimization and Management Tool · **v0.17.2**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
