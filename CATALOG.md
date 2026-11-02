@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.17.6** (console-only Stage15 and guarded RC7 fresh installation; VPS qualification pending; Sidecar experimental)
+Current stable version: **v0.17.7** (console-only Stage15 and guarded RC7 fresh installation; VPS qualification pending; Sidecar experimental)
 
 ## Core System Management
 
