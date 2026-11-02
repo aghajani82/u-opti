@@ -255,6 +255,102 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(result, "docker-compose/unclassified")
         self.assertNotIn("SECRET_PRIVATE_TOKEN", result)
 
+    def test_first_ir_signed_panel_override_requires_explicit_staging(self):
+        project = "uopti_rc6_" + "b" * 32
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / "docker-compose.yml"
+            override = Path(folder) / "docker-compose.signed-control.yml"
+            trusted = Path(folder) / "trusted-nodes"
+            base.write_text("services: {}\n")
+            override.write_bytes((
+                "services:\n  smite-panel:\n    volumes:\n"
+                f"      - {trusted}:/etc/smite-panel/trusted-nodes:ro\n"
+            ).encode())
+            override.chmod(0o600)
+            def inspect(command, **kwargs):
+                template = command[3]
+                if template.endswith('project"}}'): return project
+                if template.endswith('service"}}'): return "smite-panel"
+                if template.endswith('project.config_files"}}'): return str(base)
+                self.fail("Unexpected Docker label")
+            with (
+                patch.object(pairing, "PANEL_COMPOSE", base),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", override),
+                patch.object(pairing, "TRUSTED_NODES_DIR", trusted),
+                patch.object(pairing, "_run", side_effect=inspect),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": ""}),
+            ):
+                with self.assertRaisesRegex(pairing.WizardHold, "Inactive Panel"):
+                    pairing._panel_compose_command()
+                self.assertEqual(
+                    pairing._panel_compose_command(staged_signed_control=True),
+                    ["docker", "compose", "--project-name", project,
+                     "-f", str(base), "-f", str(override)],
+                )
+                override.write_text("services: {evil: {}}\n")
+                with self.assertRaisesRegex(pairing.WizardHold, "untrusted"):
+                    pairing._panel_compose_command(staged_signed_control=True)
+                override.unlink()
+                override.symlink_to(base)
+                with self.assertRaises(pairing.WizardHold):
+                    pairing._panel_compose_command(staged_signed_control=True)
+
+    def test_ir_node_compose_transaction_preserved_and_rollback_drops_candidate(self):
+        project = "uopti_rc6_" + "b" * 32
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / "docker-compose.yml"
+            candidate = Path(folder) / "docker-compose.security-candidate.yml"
+            base.write_text("services: {}\n")
+            candidate.write_text("services: {}\n")
+            candidate.chmod(0o600)
+            active = [str(base)]
+            node_project = [project]
+            def inspect(command, **kwargs):
+                template = command[3]
+                name = command[-1]
+                if template.endswith('project"}}'):
+                    return node_project[0] if name == "smite-node" else project
+                if template.endswith('service"}}'):
+                    return "smite-node"
+                if template.endswith('project.config_files"}}'):
+                    return ",".join(active)
+                self.fail("Unexpected Docker label")
+            with (
+                patch.object(pairing, "NODE_COMPOSE", base),
+                patch.object(pairing, "NODE_SECURITY_CANDIDATE", candidate),
+                patch.object(pairing, "_run", side_effect=inspect),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": ""}),
+            ):
+                expected = ["docker", "compose", "--project-name", project, "-f", str(base)]
+                self.assertEqual(pairing._ir_node_compose_command(), expected)
+                self.assertEqual(
+                    pairing._ir_node_compose_command(staged_candidate=True),
+                    expected + ["-f", str(candidate)],
+                )
+                active.append(str(candidate))
+                with self.assertRaisesRegex(pairing.WizardHold, "already active"):
+                    pairing._ir_node_compose_command(staged_candidate=True)
+                self.assertEqual(pairing._ir_node_compose_command(rollback=True), expected)
+                active.append("/tmp/unreviewed.yml")
+                with self.assertRaisesRegex(pairing.WizardHold, "not reviewed"):
+                    pairing._ir_node_compose_command(rollback=True)
+                active[:] = [str(base)]
+                node_project[0] = "smite"
+                with self.assertRaisesRegex(pairing.WizardHold, "differs"):
+                    pairing._ir_node_compose_command(staged_candidate=True)
+
+    def test_ir_activation_has_preflight_and_verified_rollback(self):
+        source = HELPER.read_text()
+        start = source.index("def activate_ir_node_field_trial(")
+        stop = source.index("\n# Signed KH activation", start)
+        body = source[start:stop]
+        self.assertIn("_panel_compose_command()", body)
+        self.assertIn("_ir_node_compose_command()", body)
+        self.assertIn("_restart_panel_with_signed_control(staged_signed_control=True)", body)
+        self.assertIn("_ir_node_compose_command(staged_candidate=True)", body)
+        self.assertIn("_ir_node_compose_command(rollback=True)", body)
+        self.assertIn("rollback could not be verified", body)
+
     def test_panel_signed_schema_migration_and_activation_preflight(self):
         with patch.object(
             pairing, "_run", return_value="PANEL_SIGNED_SCHEMA=READY"

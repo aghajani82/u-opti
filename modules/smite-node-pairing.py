@@ -415,7 +415,16 @@ def _wait_container(name: str, timeout: int = 90) -> None:
     raise WizardHold("Container did not become healthy")
 
 
-def _panel_compose_command() -> list[str]:
+def _expected_panel_signed_control_override() -> bytes:
+    return (
+        "services:\n"
+        "  smite-panel:\n"
+        "    volumes:\n"
+        f"      - {TRUSTED_NODES_DIR}:/etc/smite-panel/trusted-nodes:ro\n"
+    ).encode("utf-8")
+
+
+def _panel_compose_command(*, staged_signed_control: bool = False) -> list[str]:
     """Keep RC7's actual Compose project and reviewed active file set.
 
     Fresh RC6/RC7 installs use a transaction-scoped COMPOSE_PROJECT_NAME.
@@ -460,8 +469,20 @@ def _panel_compose_command() -> list[str]:
         or any(name not in (base, overlay) for name in files)
     ):
         raise WizardHold("Panel active Compose file set is not reviewed")
-    if PANEL_SECURITY_OVERRIDE.exists() and overlay not in files:
-        raise WizardHold("Inactive Panel security override requires explicit review")
+    if PANEL_SECURITY_OVERRIDE.exists() or PANEL_SECURITY_OVERRIDE.is_symlink():
+        if overlay not in files:
+            # This explicit admission is used ONLY by the first signed IR
+            # activation, immediately after its reviewed helper stages the
+            # exact expected override. An ordinary pairing enable/restart
+            # still rejects a stray inactive overlay.
+            if not staged_signed_control or files != [base]:
+                raise WizardHold("Inactive Panel security override requires explicit review")
+            actual = _regular(PANEL_SECURITY_OVERRIDE, mode=0o600, limit=32_000)
+            if actual != _expected_panel_signed_control_override():
+                raise WizardHold("Staged Panel signed-control override is untrusted")
+            files.append(overlay)
+    elif overlay in files:
+        raise WizardHold("Active Panel signed-control override is missing")
 
     command = ["docker", "compose", "--project-name", project]
     for name in files:
@@ -469,6 +490,64 @@ def _panel_compose_command() -> list[str]:
         if not path.is_file() or path.is_symlink():
             raise WizardHold("Panel active Compose file is missing or unsafe")
         command.extend(["-f", name])
+    return command
+
+
+def _ir_node_compose_command(*, staged_candidate: bool = False, rollback: bool = False) -> list[str]:
+    """Never change Compose ownership when activating the co-located IR Node.
+
+    An inactive candidate may be included only in the explicit activation
+    operation after the reviewed candidate preparer has validated it.
+    Rollback drops only this candidate, never another active overlay.
+    """
+    project = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project"}}',
+         "smite-node"],
+        timeout=15, capture=True,
+    )
+    panel_project = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project"}}',
+         "smite-panel"],
+        timeout=15, capture=True,
+    )
+    if (not re.fullmatch(r"uopti_rc6_[0-9a-f]{32}", project)
+            or project != panel_project):
+        raise WizardHold("Iran Node Compose project differs from installed Panel transaction")
+    ambient_project = os.environ.get("COMPOSE_PROJECT_NAME", "")
+    if ambient_project and ambient_project != project:
+        raise WizardHold("Iran Node Compose environment conflicts with installed transaction")
+    service = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.service"}}',
+         "smite-node"],
+        timeout=15, capture=True,
+    )
+    if service != "smite-node":
+        raise WizardHold("Iran Node container is not owned by reviewed Compose service")
+    raw_files = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project.config_files"}}',
+         "smite-node"],
+        timeout=15, capture=True,
+    )
+    base = str(NODE_COMPOSE)
+    candidate = str(NODE_SECURITY_CANDIDATE)
+    files = raw_files.split(",")
+    if files not in ([base], [base, candidate]):
+        raise WizardHold("Iran Node active Compose file set is not reviewed")
+    if (staged_candidate and files != [base]) or (
+        not staged_candidate and not rollback and files != [base]
+    ):
+        raise WizardHold("Iran Node security candidate is already active")
+    if staged_candidate:
+        _regular(NODE_SECURITY_CANDIDATE, mode=0o600, limit=128_000)
+    if not NODE_COMPOSE.is_file() or NODE_COMPOSE.is_symlink():
+        raise WizardHold("Iran Node base Compose file is missing or unsafe")
+    command = ["docker", "compose", "--project-name", project, "-f", base]
+    if staged_candidate:
+        command.extend(["-f", candidate])
     return command
 
 
@@ -905,12 +984,7 @@ def _panel_override_and_origin(node_id: str, node_name: str) -> tuple[bytes | No
     override_before = None
     if PANEL_SECURITY_OVERRIDE.exists() or PANEL_SECURITY_OVERRIDE.is_symlink():
         override_before = _regular(PANEL_SECURITY_OVERRIDE, mode=0o600, limit=32_000)
-    override = (
-        "services:\n"
-        "  smite-panel:\n"
-        "    volumes:\n"
-        f"      - {TRUSTED_NODES_DIR}:/etc/smite-panel/trusted-nodes:ro\n"
-    ).encode("utf-8")
+    override = _expected_panel_signed_control_override()
     if override_before is not None and override_before != override:
         raise WizardHold("Panel signed-control Compose override has unexpected drift")
     _atomic_write(PANEL_SECURITY_OVERRIDE, override, 0o600)
@@ -927,8 +1001,8 @@ def _panel_override_and_origin(node_id: str, node_name: str) -> tuple[bytes | No
     return origin_before, override_before, env_before
 
 
-def _restart_panel_with_signed_control() -> None:
-    command = _panel_compose_command()
+def _restart_panel_with_signed_control(*, staged_signed_control: bool = False) -> None:
+    command = _panel_compose_command(staged_signed_control=staged_signed_control)
     _run(command + ["config", "--quiet"], timeout=30)
     _run(command + ["up", "-d", "--no-build", "--force-recreate", "smite-panel"], timeout=120)
     _wait_container("smite-panel", 90)
@@ -1027,29 +1101,31 @@ def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
     ):
         raise WizardHold("IR Node is not at the reviewed paused+strict HTTPS/443 baseline")
 
+    # Preflight both original transaction owners BEFORE staging any files.
+    # An unexpected/inactive Panel overlay must fail before mutations.
+    _panel_compose_command()
+    _ir_node_compose_command()
+
     # Fail before any Panel/Node recreate if option 2 did not complete
     # both signed-registration migrations.
     _require_panel_signed_registration_schema()
 
     origin_before = override_before = panel_env_before = None
     node_was_applied = False
+    node_recreate_attempted = False
     try:
         origin_before, override_before, panel_env_before = _panel_override_and_origin(
             node_id, node_name
         )
-        _restart_panel_with_signed_control()
+        _restart_panel_with_signed_control(staged_signed_control=True)
 
         _prepare_security_candidate()
         _provision_replay_once()
+        command = _ir_node_compose_command(staged_candidate=True)
+        _run(command + ["config", "--quiet"], timeout=30)
+        node_recreate_attempted = True
         _run(
-            ["docker", "compose", "-f", str(NODE_COMPOSE),
-             "-f", str(NODE_SECURITY_CANDIDATE), "config", "--quiet"],
-            timeout=30,
-        )
-        _run(
-            ["docker", "compose", "-f", str(NODE_COMPOSE),
-             "-f", str(NODE_SECURITY_CANDIDATE),
-             "up", "-d", "--no-build", "--force-recreate", "smite-node"],
+            command + ["up", "-d", "--no-build", "--force-recreate", "smite-node"],
             timeout=120,
         )
         node_was_applied = True
@@ -1068,16 +1144,25 @@ def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
         _wait_panel_signed_checkin(node_id)
         _panel_to_ir_signed_probe(node_id)
     except Exception as exc:
-        if node_was_applied:
+        node_rollback_ok = not node_recreate_attempted
+        if node_recreate_attempted:
             try:
-                _run(
-                    ["docker", "compose", "-f", str(NODE_COMPOSE),
-                     "up", "-d", "--no-build", "--force-recreate", "smite-node"],
-                    timeout=120,
-                )
+                command = _ir_node_compose_command(rollback=True)
+                _run(command + ["up", "-d", "--no-build", "--force-recreate", "smite-node"],
+                     timeout=120)
                 _wait_container("smite-node", 90)
+                effective = _run(
+                    ["docker", "inspect", "-f",
+                     "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],
+                    timeout=10, capture=True,
+                ).splitlines()
+                node_rollback_ok = (
+                    "SMITE_NODE_PANEL_AUTH_MODE=paused" in effective
+                    and "SMITE_AGENT_AUTH_MODE=strict" in effective
+                )
             except Exception:
-                pass
+                node_rollback_ok = False
+        panel_rollback_ok = panel_env_before is None
         if panel_env_before is not None:
             try:
                 _atomic_write(PANEL_ENV, panel_env_before, 0o600)
@@ -1090,11 +1175,17 @@ def activate_ir_node_field_trial(state: dict[str, str] | None = None) -> None:
                 else:
                     _atomic_write(PANEL_SECURITY_OVERRIDE, override_before, 0o600)
                 _restart_panel_with_signed_control()
+                panel_rollback_ok = True
             except Exception:
-                pass
+                panel_rollback_ok = False
+        if not node_rollback_ok or not panel_rollback_ok:
+            raise WizardHold(
+                "CRITICAL: Signed IR activation failed and safe Panel/Node "
+                "rollback could not be verified; stop and inspect host"
+            ) from exc
         if isinstance(exc, WizardHold):
             raise
-        raise WizardHold("Signed IR Node activation failed; paused rollback was attempted") from exc
+        raise WizardHold("Signed IR Node activation failed; paused rollback verified") from exc
 
     print("IR_SIGNED_NODE_RUNTIME=ACTIVE_FIELD_TRIAL")
     print("IR_SIGNED_NODE_CHECKIN=PASS")
