@@ -346,6 +346,52 @@ def generate_report(quiet=False):
         print("REPORT=" + str(REPORTS / filename))
     return 0
 
+def history():
+    """Read-only, privacy-safe summary of currently retained Xray access logs."""
+    now = dt.datetime.now().astimezone()
+    cutoff = now - dt.timedelta(days=RETAIN_DAYS)
+    days = Counter(); indicators = Counter(); total = 0
+    earliest = None; latest_seen = None; errors = 0; files = 0
+    for directory in known_logdirs():
+        for p in directory.iterdir():
+            if p.is_symlink() or not p.is_file() or (
+                p.name != "access.log" and not ARCHIVE_RE.fullmatch(p.name)):
+                continue
+            files += 1
+            op = gzip.open if p.suffix == ".gz" else open
+            try:
+                with op(p, "rt", errors="replace") as stream:
+                    for line in stream:
+                        m = STAMP_RE.match(line)
+                        if not m: continue
+                        try:
+                            t = dt.datetime(*map(int, m.groups()), tzinfo=now.tzinfo)
+                        except ValueError:
+                            continue
+                        if earliest is None or t < earliest: earliest = t
+                        if latest_seen is None or t > latest_seen: latest_seen = t
+                        if t < cutoff or t > now + dt.timedelta(minutes=5): continue
+                        total += 1
+                        low = line.lower()
+                        for ind in INDICATORS:
+                            if ind in low:
+                                indicators[ind] += 1
+                                days[t.date().isoformat()] += 1
+            except (OSError, EOFError):
+                errors += 1
+    print("WINDOW_DAYS=10")
+    print("XRAY_FILES_SCANNED=" + str(files))
+    print("XRAY_ENTRIES_IN_WINDOW=" + str(total))
+    print("EARLIEST_AVAILABLE=" + (earliest.isoformat() if earliest else "NONE"))
+    print("LATEST_AVAILABLE=" + (latest_seen.isoformat() if latest_seen else "NONE"))
+    print("BADBOX_DOMAIN=" + str(indicators[INDICATORS[0]]))
+    print("BADBOX_IPV4=" + str(indicators[INDICATORS[1]]))
+    print("BADBOX_IPV6=" + str(indicators[INDICATORS[2]]))
+    for day in sorted(days):
+        print("MATCHES_" + day + "=" + str(days[day]))
+    print("READ_ERRORS=" + str(errors))
+    print("NOTE=This is a known-indicator scan only; no raw client data is printed.")
+
 def latest():
     if not REPORTS.is_dir(): print("No reports. Choose Install or Run now."); return
     files = sorted((p for p in REPORTS.iterdir() if REPORT_RE.fullmatch(p.name)
@@ -378,7 +424,7 @@ def status():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "status", "run", "latest", "list", "show"))
+    parser.add_argument("action", choices=("install", "status", "run", "latest", "list", "show", "history"))
     parser.add_argument("name", nargs="?")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
@@ -388,6 +434,7 @@ def main():
         elif args.action == "run": generate_report(quiet=args.quiet)
         elif args.action == "latest": latest()
         elif args.action == "list": list_reports()
+        elif args.action == "history": history()
         elif args.action == "show": show_report(args.name or "")
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print("HOLD: " + str(exc), file=sys.stderr)
