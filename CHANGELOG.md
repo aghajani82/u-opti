@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.6] - 2026-11-02
+
+### Fixed
+
+- RC7 Iran Panel + Node fresh-install Root Broker now accepts an existing root-owned `/var/lib/u-opti` mode `0700` created by the secure install journal, as well as the historical `0755`. It does **not** chmod the journal parent wider or relax permissions on broker/grant/journal children.
+- Retain rejection of group-writable, symlinked and all other wrong-mode paths. Add full inert provisioning and negative-mode regression tests.
+- Real VPS field evidence: operator reached signed image verification and Nginx prerequisites, then failed closed on `HOLD_BROKER_DIRECTORY_MODE_MISMATCH` while journal was `INSTALLING`. The original journal and partial files remain intentionally retained; use guarded menu recovery before any new install.
+- Current RC7 fresh-host qualification target remains **Ubuntu 24.04 LTS amd64**. The field VPS was later identified as **Ubuntu 26.04.1 LTS**, which is outside that qualification; publication is not evidence of a successful live 26.04 install.
+
 ## [0.17.5] - 2026-11-02
 
 ### Fixed

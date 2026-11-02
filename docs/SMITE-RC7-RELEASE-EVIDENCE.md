@@ -46,3 +46,25 @@ network compatibility repair, not approval of a production Smite release.
 
 The menu pauses on failing installs to display the exact HOLD. Host Nginx,
 real DNS/TLS, and successful live first boot still require operator trial.
+
+## Fresh Iran host broker/journal directory mismatch (2026-11-02)
+
+After the v0.17.5 signed-image checks and Nginx prerequisite passed on an
+operator-owned new IR host, actual Panel provisioning reported
+`HOLD_BROKER_DIRECTORY_MODE_MISMATCH`. Read-only inventory found root-owned
+`/var/lib/u-opti` mode `0700`, `/var/lib/u-opti/rc6-install-journal`
+mode `0700`, and journal `INSTALLING` for `panel-iran`. The journal's secure
+`mkdir(parents=True, mode=0700)` is the source of the parent mode, while
+broker provisioning had historically required `0755` for the same parent.
+
+v0.17.6 accepts only existing modes `0700` or `0755` for that one root-owned
+parent. It never changes an existing mode or relaxes requirements for private
+journal/broker/grant children. Automated tests exercise an actual inert broker
+provision against a journal-like `0700` parent and reject modes `0750`,
+`0770`, `0777` and inappropriate `0700` at unrelated directories.
+
+**Operator action:** retain interrupted journal and use official menu recovery
+(Install Components → 7, guarded rollback) before fresh install. Do not delete
+or chmod source/state paths. The IR host reports Ubuntu **26.04.1 LTS**; RC7
+qualification remains Ubuntu **24.04 LTS** and no unsupported-host success is
+claimed.
