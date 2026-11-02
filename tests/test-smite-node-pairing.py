@@ -261,10 +261,10 @@ class PreviewTests(unittest.TestCase):
             base = Path(folder) / "docker-compose.yml"
             override = Path(folder) / "docker-compose.signed-control.yml"
             trusted = Path(folder) / "trusted-nodes"
-            base.write_text("services: {}\\n")
+            base.write_text("services: {}\n")
             override.write_bytes((
-                "services:\\n  smite-panel:\\n    volumes:\\n"
-                f"      - {trusted}:/etc/smite-panel/trusted-nodes:ro\\n"
+                "services:\n  smite-panel:\n    volumes:\n"
+                f"      - {trusted}:/etc/smite-panel/trusted-nodes:ro\n"
             ).encode())
             override.chmod(0o600)
             def inspect(command, **kwargs):
@@ -287,7 +287,7 @@ class PreviewTests(unittest.TestCase):
                     ["docker", "compose", "--project-name", project,
                      "-f", str(base), "-f", str(override)],
                 )
-                override.write_text("services: {evil: {}}\\n")
+                override.write_text("services: {evil: {}}\n")
                 with self.assertRaisesRegex(pairing.WizardHold, "untrusted"):
                     pairing._panel_compose_command(staged_signed_control=True)
                 override.unlink()
@@ -300,8 +300,8 @@ class PreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             base = Path(folder) / "docker-compose.yml"
             candidate = Path(folder) / "docker-compose.security-candidate.yml"
-            base.write_text("services: {}\\n")
-            candidate.write_text("services: {}\\n")
+            base.write_text("services: {}\n")
+            candidate.write_text("services: {}\n")
             candidate.chmod(0o600)
             active = [str(base)]
             node_project = [project]
@@ -342,7 +342,7 @@ class PreviewTests(unittest.TestCase):
     def test_ir_activation_has_preflight_and_verified_rollback(self):
         source = HELPER.read_text()
         start = source.index("def activate_ir_node_field_trial(")
-        stop = source.index("\\n# Signed KH activation", start)
+        stop = source.index("\n# Signed KH activation", start)
         body = source[start:stop]
         self.assertIn("_panel_compose_command()", body)
         self.assertIn("_ir_node_compose_command()", body)

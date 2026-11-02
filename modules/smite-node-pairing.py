@@ -417,10 +417,10 @@ def _wait_container(name: str, timeout: int = 90) -> None:
 
 def _expected_panel_signed_control_override() -> bytes:
     return (
-        "services:\\n"
-        "  smite-panel:\\n"
-        "    volumes:\\n"
-        f"      - {TRUSTED_NODES_DIR}:/etc/smite-panel/trusted-nodes:ro\\n"
+        "services:\n"
+        "  smite-panel:\n"
+        "    volumes:\n"
+        f"      - {TRUSTED_NODES_DIR}:/etc/smite-panel/trusted-nodes:ro\n"
     ).encode("utf-8")
 
 
