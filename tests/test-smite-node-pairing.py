@@ -164,6 +164,97 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn("node_secret", location)
         self.assertNotIn("pairing_code", location)
 
+    def test_panel_compose_preserves_rc7_transaction_and_active_files(self):
+        project = "uopti_rc6_" + "a" * 32
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / "docker-compose.yml"
+            security = Path(folder) / "docker-compose.signed-control.yml"
+            base.write_text("services: {}\\n")
+            security.write_text("services: {}\\n")
+
+            active = [str(base), str(security)]
+
+            def inspect(cmd, **kwargs):
+                self.assertEqual(cmd[:3], ["docker", "inspect", "-f"])
+                self.assertEqual(cmd[-1], "smite-panel")
+                field = cmd[3]
+                if field.endswith('project"}}'):
+                    return project
+                if field.endswith('service"}}'):
+                    return "smite-panel"
+                if field.endswith('project.config_files"}}'):
+                    return ",".join(active)
+                self.fail("Unexpected Docker inspect template")
+
+            with (
+                patch.object(pairing, "PANEL_COMPOSE", base),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", security),
+                patch.object(pairing, "_run", side_effect=inspect),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": ""}),
+            ):
+                self.assertEqual(
+                    pairing._panel_compose_command(),
+                    ["docker", "compose", "--project-name", project,
+                     "-f", str(base), "-f", str(security)],
+                )
+                active[:] = [str(base)]
+                with self.assertRaisesRegex(pairing.WizardHold, "Inactive Panel security override"):
+                    pairing._panel_compose_command()
+                security.unlink()
+                self.assertEqual(
+                    pairing._panel_compose_command(),
+                    ["docker", "compose", "--project-name", project, "-f", str(base)],
+                )
+                active[:] = [str(base), "/tmp/unreviewed.yml"]
+                with self.assertRaisesRegex(pairing.WizardHold, "not reviewed"):
+                    pairing._panel_compose_command()
+
+    def test_panel_compose_rejects_mismatched_project_and_service(self):
+        project = "uopti_rc6_" + "a" * 32
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / "docker-compose.yml"
+            base.write_text("services: {}\\n")
+            security = Path(folder) / "docker-compose.signed-control.yml"
+            answers = [project, "smite-panel", str(base)]
+            def inspect(cmd, **kwargs):
+                return answers.pop(0)
+            with (
+                patch.object(pairing, "PANEL_COMPOSE", base),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", security),
+                patch.object(pairing, "_run", side_effect=inspect),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": "smite"}),
+            ):
+                with self.assertRaisesRegex(pairing.WizardHold, "environment conflicts"):
+                    pairing._panel_compose_command()
+            with (
+                patch.object(pairing, "PANEL_COMPOSE", base),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", security),
+                patch.object(pairing, "_run", side_effect=["smite"]),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": ""}),
+            ):
+                with self.assertRaisesRegex(pairing.WizardHold, "transaction identity"):
+                    pairing._panel_compose_command()
+            with (
+                patch.object(pairing, "PANEL_COMPOSE", base),
+                patch.object(pairing, "PANEL_SECURITY_OVERRIDE", security),
+                patch.object(pairing, "_run", side_effect=[project, "smite-node"]),
+                patch.dict(os.environ, {"COMPOSE_PROJECT_NAME": ""}),
+            ):
+                with self.assertRaisesRegex(pairing.WizardHold, "not owned"):
+                    pairing._panel_compose_command()
+
+    def test_compose_error_reports_only_safe_classification(self):
+        cmd = ["docker", "compose", "--project-name", "uopti_rc6_" + "a" * 32,
+               "-f", "/opt/smite/docker-compose.yml", "up"]
+        self.assertEqual(
+            pairing._host_failure_context(
+                cmd, "Error: Conflict. The container name /smite-panel is already in use by SECRET"),
+            "docker-compose/name-conflict",
+        )
+        result = pairing._host_failure_context(cmd, "unknown failure with SECRET_PRIVATE_TOKEN")
+        self.assertEqual(result, "docker-compose/unclassified")
+        self.assertNotIn("SECRET_PRIVATE_TOKEN", result)
+
     def test_panel_signed_schema_migration_and_activation_preflight(self):
         with patch.object(
             pairing, "_run", return_value="PANEL_SIGNED_SCHEMA=READY"

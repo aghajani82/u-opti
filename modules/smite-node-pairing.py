@@ -354,7 +354,24 @@ def _host_failure_context(command: list[str], stderr: str = "") -> str:
     if command[:2] == ["docker", "inspect"] or command[:3] == ["docker", "image", "inspect"]:
         return "docker-inspection"
     if command[:2] == ["docker", "compose"]:
-        return "docker-compose"
+        # Never echo Docker stderr: it may contain paths, environment values
+        # or credentials. Report only reviewed, fixed diagnostic categories.
+        error = stderr.lower()
+        if "container name" in error and "already in use" in error:
+            return "docker-compose/name-conflict"
+        if "manifest unknown" in error or "pull access denied" in error:
+            return "docker-compose/image-unavailable"
+        if "no such image" in error:
+            return "docker-compose/image-missing"
+        if "port is already allocated" in error or "address already in use" in error:
+            return "docker-compose/port-conflict"
+        if "invalid mount config" in error or "error while creating mount source path" in error:
+            return "docker-compose/mount-error"
+        if "permission denied" in error:
+            return "docker-compose/permission-denied"
+        if "network" in error and "not found" in error:
+            return "docker-compose/network-missing"
+        return "docker-compose/unclassified"
     return "host-operation"
 
 
@@ -399,9 +416,59 @@ def _wait_container(name: str, timeout: int = 90) -> None:
 
 
 def _panel_compose_command() -> list[str]:
-    command = ["docker", "compose", "-f", str(PANEL_COMPOSE)]
-    if PANEL_SECURITY_OVERRIDE.is_file() and not PANEL_SECURITY_OVERRIDE.is_symlink():
-        command += ["-f", str(PANEL_SECURITY_OVERRIDE)]
+    """Keep RC7's actual Compose project and reviewed active file set.
+
+    Fresh RC6/RC7 installs use a transaction-scoped COMPOSE_PROJECT_NAME.
+    Reconstructing from the working directory would create a second project
+    named "smite" and collide with the existing smite-panel container.
+    """
+    project = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project"}}',
+         "smite-panel"],
+        timeout=15, capture=True,
+    )
+    if not re.fullmatch(r"uopti_rc6_[0-9a-f]{32}", project):
+        raise WizardHold("Panel Compose transaction identity is missing or unexpected")
+
+    ambient_project = os.environ.get("COMPOSE_PROJECT_NAME", "")
+    if ambient_project and ambient_project != project:
+        raise WizardHold("Panel Compose environment conflicts with installed transaction")
+
+    service = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.service"}}',
+         "smite-panel"],
+        timeout=15, capture=True,
+    )
+    if service != "smite-panel":
+        raise WizardHold("Panel container is not owned by reviewed Compose service")
+
+    raw_files = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project.config_files"}}',
+         "smite-panel"],
+        timeout=15, capture=True,
+    )
+    files = raw_files.split(",")
+    base = str(PANEL_COMPOSE)
+    overlay = str(PANEL_SECURITY_OVERRIDE)
+    if (
+        not files or files[0] != base
+        or len(files) != len(set(files))
+        or len(files) > 2
+        or any(name not in (base, overlay) for name in files)
+    ):
+        raise WizardHold("Panel active Compose file set is not reviewed")
+    if PANEL_SECURITY_OVERRIDE.exists() and overlay not in files:
+        raise WizardHold("Inactive Panel security override requires explicit review")
+
+    command = ["docker", "compose", "--project-name", project]
+    for name in files:
+        path = Path(name)
+        if not path.is_file() or path.is_symlink():
+            raise WizardHold("Panel active Compose file is missing or unsafe")
+        command.extend(["-f", name])
     return command
 
 
