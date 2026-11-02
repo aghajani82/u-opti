@@ -128,7 +128,98 @@ fi
 
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
-source "$MODULES_PATH/security-monitor.sh"
+# Older fixed-list updaters cannot fetch modules introduced in a newer release.
+# Option 7 provisions only its missing U-OPTI module files from an immutable
+# commit on first use. This does NOT install the host monitor or touch services.
+if [ -f "$MODULES_PATH/security-monitor.sh" ] &&
+   [ -f "$MODULES_PATH/security-monitor.py" ]; then
+    source "$MODULES_PATH/security-monitor.sh"
+else
+    u_opti_security_monitor_menu() {
+        local pin="23cde3bc79d4616416eca1e5dbe3bbb354753faa"
+        local names=("security-monitor.sh" "security-monitor.py")
+        local blobs=("da0a7a84dad0072c02c94a42f4b59bdc2a8d5b88" "331945a301b09abc40314cc25eabca8f42ffd531")
+        local tmp file target i
+        if [ -L "$MODULES_PATH" ] || [ ! -d "$MODULES_PATH" ] ||
+           [ "$(stat -c %u "$MODULES_PATH")" != 0 ]; then
+            echo "HOLD: Unsafe U-OPTI module directory."
+            read -rp "Press Enter to return..."
+            return 1
+        fi
+        if ! command -v python3 >/dev/null || ! command -v curl >/dev/null; then
+            echo "HOLD: Python3 and curl required for verified first-use provisioning."
+            read -rp "Press Enter to return..."
+            return 1
+        fi
+        tmp="$(mktemp -d)" || return 1
+        for i in 0 1; do
+            file="${names[$i]}"
+            target="$MODULES_PATH/$file"
+            if [ -L "$target" ]; then
+                echo "HOLD: Unsafe module symlink: $file"
+                rm -rf -- "$tmp"
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+            if [ -f "$target" ]; then continue; fi
+            if [ -e "$target" ]; then
+                echo "HOLD: Unexpected module path: $file"
+                rm -rf -- "$tmp"
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+            if ! curl -fsSL --retry 2 --max-time 25 \
+                 "https://raw.githubusercontent.com/aghajani82/u-opti/$pin/modules/$file" -o "$tmp/$file" ||
+               ! python3 -B - "$tmp/$file" "${blobs[$i]}" <<'PY_VERIFY_MONITOR'
+import hashlib, pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+digest = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\\0" + data).hexdigest()
+sys.exit(0 if digest == sys.argv[2] else 1)
+PY_VERIFY_MONITOR
+            then
+                echo "HOLD: Missing module failed pinned integrity verification: $file"
+                rm -rf -- "$tmp"
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+            if [[ "$file" == *.py ]]; then
+                if ! python3 -B -m py_compile "$tmp/$file"; then
+                    echo "HOLD: Python module syntax verification failed."
+                    rm -rf -- "$tmp"
+                    read -rp "Press Enter to return..."
+                    return 1
+                fi
+            elif ! bash -n "$tmp/$file"; then
+                echo "HOLD: Shell module syntax verification failed."
+                rm -rf -- "$tmp"
+                read -rp "Press Enter to return..."
+                return 1
+            fi
+        done
+        for i in 0 1; do
+            file="${names[$i]}"
+            target="$MODULES_PATH/$file"
+            if [ -f "$tmp/$file" ]; then
+                if ! install -o root -g root -m 0644 -C "$tmp/$file" "$target"; then
+                    echo "HOLD: Could not provision $file."
+                    rm -rf -- "$tmp"
+                    read -rp "Press Enter to return..."
+                    return 1
+                fi
+            fi
+        done
+        rm -rf -- "$tmp"
+        if [ -f "$MODULES_PATH/security-monitor.sh" ] &&
+           [ -f "$MODULES_PATH/security-monitor.py" ]; then
+            source "$MODULES_PATH/security-monitor.sh"
+            u_opti_security_monitor_menu
+        else
+            echo "HOLD: Monitor modules remain unavailable."
+            read -rp "Press Enter to return..."
+            return 1
+        fi
+    }
+fi
 source "$MODULES_PATH/time.sh"
 source "$MODULES_PATH/swap.sh"
 source "$MODULES_PATH/bbr.sh"
