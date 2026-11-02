@@ -28,6 +28,7 @@ class SecurityMonitorContractTests(unittest.TestCase):
             self.assertGreaterEqual(main.count(f), 4)
         self.assertIn("1) Install / Enable Daily Monitoring", menu)
         self.assertIn("5) Open Report by Filename", menu)
+        self.assertIn("6) Show Last 10 Days", menu)
 
     def test_archive_allowlist(self):
         path = ROOT / "modules/security-monitor.py"
