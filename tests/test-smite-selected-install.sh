@@ -127,7 +127,7 @@ printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/menu.log"
 [ "$(cat "$TMP/dispatch")" = panel ]
 grep -q 'Selected Smite 2.0.0-rc.7' "$TMP/menu.log"
 export FAIL_SIGNATURE=1
-printf '1\\ny\\n0\\n' | show_smite_install_menu > "$TMP/failed-menu.log"
+printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/failed-menu.log"
 unset FAIL_SIGNATURE
 grep -q 'HOLD: Panel + Iran Node installation did not complete' "$TMP/failed-menu.log"
 echo 'OFFICIAL_MENU_OPTION_1=PASS_ISOLATED_FIXTURE'
