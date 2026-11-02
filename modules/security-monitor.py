@@ -92,6 +92,19 @@ def validate_logrotate(body):
     finally:
         os.unlink(tmp)
 
+def ensure_rotate_job():
+    if ROTATE_CRON.exists():
+        if (ROTATE_CRON.is_symlink() or not ROTATE_CRON.is_file()
+                or ROTATE_CRON.stat().st_uid != 0):
+            raise RuntimeError("HOLD: unsafe existing hourly logrotate job")
+        existing = ROTATE_CRON.read_text(encoding="utf-8")
+        if str(CONF) not in existing or "logrotate" not in existing:
+            raise RuntimeError("HOLD: unexpected existing hourly logrotate job")
+        return
+    cron = ("#!/bin/sh\n/usr/sbin/logrotate -s "
+            "/var/lib/logrotate/uopti-xray-access.status " + str(CONF) + "\n")
+    atomic_file(ROTATE_CRON, cron, 0o700)
+
 def configure_retention(logdirs):
     """Only modify a recognizable preexisting config or create for one existing log."""
     if CONF.is_symlink() or ROTATE_CRON.is_symlink():
@@ -119,7 +132,9 @@ def configure_retention(logdirs):
                 raise RuntimeError("HOLD: backup collision")
             atomic_file(backup, original)
             atomic_file(CONF, body)
+            ensure_rotate_job()
             return "UPDATED_EXISTING_POLICY;BACKUP=" + str(backup)
+        ensure_rotate_job()
         return "ALREADY_10_DAYS"
     eligible = [p / "access.log" for p in logdirs
                 if (p / "access.log").is_file() and not (p / "access.log").is_symlink()]
@@ -131,17 +146,8 @@ def configure_retention(logdirs):
             "    notifempty\n    compress\n    delaycompress\n"
             "    copytruncate\n    su root root\n}\n")
     validate_logrotate(body)
-    if ROTATE_CRON.exists():
-        # Existing unrecognized hourly job must not be changed or silently reused.
-        existing = ROTATE_CRON.read_text(encoding="utf-8")
-        if str(CONF) not in existing or "logrotate" not in existing:
-            raise RuntimeError("HOLD: unexpected existing hourly logrotate job")
     atomic_file(CONF, body)
-    if not ROTATE_CRON.exists():
-        cron = ("#!/bin/sh\n/usr/sbin/logrotate -s "
-                "/var/lib/logrotate/uopti-xray-access.status "
-                + str(CONF) + "\n")
-        atomic_file(ROTATE_CRON, cron, 0o700)
+    ensure_rotate_job()
     return "CREATED_10_DAY_POLICY"
 
 def install():
