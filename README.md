@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.5**
+Ubuntu Server Optimization and Management Tool · **v0.17.6**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
@@ -23,7 +23,7 @@ u-opti
 
 This installs U-OPTI and its managed modules. Install and configure Docker, Smite, Sanaei, and HTTPS through their menu entries when needed.
 
-**For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.7** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
+**For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.7** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. An interrupted RC6/RC7 installation must use guarded menu recovery (Install Components → 7) before another fresh attempt; never delete its journal or change parent permissions to force a retry. Ubuntu 26.04 LTS is not an RC7 qualified host. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
 
 For Iranian networks returning Sigstore TUF CDN HTTP 403, v0.17.5 uses a reviewed SHA-256-pinned TrustedRoot snapshot with strict Cosign signer, image digest and transparency checks; it does not assert live TUF freshness. Installation failures remain visible in the menu.
 

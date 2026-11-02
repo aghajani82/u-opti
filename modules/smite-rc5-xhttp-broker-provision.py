@@ -123,7 +123,18 @@ def _ensure_dir(root: Path, relative: str, mode: int) -> Path:
         if item.st_mode & 0o022:
             raise ProvisionHold("BROKER_DIRECTORY_WRITABLE_BY_OTHERS")
         if final and stat.S_IMODE(item.st_mode) != mode:
-            raise ProvisionHold("BROKER_DIRECTORY_MODE_MISMATCH")
+            # The RC6/RC7 install journal creates /var/lib/u-opti with
+            # mode 0700 before this broker runs. Earlier broker-only setups
+            # used 0755. Both are trusted root-owned and not group-writable.
+            # Accept the narrower existing mode ONLY at this exact parent;
+            # never chmod it wider, and keep all private children strict.
+            journal_private_parent = (
+                relative == "var/lib/u-opti"
+                and mode == 0o755
+                and stat.S_IMODE(item.st_mode) == 0o700
+            )
+            if not journal_private_parent:
+                raise ProvisionHold("BROKER_DIRECTORY_MODE_MISMATCH")
     return target
 
 

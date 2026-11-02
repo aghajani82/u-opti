@@ -345,6 +345,90 @@ class PinnedSmiteRouteWorkerTests(unittest.TestCase):
 
 
 class InertBrokerProvisioningTests(unittest.TestCase):
+    def test_journal_private_parent_provisions_without_widening_permissions(self):
+        import importlib.util
+
+        repo = Path(__file__).resolve().parents[1]
+        source_dir = repo / "modules"
+        name = "smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location(
+            "broker_private_journal_parent_test", source_dir / name
+        )
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-journal-parent-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            (root / "etc/nginx").mkdir(parents=True, mode=0o755)
+            (root / "etc/nginx").chmod(0o755)
+            module_dir = root / "usr/local/lib/u-opti/modules"
+            module_dir.mkdir(parents=True, mode=0o755)
+            broker_target = module_dir / "smite-rc5-xhttp-root-broker.py"
+            broker_target.write_bytes((source_dir / broker_target.name).read_bytes())
+            broker_target.chmod(0o644)
+
+            parent = root / "var/lib/u-opti"
+            parent.mkdir(parents=True, mode=0o700)
+            parent.chmod(0o700)
+            journal = parent / "rc6-install-journal"
+            journal.mkdir(mode=0o700)
+            journal.chmod(0o700)
+            marker = journal / "lock"
+            marker.write_bytes(b"existing journal lock")
+            marker.chmod(0o600)
+
+            result = provisioner.provision(
+                peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                instance_id=INSTANCE,
+            )
+            self.assertEqual(result["BROKER_PROVISIONING"], "PASS_INERT")
+            self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(journal.stat().st_mode), 0o700)
+            self.assertEqual(marker.read_bytes(), b"existing journal lock")
+            self.assertEqual(stat.S_IMODE(
+                (parent / "smite-xhttp-broker").stat().st_mode
+            ), 0o700)
+            self.assertEqual(stat.S_IMODE(
+                (root / "etc/u-opti/smite/route-grants").stat().st_mode
+            ), 0o700)
+
+    def test_private_parent_exception_rejects_every_other_mode(self):
+        import importlib.util
+        repo = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "broker_private_parent_negative_test",
+            repo / "modules/smite-rc5-xhttp-broker-provision.py"
+        )
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-parent-modes-") as raw_root:
+            root = Path(raw_root)
+            root.chmod(0o700)
+            parent = root / "var/lib/u-opti"
+            parent.mkdir(parents=True, mode=0o755)
+            for mode in (0o700, 0o755):
+                parent.chmod(mode)
+                provisioner._ensure_dir(root, "var/lib/u-opti", 0o755)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), mode)
+            for mode in (0o750, 0o770, 0o777):
+                parent.chmod(mode)
+                with self.assertRaisesRegex(
+                    provisioner.ProvisionHold,
+                    "BROKER_DIRECTORY_(MODE_MISMATCH|WRITABLE_BY_OTHERS)"
+                ):
+                    provisioner._ensure_dir(root, "var/lib/u-opti", 0o755)
+            parent.chmod(0o700)
+            # Do not extend the exception to another directory: all
+            # non-journal parents retain their original exact modes.
+            strict = root / "etc/u-opti"
+            strict.mkdir(parents=True, mode=0o700)
+            strict.chmod(0o700)
+            with self.assertRaisesRegex(
+                provisioner.ProvisionHold, "BROKER_DIRECTORY_MODE_MISMATCH"
+            ):
+                provisioner._ensure_dir(root, "etc/u-opti", 0o755)
+
     def test_provisions_root_owned_inert_files_without_enabling_service(self):
         import importlib.util
 
