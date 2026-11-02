@@ -14,14 +14,15 @@ u_opti_security_monitor_menu() {
         echo "3) View Latest Report"
         echo "4) List Saved Reports"
         echo "5) Open Report by Filename"
-        echo "6) Monitoring Status"
+        echo "6) Show Last 10 Days (Redacted Indicators)"
+        echo "7) Monitoring Status"
         echo
         echo "0) Back"
         echo
-        IFS= read -r -p "Please enter your selection [0-6]: " choice || return
+        IFS= read -r -p "Please enter your selection [0-7]: " choice || return
         case "$choice" in
             0) return ;;
-            1|2|3|4|5|6)
+            1|2|3|4|5|6|7)
                 if [ ! -f "$helper" ] || [ -L "$helper" ]; then
                     echo "HOLD: Security monitor module is missing or unsafe."
                     echo "Use Update U-OPTI to restore the complete module set."
@@ -47,7 +48,8 @@ u_opti_security_monitor_menu() {
                             IFS= read -r -p "Report filename (YYYYMMDDTHHMMSSZ.txt): " report
                             python3 -B "$helper" show "$report"
                             ;;
-                        6) python3 -B "$helper" status ;;
+                        6) python3 -B "$helper" history ;;
+                        7) python3 -B "$helper" status ;;
                     esac
                 fi
                 echo
