@@ -39,6 +39,16 @@ PY
 export SMITE_RC_MANIFEST_SHA256
 SMITE_RC_MANIFEST_SHA256="$(sha256sum "$SMITE_RC_BUNDLE_DIR/stage15-images.json" | cut -d' ' -f1)"
 source "$ROOT/modules/smite-install.sh"
+python3() {
+    if [[ "${1:-}" == -B && "${2:-}" == */smite-compose-safe.py ]]; then
+        # Projected temp Compose fixture; production path/daemon admission is tested separately.
+        shift 2
+        local fixture_base="$1"; shift
+        docker compose -f "$fixture_base" "$@"
+        return $?
+    fi
+    command python3 "$@"
+}
 SMITE_PANEL_DIR="$TMP/fresh/panel"
 SMITE_NODE_DIR="$TMP/fresh/node"
 SMITE_PANEL_COMPOSE="$SMITE_PANEL_DIR/docker-compose.yml"

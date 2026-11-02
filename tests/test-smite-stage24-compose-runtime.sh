@@ -41,6 +41,16 @@ export SMITE_INSTALL_PROFILE=clean-rc
 # Smite source replaces only the upstream Compose download; a clean
 # Core install MUST NOT invoke FRP preparation or Compose injection.
 source "$ROOT/modules/smite-install.sh"
+python3() {
+    if [[ "${1:-}" == -B && "${2:-}" == */smite-compose-safe.py ]]; then
+        # Projected temp Compose fixture; production path/daemon admission is tested separately.
+        shift 2
+        local fixture_base="$1"; shift
+        docker compose -f "$fixture_base" "$@"
+        return $?
+    fi
+    command python3 "$@"
+}
 # The CI runner is unprivileged; model the production root ownership step in
 # this disposable Compose fixture. Ownership admission has separate tests.
 if [ "$(id -u)" -ne 0 ]; then chown() { return 0; }; fi

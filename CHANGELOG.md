@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.0] - 2026-11-02
+
+### Stage15 console-only release
+
+- Retain terminal G/1 approval with signed request matching, expiry and replay controls; exclude Passkey and independent Web Approval from default installation.
+- Select independently verified immutable Smite 2.0.0-rc.6 Panel/Node images for fresh standard IR/KH installation, with source-pinned templates and CLI.
+- Add fresh-install journaling and explicit interrupted-install rollback. Quarantine owned files and retain stopped containers and identity/replay volumes; refuse completed, paired or active tunnel installations.
+- Preserve existing legacy recovery and independent setup menus. Backhaul is not required by FRP.
+- Fix local Docker/Compose admission, nonzero error propagation and state-write failures.
+
+### Qualification and scope
+
+- The operator authorized main distribution before real fresh-host testing. Smite remains an RC6 application candidate. Real Ubuntu 24.04 VPS, public TLS, end-to-end enrollment/client and reboot qualification remain pending.
+- Read `docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md` before installation/recovery. No automatic active-host migration, existing FRPS/FRPC restart or public firewall opening.
+- Historical release assets remain separate and unchanged. No IR/KH or Grandoptical deployment is performed by publishing this release.
+
 ## [0.16.7] - 2026-10-17
 
 ### Fixed

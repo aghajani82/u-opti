@@ -89,6 +89,14 @@ smite_container_running() { smite_container_exists "$1"; }
 smite_wait_healthy() { smite_container_exists "$1"; }
 curl() { return 0; }
 python3() {
+    if [[ "${1:-}" == -B && "${2:-}" == */smite-compose-safe.py ]]; then
+        # Projected temp Compose fixture; production path/daemon admission is tested separately.
+        shift 2
+        local fixture_base="$1"; shift
+        docker compose -f "$fixture_base" "$@"
+        return $?
+    fi
+
   if [[ " $* " == *"smite-clean-image-pair.py"* ]]; then
     printf 'CLEAN_RC_PAIR=ARCHIVES_VERIFIED\n'
     return 0

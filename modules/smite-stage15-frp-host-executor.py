@@ -7,7 +7,7 @@ existing signed security Compose overlay, and restarts ONLY smite-node.
 The signed HMAC inventory probe consumes durable replay nonces before and
 after recreation. Every mutation has a journaled rollback/recover path.
 
-This must NOT be wired to the beginner menu before two-host acceptance.
+The experimental wizard requires explicit snapshot/console confirmation.
 No firewall, Nginx, FRP server, Xray, route or public port changes.
 Production Grandoptical is explicitly excluded by host/role/image gates.
 """
@@ -254,12 +254,22 @@ def artifacts(p: Paths):
     return {"frpc": p.binaries / "frpc", "frps": p.binaries / "frps",
             "overlay": p.overlay, "manifest": p.manifest}
 
+# Exact, reviewed loopback commands only. The original Standard installer
+# (smite-node-local-bind.py) explicitly includes Uvicorn logging flags; the
+# shorter argv is retained for existing reviewed Stage15 installs. This is an
+# allowlist, not a prefix match: arbitrary Uvicorn options remain forbidden.
+SAFE_NODE_COMMANDS = (
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
+    ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888",
+     "--log-level", "info", "--access-log"],
+)
+
 def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
     try:
         raw = json.loads(runner(["docker", "inspect", "smite-node"]))
         require(isinstance(raw, list) and len(raw) == 1, "NODE_INSPECT_UNTRUSTED")
         obj = raw[0]
-        require(obj["Image"] == control.STAGE15_NODE_ID
+        require(obj["Image"] in control.STAGE15_NODE_VERSIONS
                 and obj["Config"]["Image"] == "smite-node:stage15-local"
                 and (not healthy or (obj["State"]["Running"] is True
                     and obj["State"]["Health"]["Status"] == "healthy")),
@@ -282,9 +292,8 @@ def runtime(p: Paths, enabled: bool, *, runner=run, healthy: bool = True):
                 and not obj["HostConfig"].get("PortBindings")
                 and obj["HostConfig"].get("Privileged") is False,
                 "NODE_NETWORK_SECURITY_DRIFT")
-        require(obj["Config"]["Cmd"] == [
-            "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"
-        ], "NODE_LOOPBACK_API_DRIFT")
+        require(obj["Config"]["Cmd"] in SAFE_NODE_COMMANDS,
+                "NODE_LOOPBACK_API_DRIFT")
         files = {x.strip() for x in obj["Config"]["Labels"].get(
             "com.docker.compose.project.config_files", "").split(",") if x.strip()}
         expected = {str(p.base), str(p.signed)}

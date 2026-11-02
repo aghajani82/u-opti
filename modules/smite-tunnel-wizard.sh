@@ -34,7 +34,7 @@ smite_tw_role() {
 smite_tw_choose_role() {
     local role choice
     role="$(smite_tw_role)"
-    if [ "$role" != unknown ]; then
+    if [ "$role" != unknown ] && [ "${1:-}" != always ]; then
         printf '%s\n' "$role"
         return
     fi
@@ -497,7 +497,7 @@ smite_tw_backhaul_manual_menu() {
         echo "4) Prepare only Nginx proposal (OFFLINE)"
         echo "5) Check two existing private candidates (read-only)"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-6]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
@@ -870,24 +870,127 @@ smite_tw_rathole_menu() {
     done
 }
 
+# This guided path never installs/reapplies engines, owners, children or gateways.
+# Host role is checked from trusted local state, not the user's selection alone.
+smite_tw_validate_host() {
+    python3 - "$1" <<'PYROLE'
+import os,pathlib,stat,sys
+try:
+    p=pathlib.Path('/etc/u-opti/smite/state.env')
+    for q in (*reversed(p.parents),p):
+        st=q.lstat()
+        assert st.st_uid==0 and not st.st_mode&0o022
+        assert stat.S_ISREG(st.st_mode) if q==p else stat.S_ISDIR(st.st_mode)
+    pairs=[line.split('=',1) for line in p.read_text().splitlines() if line.startswith(('SMITE_ROLE=','SMITE_CONNECTION_MODE='))]
+    assert len(pairs)==2 and len(dict(pairs))==2
+    data=dict(pairs)
+    role={'panel-iran':'ir','foreign':'kh'}[data['SMITE_ROLE']]
+    assert data['SMITE_CONNECTION_MODE']=='standard' and role==sys.argv[1]
+    host=os.uname().nodename.split('.')[0].lower()
+    assert host not in ('ir','kh') or host==role
+except Exception:
+    print('HOLD: selected role does not match trusted host state; no action.',file=sys.stderr)
+    sys.exit(2)
+PYROLE
+}
+
+smite_tw_stage_names() {
+    if [ "$1" = ir ]; then
+        printf '%s\n' 'Panel' 'Gateway' 'FRPS Owner' 'Child' 'XHTTP / G approval / Publish'
+    else
+        printf '%s\n' 'Smite Node' 'Sanaei' 'Inbound' 'FRPC' 'Signed KH Inventory'
+    fi
+}
+
+smite_tw_stage_status() {
+    local role="$1" step="$2" name actual
+    # PASS is scoped to this local observation; it is never a signed remote claim.
+    case "$role:$step" in
+        ir:0|kh:0)
+            name=smite-node; [ "$role" != ir ] || name=smite-panel
+            actual="$(docker --host unix:///var/run/docker.sock inspect -f '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null)" || actual=""
+            case "$actual" in true\|healthy|true\|none) echo 'PASS: container running (local observation only)';; *) echo 'HOLD: container unavailable/unhealthy; use existing setup after review';; esac ;;
+        ir:2|kh:3)
+            name=frpc; [ "$role" != ir ] || name=frps
+            actual="$(docker --host unix:///var/run/docker.sock top smite-node -eo comm 2>/dev/null)" || actual=""
+            if printf '%s\n' "$actual" | tail -n +2 | grep -Fxq "$name"; then
+                echo "PASS: $name process present; keep it running, do not reapply"
+            else echo "HOLD: $name process not confirmed; inspect existing status"; fi ;;
+        *) echo 'HOLD: signed/application evidence must be checked in existing Panel/tools';;
+    esac
+}
+
+smite_tw_stage_help() {
+    case "$1:$2" in
+        ir:0) echo 'Open the existing Panel. Check every existing active lease before adding a new tunnel.' ;;
+        ir:1) echo 'Keep current HTTPS/WSS Gateway. Use Stage15 V to verify XHTTP bridge; do not reconfigure it.' ;;
+        ir:2) echo 'Keep the current shared FRPS Owner. Select that owner in Panel; never create/reapply a replacement.' ;;
+        ir:3) echo 'Panel > Tunnels: create only the new Child using the existing owner and a fresh signed KH inbound.' ;;
+        ir:4) echo 'Panel > XHTTP: select exact node, port and path, prepare request; G here approves via existing reviewer.'
+              echo 'After ROOT_GRANT_APPROVED return to Panel and create a FRESH publish request, then Verify.'
+              echo 'Expired/changed/replayed requests remain denied. Check real VLESS/XHTTP and all existing tunnels.' ;;
+        kh:0) echo 'Keep current Smite Node and Signed Pairing. Check node status in Panel; do not reinstall.' ;;
+        kh:1) echo 'Use existing Sanaei management to check service status. Do not reset existing inbounds.' ;;
+        kh:2) echo 'In Sanaei, inspect/create only the intended new inbound. Match port, XHTTP path, transport and security.' ;;
+        kh:3) echo 'Keep existing FRPCs. New child provisioning is controlled by Panel; do not reapply old clients.' ;;
+        kh:4) echo 'Panel must fetch fresh Signed KH Inventory and match this inbound before IR approval/publication.'
+              echo 'A local process or an old success report cannot prove inventory freshness. Never bypass HOLD.' ;;
+    esac
+}
+
+smite_tw_guided_frp() {
+    local role="$1" step=0 choice i
+    local -a names
+    smite_tw_validate_host "$role" || return 2
+    mapfile -t names < <(smite_tw_stage_names "$role")
+    while true; do
+        smite_tw_header
+        printf 'FRP guided steps - %s - %s/5: %s\n' "$role" "$((step+1))" "${names[$step]}"
+        smite_tw_stage_status "$role" "$step"
+        smite_tw_stage_help "$role" "$step"
+        echo 'N) Next   B) Back   S) Status   0) Exit'
+        if [ "$role:$step" = ir:4 ]; then echo 'G) Approve tunnel port and path (existing signed root review)'; fi
+        echo 'Next/Back navigate only; HOLD is not approval. No stage is automatically applied.'
+        read -rp 'Choose: ' choice || return 0
+        # Recheck role on every selection, including a role change while the menu is open.
+        smite_tw_validate_host "$role" || return 2
+        case "$choice" in
+            n|N) if [ "$step" -lt 4 ]; then step=$((step+1)); fi ;;
+            b|B) if [ "$step" -gt 0 ]; then step=$((step-1)); else return 0; fi ;;
+            s|S) for i in 0 1 2 3 4; do printf '%s: ' "${names[$i]}"; smite_tw_stage_status "$role" "$i"; done; smite_tw_pause ;;
+            g|G)
+                if [ "$role:$step" != ir:4 ]; then echo 'HOLD: G is an IR publication step'; continue; fi
+                if [ -f "$SMITE_TW_DIR/smite-stage15-root-review.py" ] && [ ! -L "$SMITE_TW_DIR/smite-stage15-root-review.py" ]; then
+                    python3 -B "$SMITE_TW_DIR/smite-stage15-root-review.py" || :
+                else echo 'HOLD: root reviewer missing'; fi ;;
+            0) return 0 ;;
+            *) echo 'Invalid choice' ;;
+        esac
+    done
+}
+
 smite_tw_menu() {
     local role="" choice
-    role="$(smite_tw_choose_role)" || return
+    role="$(smite_tw_choose_role always)" || return
+    smite_tw_validate_host "$role" || return 2
     while true; do
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
         echo "1) Backhaul — guided Sidecar START HERE"
-        echo "2) FRP — EASY SETUP (Standard IR/KH)"
+        echo "2) FRP — step-by-step (existing runtime preserved)"
+        echo "6) Advanced FRP — original setup and recovery"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "0) Back"
-        read -rp "Choose [0-5]: " choice || return
+        read -rp "Choose [0-6]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
+        smite_tw_validate_host "$role" || return 2
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
-            2)
+            2) smite_tw_guided_frp "$role" ;;
+            6)
                 if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
                     smite_frp_wizard_menu "$role"
                 else

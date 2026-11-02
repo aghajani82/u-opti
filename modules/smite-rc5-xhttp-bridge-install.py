@@ -86,6 +86,22 @@ def trusted_file(path: Path, limit: int = 131072, *, mode: int | None = None) ->
     return raw
 
 
+def trusted_lock_directory(path: Path) -> None:
+    """Admit only Ubuntu's exact root-owned sticky /run/lock directory.
+
+    /run/lock is conventionally mode 01777. Its sticky bit does not make
+    arbitrary files trustworthy: lock_host() separately enforces O_NOFOLLOW,
+    root ownership, mode 0600 and an exclusive flock on the lock file.
+    All other directories still use trusted_dir()'s no-group/world-write gate.
+    """
+    require(path == Path("/run/lock"), "UNEXPECTED_LOCK_DIRECTORY")
+    info = path.lstat()
+    require(stat.S_ISDIR(info.st_mode)
+            and info.st_uid == 0 and info.st_gid == 0
+            and stat.S_IMODE(info.st_mode) == 0o1777,
+            "UNTRUSTED_LOCK_DIRECTORY")
+
+
 def sync_dir(path: Path) -> None:
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -171,7 +187,7 @@ def host_gate() -> None:
             "IR_ROOT_ONLY")
     trusted_dir(BACKEND.parent)
     trusted_dir(BRIDGE.parent)
-    trusted_dir(LOCK.parent)
+    trusted_lock_directory(LOCK.parent)
     trusted_dir(TX_ROOT.parent)
 
 

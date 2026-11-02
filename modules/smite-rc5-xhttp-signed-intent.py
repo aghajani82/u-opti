@@ -105,7 +105,7 @@ def _check_identity(data: dict[str, Any]) -> None:
         raise IntentHold("FRPS_CONTROL_PORT_FORBIDDEN")
     route = data["path"]
     if (type(route) is not str or len(route) > 128 or not ROUTE.fullmatch(route)
-            or not route.startswith(f"/{data['port']}/")):
+            or route.split("/")[1].lower() in {"api", "docs", "redoc", "openapi", "assets", "static", "auth", "login", "admin", "health", "metrics", "sub", "ws"}):
         raise IntentHold("INVALID_XHTTP_PATH")
     if type(data["nonce"]) is not str or not NONCE.fullmatch(data["nonce"]):
         raise IntentHold("INVALID_NONCE")

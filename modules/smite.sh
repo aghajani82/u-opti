@@ -923,14 +923,14 @@ PY
     fi
 
     if [ -f "$SMITE_PANEL_COMPOSE" ]; then
-        docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" config >/dev/null || {
             echo "ERROR: Panel compose validation failed. Restore the generated .bak file before continuing."
             return 1
         }
     fi
 
     if [ -f "$SMITE_NODE_COMPOSE" ]; then
-        docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null || {
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null || {
             echo "ERROR: Node compose validation failed. Restore the generated .bak file before continuing."
             return 1
         }
@@ -1006,7 +1006,7 @@ smite_activate_persistent_compatibility() {
 
     if smite_container_exists smite-panel && [ -f "$SMITE_PANEL_COMPOSE" ]; then
         echo "Recreating smite-panel..."
-        docker compose -f "$SMITE_PANEL_COMPOSE" up -d --force-recreate smite-panel || {
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --force-recreate smite-panel || {
             echo "ERROR: Failed to recreate smite-panel."
             read -rp "Press Enter to return..."
             return
@@ -1020,7 +1020,7 @@ smite_activate_persistent_compatibility() {
 
     if smite_container_exists smite-node && [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "Recreating smite-node..."
-        docker compose -f "$SMITE_NODE_COMPOSE" up -d --force-recreate smite-node || {
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --force-recreate smite-node || {
             echo "ERROR: Failed to recreate smite-node."
             read -rp "Press Enter to return..."
             return

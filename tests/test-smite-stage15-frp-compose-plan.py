@@ -111,6 +111,23 @@ class Stage15FrpComposePlan(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
         self.assertNotIn("7000", json.dumps(result))
 
+    def test_current_standard_9_arg_loopback_command_is_admitted(self):
+        command=list(plan.control.SAFE_NODE_COMMANDS[1])
+        for doc in (self.base,self.future):
+            doc["services"]["smite-node"]["command"]=command.copy()
+        self.assertEqual(self.check()["STAGE15_FRP_COMPOSE_PLAN"],
+                         "PASS_READ_ONLY")
+        for invalid in (
+            command+["--proxy-headers"],
+            ["uvicorn","main:app","--host","0.0.0.0","--port","8888"],
+            ["uvicorn","main:app","--host","127.0.0.1","--port","9999",
+             "--log-level","info","--access-log"],
+        ):
+            for doc in (self.base,self.future):
+                doc["services"]["smite-node"]["command"]=invalid.copy()
+            with self.assertRaisesRegex(plan.Hold,"STAGE15_SIGNED_BASE_COMPOSE_DRIFT"):
+                self.check()
+
     def test_unverified_official_archive_blocks_before_any_docker(self):
         with self.assertRaisesRegex(plan.Hold, "OFFICIAL_FRP_071_PAIR_NOT_VERIFIED"):
             plan.review(self.node, self.stage, official_verify=lambda _: False,

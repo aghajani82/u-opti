@@ -272,15 +272,44 @@ class BrokerRegressionTests(unittest.TestCase):
         self.assertNotIn("sudo ", source)
         self.assertFalse(broker.SOCKET.exists())
 
+    def test_authenticated_proposal_is_not_an_approval(self):
+        (broker.GRANTS / (claim()["child"] + ".json")).unlink()
+        with self.assertRaisesRegex(broker.BrokerHold,"ROOT_OPERATOR_GRANT_REQUIRED"):
+            self.accept()
+        request=broker.LEDGER.parent/"approval-request.json"
+        self.assertEqual(request.read_bytes(),signed(claim()))
+        self.assertEqual(request.stat().st_mode & 0o777,0o600)
+        self.assertEqual(list(broker.GRANTS.iterdir()),[])
+        self.assertEqual(self._calls,[])
+        # Grant independently supplied after review; original route nonce has
+        # not been consumed by staging, and still gets exactly one use.
+        self._put_grant(claim())
+        self.accept()
+        with self.assertRaises(Exception):self.accept()
+
+    def test_unsigned_missing_grant_cannot_stage_proposal(self):
+        (broker.GRANTS / (claim()["child"] + ".json")).unlink()
+        wire=json.loads(signed(claim()));wire["mac"]="0"*64
+        with self.assertRaises(Exception):
+            broker.process(contract.canonical(wire),peer_uid=PEER_UID,peer_gid=PEER_GID)
+        self.assertFalse((broker.LEDGER.parent/"approval-request.json").exists())
+        self.assertEqual(self._calls,[])
+
+    def test_expired_proposal_cannot_be_staged(self):
+        body=claim();body["issued_at"]-=100;body["expires_at"]-=100
+        with self.assertRaises(Exception):broker.stage_approval_request(signed(body),KEY_VALUE,body)
+        self.assertFalse((broker.LEDGER.parent/"approval-request.json").exists())
+
+
 
 class PinnedSmiteRouteWorkerTests(unittest.TestCase):
     def test_installer_stages_exact_reviewed_worker_and_planner_bytes(self):
         root = Path(__file__).resolve().parents[1]
         expected = {
             "modules/smite-xhttp-nginx-route":
-                "acb66752f6aa8600f1c45a7d68f46006b0d4d26c55330925bd35359d3ca868e6",
+                "12eaff0492b184025199c7a266c6a8a592fd63f4baf6ddc86171884554ae32e2",
             "modules/smite_xhttp_nginx_plan.py":
-                "0c007ca049b95227588d2e4847020a53d5d0c155d28dc537341367a783d81c19",
+                "dbb07f59266f6e4f35d3d5ed6c9d9ec808eb35cfbf29e52ef0ae2e4f58a127b5",
         }
         installer = (root / "install.sh").read_text()
         required_runtime = (
@@ -689,13 +718,24 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(result["EVIDENCE_VERIFICATION"], "OPERATOR_ASSERTED")
             self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
             stored = json.loads(target.read_text())
-            self.assertEqual(stored, proposal)
+            self.assertEqual(stored, {"schema": 1, **proposal})
+            # Regression: a root-issued grant must pass the running broker's
+            # strict versioned on-disk schema, not just the provisioner.
+            broker_path = repo / "modules/smite-rc5-xhttp-root-broker.py"
+            broker_spec = importlib.util.spec_from_file_location("grant_broker_reader_test", broker_path)
+            broker = importlib.util.module_from_spec(broker_spec)
+            sys.modules[broker_spec.name] = broker
+            broker_spec.loader.exec_module(broker)
+            with patch.object(broker, "GRANTS", grants):
+                admitted = broker._approved_grant(proposal["child"])
+                self.assertEqual(admitted.child, proposal["child"])
+                self.assertEqual(admitted.port, proposal["port"])
             with self.assertRaisesRegex(provisioner.ProvisionHold,
                                         "BROKER_TARGET_EXISTS_REQUIRES_REVIEW"):
                 provisioner.install_grant(
                     proposal, confirmed_child=proposal["child"], root=root,
                 )
-            self.assertEqual(json.loads(target.read_text()), proposal)
+            self.assertEqual(json.loads(target.read_text()), {"schema": 1, **proposal})
 
             revoked = provisioner.revoke_grant(proposal["child"], root=root)
             self.assertEqual(revoked["TRUSTED_GRANT"], "REVOKED")

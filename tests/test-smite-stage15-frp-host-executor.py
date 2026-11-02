@@ -32,6 +32,9 @@ class FakeDocker:
         self.enabled = False
         self.actions = []
         self.fail_restart = False
+        # The existing Standard installer emits this exact longer loopback
+        # argv; exercising the transaction with it prevents fixture drift.
+        self.cmd = host.SAFE_NODE_COMMANDS[1]
 
     def __call__(self, argv, **kwargs):
         self.actions.append(list(argv))
@@ -66,8 +69,7 @@ class FakeDocker:
                             "PANEL_ADDRESS=02ir.kolbe1.ir:443",
                             "SMITE_AGENT_IDENTITY_PATH=/run/smite-node-identity/node-identity.json",
                             "SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3"],
-                    "Cmd": ["uvicorn", "main:app", "--host",
-                            "127.0.0.1", "--port", "8888"],
+                    "Cmd": list(self.cmd),
                     "Labels": {
                         "com.docker.compose.project.config_files": ",".join(files)
                     },
@@ -185,6 +187,20 @@ class SignedStage15FrpHost(unittest.TestCase):
         self.assertEqual(self.p.identity.read_text(),
                          '{"node":"synthetic","secret":"NOT_REAL"}')
         self.assertEqual(self.p.replay.read_bytes(), b"CI-REPLAY-DB-CONTINUITY")
+
+    def test_exact_loopback_command_allowlist(self):
+        host.runtime(self.p, False, runner=self.fake)
+        self.fake.cmd=host.SAFE_NODE_COMMANDS[0]
+        host.runtime(self.p, False, runner=self.fake)
+        for cmd in (
+            ["uvicorn","main:app","--host","0.0.0.0","--port","8888"],
+            list(host.SAFE_NODE_COMMANDS[1])+["--proxy-headers"],
+            ["uvicorn","main:app","--host","127.0.0.1","--port","9999",
+             "--log-level","info","--access-log"],
+        ):
+            self.fake.cmd=cmd
+            with self.assertRaisesRegex(host.Hold,"NODE_LOOPBACK_API_DRIFT"):
+                host.runtime(self.p, False, runner=self.fake)
 
     def test_install_verified_signed_then_rollback(self):
         result = self.install()

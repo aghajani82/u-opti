@@ -116,6 +116,13 @@ def _json(data: bytes, expected: set[str]) -> dict:
 
 
 def _configuration() -> dict:
+    migration = Path('/var/lib/u-opti/smite-stage15-active-runtime')
+    if migration.exists() or migration.is_symlink():
+        try:
+            active = _load_module('broker_active_runtime', HERE / 'smite-stage15-active-runtime.py')
+            active.admission()
+        except Exception as exc:
+            raise BrokerHold('ACTIVE_RUNTIME_RECOVERY_REQUIRED') from exc
     _dir(CONFIG.parent, mode=0o700)
     config = _json(_file(CONFIG, mode=0o600), {
         "schema", "instance_id", "peer_uid", "peer_gid",
@@ -186,6 +193,11 @@ def _verify_helper(config: dict) -> None:
 
 
 def _verify_bridge() -> None:
+    stage15 = Path("/var/lib/u-opti/smite-stage15-xhttp-bridge")
+    if stage15.exists() or stage15.is_symlink():
+        host = _load_module("uopti_broker_stage15_bridge", HERE / "smite-stage15-xhttp-bridge.py")
+        host.verify()  # No fallback for prepared, corrupt or rolled-back state.
+        return
     host = _load_module(
         "uopti_broker_bridge_install",
         HERE / "smite-rc5-xhttp-bridge-install.py"
@@ -224,6 +236,26 @@ def _lock():
         os.close(fd)
 
 
+def stage_approval_request(wire: bytes, key: bytes, hint: dict) -> None:
+    """Store only an authenticated proposal; this grants no route authority.
+
+    Root must separately review the exact binding on its authenticated console.
+    Never put caller-controlled content in a path or consume a route nonce here.
+    """
+    contract = _contract_module()
+    fields = contract.TrustedGrant.__dataclass_fields__
+    proposal = contract.TrustedGrant(**{k: hint[k] for k in fields})
+    contract.admit(wire, key=key, expected=proposal,
+                   seen_nonces=frozenset(), now=int(time.time()))
+    directory = LEDGER.parent
+    _dir(directory, mode=0o700)
+    target = directory / "approval-request.json"
+    writer = _load_module("uopti_broker_request_writer", HERE / "smite-rc5-xhttp-bridge-install.py")
+    if target.exists() or target.is_symlink():
+        _file(target, mode=0o600)
+    writer.replace_file(target, wire, 0o600)
+
+
 def process(wire: bytes, *, peer_uid: int, peer_gid: int) -> str:
     """Bounded local dispatch. Returns PASS only after local route tool PASS.
 
@@ -247,9 +279,15 @@ def process(wire: bytes, *, peer_uid: int, peer_gid: int) -> str:
         key = _file(KEY, mode=0o600, max_size=32)
         if len(key) != 32:
             raise BrokerHold("INVALID_BROKER_KEY")
-        expected = _approved_grant(child)
         _verify_helper(config)
         _verify_bridge()
+        try:
+            expected = _approved_grant(child)
+        except BrokerHold as exc:
+            if str(exc) != "ROOT_OPERATOR_GRANT_REQUIRED":
+                raise
+            stage_approval_request(wire, key, hint)
+            raise
         nonce_ledger = _ledger_module().DurableNonceLedger(
             LEDGER, instance_id=config["instance_id"]
         )

@@ -51,6 +51,9 @@ smite_install_field_trial_verify_candidate() {
     helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
     verifier="$helper_dir/smite-registry-pair-admission.py"
     manifest="$helper_dir/smite-field-trial-candidate.json"
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        manifest="$helper_dir/smite-selected-candidate.json"
+    fi
 
     [ -f "$verifier" ] && [ ! -L "$verifier" ] &&
     [ -f "$manifest" ] && [ ! -L "$manifest" ] || {
@@ -575,7 +578,7 @@ smite_write_state() {
     mkdir -p "$SMITE_STATE_DIR" || return 1
     chmod 0700 "$SMITE_STATE_DIR" || return 1
 
-    cat > "$SMITE_STATE_FILE" <<EOF_STATE
+    cat > "$SMITE_STATE_FILE" <<EOF_STATE || return 1
 # Managed by U-OPTI. No secrets are stored here.
 SMITE_ROLE=$role
 SMITE_CONNECTION_MODE=$connection_mode
@@ -695,7 +698,7 @@ EOF_RC_BROKER_KEY
     fi
     chmod 0600 "$SMITE_PANEL_DIR/.env" || return 1
 
-    docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null || {
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" config >/dev/null || {
         echo "ERROR: Downloaded panel Compose file failed validation."
         return 1
     }
@@ -716,12 +719,19 @@ smite_install_clean_rc_broker_prepare() {
         return 1
     }
     gid=""
-    for candidate in $(seq 39100 39999); do
-        if ! getent group "$candidate" >/dev/null 2>&1; then
-            gid="$candidate"
-            break
-        fi
-    done
+    # A fresh rollback retains the inert dedicated group. Reuse its exact GID
+    # on retry; allocating a different one would fail the broker's own guard.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] && getent group u-opti-smite-peer >/dev/null 2>&1; then
+        gid="$(getent group u-opti-smite-peer | awk -F: '$1 == "u-opti-smite-peer" && $3 ~ /^[0-9]+$/ && $4 == "" {print $3}')"
+        [[ "$gid" =~ ^[0-9]+$ ]] && [ "$gid" -ge 1 ] && [ "$gid" -lt 65536 ] || return 1
+    else
+        for candidate in $(seq 39100 39999); do
+            if ! getent group "$candidate" >/dev/null 2>&1; then
+                gid="$candidate"
+                break
+            fi
+        done
+    fi
     [ -n "$gid" ] || { echo "HOLD: No dedicated Broker peer GID available." >&2; return 1; }
     python3 -B "$helper" --peer-gid "$gid" --confirm-local-root || return 1
     SMITE_UOPTI_BROKER_GID="$gid"
@@ -774,8 +784,8 @@ smite_install_clean_rc_broker_start_node_forwarding() {
     helper="$module_dir/smite-rc5-xhttp-broker-compose.py"
     [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
     python3 -B "$helper" node-env "$SMITE_NODE_DIR/.env" --enabled true || return 1
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
-       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
        ! docker exec smite-node python -c 'import os,socket,stat; p="/run/u-opti/smite/xhttp-broker.sock"; g=int(os.environ["SMITE_UOPTI_BROKER_GID"]); s=os.stat(p); assert os.environ["SMITE_UOPTI_ROUTE_BROKER_ENABLED"]=="true"; assert os.geteuid()==0 and os.getegid()==g; assert stat.S_ISSOCK(s.st_mode) and s.st_uid==0 and s.st_gid==g and stat.S_IMODE(s.st_mode)==0o660; c=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); c.settimeout(2); c.connect(p); c.close()'; then
         echo "HOLD: Broker socket forwarding verification failed; pausing Node forwarding." >&2
@@ -783,7 +793,7 @@ smite_install_clean_rc_broker_start_node_forwarding() {
             echo "CRITICAL: Could not disable Node Broker forwarding; manual review required." >&2
             return 1
         }
-        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+        if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; Broker forwarding is disabled on disk." >&2
             return 1
@@ -853,6 +863,12 @@ smite_install_node_files() {
         return 1
     fi
 
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        # A fresh retry must never adopt a retained previous Node identity volume.
+        [[ "${COMPOSE_PROJECT_NAME:-}" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 1
+        [ "$(grep -c '^    name: smite-node-data$' "$SMITE_NODE_COMPOSE")" = 1 ] || return 1
+        sed -i "s/^    name: smite-node-data$/    name: ${COMPOSE_PROJECT_NAME}_node-data/" "$SMITE_NODE_COMPOSE" || return 1
+    fi
     smite_install_core_optional_frp_prepare "$SMITE_NODE_COMPOSE" smite-node || return 1
 
     if [ "$connection_mode" = standard ]; then
@@ -950,7 +966,7 @@ EOF_RC_KH_SANAEI
 
     chmod 0600 "$SMITE_NODE_DIR/.env" || return 1
 
-    docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null || {
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null || {
         echo "ERROR: Downloaded node Compose file failed validation."
         return 1
     }
@@ -1030,13 +1046,13 @@ SQL
 smite_recreate_with_overlays_noninteractive() {
     if smite_container_exists smite-panel && [ -f "$SMITE_PANEL_COMPOSE" ]; then
         echo "Recreating smite-panel with persistent compatibility overlays..."
-        docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel || return 1
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel || return 1
         smite_wait_healthy smite-panel 90 || return 1
     fi
 
     if smite_container_exists smite-node && [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "Recreating smite-node with persistent compatibility overlays..."
-        docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
         smite_wait_healthy smite-node 90 || return 1
     fi
 
@@ -1081,15 +1097,15 @@ smite_install_panel_iran() {
     echo "TCP/443 gateway configuration is handled as a separate step."
     echo
 
-    smite_install_require_tools || { smite_install_pause; return; }
-    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return; }
+    smite_install_require_tools || { smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
+    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
 
     if smite_container_exists smite-panel || smite_container_exists smite-node || \
        [ -f "$SMITE_PANEL_COMPOSE" ] || [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "ERROR: An existing Smite installation was detected."
         echo "Use Status/Repair instead of the fresh installer."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     local panel_domain node_name
@@ -1103,7 +1119,7 @@ smite_install_panel_iran() {
     if ! smite_install_validate_domain "$panel_domain"; then
         echo "ERROR: Invalid panel domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "Iran node name [node-ir]: " node_name
@@ -1111,7 +1127,7 @@ smite_install_panel_iran() {
     if ! smite_install_validate_name "$node_name"; then
         echo "ERROR: Invalid node name. Use letters, numbers, dot, dash, or underscore."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1134,7 +1150,7 @@ smite_install_panel_iran() {
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
         echo "No Private Network installation was started."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     case "$connection_choice" in
@@ -1151,14 +1167,14 @@ smite_install_panel_iran() {
             if ! smite_install_validate_ipv4 "$panel_private_ip"; then
                 echo "ERROR: Invalid Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$panel_private_ip"; then
                 echo "ERROR: Private IPv4 address is not configured on this server:"
                 echo "       $panel_private_ip"
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             panel_host="0.0.0.0"
@@ -1166,7 +1182,7 @@ smite_install_panel_iran() {
         *)
             echo "ERROR: Invalid connection mode."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             ;;
     esac
 
@@ -1190,66 +1206,66 @@ smite_install_panel_iran() {
     read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
     case "$confirm" in
         y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return ;;
+        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
     esac
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_preflight "panel-iran" "$connection_mode"; then
             echo "HOLD: Clean RC prerequisites not met; no service started."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
         echo "HOLD: Unknown Smite install profile."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" || {
         echo "ERROR: Failed to create Smite directories."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     if ! smite_install_panel_files "$panel_domain" "$panel_host"; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_cli_tools; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_pull_images true; then
         echo "ERROR: Failed to pull the validated Smite images."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo
     echo "Starting Smite Panel on ${panel_host}:8000..."
-    if ! docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
         echo "ERROR: Failed to start Smite Panel."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-panel 90 || ! smite_wait_panel_api; then
         echo "ERROR: Smite Panel did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-panel; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_NODE_DIR/certs" || {
         echo "ERROR: Failed to create the Smite node certificate directory."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     echo "Downloading the Iran-node CA certificate from the local panel..."
@@ -1258,13 +1274,13 @@ smite_install_panel_iran() {
         -o "$SMITE_NODE_DIR/certs/ca.crt"; then
         echo "ERROR: Failed to obtain the Iran-node CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! grep -q "BEGIN CERTIFICATE" "$SMITE_NODE_DIR/certs/ca.crt"; then
         echo "ERROR: The panel returned an invalid CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_node_files \
@@ -1276,32 +1292,32 @@ smite_install_panel_iran() {
         "$panel_private_ip" \
         "$connection_mode"; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo "Starting Iran Smite Node..."
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start Smite Node."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Smite Node did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_broker_start_node_forwarding; then
             echo "ERROR: Root Broker/Node channel did not pass verification."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     fi
 
@@ -1312,14 +1328,14 @@ smite_install_panel_iran() {
         echo "ERROR: The Iran node did not register with the local panel."
         echo "Check: docker logs smite-node"
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_apply_compatibility; then
         echo "ERROR: U-OPTI compatibility preparation failed."
         echo "The expected upstream source blocks may have changed."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1330,7 +1346,7 @@ smite_install_panel_iran() {
         if ! smite_wait_node_registration_local "$node_name"; then
             echo "ERROR: Node registration was not restored after compatibility activation."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
         if smite_set_local_control_address "$node_name"; then
             echo "Panel control address set to local node API (127.0.0.1:8888)."
@@ -1348,6 +1364,7 @@ smite_install_panel_iran() {
         "$panel_private_ip" \
         "" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
+        if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
 
     echo
@@ -1382,7 +1399,10 @@ smite_install_panel_iran() {
     read -rp "Create a Smite admin account now? [y/N]: " create_admin
     case "$create_admin" in
         y|Y|yes|YES)
-            smite_install_create_admin || echo "HOLD: Smite admin account was not created."
+            smite_install_create_admin || {
+                echo "HOLD: Smite admin account was not created."
+                if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
+            }
             ;;
     esac
 
@@ -1408,14 +1428,14 @@ smite_install_foreign_node() {
     echo "Choose Standard HTTPS or Private Network transport."
     echo
 
-    smite_install_require_tools || { smite_install_pause; return; }
-    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return; }
+    smite_install_require_tools || { smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
+    smite_install_ensure_docker || { echo "Docker is required."; smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
 
     if smite_container_exists smite-node || [ -f "$SMITE_NODE_COMPOSE" ]; then
         echo "ERROR: An existing Smite node installation was detected."
         echo "Use Status/Repair instead of the fresh installer."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     local panel_domain foreign_domain node_name temp_ca
@@ -1432,7 +1452,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_domain "$panel_domain"; then
         echo "ERROR: Invalid panel domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "This foreign server domain (example: kh.example.com): " foreign_domain
@@ -1440,7 +1460,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_domain "$foreign_domain"; then
         echo "ERROR: Invalid foreign-server domain."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     read -rp "Foreign node name [node-kh]: " node_name
@@ -1448,7 +1468,7 @@ smite_install_foreign_node() {
     if ! smite_install_validate_name "$node_name"; then
         echo "ERROR: Invalid node name."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1469,7 +1489,7 @@ smite_install_foreign_node() {
         echo "ERROR: The FRP trial guide requires Standard mode (option 1)."
         echo "No Private Network installation was started."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     case "$connection_choice" in
@@ -1488,7 +1508,7 @@ smite_install_foreign_node() {
             if ! smite_install_validate_ipv4 "$panel_private_ip"; then
                 echo "ERROR: Invalid Iran Panel Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             read -rp "This Foreign server Private IPv4 address: " foreign_private_ip
@@ -1497,14 +1517,14 @@ smite_install_foreign_node() {
             if ! smite_install_validate_ipv4 "$foreign_private_ip"; then
                 echo "ERROR: Invalid Foreign Private IPv4 address."
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             if ! ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$foreign_private_ip"; then
                 echo "ERROR: Foreign Private IPv4 address is not configured on this server:"
                 echo "       $foreign_private_ip"
                 smite_install_pause
-                return
+                return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             fi
 
             panel_address="${panel_private_ip}:8000"
@@ -1515,7 +1535,7 @@ smite_install_foreign_node() {
         *)
             echo "ERROR: Invalid connection mode."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
             ;;
     esac
 
@@ -1538,31 +1558,31 @@ smite_install_foreign_node() {
     read -rp "Install the Foreign Smite Node? [y/N]: " confirm
     case "$confirm" in
         y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return ;;
+        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
     esac
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_preflight "foreign" "$connection_mode"; then
             echo "HOLD: Clean RC prerequisites not met; no service started."
             smite_install_pause
-            return
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
         fi
     elif [ "$SMITE_INSTALL_PROFILE" != stable ]; then
         echo "HOLD: Unknown Smite install profile."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     mkdir -p "$SMITE_NODE_DIR/certs" "$SMITE_NODE_DIR/config" || {
         echo "ERROR: Failed to create Smite node directories."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     temp_ca="$(mktemp)" || {
         echo "ERROR: Failed to create temporary CA file."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1586,14 +1606,14 @@ smite_install_foreign_node() {
         fi
 
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" != clean-rc ] && ! grep -q "BEGIN CERTIFICATE" "$temp_ca"; then
         rm -f "$temp_ca"
         echo "ERROR: The panel returned an invalid Foreign-node CA certificate."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_node_files \
@@ -1607,44 +1627,44 @@ smite_install_foreign_node() {
 
         rm -f "$temp_ca"
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     rm -f "$temp_ca"
 
     if ! smite_install_cli_tools; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_pull_images false; then
         echo "ERROR: Failed to pull the validated Smite node image."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     echo "Starting Foreign Smite Node..."
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
         echo "ERROR: Failed to start the Foreign Smite Node."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_wait_healthy smite-node 90; then
         echo "ERROR: Foreign Smite Node did not become healthy."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_core_optional_frp_verify smite-node; then
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if ! smite_install_apply_compatibility; then
         echo "ERROR: U-OPTI compatibility preparation failed."
         smite_install_pause
-        return
+        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -1670,6 +1690,7 @@ smite_install_foreign_node() {
         "$panel_private_ip" \
         "$foreign_private_ip" || {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
+        if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
 
     echo
@@ -1871,8 +1892,8 @@ smite_install_sanaei_foreign() {
         return
     fi
 
-    if ! docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null ||
-       ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
        ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'; then
         echo "HOLD: Read-only Sanaei mount did not pass container verification; restoring Node configuration." >&2
@@ -1881,7 +1902,7 @@ smite_install_sanaei_foreign() {
             smite_install_pause
             return
         }
-        if ! docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+        if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; backup retained at $backup" >&2
             smite_install_pause
@@ -1992,11 +2013,11 @@ smite_install_upgrade_signed_field_trial() {
 
     if smite_install_field_trial_patch_compose_image "$SMITE_PANEL_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_PANEL_IMAGE" "$SMITE_PANEL_IMAGE" &&
        smite_install_field_trial_patch_compose_image "$SMITE_NODE_COMPOSE" "$SMITE_FIELD_TRIAL_PREVIOUS_NODE_IMAGE" "$SMITE_NODE_IMAGE" &&
-       docker compose -f "$SMITE_PANEL_COMPOSE" config >/dev/null &&
-       docker compose -f "$SMITE_NODE_COMPOSE" config >/dev/null &&
-       docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" config >/dev/null &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel &&
        smite_wait_healthy smite-panel 90 &&
-       docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node &&
+       python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node &&
        smite_wait_healthy smite-node 90 &&
        [ "$(docker inspect -f '{{.Config.Image}}' smite-panel 2>/dev/null)" = "$SMITE_PANEL_IMAGE" ] &&
        [ "$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" = "$SMITE_NODE_IMAGE" ] &&
@@ -2018,20 +2039,131 @@ smite_install_upgrade_signed_field_trial() {
     fi
 
     echo "ROLLBACK: restoring rc.0 Compose and Panel DB..."
-    docker compose -f "$SMITE_PANEL_COMPOSE" stop smite-panel >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" stop smite-panel >/dev/null 2>&1 || true
     cp -a "$panel_bak" "$SMITE_PANEL_COMPOSE"
     cp -a "$node_bak" "$SMITE_NODE_COMPOSE"
     cp -a "$state_bak" "$SMITE_STATE_FILE"
     cp -a "$db_bak" "$db"
     rm -f "$db-wal" "$db-shm"
-    docker compose -f "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel >/dev/null 2>&1 || true
-    docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build --force-recreate smite-panel >/dev/null 2>&1 || true
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
     smite_wait_healthy smite-panel 90 >/dev/null 2>&1 || true
     smite_wait_healthy smite-node 90 >/dev/null 2>&1 || true
     rm -rf "$backup"
     echo "HOLD: rc.1 upgrade failed; rc.0 rollback was attempted."
     smite_install_pause
 }
+
+# Selected fresh-host entry. Subshell scope prevents RC6 settings from leaking
+# into historical recovery/upgrade operations in this same management session.
+smite_install_selected_paths() {
+    [ "$SMITE_PANEL_DIR" = /opt/smite ] &&
+    [ "$SMITE_NODE_DIR" = /opt/smite-node ] &&
+    [ "$SMITE_OVERLAY_DIR" = /opt/u-opti-smite ] &&
+    [ "$SMITE_STATE_FILE" = /etc/u-opti/smite/state.env ] &&
+    [ "$SMITE_PANEL_COMPOSE" = /opt/smite/docker-compose.yml ] &&
+    [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
+}
+
+smite_install_selected_fresh() (
+    local role="$1" module_dir workdir containers path confirm
+    case "$role" in panel-iran|foreign) ;; *) return 2 ;; esac
+    # Preserve the explicitly requested historical offline entry unchanged.
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
+        return
+    fi
+    smite_install_selected_paths || { echo 'HOLD: RC6 recovery requires standard managed paths'; return 2; }
+    [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
+    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC6 images qualify amd64 only'; return 2; }
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
+    # The guarded Compose helper chooses the local socket itself and rejects
+    # all ambient Docker overrides. Read-only inventory below pins it too.
+    # Even an incomplete installation is preserved. This is not an upgrader.
+    for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo 'HOLD: existing/partial Smite state; use reviewed recovery, never reinstall'
+            return 2
+        fi
+    done
+    echo 'Selected Smite 2.0.0-rc.6: fresh-host qualification candidate, not yet stable.'
+    echo 'Existing installations and live tunnels are not migrated by this entry.'
+    read -rp 'Prepare verified RC6 fresh installation? [y/N]: ' confirm || return 2
+    case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
+    smite_install_require_tools || return 2
+    smite_install_ensure_docker || return 2
+    containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
+        echo 'HOLD: local Docker state unavailable'; return 2;
+    }
+    if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
+        echo 'HOLD: existing Smite container; fresh installation refused'; return 2
+    fi
+    docker() { command docker --host unix:///var/run/docker.sock "$@"; }
+    local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
+    local SMITE_INSTALL_FAILURE_CODE=2
+    local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
+    local SMITE_FIELD_TRIAL_SOURCE_SHA=25ff25585be3f7ff1c8b73b39a23d0509f9a2312
+    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.6
+    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.6
+    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=26d4a50e23b6707b414a81ae9b2ca4aaa45e491481d2eb487010dcb7540ab04c
+    local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+    # Templates and CLI are from the very same immutable application source.
+    # Template image names stay upstream-shaped until strict digest replacement.
+    local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_VERSION=2.0.0-rc.6
+    local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    umask 077
+    workdir="$(mktemp -d)" || return 2
+    trap 'rm -rf -- "$workdir"' EXIT
+    # Do not overwrite an installed verifier. Use a private, hash-checked copy.
+    curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 \
+        https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64 \
+        -o "$workdir/cosign" || return 2
+    [ "$(sha256sum "$workdir/cosign" | awk '{print $1}')" = "$SMITE_FIELD_TRIAL_COSIGN_SHA256" ] || {
+        echo 'HOLD: Cosign binary hash mismatch'; return 2;
+    }
+    chmod 0700 "$workdir/cosign" || return 2
+    local PATH="$workdir:$PATH"
+    smite_install_clean_rc_preflight "$role" standard || return 2
+    if [ "$role" = panel-iran ]; then
+        [ -f "$module_dir/smite-clean-rc-preflight.sh" ] && [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || return 2
+        source "$module_dir/smite-clean-rc-preflight.sh" || return 2
+        if ! smite_clean_rc_nginx_paths_ready; then
+            smite_clean_rc_prepare_gateway_packages || return 2
+        fi
+    fi
+    local installer_pid="$BASHPID" transaction
+    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid")" || return 2
+    [[ "$transaction" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+    # Inherited lock stays held by installer children if the menu shell dies.
+    local rc6_lock
+    exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+    flock -n "$rc6_lock" || return 2
+    export COMPOSE_PROJECT_NAME="$transaction"
+    if [ "$role" = panel-iran ]; then
+        smite_install_panel_iran || return 2
+    else
+        smite_install_foreign_node || return 2
+    fi
+    python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
+)
+
+smite_install_selected_rollback() (
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+    local module_dir answer
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" status || return 2
+    echo 'Only an interrupted fresh RC6 install can be rolled back.'
+    echo 'Completed installs, pairing, grants, routes and foreign containers are refused.'
+    echo 'Files, containers and volumes are retained. Packages/images are not uninstalled.'
+    read -rp 'Type ROLLBACK-RC6 to quarantine the interrupted install: ' answer || return 2
+    [ "$answer" = ROLLBACK-RC6 ] || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" rollback --confirm "$answer" || return 2
+    echo 'Rollback complete. Retry Install Components 1 (IR) or 2 (KH).'
+    smite_install_pause
+)
 
 show_smite_install_menu() {
     while true; do
@@ -2047,19 +2179,21 @@ show_smite_install_menu() {
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
+        echo "7) Recover interrupted RC6 install (retain data / rollback)"
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-6]: " smite_install_choice
+        read -rp "Please enter your selection [0-7]: " smite_install_choice
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
-            1) smite_install_panel_iran ;;
-            2) smite_install_foreign_node ;;
+            1) smite_install_selected_fresh panel-iran ;;
+            2) smite_install_selected_fresh foreign ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
             5) smite_install_upgrade_signed_field_trial ;;
             6) smite_foreign_gateway_configure ;;
+            7) smite_install_selected_rollback ;;
             0) break ;;
             *)
                 echo

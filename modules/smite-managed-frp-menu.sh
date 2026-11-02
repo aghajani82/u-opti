@@ -25,7 +25,7 @@ smite_managed_frp_menu() {
         echo "======================================"
         echo "1) FRP status (read-only)"
         echo "2) Review prerequisites (no ports)"
-        echo "3) Install FRP (not enabled yet)"
+        echo "3) Stage15 FRP installation / WSS / rollback (experimental)"
         echo "4) Stage15 Signed FRP readiness (read-only)"
         echo "0) Back"
         echo
@@ -45,8 +45,8 @@ smite_managed_frp_menu() {
                 fi
                 ;;
             3)
-                echo "HOLD: FRP installation on real IR/KH is disabled."
-                echo "No Backhaul, FRP, Smite, paths, ports or Docker containers changed."
+                source "$SMITE_FRP_MENU_DIR/smite-stage15-frp-wizard.sh"
+                smite_stage15_frp_wizard
                 ;;
             4)
                 python3 -B "$SMITE_MANAGED_FRP_CONTROL" stage15 --node-dir "$SMITE_FRP_NODE_DIR" || :

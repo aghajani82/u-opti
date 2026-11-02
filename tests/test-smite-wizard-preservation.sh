@@ -16,6 +16,13 @@
 # paused/strict Sanaei attachment guard and its explicit Foreign Gateway menu
 # entry. Existing independent/private setup wizard blobs remain unchanged.
 # The Clean-RC safety and signed KH compatibility suites test behavior.
+# 2026-10-29 PR #73: after reviewing the installer diff, pin only the
+# intentional direct-Docker-Compose -> smite-compose-safe.py substitutions.
+# That helper preserves existing active signed, FRP and WSS Compose overlays;
+# this SHA pin still fails closed for any future unreviewed installer edit.
+# 2026-11-02: reviewed selected RC6 fresh-only entry, immutable source/manifest,
+# local Docker scope and selected-only error propagation. Historical recovery
+# pins and independent wizards are unchanged; dispatch/refusal tests cover RC6.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -35,7 +42,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-f843733acece4afe2d3c86e6e454470caf4241c3 modules/smite-install.sh
+f009b05656ba06d048a909d5982c799a205d29d3 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh

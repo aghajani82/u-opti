@@ -23,8 +23,8 @@ import subprocess
 import sys
 import time
 
-HELPER_SHA256 = "acb66752f6aa8600f1c45a7d68f46006b0d4d26c55330925bd35359d3ca868e6"
-PLANNER_SHA256 = "0c007ca049b95227588d2e4847020a53d5d0c155d28dc537341367a783d81c19"
+HELPER_SHA256 = "12eaff0492b184025199c7a266c6a8a592fd63f4baf6ddc86171884554ae32e2"
+PLANNER_SHA256 = "dbb07f59266f6e4f35d3d5ed6c9d9ec808eb35cfbf29e52ef0ae2e4f58a127b5"
 BROKER_MODULE = "smite-rc5-xhttp-root-broker.py"
 LEDGER_MODULE = "smite-rc5-xhttp-nonce-ledger.py"
 HELPER_MODULE = "smite-xhttp-nginx-route"
@@ -660,7 +660,8 @@ def _checked_grant(data: dict[str, object], *, confirmed_child: str) -> dict[str
     route = data["path"]
     if (type(port) is not int or not 1024 <= port <= 65535 or port == 7000
             or type(route) is not str or len(route) > 128
-            or not GRANT_PATH.fullmatch(route) or not route.startswith(f"/{port}/")):
+            or not GRANT_PATH.fullmatch(route)
+            or route.split("/")[1].lower() in {"api", "docs", "redoc", "openapi", "assets", "static", "auth", "login", "admin", "health", "metrics", "sub", "ws"}):
         raise ProvisionHold("BROKER_GRANT_INVALID_ROUTE")
     for name in ("owner_proof_sha256", "kh_inventory_sha256"):
         if type(data[name]) is not str or not HASH.fullmatch(data[name]):
@@ -684,7 +685,7 @@ def install_grant(data: dict[str, object], *, confirmed_child: str,
     grants = _grant_context(root)
     grant = _checked_grant(data, confirmed_child=confirmed_child)
     target = grants / f"{grant['child']}.json"
-    encoded = (json.dumps(grant, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    encoded = (json.dumps({"schema": 1, **grant}, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
     _write_new(target, encoded, 0o600)
     return {
         "TRUSTED_GRANT": "INSTALLED_ROOT_OPERATOR_APPROVED",

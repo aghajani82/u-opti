@@ -349,6 +349,28 @@ fi
 # Explicit offline Clean-RC installer entry. Never fall back to Stable or the
 # legacy Private Network wizard when the paired preview inputs are incomplete.
 if [ "${1:-}" = "--smite-clean-rc" ]; then
+    # A fresh Stage15 preview can fetch its exact reviewed FRP071 image
+    # archives from a durable public prerelease. Explicit local bundles remain
+    # supported for controlled review, but there is never an unpinned fallback.
+    if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ]; then
+        if { [ -n "${SMITE_RC_SOURCE_SHA:-}" ] &&
+              [ "$SMITE_RC_SOURCE_SHA" != "6981bd91b43811fad8847da9abd81ef99a921003" ]; } ||
+           { [ -n "${SMITE_RC_MANIFEST_SHA256:-}" ] &&
+              [ "$SMITE_RC_MANIFEST_SHA256" != "0b34ee3fbd9174e6bf7ef6ddf145f7ebcd606c9bbeae176bb3d6a38b8a2a7840" ]; }; then
+            echo "HOLD: Caller-specified source/manifest pin conflicts with reviewed automatic image source." >&2
+            exit 2
+        fi
+        image_fetcher="$MODULES_PATH/smite-stage15-fetch-images.sh"
+        if [ ! -s "$image_fetcher" ] || [ -L "$image_fetcher" ] ||
+           ! bash "$image_fetcher"; then
+            echo "HOLD: Verified Stage15 auto-download unavailable; no Smite installation started." >&2
+            exit 2
+        fi
+        SMITE_RC_BUNDLE_DIR=/var/lib/u-opti/smite-stage15-frp071-images
+        SMITE_RC_SOURCE_SHA=6981bd91b43811fad8847da9abd81ef99a921003
+        SMITE_RC_MANIFEST_SHA256=0b34ee3fbd9174e6bf7ef6ddf145f7ebcd606c9bbeae176bb3d6a38b8a2a7840
+        export SMITE_RC_BUNDLE_DIR SMITE_RC_SOURCE_SHA SMITE_RC_MANIFEST_SHA256
+    fi
     bundle_helper="$MODULES_PATH/smite-clean-image-pair.py"
     if [ -z "${SMITE_RC_BUNDLE_DIR:-}" ] ||
        [ -z "${SMITE_RC_SOURCE_SHA:-}" ] ||
@@ -722,6 +744,8 @@ print(sha)
                 "smite-clean-image-pair.py"
                 "smite-registry-pair-admission.py"
                 "smite-field-trial-candidate.json"
+                "smite-rc6-install-journal.py"
+                "smite-selected-candidate.json"
                 "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
@@ -753,6 +777,17 @@ print(sha)
                 "smite-managed-frp-transaction.py"
                 "smite-stage15-frp-compose-plan.py"
                 "smite-stage15-frp-host-executor.py"
+                "smite-compose-safe.py"
+                "smite-stage15-wss.py"
+                "smite-stage15-kh-inventory.py"
+                "smite-stage15-active-runtime.py"
+                "smite-stage15-upgrade.py"
+                "smite-stage15-wss-edge.py"
+                "smite-stage15-root-review.py"
+                "smite-stage15-xhttp-bridge.py"
+                "smite-stage15-frp-wizard.sh"
+                "smite-stage15-fetch-images.sh"
+                "smite-rc2-frp-wss-edge-plan.py"
                 "smite-managed-frp-control.py"
                 "smite-managed-frp-menu.sh"
                 "smite-managed-backhaul-control.py"
@@ -898,6 +933,8 @@ print(sha)
                 ["smite-clean-image-pair.py"]="$BASE_URL/modules/smite-clean-image-pair.py"
                 ["smite-registry-pair-admission.py"]="$BASE_URL/modules/smite-registry-pair-admission.py"
                 ["smite-field-trial-candidate.json"]="$BASE_URL/modules/smite-field-trial-candidate.json"
+                ["smite-rc6-install-journal.py"]="$BASE_URL/modules/smite-rc6-install-journal.py"
+                ["smite-selected-candidate.json"]="$BASE_URL/modules/smite-selected-candidate.json"
                 ["u-opti-update-transaction.py"]="$BASE_URL/modules/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$BASE_URL/modules/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
@@ -929,6 +966,17 @@ print(sha)
                 ["smite-managed-frp-transaction.py"]="$BASE_URL/modules/smite-managed-frp-transaction.py"
                 ["smite-stage15-frp-compose-plan.py"]="$BASE_URL/modules/smite-stage15-frp-compose-plan.py"
                 ["smite-stage15-frp-host-executor.py"]="$BASE_URL/modules/smite-stage15-frp-host-executor.py"
+                ["smite-compose-safe.py"]="$BASE_URL/modules/smite-compose-safe.py"
+                ["smite-stage15-wss.py"]="$BASE_URL/modules/smite-stage15-wss.py"
+                ["smite-stage15-kh-inventory.py"]="$BASE_URL/modules/smite-stage15-kh-inventory.py"
+                ["smite-stage15-active-runtime.py"]="$BASE_URL/modules/smite-stage15-active-runtime.py"
+                ["smite-stage15-upgrade.py"]="$BASE_URL/modules/smite-stage15-upgrade.py"
+                ["smite-stage15-wss-edge.py"]="$BASE_URL/modules/smite-stage15-wss-edge.py"
+                ["smite-stage15-root-review.py"]="$BASE_URL/modules/smite-stage15-root-review.py"
+                ["smite-stage15-xhttp-bridge.py"]="$BASE_URL/modules/smite-stage15-xhttp-bridge.py"
+                ["smite-stage15-frp-wizard.sh"]="$BASE_URL/modules/smite-stage15-frp-wizard.sh"
+                ["smite-stage15-fetch-images.sh"]="$BASE_URL/modules/smite-stage15-fetch-images.sh"
+                ["smite-rc2-frp-wss-edge-plan.py"]="$BASE_URL/modules/smite-rc2-frp-wss-edge-plan.py"
                 ["smite-managed-frp-control.py"]="$BASE_URL/modules/smite-managed-frp-control.py"
                 ["smite-managed-frp-menu.sh"]="$BASE_URL/modules/smite-managed-frp-menu.sh"
                 ["smite-managed-backhaul-control.py"]="$BASE_URL/modules/smite-managed-backhaul-control.py"
@@ -997,6 +1045,8 @@ print(sha)
                 ["smite-clean-image-pair.py"]="$TEMP_DIR/smite-clean-image-pair.py"
                 ["smite-registry-pair-admission.py"]="$TEMP_DIR/smite-registry-pair-admission.py"
                 ["smite-field-trial-candidate.json"]="$TEMP_DIR/smite-field-trial-candidate.json"
+                ["smite-rc6-install-journal.py"]="$TEMP_DIR/smite-rc6-install-journal.py"
+                ["smite-selected-candidate.json"]="$TEMP_DIR/smite-selected-candidate.json"
                 ["u-opti-update-transaction.py"]="$TEMP_DIR/u-opti-update-transaction.py"
                 ["smite-foreign-gateway-signed-check.py"]="$TEMP_DIR/smite-foreign-gateway-signed-check.py"
                 ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
@@ -1028,6 +1078,17 @@ print(sha)
                 ["smite-managed-frp-transaction.py"]="$TEMP_DIR/smite-managed-frp-transaction.py"
                 ["smite-stage15-frp-compose-plan.py"]="$TEMP_DIR/smite-stage15-frp-compose-plan.py"
                 ["smite-stage15-frp-host-executor.py"]="$TEMP_DIR/smite-stage15-frp-host-executor.py"
+                ["smite-compose-safe.py"]="$TEMP_DIR/smite-compose-safe.py"
+                ["smite-stage15-wss.py"]="$TEMP_DIR/smite-stage15-wss.py"
+                ["smite-stage15-kh-inventory.py"]="$TEMP_DIR/smite-stage15-kh-inventory.py"
+                ["smite-stage15-active-runtime.py"]="$TEMP_DIR/smite-stage15-active-runtime.py"
+                ["smite-stage15-upgrade.py"]="$TEMP_DIR/smite-stage15-upgrade.py"
+                ["smite-stage15-wss-edge.py"]="$TEMP_DIR/smite-stage15-wss-edge.py"
+                ["smite-stage15-root-review.py"]="$TEMP_DIR/smite-stage15-root-review.py"
+                ["smite-stage15-xhttp-bridge.py"]="$TEMP_DIR/smite-stage15-xhttp-bridge.py"
+                ["smite-stage15-frp-wizard.sh"]="$TEMP_DIR/smite-stage15-frp-wizard.sh"
+                ["smite-stage15-fetch-images.sh"]="$TEMP_DIR/smite-stage15-fetch-images.sh"
+                ["smite-rc2-frp-wss-edge-plan.py"]="$TEMP_DIR/smite-rc2-frp-wss-edge-plan.py"
                 ["smite-managed-frp-control.py"]="$TEMP_DIR/smite-managed-frp-control.py"
                 ["smite-managed-frp-menu.sh"]="$TEMP_DIR/smite-managed-frp-menu.sh"
                 ["smite-managed-backhaul-control.py"]="$TEMP_DIR/smite-managed-backhaul-control.py"
@@ -1301,6 +1362,8 @@ print(sha)
                 "smite-clean-image-pair.py"
                 "smite-registry-pair-admission.py"
                 "smite-field-trial-candidate.json"
+                "smite-rc6-install-journal.py"
+                "smite-selected-candidate.json"
                 "u-opti-update-transaction.py"
                 "smite-foreign-gateway-signed-check.py"
                 "smite-node-pairing-wizard.sh"
@@ -1332,6 +1395,17 @@ print(sha)
                 "smite-managed-frp-transaction.py"
                 "smite-stage15-frp-compose-plan.py"
                 "smite-stage15-frp-host-executor.py"
+                "smite-compose-safe.py"
+                "smite-stage15-wss.py"
+                "smite-stage15-kh-inventory.py"
+                "smite-stage15-active-runtime.py"
+                "smite-stage15-upgrade.py"
+                "smite-stage15-wss-edge.py"
+                "smite-stage15-root-review.py"
+                "smite-stage15-xhttp-bridge.py"
+                "smite-stage15-frp-wizard.sh"
+                "smite-stage15-fetch-images.sh"
+                "smite-rc2-frp-wss-edge-plan.py"
                 "smite-managed-frp-control.py"
                 "smite-managed-frp-menu.sh"
                 "smite-managed-backhaul-control.py"
@@ -1414,7 +1488,7 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
+                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "smite-rc6-install-journal.py" || "$FILE" = "smite-selected-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
                     : > "$BACKUP_DIR/.${FILE}-was-missing"
                 else
                     echo "ERROR: Installed module was not found: $FILE"
