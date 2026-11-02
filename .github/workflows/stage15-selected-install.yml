@@ -1,5 +1,14 @@
 name: Selected Stage15 signed install qualification
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/smite-selected-candidate.json'
+      - 'modules/smite-install.sh'
+      - 'modules/smite-rc6-install-journal.py'
+      - 'tests/test-smite-rc6-install-journal.py'
+      - 'tests/test-smite-rc6-docker-retention.py'
+      - '.github/workflows/stage15-selected-install.yml'
   pull_request:
     paths:
       - 'modules/smite-selected-candidate.json'

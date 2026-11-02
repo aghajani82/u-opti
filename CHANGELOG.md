@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.1] - 2026-11-02
+
+### Fixed
+
+- Interrupted RC6 rollback independently refuses an enrolled Node identity even while outbound Panel registration remains paused. Reject identity-path/mount drift before stopping containers.
+- Preserve all v0.17.0 installation and approval behavior. Real fresh Ubuntu VPS qualification remains pending; no live-host changes are included.
+
 ## [0.17.0] - 2026-11-02
 
 ### Stage15 console-only release

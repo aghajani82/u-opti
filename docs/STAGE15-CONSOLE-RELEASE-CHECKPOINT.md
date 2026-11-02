@@ -1,5 +1,15 @@
 # Console-only release checkpoint — 2026-11-01
 
+## Final recovery guard patch — 2026-11-02
+
+U-OPTI 0.17.1 additionally refuses rollback when an enrolled Node identity
+exists even if outbound registration is paused. An override of the identity
+path or the production bind mount also fails closed. Local regression tests
+cover paused-but-enrolled and identity-path substitution before any stop.
+The exact signed images, G/1, existing runtime and source tag are unchanged.
+The v0.17.0 publication record below is historical and remains immutable.
+Observe the 0.17.1 main CI and release workflow before reporting its publication.
+
 ## Published checkpoint — 2026-11-02
 
 Status: **READY_FOR_FRESH_HOST_TEST**. This supersedes the historical HOLD

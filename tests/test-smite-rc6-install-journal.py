@@ -91,6 +91,29 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(m.Hold): self.j.rollback()
         self.assert_no_stop()
 
+    def test_paused_but_enrolled_node_refuses(self):
+        self.install_partial()
+        identity=self.root/'opt/smite-node/config/identity'
+        identity.mkdir(parents=True)
+        (identity/'node-identity.json').write_text('preserve signed identity')
+        with self.assertRaises(m.Hold): self.j.rollback()
+        self.assert_no_stop()
+        self.assertEqual((identity/'node-identity.json').read_text(), 'preserve signed identity')
+
+    def test_identity_override_refuses(self):
+        self.install_partial()
+        self.objects['a'*64]['Config']['Env'].append('SMITE_AGENT_IDENTITY_PATH=/foreign/identity.json')
+        with self.assertRaises(m.Hold): self.j.rollback()
+        self.assert_no_stop()
+
+    def test_production_identity_mount_guard_readonly(self):
+        self.install_partial()
+        checker=m.Journal(Path('/'), self.run_command)
+        with self.assertRaises(m.Hold): checker.inspect_owned(self.j.load())
+        self.objects['a'*64]['Mounts']=[dict(Type='bind', Source='/opt/smite-node/config', Destination='/etc/smite-node')]
+        self.assertEqual(len(checker.inspect_owned(self.j.load())), 1)
+        self.assert_no_stop()
+
     def test_live_installer_refuses(self):
         d=self.j.load();d.update(installer_pid=123, installer_start='fixture-start');self.j.save(d)
         with patch.object(m, 'process_start', return_value='fixture-start'):

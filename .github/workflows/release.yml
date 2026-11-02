@@ -59,6 +59,7 @@ jobs:
           set -euo pipefail
           bash -n install.sh
           bash -n u-opti
+          sudo -n python3 -B tests/test-smite-rc6-install-journal.py
           bash tests/test-smite-frp-release-upgrade.sh
           bash tests/test-smite-frp-wizard.sh
           bash tests/test-smite-frp-xhttp-auto.sh

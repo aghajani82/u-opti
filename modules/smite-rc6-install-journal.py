@@ -144,14 +144,28 @@ class Journal:
                 if (config.get('Image') != image or
                     (config.get('Labels') or {}).get('com.docker.compose.project') != d['id']):
                     raise Hold('FOREIGN_CONTAINER')
-                if name == 'smite-node' and 'SMITE_NODE_PANEL_AUTH_MODE=paused' not in config.get('Env', []):
-                    raise Hold('NODE_NOT_PAUSED')
+                if name == 'smite-node':
+                    env = dict(x.split('=', 1) for x in config.get('Env', []) if '=' in x)
+                    if env.get('SMITE_NODE_PANEL_AUTH_MODE') != 'paused':
+                        raise Hold('NODE_NOT_PAUSED')
+                    if env.get('SMITE_AGENT_IDENTITY_PATH', '/etc/smite-node/identity/node-identity.json') != '/etc/smite-node/identity/node-identity.json':
+                        raise Hold('NODE_IDENTITY_PATH_CHANGED')
+                    mounts = obj.get('Mounts', [])
+                    if self.root == Path('/') and not any(
+                        x.get('Type') == 'bind' and x.get('Source') == '/opt/smite-node/config'
+                        and x.get('Destination') == '/etc/smite-node' for x in mounts):
+                        raise Hold('NODE_IDENTITY_MOUNT_CHANGED')
                 result.append(dict(id=obj['Id'], name=name, archived=archived,
                                    restart=obj['HostConfig']['RestartPolicy']))
         return result
 
     def inactive(self, d):
         # No enrollment/route state may be abandoned by this fresh-only tool.
+        # Paused controls outbound registration, not absence of an enrolled
+        # inbound agent identity. Refuse it independently before any stop.
+        identity = self.root / 'opt/smite-node/config/identity'
+        if os.path.lexists(identity):
+            raise Hold('NODE_ENROLLMENT_IDENTITY_PRESENT')
         etc = self.root / 'etc/u-opti/smite'
         if etc.exists():
             for p in etc.iterdir():

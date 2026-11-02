@@ -8,7 +8,7 @@ U-OPTI is a Bash-based toolkit for managing, optimizing, securing, and maintaini
 
 ## Current Version
 
-**v0.17.0**
+**v0.17.1**
 
 Smite fresh installation selects the signed **2.0.0-rc.6** candidate. Real
 Ubuntu 24.04 VPS qualification is pending; existing active installations are
