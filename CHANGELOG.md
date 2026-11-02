@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.8] - 2026-11-03
+
+### Added
+
+- Install Components option 8 applies the bundled, SHA-256-pinned Smite static UI with a durable backup; option 9 restores the prior UI. Only the reviewed running RC7 Panel image is admitted. No restart, image replacement, database, pairing or tunnel mutation.
+- Fresh Panel + Iran Node installations automatically apply the same UI after the runtime install journal commits. UI failure remains explicit and is retried via option 8 without reinstalling.
+- UI bytes are from successful Smite main CI run 41545272945 at 115f032761564a069d0aa2ca891e55d53a1c6ea0: original dimensions/layout restored; only Login image and subtitle removed, Smite title retained.
+- Unit, menu dispatch and disposable real-Docker apply/verify/rollback regressions. No live VPS deployment is performed by this release.
+
 ## [0.17.7] - 2026-11-02
 
 ### Fixed

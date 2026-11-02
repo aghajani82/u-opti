@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'modules/smite-selected-candidate.json'
+      - 'modules/smite-panel-ui.*'
+      - 'tests/test-smite-panel-ui.py'
       - 'modules/smite-install.sh'
       - 'modules/smite-rc6-install-journal.py'
       - 'tests/test-smite-rc6-install-journal.py'
@@ -12,6 +14,8 @@ on:
   pull_request:
     paths:
       - 'modules/smite-selected-candidate.json'
+      - 'modules/smite-panel-ui.*'
+      - 'tests/test-smite-panel-ui.py'
       - 'modules/smite-install.sh'
       - 'tests/test-smite-selected-install.sh'
       - 'modules/smite-rc6-install-journal.py'
@@ -68,6 +72,10 @@ jobs:
               subprocess.run(["docker","tag",ref,f"smite-{role}:stage15-local"],check=True)
           print("ANONYMOUS_SIGNED_RC7_PULL=PASS")
           PY
+      - name: Reviewed UI bundle apply and rollback on disposable RC7 container
+        run: |
+          python3 -B tests/test-smite-panel-ui.py
+          sudo -n python3 -B tests/test-smite-panel-ui.py --docker
       - name: Verify real published Panel includes the approved frontend
         run: |
           docker run --rm --network none --entrypoint python smite-panel:stage15-local -c "from pathlib import Path; p=Path('/app/static'); js=''.join(f.read_text() for f in p.rglob('*.js')); css=''.join(f.read_text() for f in p.rglob('*.css')); assert (p/'index.html').is_file(); assert 'smite-dashboard' in js and 'smite-login-card' in js; assert 'smite-dashboard' in css; print('RC7_REAL_IMAGE_FRONTEND=PASS')"

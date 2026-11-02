@@ -2179,6 +2179,12 @@ smite_install_selected_fresh() (
         smite_install_foreign_node || return 2
     fi
     python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
+    if [ "$role" = panel-iran ]; then
+        smite_install_ui_action apply || {
+            echo 'HOLD: RC7 runtime installed; UI update pending. Use Install / Lifecycle option 8; do not reinstall.'
+            return 2
+        }
+    fi
 )
 
 smite_install_selected_rollback() (
@@ -2196,6 +2202,31 @@ smite_install_selected_rollback() (
     smite_install_pause
 )
 
+# The reviewed static UI is bundled with U-OPTI; never fetch mutable UI assets.
+smite_install_ui_action() {
+    local action="$1" module_dir
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-panel-ui.py" ] && [ ! -L "$module_dir/smite-panel-ui.py" ] || {
+        echo 'HOLD: update U-OPTI first; UI helper is missing'; return 2;
+    }
+    python3 -B "$module_dir/smite-panel-ui.py" "$action"
+}
+
+smite_install_ui_menu_action() {
+    local action="$1" answer
+    echo 'Static Panel UI only. Backend, nodes, pairing and tunnels stay unchanged. No restart.'
+    echo 'A private durable backup is retained for rollback. Update U-OPTI first to obtain the newest reviewed UI.'
+    if [ "$action" = rollback ]; then
+        read -rp 'Restore the previous Panel UI? [y/N]: ' answer || return 2
+    else
+        read -rp 'Back up and apply the bundled reviewed Panel UI? [y/N]: ' answer || return 2
+    fi
+    case "$answer" in y|Y|yes|YES) ;; *) return 2 ;; esac
+    smite_install_ui_action "$action" || { echo 'HOLD: UI operation incomplete; backup retained.'; smite_install_pause; return 2; }
+    echo 'Refresh the Panel with Ctrl+F5.'
+    smite_install_pause
+}
+
 show_smite_install_menu() {
     while true; do
         clear
@@ -2211,10 +2242,12 @@ show_smite_install_menu() {
         echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
         echo "7) Recover interrupted RC6/RC7 install (retain data / rollback)"
+        echo "8) Update Panel appearance (UI only / backup first)"
+        echo "9) Roll back previous Panel appearance (UI only)"
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-7]: " smite_install_choice
+        read -rp "Please enter your selection [0-9]: " smite_install_choice
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
@@ -2235,6 +2268,8 @@ show_smite_install_menu() {
             5) smite_install_upgrade_signed_field_trial ;;
             6) smite_foreign_gateway_configure ;;
             7) smite_install_selected_rollback ;;
+            8) smite_install_ui_menu_action apply ;;
+            9) smite_install_ui_menu_action rollback ;;
             0) break ;;
             *)
                 echo
