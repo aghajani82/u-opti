@@ -82,7 +82,7 @@ Keep Xray targets and internal Smite APIs private or loopback-bound. Public web 
 ## Security Monitoring (System Optimization → 7)
 
 After updating U-OPTI, open **2) System Optimization → 7) Security Monitoring**.
-Select **1) Install / Enable** once on each server to activate a local daily security report; use **2) Run Security Check Now**, **3) View Latest Report**, **4) List Saved Reports**, **5) Open Report by Filename**, or **6) Monitoring Status** afterwards.
+Select **1) Install / Enable** once on each server to activate a local daily security report; use **2) Run Security Check Now**, **3) View Latest Report**, **4) List Saved Reports**, **5) Open Report by Filename**, **6) Show Last 10 Days (redacted)**, or **7) Monitoring Status** afterwards.
 
 Reports are root-only and contain service, disk, open-port, SSH failures, Docker, firewall-counter and available Xray log indicator summaries, without raw client IPs or UUIDs. Rotation is set to 10 days only for an existing recognized U-OPTI-managed Xray log policy (or a single detected existing Xray log). Existing 3x-ui access logging is **not** enabled automatically. On systems without Sanaei/Xray, host security reports still work. The monitor does **not** block traffic, restart services, or change firewall rules.
 
