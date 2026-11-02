@@ -14,7 +14,8 @@ Open U-OPTI → **2) System Optimization → 7) Security Monitoring**.
 | 3 | Print newest report (safe to share after reviewing contents) |
 | 4 | List recent saved report filenames |
 | 5 | Open a named report |
-| 6 | View local monitor status |
+| 6 | Show a read-only 10-day Xray known-indicator history (redacted) |
+| 7 | View local monitor status |
 
 Reports: `/var/log/uopti-security/monitor/*.txt` (root-only, mode 0600).
 Daily job: `/etc/cron.daily/uopti-security-monitor`.
