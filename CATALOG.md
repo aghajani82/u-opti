@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.17.2** (console-only Stage15 and guarded RC6 fresh installation; VPS qualification pending; Sidecar experimental)
+Current stable version: **v0.17.3** (console-only Stage15 and guarded RC6 fresh installation; VPS qualification pending; Sidecar experimental)
 
 ## Core System Management
 
@@ -15,6 +15,7 @@ Current stable version: **v0.17.2** (console-only Stage15 and guarded RC6 fresh 
 | Swap | View, create, resize, disable |
 | BBR | Status, compatibility, enable/disable, qdisc |
 | Storage | Disk information, large files/directories, APT cache cleanup |
+| Security Monitoring (System Optimization → 7) | Opt-in daily host/Xray health reports; 10-day managed archive retention; read, list and run reports from menu |
 
 ## Server Security
 
