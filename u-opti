@@ -132,13 +132,15 @@ source "$MODULES_PATH/system.sh"
 # Option 7 provisions only its missing U-OPTI module files from an immutable
 # commit on first use. This does NOT install the host monitor or touch services.
 if [ -f "$MODULES_PATH/security-monitor.sh" ] &&
-   [ -f "$MODULES_PATH/security-monitor.py" ]; then
+   [ ! -L "$MODULES_PATH/security-monitor.sh" ] &&
+   [ -f "$MODULES_PATH/security-monitor.py" ] &&
+   [ ! -L "$MODULES_PATH/security-monitor.py" ]; then
     source "$MODULES_PATH/security-monitor.sh"
 else
     u_opti_security_monitor_menu() {
-        local pin="23cde3bc79d4616416eca1e5dbe3bbb354753faa"
+        local pin="369e73eeb1f6b62f9838ca0b2da973f3ec239828"
         local names=("security-monitor.sh" "security-monitor.py")
-        local blobs=("da0a7a84dad0072c02c94a42f4b59bdc2a8d5b88" "331945a301b09abc40314cc25eabca8f42ffd531")
+        local blobs=("a228f10a1a6adafe4084367a88b02f65139434f4" "5c0a1ead3f0a39368cf48b987be51e2835488116")
         local tmp file target i
         if [ -L "$MODULES_PATH" ] || [ ! -d "$MODULES_PATH" ] ||
            [ "$(stat -c %u "$MODULES_PATH")" != 0 ]; then
