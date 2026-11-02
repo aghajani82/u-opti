@@ -47,7 +47,12 @@ def secure_dir(path):
     path.chmod(0o700)
 
 def atomic_file(path, content, mode=0o600):
-    secure_dir(path.parent)
+    # Never chmod system-managed directories (/etc/cron.daily, /etc/cron.hourly).
+    if path.parent in (DAILY.parent, ROTATE_CRON.parent):
+        if path.parent.is_symlink() or not path.parent.is_dir() or path.parent.stat().st_uid != 0:
+            raise RuntimeError("HOLD: unsafe system cron directory")
+    else:
+        secure_dir(path.parent)
     if path.is_symlink():
         raise RuntimeError("HOLD: refusing symlink: " + str(path))
     fd, temp = tempfile.mkstemp(prefix=".uopti-", dir=path.parent)
@@ -82,7 +87,8 @@ def validate_logrotate(body):
         p = subprocess.run(["logrotate", "-d", "-s", "/dev/null", tmp],
                            capture_output=True, text=True, timeout=15)
         if p.returncode != 0:
-            raise RuntimeError("HOLD: invalid logrotate configuration")
+            raise RuntimeError("HOLD: invalid logrotate configuration: " +
+                               (p.stderr or p.stdout)[-250:])
     finally:
         os.unlink(tmp)
 
@@ -211,11 +217,20 @@ def generate_report(quiet=False):
         records.append(key + "=" + str(value))
     put("CHECK_TIME", now.isoformat())
     for service in ("nginx", "docker", "cron", "fail2ban", "ssh"):
-        status = run_cmd("systemctl", "is-active", service) or "UNAVAILABLE"
+        try:
+            p = subprocess.run(["systemctl", "is-active", service],
+                               capture_output=True, text=True, timeout=10)
+            status = p.stdout.strip() or "UNKNOWN"
+        except (OSError, subprocess.TimeoutExpired):
+            status = "UNAVAILABLE"
         put("SERVICE_" + service.upper(), status)
-        # A service absent by design is informational.
-        if status not in ("active", "UNAVAILABLE", "inactive"):
+        if status not in ("active", "inactive", "unknown", "UNAVAILABLE"):
             warnings.append("SERVICE_CHECK:" + service)
+        elif status == "inactive":
+            loaded = run_cmd("systemctl", "show", service, "--property=LoadState",
+                             "--value")
+            if loaded == "loaded":
+                warnings.append("SERVICE_INACTIVE:" + service)
     disk = run_cmd("df", "-P", "/")
     if disk and len(disk.splitlines()) >= 2:
         parts = disk.splitlines()[1].split()
@@ -249,6 +264,8 @@ def generate_report(quiet=False):
                 warnings.append("NEW_BLOCKED_PACKETS:" + family)
             if isinstance(old, int) and n < old:
                 warnings.append("FIREWALL_COUNTER_RESET:" + family)
+        elif isinstance(prev.get(family), int):
+            warnings.append("FIREWALL_RULE_MISSING:" + family)
     attempts = run_cmd("journalctl", "-u", "ssh", "--since", "24 hours ago",
                        "--no-pager", "-o", "cat", timeout=25)
     put("SSH_FAILED_AUTH_LINES_24H", sum(
@@ -265,6 +282,13 @@ def generate_report(quiet=False):
             if sep and host in ("*", "0.0.0.0", "[::]", "::") and port.isdigit():
                 public.add(int(port))
     put("PUBLIC_LISTEN_PORTS", ",".join(map(str, sorted(public))) or "NONE")
+    previous_ports = prev.get("PUBLIC_PORTS")
+    if isinstance(previous_ports, list):
+        added = public - set(x for x in previous_ports if isinstance(x, int))
+        if added:
+            warnings.append("NEW_PUBLIC_PORTS:" + ",".join(map(str, sorted(added))))
+    if ports is not None:
+        current["PUBLIC_PORTS"] = sorted(public)
     hist = Counter(); client_labels = set()
     total = 0; errors = 0; newest = None; logfiles = 0
     # Host local timezone is assumed; if Xray uses a different timezone this
