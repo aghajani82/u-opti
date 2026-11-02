@@ -24,3 +24,25 @@ Frontend TypeScript/build, theme/sidebar/MFA contracts, missing/malformed metric
 Real public DNS/TLS, Iranian-network GHCR reachability, browser Login/Dashboard on the real VPS and reboot persistence: `PENDING_REAL_VPS`. No real VPS was available. No browser screenshot of the built frontend was captured in this execution. CI and static responsive/language contracts are not real-server validation.
 
 No live server changes, Foreign Node installation, tunnel creation or Grandoptical operations. RC6 tag/release preserved. Console G/1 approval retained; no Passkey or independent Web Approval added.
+
+## Iran VPS Sigstore TUF CDN 403 mitigation (2026-11-02)
+
+The first real Iran host (Ubuntu 24.04, amd64) reproduced HTTP 403 for
+`https://tuf-repo-cdn.sigstore.dev/14.root.json`. Cosign 3.0.6 correctly
+refused to verify the signed RC7 bundle without trusted material. Both real
+RC7 images passed independently in the operator's read-only diagnostic with
+`--trusted-root` pointing to `sigstore/root-signing` commit
+`c9aa2600c1492365922f1b3f351a208aa17d0e64` target `trusted_root.json` and SHA-256
+`6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`. No host installation was performed in that diagnostic.
+
+v0.17.5 makes this **explicit reviewed trust snapshot** the only selected
+RC7 fresh-install root, with checksum enforcement in the installer AND the
+Python signature admission verifier. It does not download mutable TUF targets,
+accept arbitrary certificate authorities or report live TUF metadata as
+verified. A new Sigstore root rotation requires a separate audited U-OPTI
+release. All existing digest, workflow identity, OIDC, role/source annotations,
+transparency and unsigned-image rejection checks remain enabled. This is a
+network compatibility repair, not approval of a production Smite release.
+
+The menu pauses on failing installs to display the exact HOLD. Host Nginx,
+real DNS/TLS, and successful live first boot still require operator trial.

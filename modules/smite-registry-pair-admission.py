@@ -28,6 +28,9 @@ COSIGN_SIGNATURE_TYPES = {
 REPO = "aghajani82/Smite"
 ISSUER = "https://token.actions.githubusercontent.com"
 WORKFLOW = "https://github.com/aghajani82/Smite/.github/workflows/publish-images.yml@"
+# Explicitly reviewed Sigstore root-signing snapshot: c9aa2600c1492365922f1b3f351a208aa17d0e64
+# Source: targets/trusted_root.json. TUF refresh is not claimed for this mode.
+TRUSTED_ROOT_SHA256 = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
 
 class AdmissionHold(ValueError):
     pass
@@ -62,8 +65,30 @@ def _signed_payload_match(result: object, *, digest: str, role: str, source: str
             return True
     return False
 
+def _validated_trusted_root(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    if not isinstance(path, Path) or path.is_symlink() or not path.is_file():
+        raise AdmissionHold("Invalid selected trusted-root path")
+    if path.stat().st_size > 32768:
+        raise AdmissionHold("Selected trusted-root file is oversized")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != TRUSTED_ROOT_SHA256:
+        raise AdmissionHold("Selected Sigstore trusted-root SHA256 mismatch")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise AdmissionHold("Malformed selected Sigstore trusted-root JSON") from exc
+    if (not isinstance(data, dict)
+            or data.get("mediaType") != "application/vnd.dev.sigstore.trustedroot+json;version=0.1"
+            or not all(isinstance(data.get(k), list) and data[k]
+                       for k in ("tlogs", "certificateAuthorities", "ctlogs"))):
+        raise AdmissionHold("Selected Sigstore trusted-root shape mismatch")
+    return str(path)
+
 def verify_pair(*, manifest: Path, manifest_sha256: str,
-                source_sha: str, publish_ref: str) -> dict:
+                source_sha: str, publish_ref: str,
+                trusted_root: Path | None = None) -> dict:
     if not isinstance(manifest_sha256, str) or not HASH.fullmatch(manifest_sha256):
         raise AdmissionHold("Independent manifest SHA256 required")
     if not isinstance(source_sha, str) or not SHA.fullmatch(source_sha):
@@ -113,11 +138,13 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
     if digests["panel"] == digests["node"]:
         raise AdmissionHold("Duplicate Panel and Node digests")
 
+    trust_root_path = _validated_trusted_root(trusted_root)
     identity = WORKFLOW + publish_ref
     # No ignore-tlog, no ignore-sct, no --check-claims=false or trust in tags.
     for role in ("panel", "node"):
         cmd = [
             "cosign", "verify",
+            *([ "--trusted-root", trust_root_path ] if trust_root_path else []),
             "--certificate-identity=" + identity,
             "--certificate-oidc-issuer=" + ISSUER,
             "--certificate-github-workflow-sha=" + source_sha,
@@ -149,10 +176,12 @@ def main(argv=None) -> int:
     p.add_argument("--manifest-sha256", required=True)
     p.add_argument("--source-sha", required=True)
     p.add_argument("--publish-ref", required=True)
+    p.add_argument("--trusted-root", type=Path, help="Reviewed, SHA-pinned Sigstore trusted root")
     args = p.parse_args(argv)
     try:
         verify_pair(manifest=args.manifest, manifest_sha256=args.manifest_sha256,
-                    source_sha=args.source_sha, publish_ref=args.publish_ref)
+                    source_sha=args.source_sha, publish_ref=args.publish_ref,
+                    trusted_root=args.trusted_root)
     except (AdmissionHold, OSError, TypeError) as exc:
         print("HOLD: " + str(exc), file=sys.stderr)
         return 2
