@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.2**
+Ubuntu Server Optimization and Management Tool · **v0.17.3**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
@@ -30,6 +30,7 @@ This installs U-OPTI and its managed modules. Install and configure Docker, Smit
 | Area | Available tools |
 | --- | --- |
 | System maintenance | Server updates, system information, time/NTP, swap, BBR/qdisc, storage, and hostname management |
+| Security monitoring | System Optimization → 7: opt-in local security health reports, 10-day Xray access-log archive retention, protected daily reports; does not change running services |
 | Server security | SSH ports and keys, UFW, and Fail2Ban management |
 | Application management | X-UI PRO, Docker Engine/Compose, and Sanaei 3x-UI instances |
 | Certificates | Let's Encrypt/Certbot, certificate validation, and managed 3x-UI certificate synchronization |
@@ -77,6 +78,15 @@ Docker Management provides Sanaei 3x-UI multi-instance management. Managed insta
 Certificate Management can select a managed instance, validate and synchronize its certificate, and configure renewal handling. X-UI PRO and Docker-based Sanaei remain independently manageable.
 
 Keep Xray targets and internal Smite APIs private or loopback-bound. Public web entry uses the configured Nginx HTTPS gateway; do not expose internal API or tunnel-control ports to make a failed setup appear to work. Preserve your required SSH access when configuring firewalls.
+
+## Security Monitoring (System Optimization → 7)
+
+After updating U-OPTI, open **2) System Optimization → 7) Security Monitoring**.
+Select **1) Install / Enable** once on each server to activate a local daily security report; use **2) Run Security Check Now**, **3) View Latest Report**, **4) List Saved Reports**, **5) Open Report by Filename**, or **6) Monitoring Status** afterwards.
+
+Reports are root-only and contain service, disk, open-port, SSH failures, Docker, firewall-counter and available Xray log indicator summaries, without raw client IPs or UUIDs. Rotation is set to 10 days only for an existing recognized U-OPTI-managed Xray log policy (or a single detected existing Xray log). Existing 3x-ui access logging is **not** enabled automatically. On systems without Sanaei/Xray, host security reports still work. The monitor does **not** block traffic, restart services, or change firewall rules.
+
+Xray archive history is limited by rotation count and early size-based rotations; the configured 10 days are a retention target, not a guaranteed complete history. Incident snapshot backups are preserved rather than automatically deleted. [More details](docs/SECURITY-MONITOR.md).
 
 ## Update & recovery
 
