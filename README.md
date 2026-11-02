@@ -86,6 +86,36 @@ Choose **Update U-OPTI** from the main menu. The updater stages and validates fi
 
 Installations pinned to an experimental source ref retain that channel until explicitly changed. Updating U-OPTI does not by itself migrate running Smite images or reconfigure existing tunnels.
 
+#### One-time transition from U-OPTI 0.16.7
+
+An older **0.16.7** menu updater can abort at *Creating backup* when a module
+introduced in later versions did not exist in the earlier installation. No
+change pushed to GitHub can modify the updater code already running locally.
+**Do not create empty placeholder modules or bypass the backup check.**
+
+For this specific case, with an operator snapshot, root access and a reviewed
+existing installation, use the official installer's **explicit legacy-adoption**
+path once. It downloads one commit-pinned module set, backs up every old file
+(or explicitly records absence), and applies a journal-backed transaction.
+On legacy adoption it does **not** install or upgrade host packages, start
+Docker containers, or alter Smite/Sanaei/Nginx. A failed integrity check must
+remain HOLD, not trigger a forced re-install.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/main/install.sh \
+  -o /root/u-opti-legacy-adopt.sh
+U_OPTI_ADOPT_EXISTING=YES U_OPTI_BRANCH=main \
+  bash /root/u-opti-legacy-adopt.sh
+```
+
+Run only after checking the downloaded installer source; use this **once**,
+not for regular upgrades. The installed channel stays `main`. On success,
+confirm `u-opti --version` and use **Update U-OPTI** (menu **8**) normally
+for later releases. Persistent private backups are retained under
+`/usr/local/lib/u-opti/.uopti-backup-*`; do not delete them before validating
+the installation. Existing active services are not automatically upgraded.
+
+
 ### Recover an interrupted RC6 install
 
 Use **Smite Management → Install Components → 7** and review the status before entering `ROLLBACK-RC6`.
