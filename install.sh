@@ -217,13 +217,21 @@ for PACKAGE in "${REQUIRED_PACKAGES[@]}"; do
 done
 
 if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
-    echo "Missing required packages: ${MISSING_PACKAGES[*]}"
-    echo "Installing required system packages..."
-    apt-get -o DPkg::Lock::Timeout=300 update
-    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
+    if [ "${U_OPTI_ADOPT_EXISTING:-NO}" = "YES" ] && [ -f "$INSTALL_PATH" ]; then
+        # A one-time migration updates ONLY U-OPTI files. It must not
+        # install or upgrade host packages before the recoverable backup.
+        # Package prerequisites can be reviewed separately after adoption.
+        echo "Legacy U-OPTI adoption: skipping package changes."
+        echo "Missing packages (not installed): ${MISSING_PACKAGES[*]}"
+    else
+        echo "Missing required packages: ${MISSING_PACKAGES[*]}"
+        echo "Installing required system packages..."
+        apt-get -o DPkg::Lock::Timeout=300 update
+        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
+    fi
 fi
 
-echo "Required system packages are ready."
+echo "System package preflight complete."
 echo
 
 TEMP_DIR=$(mktemp -d)
