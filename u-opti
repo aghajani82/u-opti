@@ -1488,8 +1488,19 @@ print(sha)
             for FILE in "${BACKUP_FILES[@]}"; do
                 if [ -f "$MODULES_PATH/$FILE" ]; then
                     cp -f "$MODULES_PATH/$FILE" "$BACKUP_DIR/$FILE" || BACKUP_OK=false
-                elif [[ "$FILE" = "smite.sh" || "$FILE" = "smite-install.sh" || "$FILE" = "smite-gateway.sh" || "$FILE" = "smite-foreign-gateway.sh" || "$FILE" = "smite-registry-pair-admission.py" || "$FILE" = "smite-field-trial-candidate.json" || "$FILE" = "smite-rc6-install-journal.py" || "$FILE" = "smite-selected-candidate.json" || "$FILE" = "docker-3xui-xhttp-guard.py" || "$FILE" = "docker-3xui-certificate-multi.sh" || "$FILE" = "smite-clean-ir-resume.sh" || "$FILE" = "smite-clean-rc-preflight.sh" || "$FILE" = smite-backhaul-* || "$FILE" = smite-frp-* || "$FILE" = "u-opti-update-transaction.py" ]]; then
-                    : > "$BACKUP_DIR/.${FILE}-was-missing"
+                elif [[ "$FILE" != "system.sh" && "$FILE" != "time.sh" &&
+                        "$FILE" != "swap.sh" && "$FILE" != "bbr.sh" &&
+                        "$FILE" != "storage.sh" && "$FILE" != "ssh.sh" &&
+                        "$FILE" != "ssh-access.sh" && "$FILE" != "firewall.sh" &&
+                        "$FILE" != "fail2ban.sh" && "$FILE" != "xui-pro.sh" &&
+                        "$FILE" != "certificate.sh" && "$FILE" != "backup.sh" &&
+                        "$FILE" != "docker.sh" &&
+                        "$FILE" != "docker-3xui-instance.sh" &&
+                        "$FILE" != "docker-3xui-nginx.sh" ]]; then
+                    # New optional modules are absent on older installations.
+                    # Preserve absence in the durable backup/rollback journal.
+                    # Baseline modules must exist so a corrupt install HOLDS.
+                    : > "$BACKUP_DIR/.${FILE}-was-missing" || BACKUP_OK=false
                 else
                     echo "ERROR: Installed module was not found: $FILE"
                     BACKUP_OK=false
