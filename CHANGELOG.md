@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.4] - 2026-11-02
+
+### Changed
+
+- Official Smite Panel + Iran Node menu selects the independently verified RC7 image pair from source `9a1270b31e8d44f13d09b71ab6b9798410b09c12`, including the approved charcoal/teal interface and unknown-data correction.
+- Pin source, digests, manifest hash and version consistently in installer and Ubuntu 24.04 qualification; no manual ZIP or Compose edits.
+- Preserve interrupted RC6 rollback while binding new RC7 journals to their exact images; reject cross-candidate ownership.
+- Add real-image frontend checks, registry outage/timeout regression and permanent release evidence. Initial Panel install needs no Foreign Node or tunnel. Real Iran VPS validation remains pending.
+
 ## [0.17.3] - 2026-11-02
 
 ### Added

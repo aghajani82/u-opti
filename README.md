@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.3**
+Ubuntu Server Optimization and Management Tool · **v0.17.4**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
@@ -23,7 +23,9 @@ u-opti
 
 This installs U-OPTI and its managed modules. Install and configure Docker, Smite, Sanaei, and HTTPS through their menu entries when needed.
 
-**For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.6** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
+**For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.7** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
+
+For an initial Iran-only installation, choose **Docker Management → Smite Management → Install Components → 1**. Foreign Node and active tunnels are not required. Iran Node remains pending until signed pairing. A valid domain and TLS are still required by the secure gateway flow. See [RC7 image provenance](docs/SMITE-RC7-RELEASE-EVIDENCE.md).
 
 ## Features
 
@@ -51,7 +53,7 @@ In **Install Components**, choose the action for the current host:
 | --- | --- |
 | IR: install Panel + Iran Node | **1** |
 | KH: install Foreign Node | **2** |
-| Recover an interrupted fresh RC6 installation | **7** |
+| Recover an interrupted fresh RC6/RC7 installation | **7** |
 
 The IR broker preparation requires the hostname `ir`. Continue through the existing Gateway, Signed Pairing, Sanaei, and Tunnel Management menus after core installation. Core installation alone does not activate pairing or publish a tunnel.
 
@@ -69,7 +71,7 @@ Approval retains signature, request-matching, expiry, and replay checks. Passkey
 
 ### Other networking modes
 
-Private Network/EasyTier, advanced tools, and legacy recovery remain separate menu paths. Backhaul Sidecar remains experimental. The [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) describes the older private-network deployment; it is not the RC6 fresh-install guide.
+Private Network/EasyTier, advanced tools, and legacy recovery remain separate menu paths. Backhaul Sidecar remains experimental. The [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) describes the older private-network deployment; it is not the selected fresh-install guide.
 
 ## Sanaei & certificates
 
@@ -126,7 +128,7 @@ for later releases. Persistent private backups are retained under
 the installation. Existing active services are not automatically upgraded.
 
 
-### Recover an interrupted RC6 install
+### Recover an interrupted RC6/RC7 install
 
 Use **Smite Management → Install Components → 7** and review the status before entering `ROLLBACK-RC6`.
 
@@ -156,4 +158,4 @@ Use **Backup & Restore** for supported U-OPTI backups, and keep a provider snaps
 
 `main` supplies the official installer and self-updater. CI checks source syntax, security contracts, installation behavior, and recovery scenarios; relevant workflows also exercise real disposable Docker containers.
 
-Passing CI is separate from completing a real VPS deployment. The current RC6 fresh-host path still requires operator validation of public TLS, Signed Pairing/Inventory, tunnel publication, real client traffic, and reboot persistence.
+Passing CI is separate from completing a real VPS deployment. The current RC7 fresh-host path still requires operator validation of public TLS, Signed Pairing/Inventory, tunnel publication, real client traffic, and reboot persistence.

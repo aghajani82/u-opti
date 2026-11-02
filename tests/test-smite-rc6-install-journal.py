@@ -120,9 +120,27 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaises(m.Hold): self.j.rollback()
         self.assert_no_stop()
 
+    def test_legacy_rc6_rollback_survives_installer_update(self):
+        self.install_partial()
+        d = self.j.load(); d['source'] = m.LEGACY_SOURCE; self.j.save(d)
+        self.objects['a'*64]['Config']['Image'] = m.LEGACY_IMAGES['smite-node']
+        self.assertIn('PASS', self.j.rollback())
+        self.assertFalse(self.objects['a'*64]['State']['Running'])
+
+    def test_cross_candidate_image_is_not_owned(self):
+        self.install_partial()
+        self.objects['a'*64]['Config']['Image'] = m.LEGACY_IMAGES['smite-node']
+        with self.assertRaises(m.Hold): self.j.rollback()
+        self.assert_no_stop()
+
+    def test_unknown_candidate_source_holds(self):
+        d = self.j.load(); d['source'] = 'f'*40; self.j.save(d)
+        with self.assertRaises(m.Hold): self.j.rollback()
+        self.assert_no_stop()
+
     def test_completed_install_refuses(self):
         self.install_partial();p=self.root/'etc/u-opti/smite/state.env';p.parent.mkdir(parents=True)
-        p.write_text('SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.6\nSMITE_UPSTREAM_REF='+m.SOURCE+'\n')
+        p.write_text('SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION='+m.VERSION+'\nSMITE_UPSTREAM_REF='+m.SOURCE+'\n')
         self.assertIn('COMMITTED', self.j.commit())
         with self.assertRaises(m.Hold): self.j.rollback()
         self.assert_no_stop()

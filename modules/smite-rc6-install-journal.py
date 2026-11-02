@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh RC6 rollback journal. Never an active-install migration/recovery tool.
+"""Fresh RC6/RC7 rollback journal (legacy path and confirmation retained). Never an active-install migration/recovery tool.
 
 Rollback quarantines fresh files and retains stopped containers and volumes.
 It refuses completed installs, foreign containers, pairing, grants and routes.
@@ -18,11 +18,18 @@ import subprocess
 import sys
 import uuid
 
-SOURCE = '25ff25585be3f7ff1c8b73b39a23d0509f9a2312'
+SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
 IMAGES = {
+    'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8',
+    'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263',
+}
+VERSION = '2.0.0-rc.7'
+LEGACY_SOURCE = '25ff25585be3f7ff1c8b73b39a23d0509f9a2312'
+LEGACY_IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:1e5b34652abe24c5c1971dbbdb579bb270c6c571d289198ed15cd0373da1a0f4',
     'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:60a7027b56b17ceb46348f7e107a3361723a95a9b1712634dc8d90b31f928388',
 }
+CANDIDATES = {SOURCE: (VERSION, IMAGES), LEGACY_SOURCE: ('2.0.0-rc.6', LEGACY_IMAGES)}
 TARGETS = (
     'opt/smite', 'opt/smite-node', 'opt/u-opti-smite', 'etc/u-opti/smite',
     'var/lib/u-opti/smite-xhttp-broker', 'etc/nginx/smite-xhttp-routes',
@@ -91,7 +98,7 @@ class Journal:
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600:
             raise Hold('UNTRUSTED_JOURNAL')
         d = json.loads(self.path.read_text())
-        if (not isinstance(d, dict) or d.get('schema') != 1 or d.get('source') != SOURCE or not re.fullmatch('uopti_rc6_[0-9a-f]{32}', d.get('id', ''))
+        if (not isinstance(d, dict) or d.get('schema') != 1 or d.get('source') not in CANDIDATES or not re.fullmatch('uopti_rc6_[0-9a-f]{32}', d.get('id', ''))
                 or d.get('role') not in ('panel-iran', 'foreign')
                 or d.get('state') not in ('INSTALLING', 'ROLLING_BACK', 'ROLLED_BACK', 'COMMITTED')):
             raise Hold('INVALID_JOURNAL')
@@ -134,7 +141,7 @@ class Journal:
     def inspect_owned(self, d):
         names = self.docker('ps', '-a', '--format', '{{.Names}}').splitlines()
         result = []
-        for name, image in IMAGES.items():
+        for name, image in CANDIDATES[d['source']][1].items():
             archived = name + '-' + d['id']
             for current in (name, archived):
                 if current not in names:
@@ -273,8 +280,8 @@ class Journal:
         state = self.root / 'etc/u-opti/smite/state.env'
         trusted(state)
         lines = state.read_text().splitlines()
-        if ('SMITE_UPSTREAM_REF=' + SOURCE not in lines or
-            'SMITE_MANAGED_VERSION=2.0.0-rc.6' not in lines or
+        if ('SMITE_UPSTREAM_REF=' + d['source'] not in lines or
+            'SMITE_MANAGED_VERSION=' + CANDIDATES[d['source']][0] not in lines or
             'SMITE_ROLE=' + d['role'] not in lines):
             raise Hold('STATE_MISMATCH')
         d['state'] = 'COMMITTED'; self.save(d)

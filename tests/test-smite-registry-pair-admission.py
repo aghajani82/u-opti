@@ -166,6 +166,16 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
                         gate.verify_pair(manifest=self.path, manifest_sha256=self.hash,
                                          source_sha=SOURCE, publish_ref=REF)
 
+    def test_registry_unavailable_or_timeout_holds_without_fallback(self):
+        for failure in (OSError('registry unavailable'), subprocess.TimeoutExpired('cosign', 60)):
+            with self.subTest(failure=type(failure).__name__):
+                with patch.object(gate.subprocess, 'run', side_effect=failure) as run:
+                    with self.assertRaises(gate.AdmissionHold):
+                        gate.verify_pair(manifest=self.path, manifest_sha256=self.hash,
+                                         source_sha=SOURCE, publish_ref=REF)
+                    self.assertEqual(run.call_count, 1)
+                    self.assertIn(self.document['images']['panel'], run.call_args.args[0])
+
     def test_cli_is_only_preflight_no_docker(self):
         p = subprocess.run([sys.executable, "-B", str(SCRIPT),
                             "--manifest", str(self.path), "--manifest-sha256", self.hash,

@@ -63,9 +63,9 @@ sha256sum() {
     else command sha256sum "$@"; fi
 }
 smite_install_clean_rc_preflight() {
-    [ "$SMITE_FIELD_TRIAL_SOURCE_SHA" = 25ff25585be3f7ff1c8b73b39a23d0509f9a2312 ]
-    [ "$SMITE_FIELD_TRIAL_PUBLISH_REF" = refs/tags/v2.0.0-rc.6 ]
-    [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.6 ]
+    [ "$SMITE_FIELD_TRIAL_SOURCE_SHA" = 9a1270b31e8d44f13d09b71ab6b9798410b09c12 ]
+    [ "$SMITE_FIELD_TRIAL_PUBLISH_REF" = refs/tags/v2.0.0-rc.7 ]
+    [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.7 ]
     [ "$SMITE_UPSTREAM_REF" = "$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
@@ -116,4 +116,10 @@ if smite_install_selected_fresh foreign <<< n; then exit 1; fi
 SMITE_INSTALL_PROFILE=clean-rc
 smite_install_selected_fresh foreign
 [ "$(cat "$TMP/dispatch")" = foreign ]
-echo 'SELECTED_RC6_DISPATCH_FIXTURES=PASS (not a real host installation)'
+rm "$TMP/dispatch"
+SMITE_INSTALL_PROFILE=stable
+printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/menu.log"
+[ "$(cat "$TMP/dispatch")" = panel ]
+grep -q 'Selected Smite 2.0.0-rc.7' "$TMP/menu.log"
+echo 'OFFICIAL_MENU_OPTION_1=PASS_ISOLATED_FIXTURE'
+echo 'SELECTED_RC7_DISPATCH_FIXTURES=PASS (not a real host installation)'
