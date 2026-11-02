@@ -173,7 +173,7 @@ else
                ! python3 -B - "$tmp/$file" "${blobs[$i]}" <<'PY_VERIFY_MONITOR'
 import hashlib, pathlib, sys
 data = pathlib.Path(sys.argv[1]).read_bytes()
-digest = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\\0" + data).hexdigest()
+digest = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 sys.exit(0 if digest == sys.argv[2] else 1)
 PY_VERIFY_MONITOR
             then
