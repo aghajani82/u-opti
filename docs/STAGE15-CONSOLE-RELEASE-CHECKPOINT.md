@@ -1,5 +1,38 @@
 # Console-only release checkpoint — 2026-11-01
 
+## Published checkpoint — 2026-11-02
+
+Status: **READY_FOR_FRESH_HOST_TEST**. This supersedes the historical HOLD
+entries below. The operator moved real VPS qualification after main release.
+
+- U-OPTI PR #75 merged: `c1025b8241d1ff28663c91256ab02c43d615f25a`.
+- Smite PR #42 merged: `b46dd5d5b1011a616af69f4ee22d2c0f7cca9c66`.
+- U-OPTI tested PR HEAD: `03a9d13b648cfa4cd6cd316538145fd4160351c0`,
+  all 25 checks passed, including real disposable Docker rollback retention.
+- Smite selected HEAD: `25ff25585be3f7ff1c8b73b39a23d0509f9a2312`,
+  all 19 visible checks passed. RC6 source/images/tag remain unchanged.
+- U-OPTI main CI run 41376669578: SUCCESS.
+- Smite main workflow run 41376649450: SUCCESS.
+- U-OPTI release workflow run 41376669681: SUCCESS.
+- Published release: https://github.com/aghajani82/u-opti/releases/tag/v0.17.0
+  Tag points to the U-OPTI merge SHA above; no tag was moved.
+- Superseded experimental PR #74 (U-OPTI) and #41 (Smite) were closed with
+  explicit selection/exclusion notes. Their branches and commits are retained.
+  Foundation PR #73 and #40 were already merged; no further action taken.
+
+Use the official main installer for **fresh Ubuntu 24.04 amd64 hosts only**.
+Smite Management → Install Components → 1 for IR / 2 for KH; interrupted new
+RC6 installs use option 7 and ROLLBACK-RC6. Read the recovery document first.
+The recovery path quarantines files and retains stopped containers/volumes;
+it is not active-host migration or automatic restoration of mixed identities.
+
+Remaining operator qualification: real fresh IR/KH setup, public TLS, Signed
+Pairing/Inventory, new Owner/Child, G/1, fresh publication, Verify/client traffic
+and reboot preservation. No claim of STABLE_RELEASE_COMPLETE is made.
+No IR/KH/Grandoptical deployment, restart, rebuild or firewall mutation occurred.
+Existing tunnels and runtime were not accessed. No historical branch, tag,
+GHCR package or artifact was deleted. Destructive cleanup remains deferred.
+
 ## Current continuation — 2026-11-02 (supersedes historical gates below)
 
 The operator explicitly requested interrupted-RC6 rollback completion, then
