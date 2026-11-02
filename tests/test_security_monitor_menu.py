@@ -44,6 +44,38 @@ class SecurityMonitorContractTests(unittest.TestCase):
         self.assertEqual(module.RETAIN_DAYS, 10)
         self.assertEqual(module.ROTATIONS, 240)
 
+    def test_history_reads_archives_without_exposing_client_labels(self):
+        import contextlib
+        import datetime as dt
+        import gzip
+        import io
+        import tempfile
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location(
+            "securitymonitor_fixture", ROOT / "modules/security-monitor.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            now = dt.datetime.now().astimezone()
+            stamp = now.strftime("%Y/%m/%d %H:%M:%S")
+            raw = (stamp + " from 127.0.0.1:1234 accepted tcp:ycxrl.com:80 "
+                   "email: khodam\\n")
+            (root / "access.log").write_text(raw, encoding="utf-8")
+            with gzip.open(root / "access.log.1.gz", "wt") as z:
+                z.write(raw)
+            (root / "access.snapshot.20261023T094551Z").write_text(
+                raw, encoding="utf-8")
+            out = io.StringIO()
+            with patch.object(module, "known_logdirs", return_value=[root]):
+                with contextlib.redirect_stdout(out):
+                    module.history()
+            result = out.getvalue()
+            self.assertIn("XRAY_FILES_SCANNED=2", result)
+            self.assertIn("BADBOX_DOMAIN=2", result)
+            self.assertNotIn("khodam", result)
+            self.assertNotIn("127.0.0.1", result)
+
     def test_no_automatic_service_changes(self):
         code = (ROOT / "modules/security-monitor.py").read_text(encoding="utf-8")
         self.assertNotIn("systemctl restart", code)
