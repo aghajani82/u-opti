@@ -704,6 +704,12 @@ jobs:
           bash tests/test-smite-backhaul-packaging.sh
           bash tests/test-smite-backhaul-management.sh
 
+      - name: Validate Security Monitoring option 7 and 10-day retention contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/test_security_monitor_menu.py
+
       - name: Validate release metadata
         shell: bash
         run: |
