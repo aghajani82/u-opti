@@ -239,6 +239,33 @@ class FirstInstallAndAdoptionTest(unittest.TestCase):
         self.assertEqual(self._dest("u-opti").read_bytes(), self.legacy["u-opti"])
         self.assertFalse((self.lib/".uopti-update-pending").exists())
 
+    def test_legacy_adoption_does_not_modify_host_packages(self):
+        """Existing U-OPTI upgrade must never run apt before rollback is armed."""
+        installer = INSTALLER.read_text(encoding="utf-8")
+        start = installer.index('if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then')
+        end = installer.index('echo "System package preflight complete."', start)
+        body = installer[start:end]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "u-opti"
+            path.write_text("old version", encoding="utf-8")
+            # Deliberately make apt-get fail if invoked; this is a no-package
+            # legacy transfer even if jq or sqlite3 is missing.
+            script = (
+                "set -eu\\n"
+                + f"INSTALL_PATH={str(path)!r}\\n"
+                + "U_OPTI_ADOPT_EXISTING=YES\\n"
+                + "MISSING_PACKAGES=(jq sqlite3)\\n"
+                + 'apt-get() { echo "UNEXPECTED_APT_CALL"; return 99; }\\n'
+                + body
+                + 'echo "PACKAGE_SCOPE=READ_ONLY"\\n'
+            )
+            result = subprocess.run(["bash", "-c", script],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("PACKAGE_SCOPE=READ_ONLY", result.stdout)
+            self.assertIn("skipping package changes", result.stdout)
+            self.assertNotIn("UNEXPECTED_APT_CALL", result.stdout)
+
     def test_installer_recovery_guard_precedes_network_and_packages(self):
         s = INSTALLER.read_text()
         recovery = 'python3 -B "$RESCUE" recover'
