@@ -128,6 +128,7 @@ fi
 
 source "$LIB_PATH/common.sh"
 source "$MODULES_PATH/system.sh"
+source "$MODULES_PATH/security-monitor.sh"
 source "$MODULES_PATH/time.sh"
 source "$MODULES_PATH/swap.sh"
 source "$MODULES_PATH/bbr.sh"
@@ -498,11 +499,12 @@ while true; do
                 echo "4) BBR Management"
                 echo "5) Storage Management"
                 echo "6) Hostname Management"
+                echo "7) Security Monitoring"
                 echo
                 echo "0) Back"
                 echo
 
-                read -rp "Please enter your selection [0-6]: " opt_choice
+                read -rp "Please enter your selection [0-7]: " opt_choice
                 opt_choice="${opt_choice#"${opt_choice%%[![:space:]]*}"}"
                 opt_choice="${opt_choice%"${opt_choice##*[![:space:]]}"}"
 
@@ -530,6 +532,10 @@ while true; do
 
                     6)
                         show_hostname_menu
+                        ;;
+
+                    7)
+                        u_opti_security_monitor_menu
                         ;;
 
                     0)
@@ -717,6 +723,8 @@ print(sha)
 
             UPDATE_FILE_NAMES=(
                 "system.sh"
+                "security-monitor.sh"
+                "security-monitor.py"
                 "time.sh"
                 "swap.sh"
                 "bbr.sh"
@@ -906,6 +914,8 @@ print(sha)
                 ["u-opti"]="$BASE_URL/u-opti"
                 ["common.sh"]="$BASE_URL/lib/common.sh"
                 ["system.sh"]="$BASE_URL/modules/system.sh"
+                ["security-monitor.sh"]="$BASE_URL/modules/security-monitor.sh"
+                ["security-monitor.py"]="$BASE_URL/modules/security-monitor.py"
                 ["time.sh"]="$BASE_URL/modules/time.sh"
                 ["swap.sh"]="$BASE_URL/modules/swap.sh"
                 ["bbr.sh"]="$BASE_URL/modules/bbr.sh"
@@ -1018,6 +1028,8 @@ print(sha)
                 ["u-opti"]="$TEMP_DIR/u-opti"
                 ["common.sh"]="$TEMP_DIR/common.sh"
                 ["system.sh"]="$TEMP_DIR/system.sh"
+                ["security-monitor.sh"]="$TEMP_DIR/security-monitor.sh"
+                ["security-monitor.py"]="$TEMP_DIR/security-monitor.py"
                 ["time.sh"]="$TEMP_DIR/time.sh"
                 ["swap.sh"]="$TEMP_DIR/swap.sh"
                 ["bbr.sh"]="$TEMP_DIR/bbr.sh"
@@ -1207,6 +1219,8 @@ print(sha)
             if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
                ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
                ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh" || \
+               ! grep -q 'u_opti_security_monitor_menu()' "$TEMP_DIR/security-monitor.sh" || \
+               ! grep -q '7) Security Monitoring' "$TEMP_DIR/u-opti" || \
                ! grep -q 'echo "5) Smite Management"' "$TEMP_DIR/docker.sh" || \
                ! grep -q 'docker_smite_management_menu' "$TEMP_DIR/docker.sh" || \
                ! grep -q 'show_smite_menu()' "$TEMP_DIR/smite.sh" || \
@@ -1335,6 +1349,8 @@ print(sha)
 
             BACKUP_FILES=(
                 "system.sh"
+                "security-monitor.sh"
+                "security-monitor.py"
                 "time.sh"
                 "swap.sh"
                 "bbr.sh"
