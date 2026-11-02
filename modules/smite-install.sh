@@ -2054,7 +2054,7 @@ smite_install_upgrade_signed_field_trial() {
     smite_install_pause
 }
 
-# Selected fresh-host entry. Subshell scope prevents RC6 settings from leaking
+# Selected fresh-host entry. Subshell scope prevents candidate settings from leaking
 # into historical recovery/upgrade operations in this same management session.
 smite_install_selected_paths() {
     [ "$SMITE_PANEL_DIR" = /opt/smite ] &&
@@ -2073,9 +2073,9 @@ smite_install_selected_fresh() (
         if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
         return
     fi
-    smite_install_selected_paths || { echo 'HOLD: RC6 recovery requires standard managed paths'; return 2; }
+    smite_install_selected_paths || { echo 'HOLD: Selected recovery requires standard managed paths'; return 2; }
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
-    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC6 images qualify amd64 only'; return 2; }
+    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC7 images qualify amd64 only'; return 2; }
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
     # The guarded Compose helper chooses the local socket itself and rejects
     # all ambient Docker overrides. Read-only inventory below pins it too.
@@ -2086,9 +2086,9 @@ smite_install_selected_fresh() (
             return 2
         fi
     done
-    echo 'Selected Smite 2.0.0-rc.6: fresh-host qualification candidate, not yet stable.'
+    echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
     echo 'Existing installations and live tunnels are not migrated by this entry.'
-    read -rp 'Prepare verified RC6 fresh installation? [y/N]: ' confirm || return 2
+    read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
     case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
     smite_install_require_tools || return 2
     smite_install_ensure_docker || return 2
@@ -2102,16 +2102,16 @@ smite_install_selected_fresh() (
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
-    local SMITE_FIELD_TRIAL_SOURCE_SHA=25ff25585be3f7ff1c8b73b39a23d0509f9a2312
-    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.6
-    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.6
-    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=26d4a50e23b6707b414a81ae9b2ca4aaa45e491481d2eb487010dcb7540ab04c
+    local SMITE_FIELD_TRIAL_SOURCE_SHA=9a1270b31e8d44f13d09b71ab6b9798410b09c12
+    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.7
+    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.7
+    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
     local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
     # Templates and CLI are from the very same immutable application source.
     # Template image names stay upstream-shaped until strict digest replacement.
     local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
     local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
-    local SMITE_UPSTREAM_VERSION=2.0.0-rc.6
+    local SMITE_UPSTREAM_VERSION=2.0.0-rc.7
     local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     umask 077
@@ -2155,7 +2155,7 @@ smite_install_selected_rollback() (
     local module_dir answer
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     python3 -B "$module_dir/smite-rc6-install-journal.py" status || return 2
-    echo 'Only an interrupted fresh RC6 install can be rolled back.'
+    echo 'Only an interrupted fresh RC6/RC7 install can be rolled back.'
     echo 'Completed installs, pairing, grants, routes and foreign containers are refused.'
     echo 'Files, containers and volumes are retained. Packages/images are not uninstalled.'
     read -rp 'Type ROLLBACK-RC6 to quarantine the interrupted install: ' answer || return 2
@@ -2179,7 +2179,7 @@ show_smite_install_menu() {
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
-        echo "7) Recover interrupted RC6 install (retain data / rollback)"
+        echo "7) Recover interrupted RC6/RC7 install (retain data / rollback)"
         echo "0) Back"
         echo
 

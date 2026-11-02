@@ -1,8 +1,8 @@
-# RC6 fresh installation and interrupted-install rollback
+# Selected RC7 fresh installation and interrupted-install rollback
 
 This is a fresh-host path, not migration of an active IR/KH server.
-Application source is Smite `25ff25585be3f7ff1c8b73b39a23d0509f9a2312`
-with independently verified immutable RC6 images. Real Ubuntu VPS/network
+Application source is Smite `9a1270b31e8d44f13d09b71ab6b9798410b09c12`
+with independently verified immutable RC7 images. Real Ubuntu VPS/network
 qualification is still pending; the operator explicitly chose to perform that
 qualification from main after repository checks. Never report it as completed.
 
@@ -12,7 +12,9 @@ Use the official U-OPTI installer and Smite Management → Install Components:
 1. IR: Install Panel + Iran Node (Ubuntu 24.04 amd64, hostname `ir`).
 2. KH: Install Foreign Node (Ubuntu 24.04 amd64).
 
-Existing files, services or managed containers are refused. The RC6 journal is
+Panel + Iran Node can complete with zero Foreign Nodes and zero tunnels. The Node remains paused/pending until signed pairing; this does not block access to the Panel. Domain/TLS validation remains mandatory.
+
+Existing files, services or managed containers are refused. The compatible RC6/RC7 journal is
 created before application installation. Images are signature checked first.
 The selected installer clears ambient Docker overrides; the Compose guard uses
 the local socket. Each new attempt has its own Compose project and Node volume.
@@ -26,7 +28,7 @@ real client test. Pairing, TLS and FRP are not automatically approved by install
 ## Interrupted installation
 
 Do not rerun the old RC1 resume tool or manually delete files/volumes.
-Open Install Components → **7) Recover interrupted RC6 install**.
+Open Install Components → **7) Recover interrupted RC6/RC7 install**.
 Read status and enter `ROLLBACK-RC6` only for that interrupted fresh attempt.
 
 The recovery command refuses an installer still running, a completed install,
@@ -62,3 +64,7 @@ active-state refusal. CI also uses actual Docker to prove retained container,
 restart-policy and volume bytes. Existing image first-boot/authentication and
 replay tests remain. These tests do not replace the operator's fresh VPS,
 public TLS, signed enrollment, real VLESS/XHTTP, or reboot tests.
+
+## RC6 compatibility
+
+The journal path, schema, transaction IDs and `ROLLBACK-RC6` confirmation are retained for compatibility. New transactions select RC7. Old interrupted RC6 transactions remain bound to the exact RC6 source and image pair. Cross-version containers are rejected; old journals are never silently rebound to RC7. No active install is upgraded.
