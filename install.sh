@@ -61,6 +61,8 @@ fi
 
 MODULES=(
     "system.sh"
+    "security-monitor.sh"
+    "security-monitor.py"
     "time.sh"
     "swap.sh"
     "bbr.sh"
@@ -264,6 +266,8 @@ curl -fsSL --retry 3 "$BASE_URL/lib/common.sh?cb=$CACHE_BUST" -o "$TEMP_DIR/comm
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
         system.sh) LABEL="System Information" ;;
+        security-monitor.sh) LABEL="Security Monitoring Menu" ;;
+        security-monitor.py) LABEL="Security Monitoring Engine" ;;
         time.sh) LABEL="Time & Date" ;;
         swap.sh) LABEL="Swap Management" ;;
         bbr.sh) LABEL="BBR Management" ;;
@@ -332,6 +336,8 @@ echo "All required files are present."
 if ! grep -q 'echo "6) Hostname Management"' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_hostname_menu' "$TEMP_DIR/u-opti" || \
    ! grep -q 'show_hostname_menu()' "$TEMP_DIR/system.sh" || \
+   ! grep -q 'u_opti_security_monitor_menu()' "$TEMP_DIR/security-monitor.sh" || \
+   ! grep -q '7) Security Monitoring' "$TEMP_DIR/u-opti" || \
    ! grep -q 'echo "5) Smite Management"' "$TEMP_DIR/docker.sh" || \
    ! grep -q 'docker_smite_management_menu' "$TEMP_DIR/docker.sh" || \
    ! grep -q 'docker_smite_compatibility_menu' "$TEMP_DIR/docker.sh" || \

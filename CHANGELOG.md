@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.3] - 2026-11-02
+
+### Added
+
+- System Optimization **7) Security Monitoring**: opt-in installation of local daily host/Xray monitoring reports with on-demand reports and a 10-day redacted Xray history view.
+- Root-only, local-only health summaries for services, SSH authentication failures, disk, Docker, public ports and known BADBOX indicators.
+- Managed 10-day Xray access-log archive retention with logrotate validation and safe backups; unrecognized policies fail closed.
+- Compatibility bootstrap for older U-OPTI fixed-file updaters: only missing monitor module files are downloaded from immutable, blob-hash-verified sources when menu 7 is first opened.
+- Security monitor regression tests and operator documentation.
+
+### Security boundaries
+
+- Updating U-OPTI does not enable host monitoring or reconfigure any running service. Installation is separately confirmed from option 7; no automatic firewall changes, user disables or restarts.
+- Existing forensic snapshots and active logs are preserved; only rotated archives and reports exceeding the retention window are pruned.
+
 ## [0.17.2] - 2026-11-02
 
 ### Fixed
