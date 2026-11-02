@@ -143,5 +143,42 @@ class UpdaterFileListTests(unittest.TestCase):
         self.assertIn("json.load(open(sys.argv[1]", self.source)
 
 
+    def test_legacy_missing_optional_modules_are_journal_backed(self):
+        """An older installation legitimately lacks newly added Smite modules."""
+        import os
+        source = self.source
+        start = source.index('            for FILE in "${BACKUP_FILES[@]}"; do\\n'.replace('\\n', '\n'))
+        end = source.index('            if [ ! -f "$BACKUP_DIR/u-opti" ]', start)
+        body = source[start:end]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            mods, backup = root / "modules", root / "backup"
+            mods.mkdir()
+            backup.mkdir()
+            (mods / "system.sh").write_text("unchanged core", encoding="utf-8")
+            script = (
+                'set -e\\n'.replace('\\n', '\n')
+                + 'BACKUP_FILES=(system.sh smite-profile-first.py smite-profile-first-menu.sh '
+                'smite-tunnel-wizard.sh smite-tunnel-control-center.sh)\\n'.replace('\\n', '\n')
+                + 'BACKUP_OK=true\\n'.replace('\\n', '\n')
+                + body + 'printf "BACKUP_OK=%s\\n" "$BACKUP_OK"\\n'.replace('\\n', '\n')
+            )
+            env = dict(os.environ, MODULES_PATH=str(mods), BACKUP_DIR=str(backup))
+            result = subprocess.run(["bash", "-c", script], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("BACKUP_OK=true", result.stdout)
+            self.assertEqual((backup / "system.sh").read_text(), "unchanged core")
+            for name in ("smite-profile-first.py", "smite-profile-first-menu.sh",
+                         "smite-tunnel-wizard.sh", "smite-tunnel-control-center.sh"):
+                self.assertTrue((backup / ("." + name + "-was-missing")).is_file())
+            (mods / "system.sh").unlink()
+            result = subprocess.run(["bash", "-c", script], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("BACKUP_OK=false", result.stdout)
+            self.assertIn("Installed module was not found: system.sh", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
