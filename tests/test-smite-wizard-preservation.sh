@@ -23,6 +23,8 @@
 # 2026-11-02: reviewed selected RC6 fresh-only entry, immutable source/manifest,
 # local Docker scope and selected-only error propagation. Historical recovery
 # pins and independent wizards are unchanged; dispatch/refusal tests cover RC6.
+# 2026-11-02 RC7: reviewed exact source/version/manifest pin updates and
+# RC6/RC7 recovery labels only; preserve independent wizard blobs unchanged.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -42,7 +44,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-f009b05656ba06d048a909d5982c799a205d29d3 modules/smite-install.sh
+fa068c6238250e81db0e0f6076eed65a5c5b5712 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
