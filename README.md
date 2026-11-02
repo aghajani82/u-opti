@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.4**
+Ubuntu Server Optimization and Management Tool · **v0.17.5**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
@@ -25,7 +25,7 @@ This installs U-OPTI and its managed modules. Install and configure Docker, Smit
 
 **For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.7** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
 
-For an initial Iran-only installation, choose **Docker Management → Smite Management → Install Components → 1**. Foreign Node and active tunnels are not required. Iran Node remains pending until signed pairing. A valid domain and TLS are still required by the secure gateway flow. See [RC7 image provenance](docs/SMITE-RC7-RELEASE-EVIDENCE.md).
+For Iranian networks returning Sigstore TUF CDN HTTP 403, v0.17.5 uses a reviewed SHA-256-pinned TrustedRoot snapshot with strict Cosign signer, image digest and transparency checks; it does not assert live TUF freshness. Installation failures remain visible in the menu.\n\nFor an initial Iran-only installation, choose **Docker Management → Smite Management → Install Components → 1**. Foreign Node and active tunnels are not required. Iran Node remains pending until signed pairing. A valid domain and TLS are still required by the secure gateway flow. See [RC7 image provenance](docs/SMITE-RC7-RELEASE-EVIDENCE.md).
 
 ## Features
 

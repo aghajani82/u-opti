@@ -60,6 +60,10 @@ sha256sum() {
         if [ "${BAD_COSIGN:-0}" = 1 ]; then echo 'bad fixture'; else
             echo 'c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 fixture'
         fi
+    elif [[ "$1" == */trusted_root.json ]]; then
+        if [ "${BAD_TRUST_ROOT:-0}" = 1 ]; then echo 'bad root fixture'; else
+            echo '6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66 fixture'
+        fi
     else command sha256sum "$@"; fi
 }
 smite_install_clean_rc_preflight() {
@@ -69,6 +73,7 @@ smite_install_clean_rc_preflight() {
     [ "$SMITE_UPSTREAM_REF" = "$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
+    [ -f "$SMITE_SELECTED_TRUSTED_ROOT" ]
     [ "$(command sha256sum "$ROOT/modules/smite-selected-candidate.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
     [ -z "${DOCKER_HOST:-}" ]
     [ -z "${DOCKER_CONTEXT:-}" ]
@@ -98,7 +103,7 @@ rm "$TMP/dispatch"
 smite_install_selected_fresh panel-iran <<< y
 [ "$(cat "$TMP/dispatch")" = panel ]
 rm "$TMP/dispatch"
-for flag in FAIL_DOCKER BAD_COSIGN FAIL_SIGNATURE; do
+for flag in FAIL_DOCKER BAD_COSIGN BAD_TRUST_ROOT FAIL_SIGNATURE; do
     export "$flag=1"
     if smite_install_selected_fresh foreign <<< y; then echo "FAIL: accepted $flag"; exit 1; fi
     unset "$flag"
@@ -121,5 +126,9 @@ SMITE_INSTALL_PROFILE=stable
 printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/menu.log"
 [ "$(cat "$TMP/dispatch")" = panel ]
 grep -q 'Selected Smite 2.0.0-rc.7' "$TMP/menu.log"
+export FAIL_SIGNATURE=1
+printf '1\\ny\\n0\\n' | show_smite_install_menu > "$TMP/failed-menu.log"
+unset FAIL_SIGNATURE
+grep -q 'HOLD: Panel + Iran Node installation did not complete' "$TMP/failed-menu.log"
 echo 'OFFICIAL_MENU_OPTION_1=PASS_ISOLATED_FIXTURE'
 echo 'SELECTED_RC7_DISPATCH_FIXTURES=PASS (not a real host installation)'

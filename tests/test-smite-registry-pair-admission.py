@@ -187,6 +187,40 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
         for prohibited in ("docker load", "docker pull", "subprocess.Popen", "shell=True"):
             self.assertNotIn(prohibited, code)
 
+    def test_selected_trusted_root_is_pinned_and_never_weakens_verification(self):
+        root = self.folder / "trusted_root.json"
+        root.write_text(json.dumps({
+            "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
+            "tlogs": [{}], "certificateAuthorities": [{}], "ctlogs": [{}],
+        }))
+        with patch.object(gate, "TRUSTED_ROOT_SHA256",
+                          hashlib.sha256(root.read_bytes()).hexdigest()):
+            self.check(trusted_root=root)
+            calls = [json.loads(x) for x in self.logs.read_text().splitlines()]
+            self.assertEqual(len(calls), 2)
+            for call in calls:
+                self.assertEqual(call[:4], ["verify", "--trusted-root", str(root),
+                                            "--certificate-identity=" + gate.WORKFLOW + REF])
+                self.assertIn("--certificate-oidc-issuer=" + gate.ISSUER, call)
+                self.assertNotIn("--check-claims=false", call)
+                self.assertNotIn("--insecure-ignore-tlog", call)
+            self.logs.unlink()
+            root.write_text("replaced")
+            with self.assertRaises(gate.AdmissionHold):
+                self.check(trusted_root=root)
+            self.assertFalse(self.logs.exists())
+            root.write_text(json.dumps({"mediaType": "wrong"}))
+            with patch.object(gate, "TRUSTED_ROOT_SHA256",
+                              hashlib.sha256(root.read_bytes()).hexdigest()):
+                with self.assertRaises(gate.AdmissionHold):
+                    self.check(trusted_root=root)
+            self.assertFalse(self.logs.exists())
+            alias = self.folder / "root-link.json"
+            alias.symlink_to(root)
+            with self.assertRaises(gate.AdmissionHold):
+                self.check(trusted_root=alias)
+            self.assertFalse(self.logs.exists())
+
     def test_symlink_is_rejected(self):
         alias = self.folder / "alias.json"
         alias.symlink_to(self.path)

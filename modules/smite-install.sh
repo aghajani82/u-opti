@@ -37,7 +37,7 @@ smite_install_clean_rc_signed_registry_selected() {
 
 smite_install_field_trial_verify_candidate() {
     local helper_dir verifier manifest cosign_path actual_cosign pair_result
-    local -a candidate=()
+    local -a candidate=() verify_root_args=()
 
     smite_install_clean_rc_signed_registry_selected || {
         echo "HOLD: Signed registry Field Trial was not selected" >&2
@@ -81,7 +81,21 @@ smite_install_field_trial_verify_candidate() {
         return 1
     }
 
-    pair_result="$(python3 -B "$verifier"         --manifest "$manifest"         --manifest-sha256 "$SMITE_FIELD_TRIAL_MANIFEST_SHA256"         --source-sha "$SMITE_FIELD_TRIAL_SOURCE_SHA"         --publish-ref "$SMITE_FIELD_TRIAL_PUBLISH_REF")" || return 1
+    # Only the explicitly selected RC7 fresh install supplies the reviewed,
+    # SHA-pinned Sigstore trust snapshot. Historical candidates stay unchanged.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        [ -n "${SMITE_SELECTED_TRUSTED_ROOT:-}" ] || {
+            echo 'HOLD: RC7 trusted root snapshot is required' >&2
+            return 1
+        }
+        verify_root_args=(--trusted-root "$SMITE_SELECTED_TRUSTED_ROOT")
+    fi
+    pair_result="$(python3 -B "$verifier" \
+        --manifest "$manifest" \
+        --manifest-sha256 "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" \
+        --source-sha "$SMITE_FIELD_TRIAL_SOURCE_SHA" \
+        --publish-ref "$SMITE_FIELD_TRIAL_PUBLISH_REF" \
+        "${verify_root_args[@]}")" || return 1
     printf '%s\n' "$pair_result"
 
     mapfile -t candidate < <(python3 - "$manifest" <<'PY_SIGNED_RC'
@@ -2125,6 +2139,23 @@ smite_install_selected_fresh() (
         echo 'HOLD: Cosign binary hash mismatch'; return 2;
     }
     chmod 0700 "$workdir/cosign" || return 2
+    # Reviewed Sigstore public-good TrustedRoot snapshot, pinned in this U-OPTI
+    # release. The normal TUF CDN returns HTTP 403 on some Iranian networks.
+    # This is an explicit, SHA-pinned trust anchor, NOT online TUF validation.
+    local SMITE_SELECTED_TRUSTED_ROOT="$workdir/trusted_root.json"
+    echo 'RC7: downloading reviewed Sigstore trusted-root snapshot...'
+    curl -fsSL --proto '=https' --proto-redir '=https' \
+        --connect-timeout 10 --max-time 60 --retry 2 \
+        "https://raw.githubusercontent.com/sigstore/root-signing/c9aa2600c1492365922f1b3f351a208aa17d0e64/targets/trusted_root.json" \
+        -o "$SMITE_SELECTED_TRUSTED_ROOT" || {
+            echo 'HOLD: reviewed Sigstore trusted-root download failed' >&2
+            return 2
+        }
+    [ "$(sha256sum "$SMITE_SELECTED_TRUSTED_ROOT" | awk '{print $1}')" = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66" ] || {
+        echo 'HOLD: reviewed Sigstore trusted-root SHA256 mismatch' >&2
+        return 2
+    }
+    echo 'RC7_TRUSTED_ROOT=PINNED_SHA256_VERIFIED'
     local PATH="$workdir:$PATH"
     smite_install_clean_rc_preflight "$role" standard || return 2
     if [ "$role" = panel-iran ]; then
@@ -2187,8 +2218,18 @@ show_smite_install_menu() {
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
-            1) smite_install_selected_fresh panel-iran ;;
-            2) smite_install_selected_fresh foreign ;;
+            1)
+                if ! smite_install_selected_fresh panel-iran; then
+                    echo 'HOLD: Panel + Iran Node installation did not complete. Review error above.'
+                    smite_install_pause
+                fi
+                ;;
+            2)
+                if ! smite_install_selected_fresh foreign; then
+                    echo 'HOLD: Foreign Node installation did not complete. Review error above.'
+                    smite_install_pause
+                fi
+                ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
             5) smite_install_upgrade_signed_field_trial ;;

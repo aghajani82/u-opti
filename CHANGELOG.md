@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.5] - 2026-11-02
+
+### Fixed
+
+- RC7 fresh-install signatures can be checked on networks where Sigstore's TUF CDN returns HTTP 403: fetch the reviewed upstream trusted_root.json from immutable root-signing commit `c9aa2600c1492365922f1b3f351a208aa17d0e64`, require exact SHA-256 `6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`, and pass it explicitly to Cosign 3.0.6.
+- The selected trusted root is an independently pinned trust snapshot in the reviewed U-OPTI source, **not a claim of live TUF verification**. No unsigned images, arbitrary trust roots, insecure skip flags, or fallback after a hash/signature failure are accepted.
+- Installation menu now pauses on unsuccessful RC7 installation so the operator can see HOLD/error output instead of an immediate screen clear. Add negative/positive regression checks.
+- Real Iran VPS field finding: Sigstore TUF CDN 403 was reproduced; Panel and Node signatures verified with the pinned snapshot. Actual host installation/HTTPS remains pending.
+
 ## [0.17.4] - 2026-11-02
 
 ### Changed
