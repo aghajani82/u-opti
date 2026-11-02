@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.17.7] - 2026-11-02
+
+### Fixed
+
+- RC7 fresh Iran Node's first HTTPS/443 Gateway configuration now reuses its verified, committed Compose journal project ID (e.g. `uopti_rc6_<id>`) instead of mistakenly starting a second project and colliding with the running `smite-node` container.
+- Fail closed if Docker's Node Compose service/project labels are absent or invalid, or if a transactional Node's project does not match the committed IR installation journal and Panel project. All three recreate/restore invocations now explicitly use the same verified `--project-name`.
+- Regression tests for journal identity/state/mode, untrusted container labels and Compose project consistency. No automatic container deletion, removal of volumes, or pairing migration.
+- Field observation: Let's Encrypt certificate issued and Panel HTTPS/443 passed, but Node recreation stopped at a Compose project name conflict; Gateway's built-in Nginx rollback was entered. Verify live state separately before trying again.
+- RC7 was tested here on disposable Ubuntu 26.04.1 LTS IR (outside the qualified Ubuntu 24.04 LTS baseline); no broader 26.04 qualification or production approval is claimed.
+
 ## [0.17.6] - 2026-11-02
 
 ### Fixed

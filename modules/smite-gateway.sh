@@ -931,12 +931,64 @@ smite_gateway_verify_443() {
     return 1
 }
 
+# For RC7 fresh installs, Docker Compose was started under the immutable
+# install journal project ID, not the node directory's default project.
+# Use the running Node's recorded Compose identity; never create a second
+# identically named container under a different project.
+smite_gateway_node_compose_project() {
+    local project service panel_project
+    project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' smite-node 2>/dev/null)" || {
+        echo "HOLD: Could not inspect the existing Iran node Compose project." >&2
+        return 1
+    }
+    service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' smite-node 2>/dev/null)" || return 1
+    if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]{0,127}$ ]] || [ "$service" != "smite-node" ]; then
+        echo "HOLD: Iran node Compose ownership is missing or untrusted." >&2
+        return 1
+    fi
+    if [[ "$project" == uopti_rc6_* ]]; then
+        if [[ ! "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]]; then
+            echo "HOLD: Invalid RC7 Compose project ID." >&2
+            return 1
+        fi
+        panel_project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' smite-panel 2>/dev/null)" || return 1
+        if [ "$panel_project" != "$project" ]; then
+            echo "HOLD: RC7 Panel/Node Compose projects disagree." >&2
+            return 1
+        fi
+        python3 -B - "$project" <<'PY_RC7_GATEWAY_JOURNAL'
+import json
+from pathlib import Path
+import stat
+import sys
+path = Path("/var/lib/u-opti/rc6-install-journal/current.json")
+try:
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+        raise ValueError("untrusted journal")
+    data = json.loads(path.read_text())
+    if (data.get("id") != sys.argv[1] or data.get("role") != "panel-iran"
+            or data.get("state") != "COMMITTED"):
+        raise ValueError("journal project not committed")
+except (OSError, ValueError, TypeError, AttributeError):
+    print("HOLD: RC7 journal does not attest the existing Compose project.", file=sys.stderr)
+    sys.exit(1)
+PY_RC7_GATEWAY_JOURNAL
+        if [ "$?" -ne 0 ]; then
+            return 1
+        fi
+    fi
+    printf '%s\n' "$project"
+}
+
 smite_gateway_switch_local_node_to_443() {
     local domain="$1"
     local env_file="$SMITE_NODE_DIR/.env"
     local compose_file="$SMITE_NODE_COMPOSE"
     local backup=""
     local current_panel_address=""
+    local node_project=""
 
     if [ "$(smite_gateway_connection_mode)" = "private" ]; then
         if [ -f "$env_file" ]; then
@@ -962,6 +1014,10 @@ smite_gateway_switch_local_node_to_443() {
         return 0
     fi
 
+    # Resolve before editing env or touching the live Node. In particular,
+    # fail closed if a new RC7 transaction's identity cannot be verified.
+    node_project="$(smite_gateway_node_compose_project)" || return 1
+
     backup="${env_file}.u-opti-before-gateway-$(date +%Y%m%d-%H%M%S).bak"
     cp -a "$env_file" "$backup" || return 1
 
@@ -972,16 +1028,16 @@ smite_gateway_switch_local_node_to_443() {
     fi
 
     echo "Recreating Iran Smite Node with PANEL_ADDRESS=${domain}:443 ..."
-    if ! docker compose -f "$compose_file" up -d --no-build --force-recreate smite-node; then
+    if ! docker compose --project-name "$node_project" -f "$compose_file" up -d --no-build --force-recreate smite-node; then
         cp -a "$backup" "$env_file"
-        docker compose -f "$compose_file" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+        docker compose --project-name "$node_project" -f "$compose_file" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
         echo "ERROR: Failed to recreate smite-node; node configuration was rolled back."
         return 1
     fi
 
     if ! smite_gateway_wait_healthy smite-node 90; then
         cp -a "$backup" "$env_file"
-        docker compose -f "$compose_file" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+        docker compose --project-name "$node_project" -f "$compose_file" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
         echo "ERROR: smite-node did not become healthy; node configuration was rolled back."
         return 1
     fi
