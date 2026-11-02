@@ -90,6 +90,7 @@ python3() {
     fi
     command python3 "$@"
 }
+smite_install_ui_action() { echo "$1" >> "$TMP/ui-dispatch"; [ "${FAIL_UI:-0}" = 0 ]; }
 smite_install_panel_iran() { echo panel >> "$TMP/dispatch"; }
 smite_install_foreign_node() { echo foreign >> "$TMP/dispatch"; }
 export DOCKER_CONTEXT=untrusted DOCKER_HOST=tcp://not-a-real-host:2375
@@ -102,7 +103,8 @@ smite_install_selected_fresh foreign <<< y
 rm "$TMP/dispatch"
 smite_install_selected_fresh panel-iran <<< y
 [ "$(cat "$TMP/dispatch")" = panel ]
-rm "$TMP/dispatch"
+[ "$(cat "$TMP/ui-dispatch")" = apply ]
+rm "$TMP/dispatch" "$TMP/ui-dispatch"
 for flag in FAIL_DOCKER BAD_COSIGN BAD_TRUST_ROOT FAIL_SIGNATURE; do
     export "$flag=1"
     if smite_install_selected_fresh foreign <<< y; then echo "FAIL: accepted $flag"; exit 1; fi
@@ -132,3 +134,11 @@ unset FAIL_SIGNATURE
 grep -q 'HOLD: Panel + Iran Node installation did not complete' "$TMP/failed-menu.log"
 echo 'OFFICIAL_MENU_OPTION_1=PASS_ISOLATED_FIXTURE'
 echo 'SELECTED_RC7_DISPATCH_FIXTURES=PASS (not a real host installation)'
+
+printf '8\ny\n9\ny\n0\n' | show_smite_install_menu > "$TMP/ui-menu.log"
+[ "$(tail -n 2 "$TMP/ui-dispatch")" = $'apply\nrollback' ]
+FAIL_UI=1
+if smite_install_selected_fresh panel-iran <<< y > "$TMP/ui-fail.log"; then exit 1; fi
+unset FAIL_UI
+grep -q 'runtime installed; UI update pending' "$TMP/ui-fail.log"
+echo 'UI_UPDATE_ROLLBACK_MENU_AND_FRESH_INSTALL=PASS'

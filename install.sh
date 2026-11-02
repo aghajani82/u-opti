@@ -92,6 +92,8 @@ MODULES=(
     "smite-field-trial-candidate.json"
     "smite-rc6-install-journal.py"
     "smite-selected-candidate.json"
+    "smite-panel-ui.py"
+    "smite-panel-ui.json"
     "u-opti-update-transaction.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"
