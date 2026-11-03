@@ -131,6 +131,7 @@ MODULES=(
     "smite-stage15-frp-host-executor.py"
     "smite-compose-safe.py"
     "smite-stage15-wss.py"
+    "smite-rc7-wss-preflight.py"
     "smite-stage15-active-runtime.py"
     "smite-stage15-kh-inventory.py"
     "smite-stage15-upgrade.py"

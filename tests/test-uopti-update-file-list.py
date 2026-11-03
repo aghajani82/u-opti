@@ -74,6 +74,13 @@ class UpdaterFileListTests(unittest.TestCase):
                 )
 
 
+    def test_rc7_wss_read_only_plan_installed_and_updated(self):
+        helper = "smite-rc7-wss-preflight.py"
+        for array in ("UPDATE_FILE_NAMES", "UPDATE_URLS", "UPDATE_TARGETS", "BACKUP_FILES"):
+            with self.subTest(array=array):
+                self.assertIn(helper, quoted_names(array_body(self.source, array)))
+        self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
+
     def test_fresh_install_packages_all_updater_managed_modules(self):
         """First installs must not omit modules required by later RC flows."""
         installed = quoted_names(array_body(self.installer, "MODULES"))
