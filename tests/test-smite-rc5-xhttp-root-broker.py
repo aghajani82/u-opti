@@ -1005,6 +1005,50 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
     def test_exact_node_rebind_no_recreate(self):
         self.gate()
 
+    def test_unit_reload_failure_restores_exact_bytes_before_restart(self):
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"original-legacy-unit")
+        calls = []
+        def run(_runner, cmd, **kw):
+            calls.append(cmd)
+            if cmd[:2] == ["systemctl", "show"]:
+                return "no"
+            return ""
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence", return_value=self.proof()), \
+             patch.object(self.p, "_socket_recovery_command", side_effect=run), \
+             patch.object(self.p, "_replace_existing_trusted_file") as replace, \
+             patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
+            with self.assertRaisesRegex(self.p.ProvisionHold,
+                                        "UNIT_RESTORED_BEFORE_RESTART"):
+                self.p.recover_node_socket(approved=True)
+        self.assertEqual(replace.call_count, 2)
+        self.assertEqual(replace.call_args.args[1], b"original-legacy-unit")
+        self.assertFalse(any(x[:2] == ["systemctl","restart"] for x in calls))
+        self.assertFalse(any(x[:2] == ["docker","restart"] for x in calls))
+
+    def test_already_bound_no_restart_or_approval_prompt(self):
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence",
+                          return_value=self.proof(preserve=True, ready=True)), \
+             patch.object(self.p, "_socket_recovery_command") as command, \
+             patch("builtins.input") as approve:
+            result = self.p.recover_node_socket(approved=True)
+        self.assertEqual(result["BROKER_SOCKET_RECOVERY"], "ALREADY_BOUND_NO_ACTION")
+        command.assert_not_called()
+        approve.assert_not_called()
+
     def test_broker_inode_drift_never_restarts_node(self):
         before = self.proof()
         bad = self.proof(preserve=True, service="new", inode=(28, 19327))
