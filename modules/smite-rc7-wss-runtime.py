@@ -237,6 +237,11 @@ def compose(name,doc,enabled):
     return args
 
 def no_tunnels():
+    # A retained FRPC may still be forwarding even when no local FRPS binds.
+    # Never disrupt an active forwarding process during activation/rollback.
+    probe=subprocess.run(['pgrep','-x','frpc'],capture_output=True,text=True,
+                         timeout=10,check=False)
+    need(probe.returncode==1,'FRPC_PROCESS_PRESENT_OR_UNKNOWN')
     for root in (p.PANEL,p.NODE):
         item=root/'config/tunnels.json'
         if item.is_file() or item.is_symlink():
@@ -284,6 +289,7 @@ def backup_panel():
 
 def planned(role,peer_ip):
     p.inspect(role,peer_ip)  # all existing real-host checks, read-only
+    no_tunnels()
     need(not STATE.exists() and not STATE.is_symlink(),'WSS_RUNTIME_JOURNAL_EXISTS')
     names=['smite-panel','smite-node'] if role=='ir' else ['smite-node']
     domain=p.state()['SMITE_PANEL_DOMAIN']
@@ -351,7 +357,11 @@ def apply(role,peer):
             raise Hold('WSS_APPLY_HOLD_REVIEW_BEFORE_RECOVER')
 
 def edge_absent():
-    # Prevent removing a runtime while its IR public WSS edge is active.
+    # Never remove WSS runtime while its public IR edge exists, even when
+    # an edge journal is absent, damaged or was created outside this helper.
+    alternate=Path('/etc/nginx/conf.d/u-opti-smite-panel-kh-wss.conf')
+    need(not alternate.exists() and not alternate.is_symlink(),
+         'ROLLBACK_EDGE_FIRST')
     if EDGE.exists():
         data=json.loads(EDGE.read_text())
         need(data.get('state')=='ROLLED_BACK','ROLLBACK_EDGE_FIRST')
@@ -396,19 +406,24 @@ def restore(doc):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('action',choices=('apply','verify','rollback','recover'))
+    ap.add_argument('action',choices=('plan','apply','verify','rollback','recover'))
     ap.add_argument('--role',choices=('ir','foreign'),required=True)
     ap.add_argument('--peer-ip')
     ap.add_argument('--snapshot-confirm',default='')
     args=ap.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
-        if args.action!='verify':
+        if args.action not in ('verify','plan'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'PROVIDER_SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
             need(input('Type '+challenge+': ').strip()==challenge,'OPERATOR_CANCELLED')
-        if args.action=='apply':
+        if args.action=='plan':
+            with locked():
+                planned(args.role,args.peer_ip)
+            print('RC7_WSS_RUNTIME_PLAN=PASS_READ_ONLY')
+            print('LIVE_CHANGES=NONE')
+        elif args.action=='apply':
             apply(args.role,args.peer_ip)
         else:
             with locked():

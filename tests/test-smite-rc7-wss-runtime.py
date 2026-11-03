@@ -35,6 +35,10 @@ class WssControllerTests(unittest.TestCase):
         self.assertNotIn('cap_add',p.overlay_bytes('smite-node'))
         self.assertNotIn('devices',p.overlay_bytes('smite-node'))
         self.assertNotIn('volumes',p.overlay_bytes('smite-node'))
+        self.assertIn("choices=('plan','apply','verify','rollback','recover')",
+                      Path(rt.__file__).read_text())
+        self.assertIn("no_tunnels()",Path(rt.__file__).read_text())
+        self.assertIn("'pgrep','-x','frpc'",Path(rt.__file__).read_text())
 
     def test_runtime_signature_ignores_only_wss_and_host_bind_order(self):
         info={'Config':{'Image':p.NODE_IMAGE,'Env':['A=1','B=secret'],
