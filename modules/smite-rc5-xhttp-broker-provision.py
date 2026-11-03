@@ -848,11 +848,14 @@ def _socket_recovery_evidence(runner) -> dict:
     # A concurrent route/nonce/approval mutation is never silently accepted.
     protected = [broker.KEY, broker.CONFIG, broker.LEDGER, service,
                  broker.LEDGER.parent / "approval-request.json"]
-    for folder in (broker.GRANTS, route_dir):
+    # Include transient SQLite WAL/SHM and all existing Broker journals, not
+    # only the main .db. A changed or newly created entry means HOLD.
+    for folder in (broker.GRANTS, route_dir, broker.LEDGER.parent):
         for entry in sorted(folder.iterdir()):
-            if not entry.name or entry.is_symlink():
+            if not entry.name or entry.is_symlink() or not entry.is_file():
                 raise ProvisionHold("BROKER_PROTECTED_ENTRY_UNTRUSTED")
-            protected.append(entry)
+            if entry not in protected:
+                protected.append(entry)
     volume = None
 
     def inspect(name):
