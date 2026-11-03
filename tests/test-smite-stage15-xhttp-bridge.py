@@ -271,6 +271,6 @@ class RC7BridgeTests(BridgeTests):
         edge = b.load('rc7_verifier_adapter', 'smite-rc7-wss-edge.py')
         self.patch(edge, 'load', lambda *a: b)
         self.assertEqual(edge.bridge_source(b.base.BACKEND.read_bytes()), self.old)
-        with self.assertRaises(b.base.Hold): edge.bridge_source(b.base.BACKEND.read_bytes()+b'# drift')
+        with self.assertRaises(edge.Hold): edge.bridge_source(b.base.BACKEND.read_bytes()+b'# drift')
 
 if __name__ == '__main__': unittest.main()

@@ -146,7 +146,12 @@ def bridge_source(current):
     # Admit only the exact reversible include recorded by the existing bridge.
     bridge = load('rc7_edge_bridge', 'smite-stage15-xhttp-bridge.py')
     if not bridge.base.absent(bridge.STATE):
-        return bridge.original_backend(current, committed=True)
+        try:
+            return bridge.original_backend(current, committed=True)
+        except Exception as exc:
+            reason = str(exc)
+            raise Hold(reason if re.fullmatch('[A-Z0-9_]{1,100}', reason)
+                       else 'UNTRUSTED_BRIDGE_STATE') from exc
     return current
 
 def validate_committed(doc):
