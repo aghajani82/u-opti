@@ -967,11 +967,12 @@ def _socket_recovery_evidence(runner) -> dict:
     files = {str(path): fingerprint(path) for path in protected}
     if files[str(volume / "tunnels.json")] is None:
         raise ProvisionHold("BROKER_NODE_TUNNEL_REGISTRY_MISSING")
-    # Do not change WSS/Bridge. Their existing validators must still pass.
-    module_dir = Path("/usr/local/lib/u-opti/modules")
-    for module in ("smite-rc7-wss-edge.py", "smite-stage15-xhttp-bridge.py"):
-        _socket_recovery_command(runner, ["python3", "-B", str(module_dir / module),
-                                           "verify"], timeout=35)
+    # The broker._verify_bridge() call at entry already checks the committed
+    # XHTTP Bridge and RC7 WSS Edge in-process (including their full security
+    # invariants). Never spawn their CLI `verify` while recover_node_socket()
+    # holds broker._lock(): both CLI entry points take the very same exclusive
+    # /run/lock/u-opti-smite-engine.lock and would fail before root approval.
+    # Keep verification in-process; do not weaken or skip the broker gate.
     frps = _socket_recovery_command(runner, ["ss", "-Hlnpt"])
     owners = [line for line in frps.splitlines()
               if re.search(r":7000\s", line) and '"frps"' in line]

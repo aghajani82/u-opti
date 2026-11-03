@@ -1058,6 +1058,43 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
         self.assertIn(b"RuntimeDirectoryMode=0750\n", data)
         self.assertIn(b"UMask=0077\n", data)
 
+    def test_recovery_preflight_does_not_reenter_exclusive_engine_lock(self):
+        # Regression: recovery holds broker._lock() and must not launch either
+        # WSS or Bridge CLI verify, since both acquire the same nonblocking
+        # engine lock and would abort before the operator's maintenance prompt.
+        # Keep the in-process Broker verification (including Edge validation).
+        import ast
+        import inspect
+        import textwrap
+        source = inspect.getsource(self.p._socket_recovery_evidence)
+        tree = ast.parse(textwrap.dedent(source))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        self.assertTrue(any(isinstance(call.func, ast.Attribute)
+                            and isinstance(call.func.value, ast.Name)
+                            and call.func.value.id == "broker"
+                            and call.func.attr == "_verify_bridge"
+                            for call in calls))
+        command_calls = [
+            call for call in calls
+            if isinstance(call.func, ast.Name)
+            and call.func.id == "_socket_recovery_command"
+        ]
+        for call in command_calls:
+            # Ordinary read-only systemctl/Docker/ss commands are permitted.
+            # Any child Python verifier would attempt to re-lock the engine.
+            if len(call.args) > 1 and isinstance(call.args[1], ast.List):
+                first = call.args[1].elts[0]
+                self.assertFalse(isinstance(first, ast.Constant)
+                                 and first.value in ("python3", "python"),
+                                 "Nested Python verifier deadlocks recovery lock")
+
+    def test_broker_bridge_verifier_keeps_rc7_edge_validation(self):
+        source = (MODULE).read_text()
+        bridge = (MODULE.with_name("smite-stage15-xhttp-bridge.py")).read_text()
+        self.assertIn("host.verify()", source)
+        self.assertIn("verify_edge(edge, edge_state(edge))", bridge)
+        self.assertIn("edge.validate_committed(doc)", bridge)
+
     def test_audit_is_read_only_even_when_orphaned(self):
         with patch.object(self.p.os, "geteuid", return_value=0), \
              patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \

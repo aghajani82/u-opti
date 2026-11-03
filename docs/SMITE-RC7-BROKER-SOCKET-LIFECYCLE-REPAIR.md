@@ -77,6 +77,36 @@ replay ledger, or root approval flow. Restart/recovery remains separately
 authorized and is **not** implied by a passing audit. On any HOLD, stop
 without renaming/mounting anything or retrying a Panel publish.
 
+## Follow-up: recovery preapproval engine-lock contention
+
+On IR, the read-only audit returned `NODE_SOCKET_BIND=STALE_HOLD`, but
+`--recover-node-socket` stopped at
+`HOLD_BROKER_SOCKET_RECOVERY_COMMAND_FAILED` **before asking for the
+maintenance challenge**. Source-level analysis identified an internal
+self-contention: recovery owns `broker._lock()` while its preapproval
+evidence function attempted external `smite-rc7-wss-edge.py verify` and
+`smite-stage15-xhttp-bridge.py verify`. Both CLI entry points acquire
+the same exclusive nonblocking engine lock, so the first child exits
+without completing its verification.
+
+The existing `broker._verify_bridge()` call at the beginning of each
+recovery evidence pass already runs the full committed XHTTP Bridge
+and RC7 WSS Edge verification **in-process**, without taking another
+engine lock. The redundant external CLI probes were removed; the
+root-owned key, ledger, foreign evidence, WSS, Bridge, FRPS, mount and
+container checks remain in force. Negative tests ensure no Python
+verifier is spawned under the broker lock and that the existing
+Bridge/RC7 Edge verification contract remains present.
+
+The earlier generic HOLD is not a reason to bypass an approval, retry
+the same recovery blindly, or reset any data. First confirm independently
+that no maintenance challenge was presented and the effective systemd
+preservation setting is still unchanged; then update from a reviewed
+merged U-OPTI commit. Fresh audit, independent provider snapshot,
+tested recovery console, and an explicitly approved maintenance window
+are required before attempting the corrected recovery **once**.
+Any new HOLD returns to read-only investigation.
+
 ## IR-only: after CI PASS, PR merge/review, and independent deployment approval
 
 Update U-OPTI **through its existing update mechanism** only after the
