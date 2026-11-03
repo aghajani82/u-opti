@@ -850,7 +850,7 @@ def _verified_node_tunnel_volume(runner, node: dict, panel: dict) -> Path:
             or re.fullmatch(r"[0-9a-f]{64}",
                             labels["com.docker.compose.config-hash"]) is None
             or type(labels.get("com.docker.compose.version")) is not str
-            or re.fullmatch(r"[0-9]+(?:\\.[0-9]+){1,3}",
+            or re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}",
                             labels["com.docker.compose.version"]) is None):
         raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
     return source
