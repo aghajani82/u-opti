@@ -1173,5 +1173,112 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
         self.assertEqual(sum(x[:2] == ["docker", "restart"] for x in calls), 1)
 
 
+
+class BrokerComposeScopedVolumeTests(unittest.TestCase):
+    """RC6 named-volume proof: no broad acceptance of arbitrary Docker storage."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = MODULE.with_name("smite-rc5-xhttp-broker-provision.py")
+        spec = importlib.util.spec_from_file_location("broker_compose_volume_tests", path)
+        cls.p = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = cls.p
+        spec.loader.exec_module(cls.p)
+
+    def fixture(self):
+        project = "uopti_rc6_" + "793d65cbd0ce41b9a8308c82d4b609f2"
+        name = project + "_node-data"
+        src = "/var/lib/docker/volumes/" + name + "/_data"
+        node = {"Mounts": [{"Destination": "/var/lib/smite-node",
+                            "Type": "volume", "RW": True,
+                            "Name": name, "Source": src}],
+                "Config": {"Labels": {"com.docker.compose.project": project,
+                                      "com.docker.compose.service": "smite-node"}}}
+        panel = {"Config": {"Labels": {"com.docker.compose.project": project,
+                                       "com.docker.compose.service": "smite-panel"}}}
+        record = {"Name": name, "Mountpoint": src, "Driver": "local",
+                  "Scope": "local", "Options": None,
+                  "Labels": {"com.docker.compose.project": project,
+                             "com.docker.compose.volume": "node-data",
+                             "com.docker.compose.config-hash": "a" * 64,
+                             "com.docker.compose.version": "5.6.1"}}
+        return node, panel, record
+
+    def runner(self, record, calls):
+        def execute(argv, **kwargs):
+            calls.append(list(argv))
+            return SimpleNamespace(returncode=0, stdout=json.dumps([record]), stderr="")
+        return execute
+
+    def test_real_rc6_compose_project_volume_accepted_without_mutation(self):
+        node, panel, record = self.fixture()
+        calls = []
+        source = self.p._verified_node_tunnel_volume(
+            self.runner(record, calls), node, panel)
+        self.assertEqual(str(source), record["Mountpoint"])
+        self.assertEqual(calls, [["docker", "volume", "inspect", record["Name"]]])
+
+    def test_legacy_exact_fixed_name_still_accepted(self):
+        node, panel, record = self.fixture()
+        node["Mounts"][0]["Name"] = "smite-node-data"
+        node["Mounts"][0]["Source"] = "/var/lib/docker/volumes/smite-node-data/_data"
+        def unexpected(*_args, **_kwargs):
+            raise AssertionError("legacy layout must not require new Docker proof")
+        self.assertEqual(str(self.p._verified_node_tunnel_volume(
+            unexpected, node, panel)), node["Mounts"][0]["Source"])
+
+    def test_wrong_project_and_unreviewed_volume_names_hold_before_inspect(self):
+        node, panel, record = self.fixture()
+        scenarios = [
+            lambda n, p: p["Config"]["Labels"].update(
+                {"com.docker.compose.project": "unrelated"}),
+            lambda n, p: n["Mounts"][0].update({"Name": "stray_node-data"}),
+            lambda n, p: n["Mounts"][0].update({"RW": False}),
+            lambda n, p: n["Mounts"][0].update({"Type": "bind"}),
+            lambda n, p: n["Mounts"][0].update(
+                {"Source": "/var/lib/docker/volumes/other/_data"}),
+            lambda n, p: n["Config"]["Labels"].update(
+                {"com.docker.compose.project": "arbitrary_node"}),
+        ]
+        for mutate in scenarios:
+            with self.subTest(mutate=mutate.__code__.co_firstlineno):
+                n, p, _ = self.fixture()
+                mutate(n, p)
+                with self.assertRaisesRegex(self.p.ProvisionHold,
+                                            "BROKER_NODE_TUNNEL_VOLUME_DRIFT"):
+                    self.p._verified_node_tunnel_volume(
+                        lambda *_a, **_k: self.fail("unexpected Docker call"), n, p)
+
+    def test_spoofed_docker_volume_metadata_fails_closed(self):
+        variations = [
+            {"Name": "unrelated"},
+            {"Mountpoint": "/tmp/other/_data"},
+            {"Driver": "other"},
+            {"Scope": "global"},
+            {"Options": {"device": "/other"}},
+            {"Labels": {"com.docker.compose.project": "unrelated"}},
+        ]
+        for change in variations:
+            with self.subTest(change=change):
+                node, panel, original = self.fixture()
+                record = {**original, **change}
+                calls = []
+                with self.assertRaisesRegex(
+                    self.p.ProvisionHold, "BROKER_NODE_TUNNEL_VOLUME_DRIFT"
+                ):
+                    self.p._verified_node_tunnel_volume(
+                        self.runner(record, calls), node, panel)
+                self.assertEqual(len(calls), 1)
+
+    def test_missing_or_invalid_compose_volume_proof_holds(self):
+        node, panel, record = self.fixture()
+        for response in ("garbled", "[]", "{}"):
+            with self.subTest(response=response):
+                def runner(_argv, **_kwargs):
+                    return SimpleNamespace(returncode=0, stdout=response, stderr="")
+                with self.assertRaises(self.p.ProvisionHold):
+                    self.p._verified_node_tunnel_volume(runner, node, panel)
+
+
 if __name__ == "__main__":
     unittest.main()
