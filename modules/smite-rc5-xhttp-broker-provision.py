@@ -996,14 +996,22 @@ def recover_node_socket(*, approved: bool = False, runner=subprocess.run) -> dic
                  + challenge + ": ").strip() != challenge:
             raise ProvisionHold("BROKER_SOCKET_RECOVERY_NOT_AUTHORIZED")
         if not before["preserve"]:
+            unit_path = Path("/etc/systemd/system") / SERVICE_NAME
+            original_unit = broker._file(unit_path, mode=0o644, max_size=8192)
             _replace_existing_trusted_file(
-                Path("/etc/systemd/system") / SERVICE_NAME,
-                _service_unit(before["gid"]), 0o644)
-            _socket_recovery_command(runner, ["systemctl", "daemon-reload"])
-            if (_socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
-                                                  "-p", "RuntimeDirectoryPreserve", "--value"])
-                    != "yes"):
-                raise ProvisionHold("BROKER_SOCKET_RUNTIME_PRESERVE_NOT_LOADED")
+                unit_path, _service_unit(before["gid"]), 0o644)
+            try:
+                _socket_recovery_command(runner, ["systemctl", "daemon-reload"])
+                if (_socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
+                                                      "-p", "RuntimeDirectoryPreserve", "--value"])
+                        != "yes"):
+                    raise ProvisionHold("BROKER_SOCKET_RUNTIME_PRESERVE_NOT_LOADED")
+            except ProvisionHold:
+                # The service has NOT restarted yet. Only here is it safe to
+                # atomically restore the exact reviewed unit before-image.
+                _replace_existing_trusted_file(unit_path, original_unit, 0o644)
+                _socket_recovery_command(runner, ["systemctl", "daemon-reload"])
+                raise ProvisionHold("BROKER_UNIT_RESTORED_BEFORE_RESTART_HOLD")
         # Broker restart first. This must not replace the runtime directory.
         _socket_recovery_command(runner, ["systemctl", "restart", SERVICE_NAME], timeout=35)
         _wait_for_broker_socket(Path("/run/u-opti/smite"), before["gid"])
@@ -1020,6 +1028,24 @@ def recover_node_socket(*, approved: bool = False, runner=subprocess.run) -> dic
             # no docker compose up, image pull, FRPS/FRPC or Panel restart.
             _socket_recovery_command(
                 runner, ["docker", "restart", "--time", "25", "smite-node"], timeout=65)
+            # Docker restart returns when the existing container is running,
+            # not necessarily when its strict healthcheck is healthy. Wait
+            # only for health readiness; NEVER retry restart or publication.
+            until = time.monotonic() + 60
+            while True:
+                raw = _socket_recovery_command(runner, ["docker", "inspect", "smite-node"])
+                details = json.loads(raw)
+                if not isinstance(details, list) or len(details) != 1:
+                    raise ProvisionHold("BROKER_NODE_POST_RESTART_INSPECT_INVALID")
+                state = details[0].get("State", {})
+                if not state.get("Running"):
+                    raise ProvisionHold("BROKER_NODE_POST_RESTART_STOPPED")
+                health = state.get("Health", {}).get("Status", "healthy")
+                if health == "healthy":
+                    break
+                if health != "starting" or time.monotonic() >= until:
+                    raise ProvisionHold("BROKER_NODE_HEALTH_NOT_READY_HOLD")
+                time.sleep(1)
         final = _socket_recovery_evidence(runner)
         if (not final["ready"] or not final["preserve"]
                 or final["host_inode"] != before["host_inode"]
