@@ -1211,6 +1211,8 @@ _FOREIGN_PANEL_IMAGE_RC2 = (
     "ghcr.io/aghajani82/smite-panel@sha256:"
     "9101898e19631d334b754ba8e956b63ab7dfaee304a8f9b954cf30a185125e8e"
 )
+_FOREIGN_PANEL_IMAGE_RC7 = "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8"
+_FOREIGN_NODE_IMAGE_RC7 = "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
 _FOREIGN_RC2_COMPOSE_SHA = "8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e"
 _FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
 
@@ -1300,7 +1302,7 @@ def _require_panel_foreign_transport() -> None:
     )
     if image == "smite-panel:stage15-local":
         _require_stage15_identity("panel")
-    elif image != _FOREIGN_PANEL_IMAGE_RC2:
+    elif image not in (_FOREIGN_PANEL_IMAGE_RC2, _FOREIGN_PANEL_IMAGE_RC7):
         raise WizardHold("Panel must run exact reviewed RC.2 or pinned Stage15 with foreign HMAC support")
     check = r"""
 import inspect
@@ -1328,8 +1330,9 @@ def approve_foreign_origin_field_trial(
     """IR only; additive trust record, no Panel restart or unsigned fallback."""
     _field_trial_gate()
     current = state_values() if state is None else state
-    if current.get("SMITE_ROLE") != "panel-iran" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
-        raise WizardHold("Only clean RC.1 IR Panel may approve a foreign origin")
+    if (current.get("SMITE_ROLE") != "panel-iran"
+            or current.get("SMITE_MANAGED_VERSION") not in ("2.0.0-rc.1", "2.0.0-rc.7")):
+        raise WizardHold("Foreign origin approval requires reviewed signed IR Panel")
     if not isinstance(node_id, str) or not _NODE_ID.fullmatch(node_id):
         raise WizardHold("Approved foreign Node UUID invalid")
     if (
@@ -1461,14 +1464,61 @@ print("FOREIGN_PIN=VERIFIED")
     print("PRODUCTION_ACTIVATION=NO")
 
 
+def _rc7_foreign_compose_command(*, staged_candidate: bool = False, rollback: bool = False) -> list[str]:
+    """Preserve the exact transaction project and active file set on KH RC7."""
+    project = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project"}}', "smite-node"],
+        timeout=15, capture=True,
+    )
+    if not re.fullmatch(r"uopti_rc6_[0-9a-f]{32}", project):
+        raise WizardHold("Foreign RC7 Compose project is not the fresh transaction")
+    ambient = os.environ.get("COMPOSE_PROJECT_NAME", "")
+    if ambient and ambient != project:
+        raise WizardHold("Foreign RC7 ambient Compose project conflicts")
+    service = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.service"}}', "smite-node"],
+        timeout=15, capture=True,
+    )
+    raw_files = _run(
+        ["docker", "inspect", "-f",
+         '{{index .Config.Labels "com.docker.compose.project.config_files"}}',
+         "smite-node"],
+        timeout=15, capture=True,
+    )
+    base, candidate = str(NODE_COMPOSE), str(NODE_SECURITY_CANDIDATE)
+    active = raw_files.split(",")
+    if service != "smite-node" or active not in ([base], [base, candidate]):
+        raise WizardHold("Foreign RC7 active Compose files are not reviewed")
+    if not rollback and active != [base]:
+        raise WizardHold("Foreign RC7 signed candidate is already active")
+    if NODE_COMPOSE.is_symlink() or not NODE_COMPOSE.is_file():
+        raise WizardHold("Foreign RC7 base Compose is unsafe or missing")
+    command = ["docker", "compose", "--project-name", project, "-f", base]
+    if staged_candidate:
+        if rollback:
+            raise WizardHold("Foreign RC7 candidate and rollback cannot mix")
+        _regular(NODE_SECURITY_CANDIDATE, mode=0o600, limit=128_000)
+        command.extend(["-f", candidate])
+    return command
+
+
 def _foreign_gateway_preflight(
-    current: dict[str, str], *, expected_image: str = _FOREIGN_NODE_IMAGE,
+    current: dict[str, str], *, expected_image: str | None = None,
 ) -> tuple[str, str, str]:
     """Read only managed Gateway metadata; RC.2 requires additional admission."""
-    if expected_image not in (_FOREIGN_NODE_IMAGE, _FOREIGN_NODE_IMAGE_RC2):
-        raise WizardHold("Foreign activation target is not a reviewed signed image")
-    if current.get("SMITE_ROLE") != "foreign" or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.1":
-        raise WizardHold("Foreign activation requires the reviewed clean RC.1 Node")
+    version = current.get("SMITE_MANAGED_VERSION")
+    if current.get("SMITE_ROLE") != "foreign" or version not in ("2.0.0-rc.1", "2.0.0-rc.7"):
+        raise WizardHold("Foreign activation requires an exact reviewed signed Node")
+    if version == "2.0.0-rc.7":
+        if expected_image not in (None, _FOREIGN_NODE_IMAGE_RC7):
+            raise WizardHold("RC7 cannot activate using an earlier Foreign image")
+        expected_image = _FOREIGN_NODE_IMAGE_RC7
+    elif expected_image is None:
+        expected_image = _FOREIGN_NODE_IMAGE
+    if expected_image not in (_FOREIGN_NODE_IMAGE, _FOREIGN_NODE_IMAGE_RC2, _FOREIGN_NODE_IMAGE_RC7):
+        raise WizardHold("Foreign activation image not reviewed")
     gateway = STATE.parent / "foreign-gateway.env"
     data = _env_map(_regular(gateway, mode=0o600, limit=8192))
     domain = data.get("SMITE_FOREIGN_GATEWAY_DOMAIN", "")
@@ -1511,6 +1561,42 @@ def _foreign_gateway_preflight(
         _require_stage15_foreign_compose(url, panel)
     elif running != expected_image:
         raise WizardHold("Foreign Node image differs from the exact approved digest")
+    if expected_image == _FOREIGN_NODE_IMAGE_RC7:
+        base_command = _rc7_foreign_compose_command()
+        raw = _run(base_command + ["config", "--format", "json"], timeout=30, capture=True)
+        try:
+            service = json.loads(raw)["services"]["smite-node"]
+            environment = service["environment"]
+            command = service["command"]
+            volumes = service.get("volumes", [])
+            sanaei_mounts = [
+                v for v in volumes if isinstance(v, dict)
+                and v.get("target") == "/run/smite-sanaei-ro"
+                and v.get("source") == "/opt/3x-ui/instances/01/db"
+                and v.get("read_only") is True
+            ]
+            if (
+                service.get("image") != _FOREIGN_NODE_IMAGE_RC7
+                or service.get("network_mode") != "host"
+                or service.get("ports") or service.get("privileged")
+                or service.get("cap_add") or service.get("devices")
+                or not isinstance(command, list)
+                or command[:6] != ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"]
+                or environment.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
+                or environment.get("SMITE_AGENT_AUTH_MODE") != "strict"
+                or environment.get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
+                or environment.get("PANEL_ADDRESS") != panel + ":443"
+                or environment.get("SMITE_CONTROL_ADDRESS") != url
+                or environment.get("NODE_ROLE") != "foreign"
+                or environment.get("SMITE_SANAEI_INVENTORY_ENABLED") != "true"
+                or len(sanaei_mounts) != 1
+            ):
+                raise WizardHold("RC7 Foreign effective Compose security has drifted")
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
+            raise WizardHold("RC7 Foreign effective Compose invalid") from exc
+        if _run(["docker", "inspect", "-f", "{{.State.Health.Status}}",
+                 "smite-node"], timeout=10, capture=True) != "healthy":
+            raise WizardHold("RC7 Foreign Node is not healthy")
     if expected_image == _FOREIGN_NODE_IMAGE_RC2:
         # Refuse a one-line image pin swap unless *all* paused/strict managed
         # effective Compose settings stay identical to reviewed RC.2 baseline.
@@ -1586,6 +1672,9 @@ def activate_foreign_node_field_trial(
         )
     else:
         panel, _domain, control_url = _foreign_gateway_preflight(current)
+    rc7 = current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
+    if rc7:
+        _rc7_foreign_compose_command()
     node_id, _ = _identity_record()
     helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
     if not helper.is_file() or helper.is_symlink():
@@ -1598,18 +1687,18 @@ def activate_foreign_node_field_trial(
     # Stage and validate all independent local inputs before runtime changes.
     _prepare_security_candidate()
     _provision_replay_once()
-    _run([
-        "docker", "compose", "-f", str(NODE_COMPOSE),
-        "-f", str(NODE_SECURITY_CANDIDATE), "config", "--quiet",
-    ], timeout=30)
+    candidate_command = (
+        _rc7_foreign_compose_command(staged_candidate=True) if rc7
+        else ["docker", "compose", "-f", str(NODE_COMPOSE),
+              "-f", str(NODE_SECURITY_CANDIDATE)]
+    )
+    _run(candidate_command + ["config", "--quiet"], timeout=30)
 
     recreated = False
     try:
         # Even a failed compose command may have recreated the container.
         recreated = True
-        _run([
-            "docker", "compose", "-f", str(NODE_COMPOSE),
-            "-f", str(NODE_SECURITY_CANDIDATE),
+        _run(candidate_command + [
             "up", "-d", "--no-build", "--no-deps", "--pull", "never",
             "--force-recreate", "smite-node",
         ], timeout=120)
@@ -1648,8 +1737,11 @@ def activate_foreign_node_field_trial(
         rollback_ok = not recreated
         if recreated:
             try:
-                _run([
-                    "docker", "compose", "-f", str(NODE_COMPOSE),
+                rollback_command = (
+                    _rc7_foreign_compose_command(rollback=True) if rc7
+                    else ["docker", "compose", "-f", str(NODE_COMPOSE)]
+                )
+                _run(rollback_command + [
                     "up", "-d", "--no-build", "--no-deps", "--pull", "never",
                     "--force-recreate", "smite-node",
                 ], timeout=120)
@@ -1689,11 +1781,15 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
     if current.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Signed rollback is Standard mode only")
     _regular(NODE_COMPOSE, limit=256_000)
-    _run(
-        ["docker", "compose", "-f", str(NODE_COMPOSE),
-         "up", "-d", "--no-build", "--force-recreate", "smite-node"],
-        timeout=120,
+    command = (
+        _rc7_foreign_compose_command(rollback=True)
+        if current.get("SMITE_ROLE") == "foreign"
+        and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
+        else ["docker", "compose", "-f", str(NODE_COMPOSE)]
     )
+    _run(command + [
+        "up", "-d", "--no-build", "--force-recreate", "smite-node",
+    ], timeout=120)
     _wait_container("smite-node", 90)
     env = _run(
         ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],
