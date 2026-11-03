@@ -1332,7 +1332,7 @@ def approve_foreign_origin_field_trial(
     current = state_values() if state is None else state
     if (current.get("SMITE_ROLE") != "panel-iran"
             or current.get("SMITE_MANAGED_VERSION") not in ("2.0.0-rc.1", "2.0.0-rc.7")):
-        raise WizardHold("Only clean RC.1 IR Panel may approve a foreign origin")
+        raise WizardHold("Foreign origin approval requires reviewed signed IR Panel")
     if not isinstance(node_id, str) or not _NODE_ID.fullmatch(node_id):
         raise WizardHold("Approved foreign Node UUID invalid")
     if (
