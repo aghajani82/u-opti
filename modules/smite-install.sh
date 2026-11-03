@@ -1754,6 +1754,7 @@ smite_install_foreign_node() {
 
 smite_install_sanaei_foreign() {
     local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
+    local signed_foreign=0 compose_project="" compose_service="" compose_files=""
     local -a instance_ids=() usable_ids=()
 
     clear
@@ -1782,9 +1783,28 @@ smite_install_sanaei_foreign() {
         return
     fi
 
+    # A fresh RC7 install is selected inside an installer subshell. On the
+    # next menu visit SMITE_INSTALL_PROFILE is once again "stable"; its
+    # persisted managed version, not that transient variable, decides whether
+    # existing Sanaei must be ATTACHED instead of installed again.
+    case "${SMITE_MANAGED_VERSION:-}" in
+        2.0.0-rc.1|2.0.0-rc.7) signed_foreign=1 ;;
+    esac
+    if [ "$SMITE_MANAGED_VERSION" = "2.0.0-rc.7" ]; then
+        compose_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' smite-node 2>/dev/null)" || compose_project=""
+        compose_service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' smite-node 2>/dev/null)" || compose_service=""
+        compose_files="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' smite-node 2>/dev/null)" || compose_files=""
+        if [[ ! "$compose_project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] ||
+           [ "$compose_service" != smite-node ] || [ "$compose_files" != "$SMITE_NODE_COMPOSE" ]; then
+            echo "HOLD: RC7 Foreign Node Compose ownership is not the verified fresh transaction." >&2
+            smite_install_pause
+            return
+        fi
+    fi
+
     # Attaching Sanaei recreates base Compose. Never drop an active signed
     # overlay or modify a credential-staged Node through this fresh-install path.
-    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+    if [ "$signed_foreign" -eq 1 ]; then
         if [ -e "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
            [ -L "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
            ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env" ||
@@ -1810,7 +1830,7 @@ smite_install_sanaei_foreign() {
         return
     fi
 
-    if [ "$SMITE_INSTALL_PROFILE" != clean-rc ]; then
+    if [ "$signed_foreign" -ne 1 ]; then
         echo "Smite Foreign Node detected."
         echo
         echo "Launching the existing U-OPTI 3x-UI Multi-Instance installer..."
@@ -1906,8 +1926,8 @@ smite_install_sanaei_foreign() {
         return
     fi
 
-    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
-       ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+    if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
+       ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
        ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'; then
         echo "HOLD: Read-only Sanaei mount did not pass container verification; restoring Node configuration." >&2
@@ -1916,7 +1936,7 @@ smite_install_sanaei_foreign() {
             smite_install_pause
             return
         }
-        if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
+        if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; backup retained at $backup" >&2
             smite_install_pause

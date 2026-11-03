@@ -150,7 +150,7 @@ class InstallOrderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             state = root / 'state.env'
-            state.write_text('SMITE_ROLE=foreign\n')
+            state.write_text('SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.1\n')
             node = root / 'node'; node.mkdir()
             (node / '.env').write_text('SMITE_NODE_PANEL_AUTH_MODE=' + disk + '\nSMITE_AGENT_AUTH_MODE=strict\n')
             if identity:

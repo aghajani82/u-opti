@@ -68,6 +68,40 @@ class GatewayComposeOwnerTest(unittest.TestCase):
             link.symlink_to(path)
             self.assertNotEqual(run_journal_validator(link, project).returncode, 0)
 
+    def test_rc7_foreign_gateway_is_signed_and_legacy_is_unchanged(self):
+        source = (ROOT / "modules/smite-foreign-gateway.sh").read_text()
+        script = source[source.index("smite_foreign_gateway_is_clean_rc() {"):
+                        source.index("smite_foreign_gateway_require_rc_paused() {")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.env"
+            for version, expected in (
+                ("2.0.0-rc.1", 0), ("2.0.0-rc.7", 0),
+                ("0.1.7", 1), ("2.0.0-rc.6", 1),
+            ):
+                path.write_text("SMITE_MANAGED_VERSION=" + version + "\n")
+                cmd = 'smite_foreign_gateway_state_value() { sed -n "s/^$1=//p" "$2"; }; '
+                cmd += script + '\nsmite_foreign_gateway_is_clean_rc'
+                result = subprocess.run(
+                    ["bash", "-c", cmd], text=True, capture_output=True,
+                    env={**os.environ, "SMITE_STATE_FILE": str(path)}, timeout=10,
+                )
+                self.assertEqual(result.returncode, expected, (version, result.stderr))
+
+    def test_rc7_foreign_gateway_and_sanaei_preserve_transaction(self):
+        gateway = (ROOT / "modules/smite-foreign-gateway.sh").read_text()
+        installer = (ROOT / "modules/smite-install.sh").read_text()
+        self.assertIn('smite_foreign_gateway_rc7_compose up -d --no-build --force-recreate smite-node', gateway)
+        self.assertIn('COMPOSE_PROJECT_NAME="$project" python3 -B "$helper" "$SMITE_NODE_COMPOSE" "$@"', gateway)
+        self.assertIn('if [[ ! "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]]', gateway)
+        self.assertIn('[ "$files" != "$SMITE_NODE_COMPOSE" ]', gateway)
+        body = installer.split("smite_install_sanaei_foreign() {", 1)[1].split(
+            "\nsmite_install_field_trial_patch_compose_image()", 1
+        )[0]
+        self.assertIn('2.0.0-rc.1|2.0.0-rc.7) signed_foreign=1', body)
+        self.assertNotIn('"$SMITE_INSTALL_PROFILE"', body)
+        self.assertEqual(body.count('COMPOSE_PROJECT_NAME="$compose_project" python3 -B'), 3)
+        self.assertIn('HOLD: RC7 Foreign Node Compose ownership', body)
+
     def test_local_compose_label_trust_gate_offline(self):
         source = SOURCE.read_text()
         script = source[source.index("smite_gateway_node_compose_project() {"):
