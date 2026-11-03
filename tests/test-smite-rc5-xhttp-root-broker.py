@@ -906,5 +906,272 @@ class InertBrokerProvisioningTests(unittest.TestCase):
                 provisioner._interactive_grant()
 
 
+
+class BrokerPreservedDirectoryStartupTests(unittest.TestCase):
+    """Real AF_UNIX fixtures, no systemd/container or publication."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="uopti-dead-broker-")
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "broker.sock"
+        self.owner_gid = os.getegid()
+        patcher = patch.object(broker, "SOCKET", self.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_dead(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(str(self.path))
+        self.path.chmod(0o660)
+        s.close()
+        return self.path.lstat()
+
+    def test_dead_verified_root_socket_is_retired_on_restart(self):
+        old = self.make_dead()
+        broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertFalse(self.path.exists())
+        self.assertFalse(self.path.is_symlink())
+        self.assertTrue(stat.S_ISSOCK(old.st_mode))
+
+    def test_active_socket_must_remain_bound(self):
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.path))
+        self.path.chmod(0o660)
+        listener.listen(1)
+        before = self.path.lstat()
+        with self.assertRaisesRegex(broker.BrokerHold, "LISTENER_ACTIVE"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(self.path.lstat().st_ino, before.st_ino)
+
+    def test_wrong_gid_and_mode_hold_without_unlink(self):
+        self.make_dead()
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid + 1)
+        self.assertTrue(self.path.exists())
+        self.path.chmod(0o600)
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertTrue(self.path.exists())
+
+    def test_symlink_and_regular_file_must_hold(self):
+        real = Path(self.tmp.name) / "legitimate"
+        real.write_bytes(b"KEEP")
+        self.path.symlink_to(real)
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(real.read_bytes(), b"KEEP")
+        self.path.unlink()
+        self.path.write_bytes(b"KEEP")
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(self.path.read_bytes(), b"KEEP")
+
+    def test_socket_replacement_after_refusal_holds(self):
+        self.make_dead()
+        # A newly bound socket can legitimately reuse the freed inode.
+        # A regular file replacement makes this negative case deterministic.
+        def changing_connect(sock, addr):
+            self.path.unlink()
+            self.path.write_bytes(b"KEEP")
+            raise ConnectionRefusedError()
+        with patch.object(socket.socket, "connect", new=changing_connect):
+            with self.assertRaisesRegex(broker.BrokerHold, "REPLACED"):
+                broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(self.path.read_bytes(), b"KEEP")
+
+class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
+    """Offline replay, owner, and interruption gates: never touch a live host."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = MODULE.with_name("smite-rc5-xhttp-broker-provision.py")
+        spec = importlib.util.spec_from_file_location("broker_socket_recovery_tests", cls.path)
+        cls.p = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = cls.p
+        spec.loader.exec_module(cls.p)
+
+    def proof(self, *, ready=False, preserve=False, inode=(28, 19326),
+              owner="127.0.0.1:7000", service="old"):
+        return dict(ready=ready, preserve=preserve,
+                    effective="yes" if preserve else "no", gid=39100,
+                    host_inode=inode, peer_inode=inode if ready else (28, 5229),
+                    files={"/etc/systemd/system/u-opti-smite-xhttp-broker.service": service,
+                           "/var/lib/u-opti/smite-xhttp-broker/nonce.db": "same-ledger",
+                           "/var/lib/smite-node/tunnels.json": "same-registry",
+                           "/etc/u-opti/smite/route-broker.key": "same-key"},
+                    identity=("same-container", "same-image", "same-compose",
+                              "same-mounts", "same-panel"),
+                    owner=owner)
+
+    def gate(self, *, active=True, confirmed=True, stages=None):
+        from contextlib import nullcontext
+        from unittest.mock import MagicMock
+        if stages is None:
+            stages = [self.proof(), self.proof(preserve=True, service="new"),
+                      self.proof(preserve=True, ready=True, service="new")]
+        calls = []
+        def run(runner, argv, **kwargs):
+            calls.append(tuple(argv))
+            if argv[:3] == ["systemctl", "show", self.p.SERVICE_NAME]:
+                return "yes"
+            if argv[:2] == ["docker", "inspect"]:
+                return '[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
+            return ""
+        def fakes(*args, **kwargs):
+            return next(stages_it)
+        stages_it = iter(stages)
+        class FakeBroker:
+            _lock = staticmethod(nullcontext if active else lambda: (_ for _ in ()).throw(
+                self.p.ProvisionHold("ENGINE_BUSY")))
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
+        ctx = [
+            patch.object(self.p.os, "geteuid", return_value=0),
+            patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")),
+            patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)),
+            patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker),
+            patch.object(self.p, "_socket_recovery_evidence", side_effect=fakes),
+            patch.object(self.p, "_socket_recovery_command", side_effect=run),
+            patch.object(self.p, "_replace_existing_trusted_file"),
+            patch.object(self.p, "_wait_for_broker_socket"),
+            patch("builtins.input", return_value=(
+                "REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED" if confirmed else "NO")),
+        ]
+        with ctx[0], ctx[1], ctx[2], ctx[3], ctx[4], ctx[5], \
+             ctx[6] as replace, ctx[7], ctx[8]:
+            if not active or not confirmed:
+                with self.assertRaises(Exception):
+                    self.p.recover_node_socket(approved=True)
+            else:
+                result = self.p.recover_node_socket(approved=True)
+                self.assertEqual(result["BROKER_SOCKET_RECOVERY"], "PASS_SAME_NODE_REATTACHED")
+                self.assertEqual(sum(x[:2] == ("docker", "restart") for x in calls), 1)
+                self.assertEqual(sum(x[:2] == ("systemctl", "restart") for x in calls), 1)
+                self.assertFalse(any(x[:2] == ("docker", "compose") for x in calls))
+                self.assertEqual(replace.call_count, 1)
+        return calls
+
+    def test_clean_unit_and_idempotent_stage15_preservation(self):
+        data = self.p._service_unit(39100)
+        self.assertEqual(data.count(b"RuntimeDirectoryPreserve=yes\n"), 1)
+        self.assertIn(b"Group=39100\n", data)
+        self.assertIn(b"RuntimeDirectoryMode=0750\n", data)
+        self.assertIn(b"UMask=0077\n", data)
+
+    def test_audit_is_read_only_even_when_orphaned(self):
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p, "_load_recovery_broker"), \
+             patch.object(self.p, "_socket_recovery_evidence", return_value=self.proof()), \
+             patch.object(self.p, "_socket_recovery_command") as command:
+            result = self.p.recover_node_socket(approved=False)
+            self.assertEqual(result["NODE_SOCKET_BIND"], "STALE_HOLD")
+            self.assertEqual(result["LIVE_CHANGES"], "NONE")
+            command.assert_not_called()
+
+    def test_snapshot_challenge_rejects_before_writes(self):
+        self.gate(confirmed=False)
+
+    def test_active_engine_lock_prevents_restart(self):
+        self.gate(active=False)
+
+    def test_exact_node_rebind_no_recreate(self):
+        self.gate()
+
+    def test_unit_reload_failure_restores_exact_bytes_before_restart(self):
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"original-legacy-unit")
+        calls = []
+        def run(_runner, cmd, **kw):
+            calls.append(cmd)
+            if cmd[:2] == ["systemctl", "show"]:
+                return "no"
+            return ""
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence", return_value=self.proof()), \
+             patch.object(self.p, "_socket_recovery_command", side_effect=run), \
+             patch.object(self.p, "_replace_existing_trusted_file") as replace, \
+             patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
+            with self.assertRaisesRegex(self.p.ProvisionHold,
+                                        "UNIT_RESTORED_BEFORE_RESTART"):
+                self.p.recover_node_socket(approved=True)
+        self.assertEqual(replace.call_count, 2)
+        self.assertEqual(replace.call_args.args[1], b"original-legacy-unit")
+        self.assertFalse(any(x[:2] == ["systemctl","restart"] for x in calls))
+        self.assertFalse(any(x[:2] == ["docker","restart"] for x in calls))
+
+    def test_already_bound_no_restart_or_approval_prompt(self):
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence",
+                          return_value=self.proof(preserve=True, ready=True)), \
+             patch.object(self.p, "_socket_recovery_command") as command, \
+             patch("builtins.input") as approve:
+            result = self.p.recover_node_socket(approved=True)
+        self.assertEqual(result["BROKER_SOCKET_RECOVERY"], "ALREADY_BOUND_NO_ACTION")
+        command.assert_not_called()
+        approve.assert_not_called()
+
+    def test_broker_inode_drift_never_restarts_node(self):
+        before = self.proof()
+        bad = self.proof(preserve=True, service="new", inode=(28, 19327))
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
+        calls=[]
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence", side_effect=[before,bad]), \
+             patch.object(self.p, "_socket_recovery_command",
+                          side_effect=lambda runner, cmd, **kw: (
+                              calls.append(cmd) or
+                              ('[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
+                               if cmd[:2] == ["docker", "inspect"] else "yes"))), \
+             patch.object(self.p, "_replace_existing_trusted_file"), \
+             patch.object(self.p, "_wait_for_broker_socket"), \
+             patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
+            with self.assertRaisesRegex(self.p.ProvisionHold, "POST_RESTART_DRIFT"):
+                self.p.recover_node_socket(approved=True)
+        self.assertFalse(any(x[:2] == ["docker","restart"] for x in calls))
+
+    def test_partial_node_restart_fails_closed_without_retry(self):
+        from contextlib import nullcontext
+        class FakeBroker:
+            _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
+        calls=[]
+        evidence=[self.proof(), self.proof(preserve=True, service="new"),
+                  self.proof(preserve=True, service="new")]  # Still orphaned
+        with patch.object(self.p.os, "geteuid", return_value=0), \
+             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
+             patch.object(self.p.sys, "stdin", new=SimpleNamespace(isatty=lambda: True)), \
+             patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
+             patch.object(self.p, "_socket_recovery_evidence", side_effect=evidence), \
+             patch.object(self.p, "_socket_recovery_command",
+                          side_effect=lambda runner, cmd, **kw: (
+                              calls.append(cmd) or
+                              ('[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
+                               if cmd[:2] == ["docker", "inspect"] else "yes"))), \
+             patch.object(self.p, "_replace_existing_trusted_file"), \
+             patch.object(self.p, "_wait_for_broker_socket"), \
+             patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
+            with self.assertRaisesRegex(self.p.ProvisionHold, "PARTIAL_HOLD"):
+                self.p.recover_node_socket(approved=True)
+        self.assertEqual(sum(x[:2] == ["docker", "restart"] for x in calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import socket
 import stat
 import subprocess
@@ -281,6 +282,7 @@ WorkingDirectory=/usr/local/lib/u-opti/modules
 ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/{BROKER_MODULE} --serve
 RuntimeDirectory=u-opti/smite
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 UMask=0077
 Restart=on-failure
 RestartSec=3s
@@ -548,18 +550,23 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
     # files are intentionally created lazily under /run/lock, so systemd must
     # tolerate their absence when the persistent broker service starts.
     expected_unit = _service_unit(peer_gid)
-    expected_text = expected_unit.decode("ascii")
-    legacy_text = expected_text.replace(
+    # Exactly the previous U-OPTI units are eligible for in-place upgrade:
+    # old optional-lock syntax, with or without runtime preservation. Do not
+    # bless any other service text, symlinks, drop-ins, or changed credentials.
+    current_text = expected_unit.decode("ascii")
+    old_text = current_text.replace("RuntimeDirectoryPreserve=yes\n", "")
+    lock_old = lambda value: value.replace(
         "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
         "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
     ).replace(
         "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
         "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
     )
-    if unit == legacy_text:
+    known_old = {old_text, lock_old(old_text), lock_old(current_text)}
+    if unit in known_old:
         _replace_existing_trusted_file(service, expected_unit, 0o644)
-        unit = expected_text
-    elif unit != expected_text:
+        unit = current_text
+    elif unit != current_text:
         raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
 
     helper = trusted_file(root / "usr/local/libexec" / HELPER_MODULE, 0o755, 1024 * 1024)
@@ -776,10 +783,299 @@ def _interactive_grant() -> tuple[dict[str, object], str]:
     return values, child  # type: ignore[return-value]
 
 
+
+def _socket_recovery_command(runner, argv: list[str], *, timeout: int = 20) -> str:
+    """No shell, no implicit retries, and never expose command output."""
+    try:
+        result = runner(argv, check=False, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProvisionHold("BROKER_SOCKET_RECOVERY_COMMAND_FAILED") from exc
+    if result.returncode != 0 or len(result.stdout) > 1024 * 1024:
+        raise ProvisionHold("BROKER_SOCKET_RECOVERY_COMMAND_FAILED")
+    return result.stdout.strip()
+
+
+def _socket_recovery_evidence(runner) -> dict:
+    """Read-only, fail-closed proof. No publication or nonce consumption."""
+    broker = _load_recovery_broker()
+    config = broker._configuration()
+    broker._verify_helper(config)
+    broker._verify_bridge()
+    gid = config["peer_gid"]
+    key = broker._file(broker.KEY, mode=0o600)
+    if len(key) != 32:
+        raise ProvisionHold("BROKER_HMAC_KEY_INVALID")
+    ledger = broker._ledger_module()
+    ledger._trusted_db(broker.LEDGER)
+    with sqlite3.connect(broker.LEDGER.as_uri() + "?mode=ro", uri=True) as db:
+        db.execute("PRAGMA query_only=ON")
+        db.execute("PRAGMA trusted_schema=OFF")
+        if (db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]
+                or db.execute("PRAGMA user_version").fetchone() != (ledger.SCHEMA_VERSION,)
+                or db.execute("PRAGMA application_id").fetchone() != (ledger.APPLICATION_ID,)
+                or db.execute("SELECT instance_id FROM broker_identity").fetchall()
+                != [(config["instance_id"],)]):
+            raise ProvisionHold("BROKER_REPLAY_LEDGER_INVALID")
+    service = Path("/etc/systemd/system") / SERVICE_NAME
+    unit = broker._file(service, mode=0o644, max_size=8192)
+    current = _service_unit(gid)
+    legacy = current.replace(b"RuntimeDirectoryPreserve=yes\n", b"")
+    old_locks = lambda raw: raw.replace(
+        b"ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
+        b"ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n").replace(
+        b"ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
+        b"ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n")
+    if unit not in (current, legacy, old_locks(current), old_locks(legacy)):
+        raise ProvisionHold("BROKER_SERVICE_UNIT_DRIFT")
+    if (_socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
+                                         "-p", "FragmentPath", "--value"]) != str(service)
+            or _socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
+                                                 "-p", "DropInPaths", "--value"]) != ""
+            or _socket_recovery_command(runner, ["systemctl", "is-active", SERVICE_NAME]) != "active"):
+        raise ProvisionHold("BROKER_SERVICE_OVERRIDE_OR_INACTIVE")
+    effective = _socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
+                                                 "-p", "RuntimeDirectoryPreserve", "--value"])
+    if effective not in ("yes", "no"):
+        raise ProvisionHold("BROKER_SERVICE_RUNTIME_UNKNOWN")
+    if unit == current and effective != "yes":
+        raise ProvisionHold("BROKER_SERVICE_RUNTIME_NOT_LOADED")
+
+    broker._dir(broker.GRANTS, mode=0o700)
+    broker._dir(broker.LEDGER.parent, mode=0o700)
+    route_dir = Path("/etc/nginx/smite-xhttp-routes")
+    broker._dir(route_dir, mode=0o755)
+    # Hash protected inputs AND directory entries, including absent queue.
+    # A concurrent route/nonce/approval mutation is never silently accepted.
+    protected = [broker.KEY, broker.CONFIG, broker.LEDGER, service,
+                 broker.LEDGER.parent / "approval-request.json"]
+    # Include transient SQLite WAL/SHM and all existing Broker journals, not
+    # only the main .db. A changed or newly created entry means HOLD.
+    for folder in (broker.GRANTS, route_dir, broker.LEDGER.parent):
+        for entry in sorted(folder.iterdir()):
+            if not entry.name or entry.is_symlink() or not entry.is_file():
+                raise ProvisionHold("BROKER_PROTECTED_ENTRY_UNTRUSTED")
+            if entry not in protected:
+                protected.append(entry)
+    volume = None
+
+    def inspect(name):
+        data = json.loads(_socket_recovery_command(
+            runner, ["docker", "inspect", name]))
+        if not isinstance(data, list) or len(data) != 1:
+            raise ProvisionHold("BROKER_CONTAINER_INSPECT_INVALID")
+        item = data[0]
+        if (item.get("Name") != "/" + name
+                or not item.get("State", {}).get("Running")
+                or item.get("State", {}).get("Health", {}).get("Status", "healthy") != "healthy"
+                or item.get("Config", {}).get("Labels", {}).get("com.docker.compose.service") != name):
+            raise ProvisionHold("BROKER_CONTAINER_IDENTITY_DRIFT")
+        return item
+
+    node = inspect("smite-node")
+    panel = inspect("smite-panel")
+    mounts = [x for x in node["Mounts"] if x.get("Destination") == "/run/u-opti/smite"]
+    if (len(mounts) != 1 or mounts[0].get("Source") != "/run/u-opti/smite"
+            or mounts[0].get("Type") != "bind" or mounts[0].get("RW") is not False
+            or sum(x.get("Source") == "/run/u-opti/smite" for x in node["Mounts"]) != 1
+            or node["Config"].get("User") != f"0:{gid}"):
+        raise ProvisionHold("BROKER_NODE_MOUNT_OR_GID_DRIFT")
+    if any("/run/u-opti/smite" in str(x) for x in panel.get("Mounts", [])):
+        raise ProvisionHold("BROKER_PANEL_UNEXPECTED_SOCKET_MOUNT")
+    # The existing FRPS and persistent tunnel registry must survive in place.
+    vols = [x for x in node["Mounts"] if x.get("Destination") == "/var/lib/smite-node"]
+    if (len(vols) != 1 or vols[0].get("Type") != "volume"
+            or vols[0].get("RW") is not True or vols[0].get("Name") != "smite-node-data"):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+    volume = Path(vols[0]["Source"])
+    if (volume.name != "_data" or volume.parent.name != "smite-node-data"
+            or not volume.is_absolute() or ".." in volume.parts):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+    protected.append(volume / "tunnels.json")
+
+    def fingerprint(path):
+        if not path.exists() and not path.is_symlink():
+            return None
+        st = path.lstat()
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_nlink != 1
+                or st.st_mode & 0o022 or st.st_size > 80 * 1024 * 1024):
+            raise ProvisionHold("BROKER_PROTECTED_FILE_DRIFT")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
+                raise ProvisionHold("BROKER_PROTECTED_FILE_CHANGED")
+            digest = hashlib.sha256()
+            while block := os.read(fd, 1024 * 1024):
+                digest.update(block)
+        finally:
+            os.close(fd)
+        return (st.st_dev, st.st_ino, st.st_size, digest.hexdigest())
+
+    files = {str(path): fingerprint(path) for path in protected}
+    if files[str(volume / "tunnels.json")] is None:
+        raise ProvisionHold("BROKER_NODE_TUNNEL_REGISTRY_MISSING")
+    # Do not change WSS/Bridge. Their existing validators must still pass.
+    module_dir = Path("/usr/local/lib/u-opti/modules")
+    for module in ("smite-rc7-wss-edge.py", "smite-stage15-xhttp-bridge.py"):
+        _socket_recovery_command(runner, ["python3", "-B", str(module_dir / module),
+                                           "verify"], timeout=35)
+    frps = _socket_recovery_command(runner, ["ss", "-Hlnpt"])
+    owners = [line for line in frps.splitlines()
+              if re.search(r":7000\s", line) and '"frps"' in line]
+    if len(owners) != 1:
+        raise ProvisionHold("BROKER_FRPS_OWNER_PROOF_MISSING")
+    # A Node-only restart can change the FRPS PID without changing its
+    # single owner socket. Pin the TCP bind identity, not a volatile PID/fd.
+    owner_address = owners[0].split()[3]
+    host = broker.SOCKET.parent.lstat()
+    sock = broker.SOCKET.lstat()
+    if (not stat.S_ISDIR(host.st_mode) or host.st_uid != 0
+            or host.st_gid != gid or stat.S_IMODE(host.st_mode) != 0o750
+            or not stat.S_ISSOCK(sock.st_mode) or sock.st_uid != 0
+            or sock.st_gid != gid or stat.S_IMODE(sock.st_mode) != 0o660):
+        raise ProvisionHold("BROKER_HOST_SOCKET_UNTRUSTED")
+    _probe_broker_socket(broker.SOCKET)
+    try:
+        peer = json.loads(_socket_recovery_command(
+            runner, ["docker", "exec", "smite-node", "python", "-c",
+                     ("import os,json,stat; d=os.lstat('/run/u-opti/smite'); "
+                      "p='/run/u-opti/smite/xhttp-broker.sock'; "
+                      "s=os.lstat(p) if os.path.lexists(p) else None; "
+                      "print(json.dumps([d.st_dev,d.st_ino, "
+                      "None if s is None else [s.st_uid,s.st_gid,"
+                      "stat.S_IMODE(s.st_mode),stat.S_ISSOCK(s.st_mode)]]))")]))
+    except (ValueError, KeyError) as exc:
+        raise ProvisionHold("BROKER_NODE_SOCKET_PROOF_INVALID") from exc
+    if not isinstance(peer, list) or len(peer) != 3 or type(peer[0]) is not int or type(peer[1]) is not int:
+        raise ProvisionHold("BROKER_NODE_SOCKET_PROOF_INVALID")
+    if peer[2] is not None and peer[2] != [0, gid, 0o660, True]:
+        # A stale but legitimate socket may be present; a symlink, wrong GID
+        # or wrong mode is not an authorized rebind target.
+        raise ProvisionHold("BROKER_NODE_SOCKET_UNTRUSTED")
+    host_inode = (host.st_dev, host.st_ino)
+    peer_inode = tuple(peer[:2])
+    mounted = peer_inode == host_inode and peer[2] == [0, gid, 0o660, True]
+    # Configuration/mount/volume must remain byte-identical. Container ID and
+    # image also must not change (docker restart, NEVER compose up/recreate).
+    identity = (node["Id"], node["Image"], node["Config"], node["HostConfig"],
+                node["Mounts"], panel["Id"], panel["Image"])
+    return dict(ready=mounted, preserve=unit == current, effective=effective,
+                gid=gid, host_inode=host_inode, peer_inode=peer_inode,
+                files=files, identity=identity, owner=owner_address)
+
+
+def _load_recovery_broker():
+    path = Path("/usr/local/lib/u-opti/modules") / BROKER_MODULE
+    spec = importlib.util.spec_from_file_location("uopti_broker_socket_recovery", path)
+    if spec is None or spec.loader is None:
+        raise ProvisionHold("BROKER_RECOVERY_MODULE_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def recover_node_socket(*, approved: bool = False, runner=subprocess.run) -> dict[str, str]:
+    """Read-only audit unless separately approved in a maintenance window.
+
+    In-place systemd unit repair + restart of ONLY the existing smite-node.
+    No new container, no route submission, no nonce reset, no FRP reapply.
+    Interruption leaves the durable state intact and requires a fresh audit.
+    """
+    if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
+        raise ProvisionHold("IR_ROOT_ONLY")
+    broker = _load_recovery_broker()
+    if not approved:
+        proof = _socket_recovery_evidence(runner)
+        return {"BROKER_RUNTIME_PRESERVED": "YES" if proof["preserve"] else "NO",
+                "NODE_SOCKET_BIND": "PASS" if proof["ready"] else "STALE_HOLD",
+                "RESTART_PERFORMED": "NO", "LIVE_CHANGES": "NONE"}
+    if not sys.stdin.isatty():
+        raise ProvisionHold("BROKER_SOCKET_REPAIR_REQUIRES_ROOT_TTY")
+    with broker._lock():
+        before = _socket_recovery_evidence(runner)
+        if before["preserve"] and before["ready"]:
+            return {"BROKER_SOCKET_RECOVERY": "ALREADY_BOUND_NO_ACTION",
+                    "LIVE_CHANGES": "NONE"}
+        # Operator must have independently captured and verified a provider
+        # snapshot and recovery console; a challenge is NOT a snapshot itself.
+        challenge = "REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"
+        if input("Maintenance window, verified snapshot and console. Type "
+                 + challenge + ": ").strip() != challenge:
+            raise ProvisionHold("BROKER_SOCKET_RECOVERY_NOT_AUTHORIZED")
+        if not before["preserve"]:
+            unit_path = Path("/etc/systemd/system") / SERVICE_NAME
+            original_unit = broker._file(unit_path, mode=0o644, max_size=8192)
+            _replace_existing_trusted_file(
+                unit_path, _service_unit(before["gid"]), 0o644)
+            try:
+                _socket_recovery_command(runner, ["systemctl", "daemon-reload"])
+                if (_socket_recovery_command(runner, ["systemctl", "show", SERVICE_NAME,
+                                                      "-p", "RuntimeDirectoryPreserve", "--value"])
+                        != "yes"):
+                    raise ProvisionHold("BROKER_SOCKET_RUNTIME_PRESERVE_NOT_LOADED")
+            except ProvisionHold:
+                # The service has NOT restarted yet. Only here is it safe to
+                # atomically restore the exact reviewed unit before-image.
+                _replace_existing_trusted_file(unit_path, original_unit, 0o644)
+                _socket_recovery_command(runner, ["systemctl", "daemon-reload"])
+                raise ProvisionHold("BROKER_UNIT_RESTORED_BEFORE_RESTART_HOLD")
+        # Broker restart first. This must not replace the runtime directory.
+        _socket_recovery_command(runner, ["systemctl", "restart", SERVICE_NAME], timeout=35)
+        _wait_for_broker_socket(Path("/run/u-opti/smite"), before["gid"])
+        after_broker = _socket_recovery_evidence(runner)
+        if (after_broker["host_inode"] != before["host_inode"]
+                or after_broker["files"] != {**before["files"],
+                    str(Path("/etc/systemd/system") / SERVICE_NAME):
+                    after_broker["files"][str(Path("/etc/systemd/system") / SERVICE_NAME)]}
+                or after_broker["identity"] != before["identity"]
+                or after_broker["owner"] != before["owner"]):
+            raise ProvisionHold("BROKER_POST_RESTART_DRIFT_REQUIRES_REVIEW")
+        if not after_broker["ready"]:
+            # docker restart retains the exact existing container and image;
+            # no docker compose up, image pull, FRPS/FRPC or Panel restart.
+            _socket_recovery_command(
+                runner, ["docker", "restart", "--time", "25", "smite-node"], timeout=65)
+            # Docker restart returns when the existing container is running,
+            # not necessarily when its strict healthcheck is healthy. Wait
+            # only for health readiness; NEVER retry restart or publication.
+            until = time.monotonic() + 60
+            while True:
+                raw = _socket_recovery_command(runner, ["docker", "inspect", "smite-node"])
+                details = json.loads(raw)
+                if not isinstance(details, list) or len(details) != 1:
+                    raise ProvisionHold("BROKER_NODE_POST_RESTART_INSPECT_INVALID")
+                state = details[0].get("State", {})
+                if not state.get("Running"):
+                    raise ProvisionHold("BROKER_NODE_POST_RESTART_STOPPED")
+                health = state.get("Health", {}).get("Status", "healthy")
+                if health == "healthy":
+                    break
+                if health != "starting" or time.monotonic() >= until:
+                    raise ProvisionHold("BROKER_NODE_HEALTH_NOT_READY_HOLD")
+                time.sleep(1)
+        final = _socket_recovery_evidence(runner)
+        if (not final["ready"] or not final["preserve"]
+                or final["host_inode"] != before["host_inode"]
+                or final["files"] != after_broker["files"]
+                or final["identity"] != before["identity"]
+                or final["owner"] != before["owner"]):
+            raise ProvisionHold("BROKER_RECOVERY_PARTIAL_HOLD_MANUAL_REVIEW")
+        return {"BROKER_SOCKET_RECOVERY": "PASS_SAME_NODE_REATTACHED",
+                "BROKER_HOST_NODE_INODE": "MATCH",
+                "BROKER_RUNTIME_PRESERVED": "YES",
+                "FRPS_AND_DURABLE_EVIDENCE": "UNCHANGED",
+                "ROUTE_REPUBLISH": "NOT_PERFORMED"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare the IR-only Smite route broker")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--peer-gid", type=int)
+    mode.add_argument("--audit-node-socket", action="store_true",
+                      help="Read-only host/container Broker inode and state audit")
+    mode.add_argument("--recover-node-socket", action="store_true",
+                      help="Explicit IR-only maintenance recovery; restarts only Broker/Node")
     mode.add_argument("--activate-existing", action="store_true",
                       help="Enable and start an already provisioned IR broker")
     mode.add_argument("--approve-grant", action="store_true",
@@ -792,7 +1088,11 @@ def main() -> int:
         print("HOLD_EXPLICIT_LOCAL_ROOT_CONFIRMATION_REQUIRED")
         return 2
     try:
-        if args.activate_existing:
+        if args.audit_node_socket:
+            result = recover_node_socket(approved=False)
+        elif args.recover_node_socket:
+            result = recover_node_socket(approved=True)
+        elif args.activate_existing:
             result = activate()
         elif args.approve_grant:
             if not sys.stdin.isatty():

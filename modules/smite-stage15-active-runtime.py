@@ -58,6 +58,9 @@ def present(path): return path.exists() or path.is_symlink()
 
 
 def preserved_unit(raw):
+    # Idempotent for new RC7 units; old signed Stage15 receipts remain valid.
+    if b"RuntimeDirectoryPreserve=yes\n" in raw:
+        return raw
     return raw.replace(b"RuntimeDirectoryMode=0750\n", b"RuntimeDirectoryMode=0750\nRuntimeDirectoryPreserve=yes\n")
 
 def target_bytes(doc, side, path):
@@ -77,7 +80,8 @@ def validate(doc):
     old = json.loads(decode(doc['before'][str(b.CONFIG)]))
     new = json.loads(decode(doc['after'][str(b.CONFIG)]))
     unit = p._service_unit(old['peer_gid'])
-    need(decode(doc['before'][str(UNIT)]) in (unit, preserved_unit(unit))
+    legacy_unit = unit.replace(b"RuntimeDirectoryPreserve=yes\n", b"")
+    need(decode(doc['before'][str(UNIT)]) in (legacy_unit, unit)
          and decode(doc['after'][str(UNIT)]) == preserved_unit(unit), 'BROKER_UNIT_MIGRATION_DRIFT')
     need(new == dict(old, helper_sha256=p.HELPER_SHA256, planner_sha256=p.PLANNER_SHA256), 'BROKER_CONFIG_MIGRATION_DRIFT')
     for target, field, expected in [(b.HELPER, 'helper_sha256', p.HELPER_SHA256), (b.PLANNER, 'planner_sha256', p.PLANNER_SHA256)]:
