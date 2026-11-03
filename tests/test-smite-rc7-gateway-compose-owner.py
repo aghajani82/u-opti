@@ -78,9 +78,9 @@ class GatewayComposeOwnerTest(unittest.TestCase):
                 ("2.0.0-rc.1", 0), ("2.0.0-rc.7", 0),
                 ("0.1.7", 1), ("2.0.0-rc.6", 1),
             ):
-                path.write_text("SMITE_MANAGED_VERSION=" + version + "\\n")
+                path.write_text("SMITE_MANAGED_VERSION=" + version + "\n")
                 cmd = 'smite_foreign_gateway_state_value() { sed -n "s/^$1=//p" "$2"; }; '
-                cmd += script + '\\nsmite_foreign_gateway_is_clean_rc'
+                cmd += script + '\nsmite_foreign_gateway_is_clean_rc'
                 result = subprocess.run(
                     ["bash", "-c", cmd], text=True, capture_output=True,
                     env={**os.environ, "SMITE_STATE_FILE": str(path)}, timeout=10,
@@ -95,7 +95,7 @@ class GatewayComposeOwnerTest(unittest.TestCase):
         self.assertIn('if [[ ! "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]]', gateway)
         self.assertIn('[ "$files" != "$SMITE_NODE_COMPOSE" ]', gateway)
         body = installer.split("smite_install_sanaei_foreign() {", 1)[1].split(
-            "\\nsmite_install_upgrade_signed_field_trial()", 1
+            "\nsmite_install_upgrade_signed_field_trial()", 1
         )[0]
         self.assertIn('2.0.0-rc.1|2.0.0-rc.7) signed_foreign=1', body)
         self.assertNotIn('"$SMITE_INSTALL_PROFILE"', body)
