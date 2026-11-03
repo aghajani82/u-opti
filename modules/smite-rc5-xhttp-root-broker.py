@@ -337,14 +337,60 @@ def _send_reply(connection: socket.socket, response: str) -> None:
         pass
 
 
+
+def _retire_dead_socket_at_start(peer_gid: int) -> None:
+    """Retire ONLY the exact dead Broker socket after a preserved-dir restart.
+
+    systemd SIGTERM does not run Python finally blocks. With
+    RuntimeDirectoryPreserve=yes the inode is retained, including a stale
+    AF_UNIX pathname. Never remove an unknown entry or a live listener.
+    """
+    try:
+        first = SOCKET.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise BrokerHold("BROKER_SOCKET_ENTRY_UNAVAILABLE") from exc
+    if (not stat.S_ISSOCK(first.st_mode) or first.st_uid != 0
+            or first.st_gid != peer_gid or first.st_nlink != 1
+            or stat.S_IMODE(first.st_mode) != 0o660):
+        raise BrokerHold("BROKER_SOCKET_ENTRY_UNTRUSTED")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(1)
+        try:
+            peer.connect(str(SOCKET))
+        except ConnectionRefusedError:
+            # Only a refused connect to the exact trusted AF_UNIX socket
+            # permits removal; missing/timeout/permissions all HOLD.
+            pass
+        except OSError as exc:
+            raise BrokerHold("BROKER_SOCKET_LISTENER_UNCERTAIN") from exc
+        else:
+            raise BrokerHold("BROKER_SOCKET_LISTENER_ACTIVE")
+    try:
+        current = SOCKET.lstat()
+    except OSError as exc:
+        raise BrokerHold("BROKER_SOCKET_REPLACED") from exc
+    if ((current.st_dev, current.st_ino) != (first.st_dev, first.st_ino)
+            or not stat.S_ISSOCK(current.st_mode)
+            or current.st_uid != 0 or current.st_gid != peer_gid
+            or stat.S_IMODE(current.st_mode) != 0o660):
+        raise BrokerHold("BROKER_SOCKET_REPLACED")
+    try:
+        SOCKET.unlink()
+    except OSError as exc:
+        raise BrokerHold("BROKER_SOCKET_REMOVE_FAILED") from exc
+
+
 def serve() -> None:
     """Explicit local root service command. No TCP listener, no auto-install."""
     if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
         raise BrokerHold("IR_ROOT_ONLY")
     config = _configuration()
     _dir(SOCKET.parent, mode=0o750, gid=config["peer_gid"])
-    if SOCKET.exists() or SOCKET.is_symlink():
-        raise BrokerHold("SOCKET_EXISTS_REQUIRES_OPERATOR")
+    # Only a proven dead, root-owned socket is retired, never a live peer.
+    # This is required for systemd restarts with a preserved directory.
+    _retire_dead_socket_at_start(config["peer_gid"])
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(SOCKET))
         try:
@@ -379,8 +425,16 @@ def serve() -> None:
                         response = "HOLD"
                     _send_reply(connection, response)
         finally:
-            # Remove only our socket entry; never replace a pre-existing path.
-            SOCKET.unlink(missing_ok=True)
+            # SIGTERM normally bypasses finally, but a graceful exit may
+            # arrive concurrently with a replacement. Retire only our inode.
+            try:
+                final = SOCKET.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (stat.S_ISSOCK(final.st_mode) and final.st_uid == 0
+                        and final.st_gid == config["peer_gid"]):
+                    SOCKET.unlink()
 
 
 if __name__ == "__main__":
