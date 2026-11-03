@@ -59,7 +59,28 @@ smite_foreign_gateway_private_ip() {
 # Only the pinned, signed RC.1 Field Trial uses strict, paused Node semantics.
 # Legacy v0.1.7 gateways must keep their original behavior.
 smite_foreign_gateway_is_clean_rc() {
-    [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.1" ]
+    # RC7 is a signed, paused/strict Node too. Never run legacy anonymous
+    # registration, legacy Python overlays or /api/agent/status readiness.
+    case "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" in
+        2.0.0-rc.1|2.0.0-rc.7) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+smite_foreign_gateway_rc7_compose() {
+    local project service files helper
+    [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] || return 2
+    project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' smite-node 2>/dev/null)" || return 2
+    service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' smite-node 2>/dev/null)" || return 2
+    files="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' smite-node 2>/dev/null)" || return 2
+    if [[ ! "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] ||
+       [ "$service" != smite-node ] || [ "$files" != "$SMITE_NODE_COMPOSE" ]; then
+        echo "HOLD: RC7 Foreign Gateway Compose ownership or active files drifted." >&2
+        return 2
+    fi
+    helper="${BASH_SOURCE[0]%/*}/smite-compose-safe.py"
+    [ -f "$helper" ] && [ ! -L "$helper" ] || return 2
+    COMPOSE_PROJECT_NAME="$project" python3 -B "$helper" "$SMITE_NODE_COMPOSE" "$@"
 }
 
 smite_foreign_gateway_require_rc_paused() {
@@ -580,7 +601,11 @@ smite_foreign_gateway_recreate_node() {
         # Never install legacy panel_client.py overlay into the signed RC image.
         smite_foreign_gateway_require_rc_paused || return 1
         echo "Applying paused/strict RC Node control address (no legacy overlay)..."
-        docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
+        if [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ]; then
+            smite_foreign_gateway_rc7_compose up -d --no-build --force-recreate smite-node || return 1
+        else
+            docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node || return 1
+        fi
         smite_foreign_gateway_wait_healthy 90
         return $?
     fi
@@ -886,7 +911,12 @@ smite_foreign_gateway_configure() {
     if ! smite_foreign_gateway_recreate_node; then
         echo "ERROR: Foreign node recreation failed; restoring previous node environment."
         cp -a "$env_backup" "$SMITE_NODE_DIR/.env"
-        docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+        if [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ]; then
+            smite_foreign_gateway_rc7_compose up -d --no-build --force-recreate smite-node >/dev/null 2>&1 ||
+                echo "CRITICAL: RC7 foreign gateway Node rollback could not be verified." >&2
+        else
+            docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
+        fi
         smite_foreign_gateway_pause
         return
     fi
