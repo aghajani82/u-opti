@@ -91,6 +91,18 @@ class MigrationTests(unittest.TestCase):
                                   (m.b,'HELPER',targets[0]),(m.b,'PLANNER',targets[1]),(m.b,'CONFIG',targets[2])]:
             patcher=patch.object(module,name,value);patcher.start();self.addCleanup(patcher.stop)
         self.host=Fixture(self.root)
+    def test_exact_old_stage15_receipt_remains_valid_after_rc7_unit_fix(self):
+        old = m.p._service_unit(39100).replace(b"RuntimeDirectoryPreserve=yes\n", b"")
+        doc = copy.deepcopy(self.host.doc)
+        doc["before"][str(m.UNIT)] = m.encode(old)
+        self.assertEqual(m.validate(doc), doc)
+        self.assertEqual(m.preserved_unit(old), m.p._service_unit(39100))
+        self.assertEqual(m.preserved_unit(m.p._service_unit(39100)),
+                         m.p._service_unit(39100))
+        doc["before"][str(m.UNIT)] = m.encode(old.replace(b"Group=39100", b"Group=0"))
+        with self.assertRaises(m.h.Hold):
+            m.validate(doc)
+
     def test_success_then_verified_rollback_preserves_owner_identity_and_replay(self):
         identity=self.host.key.read_bytes();m.execute(self.host,'apply');self.assertEqual(m.record()['phase'],'COMMITTED')
         m.admission();m.execute(self.host,'verify')
