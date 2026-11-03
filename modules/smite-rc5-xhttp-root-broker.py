@@ -193,16 +193,27 @@ def _verify_helper(config: dict) -> None:
 
 
 def _verify_bridge() -> None:
-    stage15 = Path("/var/lib/u-opti/smite-stage15-xhttp-bridge")
-    if stage15.exists() or stage15.is_symlink():
-        host = _load_module("uopti_broker_stage15_bridge", HERE / "smite-stage15-xhttp-bridge.py")
-        host.verify()  # No fallback for prepared, corrupt or rolled-back state.
-        return
-    host = _load_module(
-        "uopti_broker_bridge_install",
-        HERE / "smite-rc5-xhttp-bridge-install.py"
-    )
-    host.verify()  # read-only effective nginx -T, TLS probe, committed journal
+    host = _load_module("uopti_broker_stage15_bridge", HERE / "smite-stage15-xhttp-bridge.py")
+    try:
+        modern = not host.base.absent(host.STATE)
+        rc7 = not host.base.absent(host.RC7_EDGE.parent)
+        if modern:
+            if not host.base.absent(host.base.TX_DIR):
+                raise BrokerHold("AMBIGUOUS_BRIDGE_GENERATION")
+            host.verify()
+            return
+        if rc7:
+            raise BrokerHold("RC7_XHTTP_BRIDGE_REQUIRED")
+        legacy = _load_module("uopti_broker_bridge_install", HERE / "smite-rc5-xhttp-bridge-install.py")
+        if host.base.absent(legacy.TX_DIR):
+            raise BrokerHold("XHTTP_BRIDGE_REQUIRED")
+        legacy.verify()
+    except BrokerHold:
+        raise
+    except Exception as exc:
+        reason = str(exc)
+        raise BrokerHold(reason if re.fullmatch('[A-Z0-9_]{1,100}', reason)
+                         else "BRIDGE_STATE_INVALID") from exc
 
 
 def _apply_route(port: int, path: str) -> None:
@@ -358,6 +369,9 @@ def serve() -> None:
                         # the Panel can guide a separate root approval. Other
                         # broker details remain private and ambiguous failures
                         # are never converted into retryable instructions.
+                        reason = str(exc)
+                        if re.fullmatch('[A-Z0-9_]{1,100}', reason):
+                            print('BROKER_HOLD=' + reason, file=sys.stderr, flush=True)
                         response = ("HOLD_ROOT_OPERATOR_GRANT_REQUIRED"
                                     if str(exc) == "ROOT_OPERATOR_GRANT_REQUIRED"
                                     else "HOLD")

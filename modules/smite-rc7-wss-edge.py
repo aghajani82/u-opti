@@ -142,12 +142,24 @@ def preview(peer):
             'map_before':sha(original),'map_after':sha(new),
             'alternate':sha(alt),'map_mode':mode},original,alt,new
 
+def bridge_source(current):
+    # Admit only the exact reversible include recorded by the existing bridge.
+    bridge = load('rc7_edge_bridge', 'smite-stage15-xhttp-bridge.py')
+    if not bridge.base.absent(bridge.STATE):
+        try:
+            return bridge.original_backend(current, committed=True)
+        except Exception as exc:
+            reason = str(exc)
+            raise Hold(reason if re.fullmatch('[A-Z0-9_]{1,100}', reason)
+                       else 'UNTRUSTED_BRIDGE_STATE') from exc
+    return current
+
 def validate_committed(doc):
     need(doc['state']=='COMMITTED','EDGE_NOT_COMMITTED')
     expected_runtime(doc['domain'],doc['peer'])
     original=file(STATE/'map.before',0o600)
     need(sha(original)==doc['map_before'],'MAP_BACKUP_DRIFT')
-    current=file(q.TLS_SOURCE)
+    current=bridge_source(file(q.TLS_SOURCE))
     stream=file(q.STREAM_SOURCE)
     need(sha(current)==doc['tls_before'] and sha(stream)==doc['stream'],
          'EXISTING_PANEL_GATEWAY_DRIFT')
