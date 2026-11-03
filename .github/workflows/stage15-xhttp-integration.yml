@@ -28,6 +28,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install Nginx for isolated RC7 effective-config regression
+        run: sudo apt-get update && sudo apt-get install -y nginx libnginx-mod-stream
       - run: |
           sudo -n python3 -B tests/test-smite-stage15-active-runtime.py
           sudo -n python3 -B tests/test-smite-stage15-kh-inventory.py -v
@@ -37,7 +39,7 @@ jobs:
           python3 -B tests/test-stage15-console-only-release.py
           sudo -n python3 -B tests/test-smite-guided-frp.py
           sudo -n python3 -B tests/test-smite-stage15-root-review.py
-          sudo -n python3 -B tests/test-smite-stage15-xhttp-bridge.py
+          sudo -n env RC7_REQUIRE_NGINX=1 python3 -B tests/test-smite-stage15-xhttp-bridge.py
           sudo -n python3 -B tests/test-smite-stage15-wss-edge.py
           sudo -n python3 -B tests/test-smite-rc5-xhttp-root-broker.py
           sudo -n python3 -B tests/test-smite-rc5-xhttp-nonce-ledger.py
