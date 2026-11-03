@@ -143,6 +143,37 @@ class WssControllerTests(unittest.TestCase):
             with self.subTest(invalid=invalid),self.assertRaises(edge.p.Hold):
                 edge.render(domain,invalid,before=src,stream=stream,mapping=mapping)
 
+    def test_wss_apply_requires_explicit_snapshot_tty(self):
+        from unittest.mock import MagicMock
+        with patch('sys.argv',['wss','apply','--role','foreign']):
+            with patch.object(rt,'apply') as actuator:
+                with patch.object(rt.sys.stdin,'isatty',return_value=False):
+                    self.assertEqual(rt.main(),2)
+                actuator.assert_not_called()
+
+    def test_rollback_fails_closed_with_existing_edge_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            item=Path(temp)/'edge.json'
+            item.write_text('{"state":"COMMITTED"}')
+            with patch.object(rt,'EDGE',item):
+                with self.assertRaises(p.Hold):
+                    rt.edge_absent()
+
+    def test_frpc_process_blocks_rollback_or_apply(self):
+        from types import SimpleNamespace
+        with patch.object(rt.subprocess,'run',return_value=SimpleNamespace(returncode=0)):
+            with self.assertRaises(p.Hold):
+                rt.no_tunnels()
+
+    def test_runtime_verify_does_not_disrupt_live_owner(self):
+        document={'role':'foreign','state':'COMMITTED',
+                  'domain':'iran.grandoptical.ir','services':['smite-node']}
+        with patch.object(rt,'check_protected'),patch.object(rt,'ensure_service') as check:
+            with patch.object(rt,'signed_probe'),patch.object(rt,'no_tunnels') as guard:
+                rt.verify(document)
+                guard.assert_not_called()
+                check.assert_called_once_with('smite-node',document,enabled=True)
+
     def test_source_ip_canary_does_not_route_other_clients_to_frp(self):
         stream=Path(MODULES/'smite-rc2-frp-wss-edge-plan.py').read_text()
         self.assertIn("default $uopti_smite_backend;",stream)
