@@ -876,6 +876,7 @@ def _socket_recovery_evidence(runner) -> dict:
     mounts = [x for x in node["Mounts"] if x.get("Destination") == "/run/u-opti/smite"]
     if (len(mounts) != 1 or mounts[0].get("Source") != "/run/u-opti/smite"
             or mounts[0].get("Type") != "bind" or mounts[0].get("RW") is not False
+            or sum(x.get("Source") == "/run/u-opti/smite" for x in node["Mounts"]) != 1
             or node["Config"].get("User") != f"0:{gid}"):
         raise ProvisionHold("BROKER_NODE_MOUNT_OR_GID_DRIFT")
     if any("/run/u-opti/smite" in str(x) for x in panel.get("Mounts", [])):
@@ -945,10 +946,14 @@ def _socket_recovery_evidence(runner) -> dict:
                       "stat.S_IMODE(s.st_mode),stat.S_ISSOCK(s.st_mode)]]))")]))
     except (ValueError, KeyError) as exc:
         raise ProvisionHold("BROKER_NODE_SOCKET_PROOF_INVALID") from exc
+    if not isinstance(peer, list) or len(peer) != 3 or type(peer[0]) is not int or type(peer[1]) is not int:
+        raise ProvisionHold("BROKER_NODE_SOCKET_PROOF_INVALID")
+    if peer[2] is not None and peer[2] != [0, gid, 0o660, True]:
+        # A stale but legitimate socket may be present; a symlink, wrong GID
+        # or wrong mode is not an authorized rebind target.
+        raise ProvisionHold("BROKER_NODE_SOCKET_UNTRUSTED")
     host_inode = (host.st_dev, host.st_ino)
     peer_inode = tuple(peer[:2])
-    if len(peer) != 3:
-        raise ProvisionHold("BROKER_NODE_SOCKET_PROOF_INVALID")
     mounted = peer_inode == host_inode and peer[2] == [0, gid, 0o660, True]
     # Configuration/mount/volume must remain byte-identical. Container ID and
     # image also must not change (docker restart, NEVER compose up/recreate).
