@@ -33,7 +33,9 @@ root-owned Broker configuration/HMAC/helper and strict SQLite replay
 schema; an unmodified known systemd unit with no drop-ins; current
 signed XHTTP Bridge and RC7 WSS Edge verification; owner listener on
 7000; existing healthy Panel and Node, exact read-only Node bind, UID 0
-and dedicated GID; persistent `smite-node-data` volume; independent
+and dedicated GID; persistent Node tunnel volume (legacy `smite-node-data` or the exact
+RC6 Compose-scoped `<project>_node-data`, verified against both container
+project labels and read-only Docker volume metadata); independent
 snapshot/console challenge; and the existing exclusive host engine lock.
 Unexpected ownership, mount, service, missing ledger, symlink, missing
 tunnel registry, competing operation, or active protected-file drift is
@@ -48,6 +50,32 @@ revalidates the exact container ID/image/Compose configuration/mounts,
 Broker directory inode and socket owner/mode, protected input fingerprints,
 FRPS listening identity, Bridge, WSS, and healthy Panel/Node. No Panel,
 Grandoptical, Sanaei, FRP owner or tunnel reapplication.
+
+## Follow-up: RC6 Compose-scoped Node volume acceptance
+
+The IR field audit originally stopped at `HOLD_BROKER_NODE_TUNNEL_VOLUME_DRIFT`
+because its running Node has a Compose-created volume named
+`uopti_rc6_<32-hex-project-id>_node-data` rather than the older fixed
+`smite-node-data`. Read-only Docker evidence confirms both `smite-panel`
+and `smite-node` share the same Compose project and the existing volume
+has `com.docker.compose.project=<project>` and
+`com.docker.compose.volume=node-data`. This is **not** permission to rename
+the volume, move `tunnels.json`, recreate the container, or change FRP.
+
+The repair audit now accepts the existing fixed-name layout unchanged, or
+**only** the project-scoped RC6 pattern when all these proofs agree:
+the exact Node mount destination `/var/lib/smite-node`, type `volume`,
+read-write data mount, matching Panel and Node Compose project/service
+labels, volume name `<project>_node-data`, the same canonical Docker
+volume directory, and a read-only `docker volume inspect` record with
+matching Name/Mountpoint, local driver/scope, default options, project,
+`node-data` label, Compose config hash and version. A forged/mismatched
+name, foreign project, missing labels or untrusted mount fails closed.
+
+No change to signed Pairing, XHTTP route publication, FRPS, Bridge, WSS,
+replay ledger, or root approval flow. Restart/recovery remains separately
+authorized and is **not** implied by a passing audit. On any HOLD, stop
+without renaming/mounting anything or retrying a Panel publish.
 
 ## IR-only: after CI PASS, PR merge/review, and independent deployment approval
 
