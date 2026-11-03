@@ -10,8 +10,6 @@ Nginx. A missing grant keeps every route request HOLD.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import fcntl
 import hashlib
 import importlib.util
 import json
@@ -922,6 +920,9 @@ def _socket_recovery_evidence(runner) -> dict:
               if re.search(r":7000\s", line) and '"frps"' in line]
     if len(owners) != 1:
         raise ProvisionHold("BROKER_FRPS_OWNER_PROOF_MISSING")
+    # A Node-only restart can change the FRPS PID without changing its
+    # single owner socket. Pin the TCP bind identity, not a volatile PID/fd.
+    owner_address = owners[0].split()[3]
     host = broker.SOCKET.parent.lstat()
     sock = broker.SOCKET.lstat()
     if (not stat.S_ISDIR(host.st_mode) or host.st_uid != 0
@@ -952,7 +953,7 @@ def _socket_recovery_evidence(runner) -> dict:
                 node["Mounts"], panel["Id"], panel["Image"])
     return dict(ready=mounted, preserve=unit == current, effective=effective,
                 gid=gid, host_inode=host_inode, peer_inode=peer_inode,
-                files=files, identity=identity, owner=owners[0])
+                files=files, identity=identity, owner=owner_address)
 
 
 def _load_recovery_broker():
