@@ -127,6 +127,8 @@ class ForeignRC7Tests(unittest.TestCase):
             service = {
                 "image": p._FOREIGN_NODE_IMAGE_RC7,
                 "network_mode": "host",
+                "cap_add": ["NET_ADMIN", "SYS_MODULE"],
+                "devices": ["/dev/net/tun:/dev/net/tun"],
                 "command": ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
                 "environment": {
                     "SMITE_NODE_PANEL_AUTH_MODE": "paused",
@@ -167,6 +169,28 @@ class ForeignRC7Tests(unittest.TestCase):
                 service["command"][3] = "0.0.0.0"
                 with self.assertRaises(p.WizardHold):
                     p._foreign_gateway_preflight(current)
+                service["command"][3] = "127.0.0.1"
+                # Extra host capabilities or devices must still fail closed.
+                for caps in (
+                    ["NET_ADMIN", "SYS_MODULE", "SYS_ADMIN"],
+                    ["NET_ADMIN"],
+                    [],
+                ):
+                    service["cap_add"] = caps
+                    with self.subTest(cap_add=caps), self.assertRaises(p.WizardHold):
+                        p._foreign_gateway_preflight(current)
+                service["cap_add"] = ["NET_ADMIN", "SYS_MODULE"]
+                for devices in (
+                    ["/dev/net/tun:/dev/net/tun", "/dev/kvm:/dev/kvm"],
+                    ["/dev/kvm:/dev/kvm"],
+                    [],
+                ):
+                    service["devices"] = devices
+                    with self.subTest(devices=devices), self.assertRaises(p.WizardHold):
+                        p._foreign_gateway_preflight(current)
+                service["devices"] = ["/dev/net/tun:/dev/net/tun:rwm"]
+                self.assertEqual(p._foreign_gateway_preflight(current),
+                                 ("iran.grandoptical.ir", "grandoptical.ir", control))
 
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()

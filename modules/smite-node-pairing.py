@@ -1579,7 +1579,18 @@ def _foreign_gateway_preflight(
                 service.get("image") != _FOREIGN_NODE_IMAGE_RC7
                 or service.get("network_mode") != "host"
                 or service.get("ports") or service.get("privileged")
-                or service.get("cap_add") or service.get("devices")
+                # Exact immutable RC7 upstream Compose baseline. These
+                # capabilities and the single TUN device already exist in
+                # the installed Node; accepting them does not add privileges.
+                # Reject any different/extra capability or host device.
+                or service.get("cap_add") not in (
+                    ["NET_ADMIN", "SYS_MODULE"],
+                    ["SYS_MODULE", "NET_ADMIN"],
+                )
+                or service.get("devices") not in (
+                    ["/dev/net/tun:/dev/net/tun"],
+                    ["/dev/net/tun:/dev/net/tun:rwm"],
+                )
                 or not isinstance(command, list)
                 or command[:6] != ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"]
                 or environment.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
