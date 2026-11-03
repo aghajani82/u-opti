@@ -795,6 +795,66 @@ def _socket_recovery_command(runner, argv: list[str], *, timeout: int = 20) -> s
     return result.stdout.strip()
 
 
+
+def _verified_node_tunnel_volume(runner, node: dict, panel: dict) -> Path:
+    """Pin the existing Node data volume; accept only reviewed Compose identities.
+
+    The old unscoped smite-node-data volume remains valid. RC6 clean installs
+    use a Compose-scoped node-data volume; its exact project/name/mountpoint
+    and Docker-owned labels must all agree with both running containers.
+    No volume is created, copied, renamed or mounted here.
+    """
+    vols = [m for m in node.get("Mounts", [])
+            if m.get("Destination") == "/var/lib/smite-node"]
+    if (len(vols) != 1 or vols[0].get("Type") != "volume"
+            or vols[0].get("RW") is not True
+            or type(vols[0].get("Name")) is not str
+            or type(vols[0].get("Source")) is not str):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+    name = vols[0]["Name"]
+    source = Path(vols[0]["Source"])
+    if (not name or source.name != "_data" or source.parent.name != name
+            or not source.is_absolute() or ".." in source.parts):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+
+    if name == "smite-node-data":
+        return source  # Retain the exact legacy validation.
+    node_labels = node.get("Config", {}).get("Labels") or {}
+    panel_labels = panel.get("Config", {}).get("Labels") or {}
+    project = node_labels.get("com.docker.compose.project")
+    if (type(project) is not str
+            or re.fullmatch(r"uopti_rc6_[0-9a-f]{32}", project) is None
+            or panel_labels.get("com.docker.compose.project") != project
+            or node_labels.get("com.docker.compose.service") != "smite-node"
+            or panel_labels.get("com.docker.compose.service") != "smite-panel"
+            or name != project + "_node-data"):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+
+    try:
+        details = json.loads(_socket_recovery_command(
+            runner, ["docker", "volume", "inspect", name]))
+    except (ValueError, TypeError) as exc:
+        raise ProvisionHold("BROKER_NODE_VOLUME_PROOF_INVALID") from exc
+    if not isinstance(details, list) or len(details) != 1 or not isinstance(details[0], dict):
+        raise ProvisionHold("BROKER_NODE_VOLUME_PROOF_INVALID")
+    record = details[0]
+    labels = record.get("Labels")
+    if (not isinstance(labels, dict) or record.get("Name") != name
+            or record.get("Driver") != "local"
+            or record.get("Scope") != "local"
+            or record.get("Mountpoint") != str(source)
+            or record.get("Options") not in (None, {})
+            or labels.get("com.docker.compose.project") != project
+            or labels.get("com.docker.compose.volume") != "node-data"
+            or type(labels.get("com.docker.compose.config-hash")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}",
+                            labels["com.docker.compose.config-hash"]) is None
+            or type(labels.get("com.docker.compose.version")) is not str
+            or re.fullmatch(r"[0-9]+(?:\\.[0-9]+){1,3}",
+                            labels["com.docker.compose.version"]) is None):
+        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+    return source
+
 def _socket_recovery_evidence(runner) -> dict:
     """Read-only, fail-closed proof. No publication or nonce consumption."""
     broker = _load_recovery_broker()
@@ -882,14 +942,7 @@ def _socket_recovery_evidence(runner) -> dict:
     if any("/run/u-opti/smite" in str(x) for x in panel.get("Mounts", [])):
         raise ProvisionHold("BROKER_PANEL_UNEXPECTED_SOCKET_MOUNT")
     # The existing FRPS and persistent tunnel registry must survive in place.
-    vols = [x for x in node["Mounts"] if x.get("Destination") == "/var/lib/smite-node"]
-    if (len(vols) != 1 or vols[0].get("Type") != "volume"
-            or vols[0].get("RW") is not True or vols[0].get("Name") != "smite-node-data"):
-        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
-    volume = Path(vols[0]["Source"])
-    if (volume.name != "_data" or volume.parent.name != "smite-node-data"
-            or not volume.is_absolute() or ".." in volume.parts):
-        raise ProvisionHold("BROKER_NODE_TUNNEL_VOLUME_DRIFT")
+    volume = _verified_node_tunnel_volume(runner, node, panel)
     protected.append(volume / "tunnels.json")
 
     def fingerprint(path):
