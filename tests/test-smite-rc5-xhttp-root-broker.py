@@ -907,6 +907,82 @@ class InertBrokerProvisioningTests(unittest.TestCase):
 
 
 
+class BrokerPreservedDirectoryStartupTests(unittest.TestCase):
+    """Real AF_UNIX fixtures, no systemd/container or publication."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="uopti-dead-broker-")
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "broker.sock"
+        self.owner_gid = os.getegid()
+        patcher = patch.object(broker, "SOCKET", self.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_dead(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(str(self.path))
+        self.path.chmod(0o660)
+        s.close()
+        return self.path.lstat()
+
+    def test_dead_verified_root_socket_is_retired_on_restart(self):
+        old = self.make_dead()
+        broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertFalse(self.path.exists())
+        self.assertFalse(self.path.is_symlink())
+        self.assertTrue(stat.S_ISSOCK(old.st_mode))
+
+    def test_active_socket_must_remain_bound(self):
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.path))
+        self.path.chmod(0o660)
+        listener.listen(1)
+        before = self.path.lstat()
+        with self.assertRaisesRegex(broker.BrokerHold, "LISTENER_ACTIVE"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(self.path.lstat().st_ino, before.st_ino)
+
+    def test_wrong_gid_and_mode_hold_without_unlink(self):
+        self.make_dead()
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid + 1)
+        self.assertTrue(self.path.exists())
+        self.path.chmod(0o600)
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertTrue(self.path.exists())
+
+    def test_symlink_and_regular_file_must_hold(self):
+        real = Path(self.tmp.name) / "legitimate"
+        real.write_bytes(b"KEEP")
+        self.path.symlink_to(real)
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(real.read_bytes(), b"KEEP")
+        self.path.unlink()
+        self.path.write_bytes(b"KEEP")
+        with self.assertRaisesRegex(broker.BrokerHold, "UNTRUSTED"):
+            broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertEqual(self.path.read_bytes(), b"KEEP")
+
+    def test_inode_replacement_after_refusal_holds(self):
+        self.make_dead()
+        original = self.path.lstat()
+        old_connect = socket.socket.connect
+        def changing_connect(sock, addr):
+            self.path.unlink()
+            changed = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            changed.bind(str(self.path))
+            self.path.chmod(0o660)
+            changed.close()
+            raise ConnectionRefusedError()
+        with patch.object(socket.socket, "connect", new=changing_connect):
+            with self.assertRaisesRegex(broker.BrokerHold, "REPLACED"):
+                broker._retire_dead_socket_at_start(self.owner_gid)
+        self.assertNotEqual(self.path.lstat().st_ino, original.st_ino)
+
 class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
     """Offline replay, owner, and interruption gates: never touch a live host."""
 
