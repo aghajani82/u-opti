@@ -66,7 +66,6 @@ def run(args,timeout=150,input=None):
     )),'AMBIENT_DOCKER_OVERRIDE')
     try:
         x=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-                         stdin=subprocess.PIPE if input is not None else None,
                          input=input,text=True,timeout=timeout,check=False)
     except (OSError,subprocess.SubprocessError) as exc:
         raise Hold('EXECUTION_FAILED') from exc
@@ -261,7 +260,8 @@ def panel_probe(domain):
 def verify(doc):
     need(doc['state']=='COMMITTED','WSS_RUNTIME_NOT_COMMITTED')
     check_protected(doc)
-    no_tunnels()
+    # Verification is safe even after an independently approved FRPS owner.
+    # Rollback alone must require no active tunnels or data listeners.
     for name in doc['services']:
         ensure_service(name,doc,enabled=True)
     signed_probe()

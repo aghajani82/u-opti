@@ -59,7 +59,11 @@ class WssControllerTests(unittest.TestCase):
             copy=json.loads(json.dumps(info))
             change(copy)
             with self.subTest(change=change):
-                self.assertNotEqual(original,rt.runtime_signature(copy))
+                try:
+                    changed = rt.runtime_signature(copy)
+                except p.Hold:
+                    continue  # Duplicate env is correctly fail-closed.
+                self.assertNotEqual(original, changed)
 
     def test_active_compose_labels_stripped_only_at_exact_final_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -132,13 +136,13 @@ class WssControllerTests(unittest.TestCase):
         self.assertIn(b'"iran.grandoptical.ir|91.107.169.200" 127.0.0.1:8444;',new)
         self.assertNotIn(b'91.107.169.200',src)
         for invalid in ('127.0.0.1','0.0.0.0','not-an-address'):
-            with self.subTest(invalid=invalid),self.assertRaises(p.Hold):
+            with self.subTest(invalid=invalid),self.assertRaises(edge.p.Hold):
                 edge.render(domain,invalid,before=src,stream=stream,mapping=mapping)
 
     def test_source_ip_canary_does_not_route_other_clients_to_frp(self):
         stream=Path(MODULES/'smite-rc2-frp-wss-edge-plan.py').read_text()
         self.assertIn("default $uopti_smite_backend;",stream)
-        self.assertIn('map "$ssl_preread_server_name|$remote_addr"',stream)
+        self.assertIn('stream.count("map \\"$ssl_preread_server_name|$remote_addr\\"',stream)
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

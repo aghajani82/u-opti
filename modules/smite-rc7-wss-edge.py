@@ -154,7 +154,7 @@ def validate_committed(doc):
     rt.panel_probe(doc['domain'])
     print('RC7_WSS_EDGE_VERIFY=PASS_READ_ONLY')
     print('PEER_ONLY='+doc['peer'])
-    print('FRPS_STARTED=NO')
+    print('FRPS_TOUCHED=NO')
 
 def apply(peer):
     with rt.locked():
@@ -175,7 +175,7 @@ def apply(peer):
                  and file(q.ALT_CANDIDATE,0o644)==alt,'EDGE_POSTCONDITION_FAILED')
             doc['state']='COMMITTED';save(doc)
             print('RC7_WSS_EDGE_APPLY=PASS')
-            print('FRPS_STARTED=NO')
+            print('FRPS_TOUCHED=NO')
             print('XHTTP_ROUTE_PUBLISHED=NO')
         except Exception:
             doc['state']='HOLD';save(doc)
