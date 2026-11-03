@@ -396,6 +396,7 @@ def serve() -> None:
         try:
             os.chown(SOCKET, 0, config["peer_gid"])
             os.chmod(SOCKET, 0o660)
+            bound = SOCKET.lstat()
             server.listen(4)
             while True:
                 with server.accept()[0] as connection:
@@ -432,7 +433,8 @@ def serve() -> None:
             except FileNotFoundError:
                 pass
             else:
-                if (stat.S_ISSOCK(final.st_mode) and final.st_uid == 0
+                if ((final.st_dev, final.st_ino) == (bound.st_dev, bound.st_ino)
+                        and stat.S_ISSOCK(final.st_mode) and final.st_uid == 0
                         and final.st_gid == config["peer_gid"]):
                     SOCKET.unlink()
 
