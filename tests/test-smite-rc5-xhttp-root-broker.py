@@ -938,7 +938,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
             stages = [self.proof(), self.proof(preserve=True, service="new"),
                       self.proof(preserve=True, ready=True, service="new")]
         calls = []
-        def run(argv, **kwargs):
+        def run(runner, argv, **kwargs):
             calls.append(tuple(argv))
             if argv[:3] == ["systemctl", "show", self.p.SERVICE_NAME]:
                 return "yes"
@@ -1015,7 +1015,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
              patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
              patch.object(self.p, "_socket_recovery_evidence", side_effect=[before,bad]), \
              patch.object(self.p, "_socket_recovery_command",
-                          side_effect=lambda cmd, **kw: calls.append(cmd) or "yes"), \
+                          side_effect=lambda runner, cmd, **kw: calls.append(cmd) or "yes"), \
              patch.object(self.p, "_replace_existing_trusted_file"), \
              patch.object(self.p, "_wait_for_broker_socket"), \
              patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
@@ -1036,7 +1036,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
              patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
              patch.object(self.p, "_socket_recovery_evidence", side_effect=evidence), \
              patch.object(self.p, "_socket_recovery_command",
-                          side_effect=lambda cmd, **kw: calls.append(cmd) or "yes"), \
+                          side_effect=lambda runner, cmd, **kw: calls.append(cmd) or "yes"), \
              patch.object(self.p, "_replace_existing_trusted_file"), \
              patch.object(self.p, "_wait_for_broker_socket"), \
              patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
