@@ -132,6 +132,8 @@ MODULES=(
     "smite-compose-safe.py"
     "smite-stage15-wss.py"
     "smite-rc7-wss-preflight.py"
+    "smite-rc7-wss-runtime.py"
+    "smite-rc7-wss-edge.py"
     "smite-stage15-active-runtime.py"
     "smite-stage15-kh-inventory.py"
     "smite-stage15-upgrade.py"
