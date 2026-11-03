@@ -104,6 +104,7 @@ class WssControllerTests(unittest.TestCase):
         self.assertIn('IDENTITY_REPLAY_RETAINED=YES',source)
         self.assertNotIn('docker stop 3xui-01',source)
         self.assertNotIn('docker restart 3xui-01',source)
+        self.assertIn('alternate_probe(doc[\'domain\'])',Path(edge.__file__).read_text())
 
     def test_journal_rejects_unknown_state(self):
         with tempfile.TemporaryDirectory() as tmp:

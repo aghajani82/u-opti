@@ -104,6 +104,13 @@ def render(domain,peer,*,before=None,stream=None,mapping=None):
                    else 'EDGE_RENDER_REJECTED') from exc
     return alt,mapping_new
 
+def alternate_probe(domain):
+    # Verify the *new* TLS backend, not only the pre-existing default Panel.
+    rt.run(['curl','--noproxy','*','-4','-fsS',
+            '--connect-timeout','3','--max-time','12',
+            '--resolve',domain+':8444:127.0.0.1',
+            '-o','/dev/null','https://'+domain+':8444/'],timeout=17)
+
 def no_owner_or_data_port():
     rt.no_tunnels()
     need(not p.run(['ss','-H','-lnt','( sport = :20182 )']).strip(),
@@ -152,6 +159,7 @@ def validate_committed(doc):
          file(q.FRP_MAP,doc['map_mode'])==new,'LIVE_EDGE_DRIFT')
     p.run(['nginx','-t'])
     rt.panel_probe(doc['domain'])
+    alternate_probe(doc['domain'])
     print('RC7_WSS_EDGE_VERIFY=PASS_READ_ONLY')
     print('PEER_ONLY='+doc['peer'])
     print('FRPS_TOUCHED=NO')
@@ -170,6 +178,7 @@ def apply(peer):
             p.run(['nginx','-t'])
             p.run(['systemctl','reload','nginx'])
             rt.panel_probe(doc['domain'])
+            alternate_probe(doc['domain'])
             # Verify exact content before committing.
             need(file(q.FRP_MAP,doc['map_mode'])==new
                  and file(q.ALT_CANDIDATE,0o644)==alt,'EDGE_POSTCONDITION_FAILED')
