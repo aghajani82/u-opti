@@ -1590,6 +1590,7 @@ def _foreign_gateway_preflight(
                 or service.get("devices") not in (
                     ["/dev/net/tun:/dev/net/tun"],
                     ["/dev/net/tun:/dev/net/tun:rwm"],
+                    [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}],
                 )
                 or not isinstance(command, list)
                 or command[:6] != ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"]

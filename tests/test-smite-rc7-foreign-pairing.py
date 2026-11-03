@@ -128,7 +128,7 @@ class ForeignRC7Tests(unittest.TestCase):
                 "image": p._FOREIGN_NODE_IMAGE_RC7,
                 "network_mode": "host",
                 "cap_add": ["NET_ADMIN", "SYS_MODULE"],
-                "devices": ["/dev/net/tun:/dev/net/tun"],
+                "devices": [{"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm"}],
                 "command": ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8888"],
                 "environment": {
                     "SMITE_NODE_PANEL_AUTH_MODE": "paused",
@@ -188,6 +188,21 @@ class ForeignRC7Tests(unittest.TestCase):
                     service["devices"] = devices
                     with self.subTest(devices=devices), self.assertRaises(p.WizardHold):
                         p._foreign_gateway_preflight(current)
+                # Docker Compose 5 maps the exact TUN device to a dict.
+                # Reject changes in any field or additional devices.
+                for device in (
+                    {"source": "/dev/other", "target": "/dev/net/tun", "permissions": "rwm"},
+                    {"source": "/dev/net/tun", "target": "/dev/other", "permissions": "rwm"},
+                    {"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rw"},
+                    {"source": "/dev/net/tun", "target": "/dev/net/tun", "permissions": "rwm", "other": 1},
+                ):
+                    service["devices"] = [device]
+                    with self.subTest(device=device), self.assertRaises(p.WizardHold):
+                        p._foreign_gateway_preflight(current)
+                service["devices"] = [{"source": "/dev/net/tun",
+                                      "target": "/dev/net/tun", "permissions": "rwm"}]
+                self.assertEqual(p._foreign_gateway_preflight(current),
+                                 ("iran.grandoptical.ir", "grandoptical.ir", control))
                 service["devices"] = ["/dev/net/tun:/dev/net/tun:rwm"]
                 self.assertEqual(p._foreign_gateway_preflight(current),
                                  ("iran.grandoptical.ir", "grandoptical.ir", control))
