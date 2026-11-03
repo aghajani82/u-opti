@@ -10,6 +10,8 @@ Nginx. A missing grant keeps every route request HOLD.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -17,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import socket
 import stat
 import subprocess
@@ -281,6 +284,7 @@ WorkingDirectory=/usr/local/lib/u-opti/modules
 ExecStart=/usr/bin/python3 -B /usr/local/lib/u-opti/modules/{BROKER_MODULE} --serve
 RuntimeDirectory=u-opti/smite
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
 UMask=0077
 Restart=on-failure
 RestartSec=3s
@@ -548,18 +552,23 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
     # files are intentionally created lazily under /run/lock, so systemd must
     # tolerate their absence when the persistent broker service starts.
     expected_unit = _service_unit(peer_gid)
-    expected_text = expected_unit.decode("ascii")
-    legacy_text = expected_text.replace(
+    # Exactly the previous U-OPTI units are eligible for in-place upgrade:
+    # old optional-lock syntax, with or without runtime preservation. Do not
+    # bless any other service text, symlinks, drop-ins, or changed credentials.
+    current_text = expected_unit.decode("ascii")
+    old_text = current_text.replace("RuntimeDirectoryPreserve=yes\n", "")
+    lock_old = lambda value: value.replace(
         "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
         "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
     ).replace(
         "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
         "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
     )
-    if unit == legacy_text:
+    known_old = {old_text, lock_old(old_text), lock_old(current_text)}
+    if unit in known_old:
         _replace_existing_trusted_file(service, expected_unit, 0o644)
-        unit = expected_text
-    elif unit != expected_text:
+        unit = current_text
+    elif unit != current_text:
         raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
 
     helper = trusted_file(root / "usr/local/libexec" / HELPER_MODULE, 0o755, 1024 * 1024)
