@@ -942,6 +942,8 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
             calls.append(tuple(argv))
             if argv[:3] == ["systemctl", "show", self.p.SERVICE_NAME]:
                 return "yes"
+            if argv[:2] == ["docker", "inspect"]:
+                return '[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
             return ""
         def fakes(*args, **kwargs):
             return next(stages_it)
@@ -949,6 +951,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
         class FakeBroker:
             _lock = staticmethod(nullcontext if active else lambda: (_ for _ in ()).throw(
                 self.p.ProvisionHold("ENGINE_BUSY")))
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
         ctx = [
             patch.object(self.p.os, "geteuid", return_value=0),
             patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")),
@@ -1008,6 +1011,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
         from contextlib import nullcontext
         class FakeBroker:
             _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
         calls=[]
         with patch.object(self.p.os, "geteuid", return_value=0), \
              patch.object(self.p.os, "uname", return_value=SimpleNamespace(nodename="ir")), \
@@ -1015,7 +1019,10 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
              patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
              patch.object(self.p, "_socket_recovery_evidence", side_effect=[before,bad]), \
              patch.object(self.p, "_socket_recovery_command",
-                          side_effect=lambda runner, cmd, **kw: calls.append(cmd) or "yes"), \
+                          side_effect=lambda runner, cmd, **kw: (
+                              calls.append(cmd) or
+                              ('[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
+                               if cmd[:2] == ["docker", "inspect"] else "yes"))), \
              patch.object(self.p, "_replace_existing_trusted_file"), \
              patch.object(self.p, "_wait_for_broker_socket"), \
              patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
@@ -1027,6 +1034,7 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
         from contextlib import nullcontext
         class FakeBroker:
             _lock = staticmethod(nullcontext)
+            _file = staticmethod(lambda *args, **kwargs: b"exact-original-unit")
         calls=[]
         evidence=[self.proof(), self.proof(preserve=True, service="new"),
                   self.proof(preserve=True, service="new")]  # Still orphaned
@@ -1036,7 +1044,10 @@ class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
              patch.object(self.p, "_load_recovery_broker", return_value=FakeBroker), \
              patch.object(self.p, "_socket_recovery_evidence", side_effect=evidence), \
              patch.object(self.p, "_socket_recovery_command",
-                          side_effect=lambda runner, cmd, **kw: calls.append(cmd) or "yes"), \
+                          side_effect=lambda runner, cmd, **kw: (
+                              calls.append(cmd) or
+                              ('[{"State":{"Running":true,"Health":{"Status":"healthy"}}}]'
+                               if cmd[:2] == ["docker", "inspect"] else "yes"))), \
              patch.object(self.p, "_replace_existing_trusted_file"), \
              patch.object(self.p, "_wait_for_broker_socket"), \
              patch("builtins.input", return_value="REATTACH-IR-SMITE-NODE-SNAPSHOT-VERIFIED"):
