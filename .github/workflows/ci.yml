@@ -33,6 +33,7 @@ jobs:
           python3 -B tests/test-smite-stage15-frp-source-version.py -v
           python3 -m pip install -r .stage15-foreign-source/panel/requirements.txt -r .stage15-foreign-source/node/requirements.txt
           python3 -B tests/test-smite-stage15-foreign-pairing.py -v
+          python3 -B tests/test-smite-rc7-foreign-pairing.py -v
           cd .stage15-foreign-source
           python3 -B tests/test_panel_signed_nodeclient.py -v
           python3 -B tests/test_signed_node_outbound_client.py -v
