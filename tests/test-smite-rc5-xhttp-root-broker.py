@@ -967,21 +967,18 @@ class BrokerPreservedDirectoryStartupTests(unittest.TestCase):
             broker._retire_dead_socket_at_start(self.owner_gid)
         self.assertEqual(self.path.read_bytes(), b"KEEP")
 
-    def test_inode_replacement_after_refusal_holds(self):
+    def test_socket_replacement_after_refusal_holds(self):
         self.make_dead()
-        original = self.path.lstat()
-        old_connect = socket.socket.connect
+        # A newly bound socket can legitimately reuse the freed inode.
+        # A regular file replacement makes this negative case deterministic.
         def changing_connect(sock, addr):
             self.path.unlink()
-            changed = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            changed.bind(str(self.path))
-            self.path.chmod(0o660)
-            changed.close()
+            self.path.write_bytes(b"KEEP")
             raise ConnectionRefusedError()
         with patch.object(socket.socket, "connect", new=changing_connect):
             with self.assertRaisesRegex(broker.BrokerHold, "REPLACED"):
                 broker._retire_dead_socket_at_start(self.owner_gid)
-        self.assertNotEqual(self.path.lstat().st_ino, original.st_ino)
+        self.assertEqual(self.path.read_bytes(), b"KEEP")
 
 class BrokerSocketLifecycleRecoveryTests(unittest.TestCase):
     """Offline replay, owner, and interruption gates: never touch a live host."""
