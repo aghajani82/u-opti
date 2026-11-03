@@ -21,9 +21,14 @@ trap cleanup EXIT
 command -v docker >/dev/null
 docker info >/dev/null
 cat > "$lab/server.py" <<'PY'
-import socket,sys,os
+import socket,sys,os,importlib.util,pathlib
 path=sys.argv[1]
-if os.path.lexists(path):os.unlink(path)
+spec=importlib.util.spec_from_file_location("fixture_broker",sys.argv[2])
+broker=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(broker)
+broker.SOCKET=pathlib.Path(path)
+# Use the actual U-OPTI safe dead-socket lifecycle, never unconditional unlink.
+broker._retire_dead_socket_at_start(0)
 s=socket.socket(socket.AF_UNIX);s.bind(path);os.chmod(path,0o660);s.listen(4)
 while True:
     c,_=s.accept();c.sendall(b'OK');c.close()
@@ -32,7 +37,7 @@ cat > "$path" <<EOF
 [Unit]
 Description=Disposable Stage15 socket inode regression
 [Service]
-ExecStart=/usr/bin/python3 $lab/server.py $runtime/broker.sock
+ExecStart=/usr/bin/python3 $lab/server.py $runtime/broker.sock $(pwd)/modules/smite-rc5-xhttp-root-broker.py
 RuntimeDirectory=$name
 RuntimeDirectoryMode=0750
 EOF
