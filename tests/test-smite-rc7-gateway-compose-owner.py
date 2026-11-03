@@ -95,7 +95,7 @@ class GatewayComposeOwnerTest(unittest.TestCase):
         self.assertIn('if [[ ! "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]]', gateway)
         self.assertIn('[ "$files" != "$SMITE_NODE_COMPOSE" ]', gateway)
         body = installer.split("smite_install_sanaei_foreign() {", 1)[1].split(
-            "\nsmite_install_upgrade_signed_field_trial()", 1
+            "\nsmite_install_field_trial_patch_compose_image()", 1
         )[0]
         self.assertIn('2.0.0-rc.1|2.0.0-rc.7) signed_foreign=1', body)
         self.assertNotIn('"$SMITE_INSTALL_PROFILE"', body)
