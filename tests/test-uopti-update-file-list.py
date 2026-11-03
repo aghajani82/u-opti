@@ -88,6 +88,12 @@ class UpdaterFileListTests(unittest.TestCase):
                     self.assertIn(helper, quoted_names(array_body(self.source, array)))
             self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
+    def test_rc7_frp_enrollment_in_installer_and_updater(self):
+        helper = "smite-rc7-frp-enrollment.py"
+        for name in ("UPDATE_FILE_NAMES", "UPDATE_URLS", "UPDATE_TARGETS", "BACKUP_FILES"):
+            self.assertIn(helper, quoted_names(array_body(self.source, name)))
+        self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
+
     def test_fresh_install_packages_all_updater_managed_modules(self):
         """First installs must not omit modules required by later RC flows."""
         installed = quoted_names(array_body(self.installer, "MODULES"))
