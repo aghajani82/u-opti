@@ -107,6 +107,7 @@ class FrpOperator(unittest.TestCase):
             "frp": {"sha256": "a" * 64, "server_sha256": "b" * 64}
         }}, sort_keys=True).encode()
         (directory / "engines.json").write_bytes(content)
+        (directory / "engines.json").chmod(0o600)
         raw = b"untrusted-inventory" if altered_manifest else content
         digest = hashlib.sha256(raw).hexdigest()
         binaries = {"frpc": "a" * 64, "frps": "c" * 64 if altered_binary else "b" * 64}
