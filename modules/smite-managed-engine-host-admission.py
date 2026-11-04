@@ -79,6 +79,14 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "SAVED_TUNNELS": "UNKNOWN",
         "SAVED_TUNNEL_REGISTRY_SHA256": "UNVERIFIED",
         "NODE_CONTAINER_ID_SHA256": "UNVERIFIED",
+        "FRPC_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPS_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPC_INSTANCE_SHA256": "UNVERIFIED",
+        "FRPS_INSTANCE_SHA256": "UNVERIFIED",
+        "BROKER_SOCKET_LOCAL": "UNVERIFIED",
+        "BROKER_SOCKET_ID_SHA256": "UNVERIFIED",
+        "WSS_EDGE_JOURNAL_LOCAL": "UNVERIFIED",
+        "WSS_EDGE_JOURNAL_SHA256": "UNVERIFIED",
         "TARGET_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE_LOCAL_REASON": "UNVERIFIED",
@@ -144,6 +152,14 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
             "PERSISTED_TUNNEL_REGISTRY_SHA256", "UNVERIFIED")
         output["NODE_CONTAINER_ID_SHA256"] = evidence.get(
             "NODE_CONTAINER_ID_SHA256", "UNVERIFIED")
+        for key in (
+            "FRPC_PROCESS_LOCAL", "FRPS_PROCESS_LOCAL",
+            "FRPC_INSTANCE_SHA256", "FRPS_INSTANCE_SHA256",
+            "BROKER_SOCKET_LOCAL", "BROKER_SOCKET_ID_SHA256",
+            "WSS_EDGE_JOURNAL_LOCAL", "WSS_EDGE_JOURNAL_SHA256",
+        ):
+            # Local hints never alter the signed pair or install decision.
+            output[key] = evidence.get(key, "UNVERIFIED")
         if evidence.get("HOST_PREFLIGHT") != "PASS_LOCAL_ONLY_INCOMPLETE":
             if evidence.get("HOST_PREFLIGHT") == "HOLD_EXISTING_TUNNELS":
                 # Safe local inventory can still be shown on a production

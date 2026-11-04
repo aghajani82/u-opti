@@ -91,6 +91,38 @@ continues to return `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` and
 simulate mismatched container identity, modified stored tunnel bytes and
 corrupt/private registry before this can be merged.
 
+## IR FRP / Broker / WSS local continuity hints — read-only
+
+The existing Backhaul option 2 report now includes **best-effort local hints**,
+never live process/service health claims or restart authority:
+
+- `FRPC_PROCESS_LOCAL`, `FRPS_PROCESS_LOCAL`: `OBSERVED_UNATTESTED`,
+  `NOT_OBSERVED`, or `UNVERIFIED`. Only exact kernel `/proc/PID/comm`
+  process names are read (no arguments, environment, open FDs or secrets).
+  `FRPC_INSTANCE_SHA256` and `FRPS_INSTANCE_SHA256` hash sorted PID + kernel
+  starttime pairs, so a changed process can be detected locally. A missing
+  process is **not** proof that a tunnel is down; a matching name does not
+  prove it belongs to the reviewed FRPS Owner.
+- `BROKER_SOCKET_LOCAL` / `BROKER_SOCKET_ID_SHA256` (IR only): inspect
+  the fixed `/run/u-opti/smite/xhttp-broker.sock` pathname and its parent.
+  A root-owned `0660` socket with the expected dedicated nonzero GID
+  and `0750` parent yields `PRESENT_UNATTESTED` and a hash of dev+inode.
+  This does **not** connect to the socket or prove it accepts requests.
+  Invalid ownership/type/mode is `UNTRUSTED`; missing is `ABSENT`.
+- `WSS_EDGE_JOURNAL_LOCAL` / `WSS_EDGE_JOURNAL_SHA256` (IR only):
+  hash exact strict root-owned `0600` committed RC7 WSS Edge journal bytes;
+  duplicate JSON keys, malformed ownership/state and symlinks cannot claim
+  `COMMITTED_LOCAL_UNATTESTED`. No peer IP or TLS secret is printed. The
+  journal is **not** proof of currently healthy TLS/443.
+
+These hints are intentionally reported beside saved-tunnel hard HOLD; they
+are only inputs for later **independently authorized** before/after checks,
+not a signed FRP owner/child inventory, Broker connectivity proof, WSS
+end-to-end test, provider snapshot or a replacement for existing signed
+health/replay probes. A changed hash is a reason for HOLD, never an automatic
+restore/restart. On non-IR roles Broker/WSS fields remain `UNVERIFIED`.
+No new menu entry, login UI, installation mechanism or daemon is added.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
