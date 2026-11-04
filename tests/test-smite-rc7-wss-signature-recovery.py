@@ -41,6 +41,71 @@ class Recovery(unittest.TestCase):
             rt.check_runtime_signature(a,baseline)
         self.assertTrue(rt.legacy_dns_proof(a,baseline['signature']))
 
+    def test_ir_committed_legacy_trial_matches_only_original_dns_empty_permutations(self):
+        # This uses the original SHA. No journal or policy field is rewritten.
+        for before in itertools.product((None,[]),repeat=3):
+            for after in itertools.product((None,[]),repeat=3):
+                original=obj(); original['HostConfig'].update(zip(rt.DNS_EMPTY_FIELDS,before))
+                live=obj(); live['HostConfig'].update(zip(rt.DNS_EMPTY_FIELDS,after))
+                signature=rt.runtime_signature(original)
+                baseline={'signature':signature}
+                rt.check_runtime_signature(live,baseline,allow_legacy_ir_dns_proof=True)
+                self.assertEqual(baseline,{'signature':signature})
+
+    def test_ir_legacy_dns_trial_rejects_every_other_drift(self):
+        original=obj()
+        original_sig=rt.runtime_signature(original)
+        baseline={'signature':original_sig}
+        for key,value in (('Privileged',True),('CapAdd',['SYS_ADMIN']),
+                          ('SecurityOpt',['seccomp=unconfined']),('NetworkMode','bridge'),
+                          ('UnknownDockerField',None),('ReadonlyRootfs',True),
+                          ('RestartPolicy',{'Name':'always','MaximumRetryCount':0}),
+                          ('Dns',['1.1.1.1']),('DnsSearch',['evil']),
+                          ('DnsOptions',['ndots:5']),('Binds',['/etc:/etc:rw'])):
+            live=copy.deepcopy(original)
+            live['HostConfig']['Dns']=[]
+            live['HostConfig'][key]=value
+            with self.subTest(key=key),self.assertRaisesRegex(rt.Hold,'WSS_RUNTIME_SECURITY_DRIFT'):
+                rt.check_runtime_signature(live,baseline,allow_legacy_ir_dns_proof=True)
+        for mutate in (lambda o:o['Config'].update(Image='other'),
+                       lambda o:o['Config'].update(Env=['SECRET=changed']),
+                       lambda o:o['Config'].update(Cmd=['sh']),
+                       lambda o:o['Mounts'][0].update(RW=True),
+                       lambda o:o['HostConfig'].pop('Dns')):
+            live=copy.deepcopy(original)
+            live['HostConfig']['Dns']=[]
+            mutate(live)
+            with self.assertRaises(rt.Hold):
+                rt.check_runtime_signature(live,baseline,allow_legacy_ir_dns_proof=True)
+        with self.assertRaisesRegex(rt.Hold,'UNKNOWN_RUNTIME_SIGNATURE_POLICY'):
+            rt.check_runtime_signature(original,dict(baseline,signature_policy='unexpected'),
+                                       allow_legacy_ir_dns_proof=True)
+
+    def test_ir_only_committed_scope_is_passed_from_service_gate(self):
+        # Ensure the bypass is NOT routed into foreign or incomplete WSS journals.
+        source=obj()
+        source['Config']['Env'].append('SMITE_FRP_STANDARD_WSS=1')
+        source['Config']['Labels']={
+            'com.docker.compose.project.config_files':'/config,'+str(rt.overlay_path('smite-panel'))
+        }
+        digest=rt.runtime_signature(source)
+        live=copy.deepcopy(source);live['HostConfig']['Dns']=[]
+        common={'domain':'ir.example.test','project':'trial','baseline':{'smite-panel':{'files':['/config'],
+                                                        'signature':digest}}}
+        with patch.object(rt,'inspect_container',return_value=live), \
+             patch.object(rt.p,'runtime_env',side_effect=lambda _obj: {'SMITE_FRP_STANDARD_WSS':'1','SECRET':'private'}), \
+             patch.object(rt.p,'service_gate'), \
+             patch.object(rt.p,'compose_files',return_value=('trial',['/config'])):
+            for role,state,should_pass in [('ir','COMMITTED',True),
+                                           ('ir','PREPARED',False),
+                                           ('foreign','COMMITTED',False)]:
+                doc=dict(common,role=role,state=state)
+                if should_pass:
+                    rt.ensure_service('smite-panel',doc,enabled=True)
+                else:
+                    with self.assertRaisesRegex(rt.Hold,'WSS_RUNTIME_SECURITY_DRIFT'):
+                        rt.ensure_service('smite-panel',doc,enabled=True)
+
     def test_negative_security_unknown_and_nonempty_dns_changes(self):
         a=obj(); base={'signature':rt.runtime_signature(a),'signature_policy':rt.DNS_EMPTY_POLICY}
         for key,value in [('Privileged',True),('CapAdd',['SYS_ADMIN']),
