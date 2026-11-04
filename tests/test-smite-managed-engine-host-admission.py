@@ -239,7 +239,7 @@ class SharedHostAdmission(unittest.TestCase):
     def test_signed_pair_never_bypasses_existing_saved_tunnel_hold(self):
         inputs = self.signed_inputs()
         (self.data / "tunnels.json").write_text(json.dumps({
-            "saved": {"frp": {"secret": "DO_NOT_PRINT_ME"}}
+            "saved": {"core": "frp", "spec": {"secret": "DO_NOT_PRINT_ME"}}
         }))
         with patch.object(gate.signed_pair.subprocess, "run",
                           side_effect=self.signed_cosign):
@@ -255,7 +255,7 @@ class SharedHostAdmission(unittest.TestCase):
     def test_signed_production_frp_inventory_still_holds_saved_tunnels(self):
         inputs = self.signed_inputs()
         (self.data / "tunnels.json").write_text(json.dumps({
-            "saved": {"frp": {"secret": "DO_NOT_PRINT_ME"}}
+            "saved": {"core": "frp", "spec": {"secret": "DO_NOT_PRINT_ME"}}
         }))
         def local_fixture(engine, node):
             return {"state": "ENROLLED_UNVERIFIED" if engine == "frp" else "NOT_INSTALLED",
