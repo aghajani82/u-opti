@@ -252,6 +252,29 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertEqual(result["INSTALL_ALLOWED"], "NO")
         self.assertNotIn("DO_NOT_PRINT_ME", str(result))
 
+    def test_signed_production_frp_inventory_still_holds_saved_tunnels(self):
+        inputs = self.signed_inputs()
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "saved": {"frp": {"secret": "DO_NOT_PRINT_ME"}}
+        }))
+        def local_fixture(engine, node):
+            return {"state": "ENROLLED_UNVERIFIED" if engine == "frp" else "NOT_INSTALLED",
+                    "reason": "LOCAL_ONLY"}
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign), \
+             patch.object(gate, "local_state", side_effect=local_fixture):
+            out = gate.report("backhaul", self.node, runtime=self.runtime,
+                              min_bytes=4096, **inputs)
+        self.assertEqual(out["TARGET_ENGINE"], "NOT_INSTALLED")
+        self.assertEqual(out["OTHER_ENGINE"], "ENROLLED_UNVERIFIED")
+        self.assertEqual(out["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+        self.assertEqual(out["REASON"], "SAVED_TUNNELS_PRESENT")
+        self.assertEqual(out["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(out["SIGNED_NODE_HEALTH_AND_REPLAY"], "UNVERIFIED")
+        self.assertEqual(out["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(out["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DO_NOT_PRINT_ME", str(out))
+
     def test_incomplete_or_invalid_signed_pair_never_queries_docker(self):
         inputs = self.signed_inputs()
         examples = [
