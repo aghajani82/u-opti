@@ -28,6 +28,14 @@ REVIEWED_NODE_DIGEST = re.compile(
 )
 PRIVATE_PROFILES = {"managed", "strict"}
 NO_PROOF = "UNVERIFIED_MANUAL_OR_SEPARATE_SIGNED_TEST"
+# An RC6/RC7 fresh install may retain its transaction-owned named volume.
+# It is admitted for read-only inventory only with the exact COMMITTED journal.
+RC6_JOURNAL = Path("/var/lib/u-opti/rc6-install-journal/current.json")
+RC6_ID = re.compile(r"^uopti_rc6_[0-9a-f]{32}$")
+RC6_SOURCES = frozenset({
+    "9a1270b31e8d44f13d09b71ab6b9798410b09c12",
+    "25ff25585be3f7ff1c8b73b39a23d0509f9a2312",
+})
 
 
 class GateHold(ValueError):
@@ -78,6 +86,101 @@ def _node_profile(env_data: bytes) -> str:
     raise GateHold("UNRECOGNIZED_CORE_ROLE")
 
 
+def _declared_node_volume_name(compose: str) -> str:
+    """Extract exactly one top-level node-data volume name (not any nested name)."""
+    in_volumes = in_node_data = False
+    sections = definitions = 0
+    names: list[str] = []
+    for line in compose.splitlines():
+        if line == "volumes:":
+            sections += 1
+            in_volumes, in_node_data = True, False
+            continue
+        if in_volumes and line and not line[0].isspace() and not line.startswith("#"):
+            in_volumes = in_node_data = False
+        if not in_volumes:
+            continue
+        if line == "  node-data:":
+            definitions += 1
+            in_node_data = True
+            continue
+        if (line.startswith("  ") and not line.startswith("    ")
+                and not line.lstrip().startswith("#")):
+            in_node_data = False
+        if in_node_data:
+            m = re.fullmatch(r"    name:\s*([a-zA-Z0-9_-]+)\s*", line)
+            if m:
+                names.append(m.group(1))
+            elif re.match(r"    name\s*:", line):
+                raise GateHold("UNTRUSTED_NODE_COMPOSE")
+    if sections != 1 or definitions != 1 or len(names) != 1:
+        raise GateHold("UNTRUSTED_NODE_COMPOSE")
+    return names[0]
+
+
+def _read_rc6_journal_bytes(path: Path = RC6_JOURNAL) -> bytes:
+    """Read only a root-owned, non-symlink, private transaction journal."""
+    try:
+        for parent in (path.parent.parent.parent, path.parent.parent, path.parent):
+            st = parent.lstat()
+            if (not stat.S_ISDIR(st.st_mode) or st.st_uid != 0
+                    or st.st_mode & 0o022):
+                raise GateHold("UNTRUSTED_RC6_JOURNAL")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                    or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != 0o600
+                    or st.st_nlink != 1 or not 0 < st.st_size <= 16384):
+                raise GateHold("UNTRUSTED_RC6_JOURNAL")
+            with os.fdopen(fd, "rb", closefd=False) as file:
+                raw = file.read(16385)
+            if len(raw) > 16384:
+                raise GateHold("UNTRUSTED_RC6_JOURNAL")
+            return raw
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise GateHold("UNTRUSTED_RC6_JOURNAL") from exc
+
+
+def _committed_rc6_volume(raw: bytes, role: str) -> str:
+    """Bind a volume to the exact trusted install journal, never by name alone."""
+    def unique_pairs(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise GateHold("UNTRUSTED_RC6_JOURNAL")
+            out[key] = value
+        return out
+    try:
+        journal = json.loads(raw, object_pairs_hook=unique_pairs)
+    except (UnicodeError, ValueError, TypeError) as exc:
+        raise GateHold("UNTRUSTED_RC6_JOURNAL") from exc
+    if (not isinstance(journal, dict)
+            or type(journal.get("schema")) is not int
+            or journal.get("schema") != 1
+            or journal.get("state") != "COMMITTED"
+            or journal.get("source") not in RC6_SOURCES
+            or journal.get("role") != {"IR": "panel-iran", "KH": "foreign"}.get(role)
+            or not isinstance(journal.get("id"), str)
+            or RC6_ID.fullmatch(journal["id"]) is None):
+        raise GateHold("UNTRUSTED_RC6_JOURNAL")
+    return journal["id"] + "_node-data"
+
+
+def _approved_data_volume_name(compose: str, role: str) -> str:
+    name = _declared_node_volume_name(compose)
+    if name == "smite-node-data":
+        return name  # Existing reviewed static-volume installations.
+    if not re.fullmatch(r"uopti_rc6_[0-9a-f]{32}_node-data", name):
+        raise GateHold("UNTRUSTED_NODE_COMPOSE")
+    # An apparently valid RC6 prefix alone never grants admission.
+    if name != _committed_rc6_volume(_read_rc6_journal_bytes(), role):
+        raise GateHold("UNTRUSTED_RC6_JOURNAL")
+    return name
+
+
 def read_only_docker_inspect(*, name: str = "smite-node", runner=subprocess.run) -> dict:
     """The single subprocess permitted in this module: 'docker inspect'."""
     if not NAME.fullmatch(name):
@@ -101,7 +204,8 @@ def read_only_docker_inspect(*, name: str = "smite-node", runner=subprocess.run)
 
 
 def check_runtime(report: dict, *, node_dir: Path,
-                  expected_node_image: str | None = None) -> tuple[str, Path, str]:
+                  expected_node_image: str | None = None,
+                  expected_data_volume: str = "smite-node-data") -> tuple[str, Path, str]:
     """Inspect exact container identity and an externally pinned Node digest.
 
     Production-like registry images are never trusted from Docker metadata
@@ -164,7 +268,7 @@ def check_runtime(report: dict, *, node_dir: Path,
     # This is NOT a bind mount. Silently demanding a bind would reject
     # legitimate fresh Smite Core installations.
     if (data_mount is None or data_mount.get("Type") != "volume"
-            or data_mount.get("Name") != "smite-node-data"
+            or data_mount.get("Name") != expected_data_volume
             or data_mount.get("Driver") != "local"):
         raise GateHold("WRONG_NODE_NAMED_VOLUME")
     data_path = Path(data_mount["Source"])
@@ -228,16 +332,19 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
                 or not re.search(r"(?m)^\s+network_mode: host\s*$", compose)
                 or re.search(r"(?m)^\s+ports:\s*$", compose)
                 or not re.search(r"(?m)^\s+- ./config:/etc/smite-node\s*$", compose)
-                or not re.search(r"(?m)^\s+- node-data:/var/lib/smite-node\s*$", compose)
-                or not re.search(r"(?m)^\s+name: smite-node-data\s*$", compose)):
+                or not re.search(r"(?m)^\s+- node-data:/var/lib/smite-node\s*$", compose)):
             raise GateHold("UNTRUSTED_NODE_COMPOSE")
+        data_volume_name = _approved_data_volume_name(compose, role)
         result["COMPOSE_SHA256"] = hashlib.sha256(compose.encode("utf-8")).hexdigest()
         node_report = runtime if runtime is not None else read_only_docker_inspect(runner=runner)
         _image, data_dir, image_class = check_runtime(
-            node_report, node_dir=node, expected_node_image=expected_node_image
+            node_report, node_dir=node, expected_node_image=expected_node_image,
+            expected_data_volume=data_volume_name
         )
         result["DOCKER_NODE"] = "RUNNING_REVIEWED_IMAGE"
         result["PERSISTENT_DATA"] = "LOCAL_NAMED_VOLUME_CONFIRMED"
+        result["VOLUME_PROOF"] = ("COMMITTED_RC6_JOURNAL" if data_volume_name != "smite-node-data"
+                                  else "REVIEWED_STATIC_VOLUME")
         result["IMAGE_REFERENCE_CLASS"] = image_class
         count = tunnel_count(data_dir)
         result["PERSISTED_TUNNELS"] = "ZERO" if count == 0 else "EXISTING_DO_NOT_RESTART"

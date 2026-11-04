@@ -30,6 +30,12 @@ volumes:
   node-data:
     name: smite-node-data
 """
+RC6_ID = "uopti_rc6_" + "7" * 32
+RC6_VOLUME = RC6_ID + "_node-data"
+RC6_JOURNAL = {
+    "schema": 1, "source": "9a1270b31e8d44f13d09b71ab6b9798410b09c12",
+    "state": "COMMITTED", "id": RC6_ID, "role": "panel-iran",
+}
 ENV = """NODE_ROLE=foreign
 SMITE_NODE_PANEL_AUTH_MODE=signed
 SMITE_AGENT_AUTH_MODE=strict
@@ -87,6 +93,103 @@ class ReadOnlyGate(unittest.TestCase):
         self.assertEqual(status["FRP_INSTALL_REQUIRED"], "NO")
         self.assertNotIn("DONT_PRINT", str(status))
 
+
+
+    def use_rc6_ir(self):
+        """Model the real IR layout, leaving the production gate HOLD."""
+        (self.node / ".env").write_text(ENV.replace("NODE_ROLE=foreign", "NODE_ROLE=iran"))
+        (self.node / "docker-compose.yml").write_text(
+            COMPOSE.replace("name: smite-node-data", "name: " + RC6_VOLUME))
+        self.runtime["Mounts"][1]["Name"] = RC6_VOLUME
+
+    def test_committed_rc6_volume_proves_ir_compose_and_runtime_without_activation(self):
+        self.use_rc6_ir()
+        with patch.object(gate, "_read_rc6_journal_bytes",
+                          return_value=json.dumps(RC6_JOURNAL).encode()):
+            result = self.report()
+        self.assertEqual(result["NODE_ROLE"], "IR")
+        self.assertEqual(result["PERSISTENT_DATA"], "LOCAL_NAMED_VOLUME_CONFIRMED")
+        self.assertEqual(result["VOLUME_PROOF"], "COMMITTED_RC6_JOURNAL")
+        self.assertEqual(result["HOST_PREFLIGHT"], "PASS_LOCAL_ONLY_INCOMPLETE")
+        self.assertEqual(result["HOST_INSTALL_AUTHORIZED"], "NO")
+
+    def test_committed_rc6_keeps_existing_tunnels_on_hold(self):
+        self.use_rc6_ir()
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "frp": {"core": "frp", "spec": {"secret": "DONT_PRINT"}}
+        }))
+        with patch.object(gate, "_read_rc6_journal_bytes",
+                          return_value=json.dumps(RC6_JOURNAL).encode()):
+            result = self.report()
+        self.assertEqual(result["HOST_PREFLIGHT"], "HOLD_EXISTING_TUNNELS")
+        self.assertEqual(result["HOST_INSTALL_AUTHORIZED"], "NO")
+        self.assertNotIn("DONT_PRINT", str(result))
+
+    def test_rc6_journal_must_be_committed_matching_role_and_source(self):
+        self.use_rc6_ir()
+        bad_cases = [
+            {"state": "INSTALLING"}, {"state": "ROLLED_BACK"},
+            {"role": "foreign"}, {"source": "0" * 40},
+            {"schema": 2}, {"id": "uopti_rc6_" + "0" * 32},
+        ]
+        for change in bad_cases:
+            with self.subTest(change=change):
+                value = dict(RC6_JOURNAL, **change)
+                with patch.object(gate, "_read_rc6_journal_bytes",
+                                  return_value=json.dumps(value).encode()):
+                    result = self.report()
+                self.assertEqual(result["HOST_PREFLIGHT"], "HOLD")
+                self.assertEqual(result["HOLD_REASON"], "UNTRUSTED_RC6_JOURNAL")
+
+    def test_rc6_wrong_runtime_name_and_untrusted_journal_hold(self):
+        self.use_rc6_ir()
+        raw = json.dumps(RC6_JOURNAL).encode()
+        with patch.object(gate, "_read_rc6_journal_bytes", return_value=raw):
+            self.runtime["Mounts"][1]["Name"] = "smite-node-data"
+            self.assertEqual(self.report()["HOLD_REASON"], "WRONG_NODE_NAMED_VOLUME")
+            self.runtime["Mounts"][1]["Name"] = RC6_VOLUME
+            self.runtime["Mounts"][1]["Type"] = "bind"
+            self.assertEqual(self.report()["HOLD_REASON"], "WRONG_NODE_NAMED_VOLUME")
+        with patch.object(gate, "_read_rc6_journal_bytes",
+                          side_effect=gate.GateHold("UNTRUSTED_RC6_JOURNAL")):
+            self.assertEqual(self.report()["HOLD_REASON"], "UNTRUSTED_RC6_JOURNAL")
+
+    def test_rc6_unrelated_prefix_duplicate_declarations_and_extra_names_hold(self):
+        self.use_rc6_ir()
+        source = (self.node / "docker-compose.yml").read_text()
+        for variant in (
+            source.replace(RC6_VOLUME, "uopti_rc6_" + "a" * 32 + "_node-data"),
+            source.replace("    name: " + RC6_VOLUME,
+                           "    name: " + RC6_VOLUME + "\n    name: " + RC6_VOLUME),
+            source + "\nvolumes:\n  node-data:\n    name: " + RC6_VOLUME + "\n",
+        ):
+            with self.subTest(variant=variant[-80:]):
+                (self.node / "docker-compose.yml").write_text(variant)
+                with patch.object(gate, "_read_rc6_journal_bytes",
+                                  return_value=json.dumps(RC6_JOURNAL).encode()):
+                    self.assertEqual(self.report()["HOST_PREFLIGHT"], "HOLD")
+        (self.node / "docker-compose.yml").write_text(source)
+
+    def test_rc6_json_duplicate_keys_and_journal_file_security_fail(self):
+        double = (b'{"schema":1,"source":"' +
+                  RC6_JOURNAL["source"].encode() +
+                  b'","state":"COMMITTED","role":"panel-iran","id":"' +
+                  RC6_ID.encode() + b'","id":"' + RC6_ID.encode() + b'"}')
+        with self.assertRaises(gate.GateHold):
+            gate._committed_rc6_volume(double, "IR")
+        with self.assertRaises(gate.GateHold):
+            gate._read_rc6_journal_bytes(self.root / "nonexistent" / "current.json")
+        unowned = self.root / "current.json"
+        unowned.write_text(json.dumps(RC6_JOURNAL))
+        with self.assertRaises(gate.GateHold):
+            gate._read_rc6_journal_bytes(unowned)
+
+    def test_static_volume_works_without_rc6_journal(self):
+        with patch.object(gate, "_read_rc6_journal_bytes",
+                          side_effect=AssertionError("static volume needs no RC6 journal")):
+            result = self.report()
+        self.assertEqual(result["VOLUME_PROOF"], "REVIEWED_STATIC_VOLUME")
+        self.assertEqual(result["HOST_INSTALL_AUTHORIZED"], "NO")
 
     def test_registry_candidate_requires_exact_external_digest_pin(self):
         self.runtime["Config"]["Image"] = "ghcr.io/aghajani82/smite-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
