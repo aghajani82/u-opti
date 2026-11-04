@@ -77,6 +77,8 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "NODE_CONTAINER": "UNVERIFIED",
         "PERSISTENT_STORAGE": "UNVERIFIED",
         "SAVED_TUNNELS": "UNKNOWN",
+        "SAVED_TUNNEL_REGISTRY_SHA256": "UNVERIFIED",
+        "NODE_CONTAINER_ID_SHA256": "UNVERIFIED",
         "TARGET_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE_LOCAL_REASON": "UNVERIFIED",
@@ -138,6 +140,10 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         output["NODE_CONTAINER"] = evidence.get("DOCKER_NODE", "UNVERIFIED")
         output["PERSISTENT_STORAGE"] = evidence.get("PERSISTENT_DATA", "UNVERIFIED")
         output["SAVED_TUNNELS"] = evidence.get("PERSISTED_TUNNELS", "UNKNOWN")
+        output["SAVED_TUNNEL_REGISTRY_SHA256"] = evidence.get(
+            "PERSISTED_TUNNEL_REGISTRY_SHA256", "UNVERIFIED")
+        output["NODE_CONTAINER_ID_SHA256"] = evidence.get(
+            "NODE_CONTAINER_ID_SHA256", "UNVERIFIED")
         if evidence.get("HOST_PREFLIGHT") != "PASS_LOCAL_ONLY_INCOMPLETE":
             if evidence.get("HOST_PREFLIGHT") == "HOLD_EXISTING_TUNNELS":
                 # Safe local inventory can still be shown on a production

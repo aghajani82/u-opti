@@ -280,10 +280,16 @@ def check_runtime(report: dict, *, node_dir: Path,
     return image, data_path, image_class
 
 
-def tunnel_count(data_dir: Path) -> int:
+def tunnel_inventory(data_dir: Path) -> tuple[int, str]:
+    """Exact persisted registry bytes digest; no raw tunnel specs or tokens.
+
+    ABSENT is intentionally different from SHA256('{}'): missing files must
+    not be mistaken for a validated empty registry. This is NOT a signed
+    tunnel-health proof or a host installation authorization.
+    """
     saved = data_dir / "tunnels.json"
     if not saved.exists() and not saved.is_symlink():
-        return 0
+        return 0, "ABSENT"
     blob = _local_file(saved, max_bytes=MAX_TUNNELS_BYTES, require_root=True)
     try:
         tunnels = json.loads(blob)
@@ -296,7 +302,12 @@ def tunnel_count(data_dir: Path) -> int:
                 not isinstance(value.get("core"), str) or
                 not isinstance(value.get("spec"), dict)):
             raise GateHold("UNTRUSTED_TUNNEL_REGISTRY")
-    return len(tunnels)
+    return len(tunnels), hashlib.sha256(blob).hexdigest()
+
+
+def tunnel_count(data_dir: Path) -> int:
+    # Preserve the existing count-only caller contract.
+    return tunnel_inventory(data_dir)[0]
 
 
 def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
@@ -309,6 +320,8 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         "DOCKER_NODE": "HOLD",
         "PERSISTENT_DATA": "UNVERIFIED",
         "PERSISTED_TUNNELS": "UNKNOWN",
+        "PERSISTED_TUNNEL_REGISTRY_SHA256": "UNVERIFIED",
+        "NODE_CONTAINER_ID_SHA256": "UNVERIFIED",
         "DISK_SPACE": "HOLD",
         "ENGINE": "BACKHAUL_ONLY",
         "FRP_INSTALL_REQUIRED": "NO",
@@ -346,7 +359,14 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         result["VOLUME_PROOF"] = ("COMMITTED_RC6_JOURNAL" if data_volume_name != "smite-node-data"
                                   else "REVIEWED_STATIC_VOLUME")
         result["IMAGE_REFERENCE_CLASS"] = image_class
-        count = tunnel_count(data_dir)
+        # Docker's raw container ID is not itself a signed runtime proof.
+        # Export only its SHA256, and never invent an ID for a missing field.
+        container_id = node_report.get("Id")
+        if isinstance(container_id, str) and re.fullmatch(r"[a-f0-9]{64}", container_id):
+            result["NODE_CONTAINER_ID_SHA256"] = hashlib.sha256(
+                container_id.encode("ascii")).hexdigest()
+        count, saved_sha256 = tunnel_inventory(data_dir)
+        result["PERSISTED_TUNNEL_REGISTRY_SHA256"] = saved_sha256
         result["PERSISTED_TUNNELS"] = "ZERO" if count == 0 else "EXISTING_DO_NOT_RESTART"
         try:
             free = os.statvfs(node).f_bavail * os.statvfs(node).f_frsize

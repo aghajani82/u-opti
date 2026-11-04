@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -239,6 +240,59 @@ class ReadOnlyGate(unittest.TestCase):
         self.assertEqual(out["HOST_PREFLIGHT"], "HOLD_EXISTING_TUNNELS")
         self.assertEqual(out["HOST_INSTALL_AUTHORIZED"], "NO")
         self.assertNotIn("DONT_PRINT", str(out))
+
+    def test_preservation_receipts_hash_exact_bytes_without_leaking_tunnels(self):
+        raw_id = "a" * 64
+        self.runtime["Id"] = raw_id
+        missing = self.report()
+        self.assertEqual(missing["PERSISTED_TUNNEL_REGISTRY_SHA256"], "ABSENT")
+        self.assertEqual(missing["NODE_CONTAINER_ID_SHA256"],
+                         hashlib.sha256(raw_id.encode()).hexdigest())
+        self.assertNotIn(raw_id, str(missing))
+
+        saved = self.data / "tunnels.json"
+        original = json.dumps({"live": {
+            "core": "frp", "spec": {"token": "SECRET_TUNNEL_A", "port": 20182}
+        }}).encode()
+        saved.write_bytes(original)
+        existing = self.report()
+        self.assertEqual(existing["PERSISTED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(existing["HOST_PREFLIGHT"], "HOLD_EXISTING_TUNNELS")
+        self.assertEqual(existing["PERSISTED_TUNNEL_REGISTRY_SHA256"],
+                         hashlib.sha256(original).hexdigest())
+        self.assertNotIn("SECRET_TUNNEL_A", str(existing))
+        self.assertNotIn("20182", str(existing))
+        self.assertEqual(existing["HOST_INSTALL_AUTHORIZED"], "NO")
+
+        # Changing one byte of retained route data must change the receipt.
+        changed = original.replace(b"20182", b"20183")
+        saved.write_bytes(changed)
+        drift = self.report()
+        self.assertNotEqual(existing["PERSISTED_TUNNEL_REGISTRY_SHA256"],
+                            drift["PERSISTED_TUNNEL_REGISTRY_SHA256"])
+        self.assertEqual(drift["HOST_PREFLIGHT"], "HOLD_EXISTING_TUNNELS")
+        self.assertEqual(drift["HOST_INSTALL_AUTHORIZED"], "NO")
+
+    def test_empty_registry_and_missing_identity_are_not_falsely_attested(self):
+        self.runtime["Id"] = "not-a-docker-id"
+        self.assertEqual(self.report()["NODE_CONTAINER_ID_SHA256"], "UNVERIFIED")
+        saved = self.data / "tunnels.json"
+        saved.write_bytes(b"{}")
+        local = self.report()
+        self.assertEqual(local["PERSISTED_TUNNELS"], "ZERO")
+        self.assertEqual(local["PERSISTED_TUNNEL_REGISTRY_SHA256"],
+                         hashlib.sha256(b"{}").hexdigest())
+        self.assertNotEqual(local["PERSISTED_TUNNEL_REGISTRY_SHA256"], "ABSENT")
+        self.assertEqual(local["HOST_INSTALL_AUTHORIZED"], "NO")
+
+    def test_bad_saved_tunnels_do_not_produce_a_trusted_registry_hash(self):
+        self.runtime["Id"] = "b" * 64
+        saved = self.data / "tunnels.json"
+        saved.write_text('{"broken": {"core": "frp", "spec": "not-a-dict"}}')
+        state = self.report()
+        self.assertEqual(state["HOST_PREFLIGHT"], "HOLD")
+        self.assertEqual(state["PERSISTED_TUNNEL_REGISTRY_SHA256"], "UNVERIFIED")
+        self.assertEqual(state["HOLD_REASON"], "UNTRUSTED_TUNNEL_REGISTRY")
 
     def test_wrong_source_mount_and_docker_port_bindings_are_held(self):
         self.runtime["Mounts"][0]["Source"] = str(self.root / "wrong")

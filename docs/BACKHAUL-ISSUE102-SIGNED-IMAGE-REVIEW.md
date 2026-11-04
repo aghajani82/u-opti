@@ -61,6 +61,36 @@ A mismatch or incomplete proof returns a redacted fail-closed reason:
 `SIGNED_PAIR_IMAGE_PIN_CONFLICT`, or `NODE_IMAGE_DIGEST_MISMATCH`.
 No secrets, UUIDs, tokens, full Compose files or signatures are emitted.
 
+## Privacy-safe local preservation receipts (incremental Issue #102)
+
+The **existing** Backhaul host review also reports two optional read-only,
+local-only comparison receipts when it can validate the source:
+
+- `SAVED_TUNNEL_REGISTRY_SHA256` / `PERSISTED_TUNNEL_REGISTRY_SHA256`:
+  SHA-256 of the **exact** validated `tunnels.json` bytes, after the
+  existing strict JSON/schema/ownership check. `ABSENT` means the file is
+  missing, not a verified empty registry; a present `{}` produces the hash
+  of those exact two bytes. Invalid, symlinked or oversized records report
+  `UNVERIFIED` and the preflight remains HOLD.
+- `NODE_CONTAINER_ID_SHA256`: SHA-256 of the validated 64-hex Docker
+  container ID read from the *existing* `docker inspect` result. Missing,
+  non-hex or malformed IDs remain `UNVERIFIED`, never guessed.
+
+Neither raw Docker ID nor raw tunnel names, ports, paths, token/spec values,
+secrets, environment, or image payloads are printed. These hashes are **not
+signed attestations** and do **not** prove that a tunnel is reachable or
+FRPS owners/children are healthy. They are local change-detection references
+for a later **independently approved** before/after comparison. A comparison
+must detect a missing or unverified receipt as HOLD, not as zero tunnels.
+A stable hash alone cannot prove that a container was never restarted.
+
+No new menu option or standalone installer is provided. Existing
+`Independent Engines → Backhaul → Review installation prerequisites`
+continues to return `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD` and
+`REASON=SAVED_TUNNELS_PRESENT` for IR with existing tunnels. CI must
+simulate mismatched container identity, modified stored tunnel bytes and
+corrupt/private registry before this can be merged.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime

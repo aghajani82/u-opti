@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -138,6 +139,35 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertEqual(result["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
         self.assertEqual(result["REASON"], "SAVED_TUNNELS_PRESENT")
         self.assertNotIn("DO_NOT_PRINT_ME", str(result))
+
+    def test_saved_tunnel_hold_carries_hashed_baselines_but_not_authorization(self):
+        self.runtime["Id"] = "c" * 64
+        raw = json.dumps({
+            "active": {"core": "frp", "spec": {"token": "TOP_SECRET", "port": 20182}}
+        }).encode()
+        (self.data / "tunnels.json").write_bytes(raw)
+        snapshot = self.report("backhaul")
+        self.assertEqual(snapshot["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(snapshot["REASON"], "SAVED_TUNNELS_PRESENT")
+        self.assertEqual(snapshot["SAVED_TUNNEL_REGISTRY_SHA256"],
+                         hashlib.sha256(raw).hexdigest())
+        self.assertEqual(snapshot["NODE_CONTAINER_ID_SHA256"],
+                         hashlib.sha256(("c" * 64).encode()).hexdigest())
+        self.assertNotIn("TOP_SECRET", str(snapshot))
+        self.assertNotIn("20182", str(snapshot))
+        self.assertEqual(snapshot["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+        self.assertEqual(snapshot["HOST_TRANSACTION_AND_ROLLBACK"], "NOT_IMPLEMENTED")
+        self.assertEqual(snapshot["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(snapshot["ACTIVATION_GATE"], "HOLD")
+
+    def test_invalid_registry_blocks_baseline_and_can_never_open_install(self):
+        self.runtime["Id"] = "invalid-id"
+        (self.data / "tunnels.json").write_text('{"live": {"core": "frp"}}')
+        state = self.report("backhaul")
+        self.assertEqual(state["SAVED_TUNNEL_REGISTRY_SHA256"], "UNVERIFIED")
+        self.assertEqual(state["NODE_CONTAINER_ID_SHA256"], "UNVERIFIED")
+        self.assertEqual(state["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(state["ACTIVATION_GATE"], "HOLD")
 
     def test_missing_or_mismatched_digest_pin_holds_before_engine_review(self):
         missing = self.report("backhaul", expected_node_image=None)
