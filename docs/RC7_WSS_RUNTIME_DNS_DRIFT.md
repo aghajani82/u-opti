@@ -30,11 +30,23 @@ health/image/signed-mode/Compose ownership/protected-file checks, then tests at
 most eight DNS-only alternatives against the original digest for every service.
 It performs no signed probes, nonce consumption, route publication or writes.
 
-`signature-recover` repeats those proofs under the engine lock and atomically
-adds `signature_policy: docker-dns-empty-v1` to each baseline. It never replaces
-the original signature. Each subsequent consumer repeats the bounded comparison.
-No startup, verify or broker path silently migrates old records. New activation
-records use the canonical empty-list digest and the same explicit policy.
+**Experimental IR-only compatibility (separate review branch):** for a
+`COMMITTED` IR journal, the normal runtime verifier first tries the strict
+original signature and, only if it fails, permits the same at-most-eight
+empty-DNS permutations against that **original** digest. This is scoped to
+`ensure_service` on committed IR; Foreign/incomplete journals and direct strict
+calls remain unchanged. It never updates the recorded policy, replaces a hash,
+edits Docker, sends a signed request or consumes a nonce. Nonempty/missing DNS,
+changed network/mounts/image/env/restart policy and unknown signature policies
+still HOLD. This temporarily removes the need for a signature-policy write for
+the proven IR nil/empty-DNS serialization case only. It is a deliberately
+separate *trial* from the existing explicit recovery path.
+
+`signature-recover` remains available for explicit policy recording: it repeats
+those proofs under the engine lock and atomically adds
+`signature_policy: docker-dns-empty-v1` to each baseline, retaining the original
+signature. No path silently migrates the journal. New activation records use the
+canonical empty-list digest and the explicit policy.
 
 `signature-rollback` atomically removes only that policy. It does NOT call the
 older runtime rollback/recover functions (which recreate containers). After
