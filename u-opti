@@ -794,7 +794,7 @@ try:
     raw = pathlib.Path(destination).read_bytes()
     if len(raw) != size:
         raise ValueError("incomplete blob (size mismatch)")
-    actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
+    actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     if actual != sha:
         raise ValueError("pinned Git blob SHA mismatch")
 except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -806,7 +806,7 @@ PY_UPDATER_BLOB_CHECK
                 local REPO_PATH="$1" DESTINATION="$2"
                 local staging="" attempt curl_rc http_code
                 # Paths are supplied from the existing fixed update inventory.
-                if [[ ! "$REPO_PATH" =~ ^(VERSION|u-opti|lib/common\\.sh|modules/[a-zA-Z0-9._-]+)$ ]] ||
+                if [[ ! "$REPO_PATH" =~ ^(VERSION|u-opti|lib/common\.sh|modules/[a-zA-Z0-9._-]+)$ ]] ||
                    [[ "$REPO_PATH" == *".."* ]] ||
                    [[ "$DESTINATION" != "$TEMP_DIR/"* ]] ||
                    [ -L "$DESTINATION" ]; then
@@ -835,7 +835,7 @@ PY_UPDATER_BLOB_CHECK
                         return 0
                     else
                         curl_rc=$?
-                        printf 'Update download failed: %s attempt %d/3 (curl=%d, HTTP=%s).\\n' \
+                        printf 'Update download failed: %s attempt %d/3 (curl=%d, HTTP=%s).\n' \
                             "$REPO_PATH" "$attempt" "$curl_rc" "${http_code:-000}" >&2
                     fi
                     # No unverified or partial data survives into another attempt.
