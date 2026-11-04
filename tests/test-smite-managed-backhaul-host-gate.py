@@ -160,8 +160,8 @@ class ReadOnlyGate(unittest.TestCase):
         for variant in (
             source.replace(RC6_VOLUME, "uopti_rc6_" + "a" * 32 + "_node-data"),
             source.replace("    name: " + RC6_VOLUME,
-                           "    name: " + RC6_VOLUME + "\\n    name: " + RC6_VOLUME),
-            source + "\\nvolumes:\\n  node-data:\\n    name: " + RC6_VOLUME + "\\n",
+                           "    name: " + RC6_VOLUME + "\n    name: " + RC6_VOLUME),
+            source + "\nvolumes:\n  node-data:\n    name: " + RC6_VOLUME + "\n",
         ):
             with self.subTest(variant=variant[-80:]):
                 (self.node / "docker-compose.yml").write_text(variant)
