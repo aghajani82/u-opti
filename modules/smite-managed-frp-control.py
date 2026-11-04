@@ -29,6 +29,54 @@ class Hold(ValueError):
     pass
 
 
+# RC7 can enroll frpc/frps already shipped in the signed smite-node image.
+# That lane deliberately has NO host binary mounts. Never treat a missing
+# mount as evidence of a broken live FRP tunnel or permission to recreate Node.
+RC7_ENROLLMENT_RECORD = Path("/var/lib/u-opti/smite-rc7-frp-enrollment/record.json")
+
+
+def _rc7_bundled_local_review(node: Path, role: str,
+                              record: dict) -> dict[str, str] | None:
+    """Read RC7's own root-owned committed journal; never probe live Docker.
+
+    This is strictly LOCAL enrollment evidence. It does not attest image
+    bytes, a running FRP owner/child, signed status, pairing, or replay.
+    Return None if no RC7 journal exists so legacy mount errors remain clear.
+    """
+    if not RC7_ENROLLMENT_RECORD.exists() and not RC7_ENROLLMENT_RECORD.is_symlink():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "managed_frp_rc7_local_review",
+            MODULE_DIR / "smite-rc7-frp-enrollment.py",
+        )
+        if spec is None or spec.loader is None:
+            raise Hold("RC7_REVIEW_HELPER_MISSING")
+        reviewed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reviewed)
+        # state() checks the root-owned 0700 enrollment journal directory,
+        # private 0600 record, schema, role and both binary digests.
+        journal = reviewed.state()
+        if journal.get("state") != "COMMITTED":
+            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_NOT_COMMITTED"}
+        if journal.get("role") != ("foreign" if role == "KH" else "ir"):
+            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_ROLE_MISMATCH"}
+        raw = reviewed.read_private(node / "config" / "engine-state" / "engines.json")
+        if (reviewed.sha(raw) != journal["new"]
+                or journal["binaries"] != {
+                    "frpc": record["sha256"], "frps": record["server_sha256"],
+                }):
+            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_MANIFEST_DRIFT"}
+        return {
+            "state": "ENROLLED_UNVERIFIED",
+            "reason": "RC7_BUNDLED_FRP_SIGNED_STATUS_REQUIRED",
+        }
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, Hold,
+            ImportError, AttributeError):
+        # Never echo arbitrary paths, exceptions, identities or secret data.
+        return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_LOCAL_PROOF_INVALID"}
+
+
 def inspect(node: Path, *, binaries: dict[str, Path] | None = None) -> dict[str, str]:
     if not node.is_absolute() or node.is_symlink() or not node.is_dir():
         raise Hold("UNSAFE_NODE_DIR")
@@ -66,6 +114,14 @@ def inspect(node: Path, *, binaries: dict[str, Path] | None = None) -> dict[str,
     }
     if set(binaries) != set(frp.BINARY_PATHS) or "server_sha256" not in record:
         return {"role": role, "state": "UNAVAILABLE", "reason": "DUAL_FRP_DIGEST_REQUIRED"}
+    # The legacy independent-engine lane MUST keep its exact two external
+    # read-only bind requirements. RC7's bundled lane has no such mounts and
+    # may be classified only using its own committed, matching enrollment
+    # journal. A partial external mount never falls back to RC7.
+    if not any(target in compose for target in frp.BINARY_PATHS.values()):
+        rc7 = _rc7_bundled_local_review(node, role, record)
+        if rc7 is not None:
+            return {"role": role, **rc7}
     for name, dest in frp.BINARY_PATHS.items():
         binpath = binaries[name]
         mount = f"      - {binpath}:{dest}:ro"
