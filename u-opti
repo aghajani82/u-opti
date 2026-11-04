@@ -748,17 +748,103 @@ print(sha)
 }
 # END: U-OPTI immutable per-operation source pin
 
+            # The source SHA is immutable. Verify every raw response against
+            # that commit's Git tree BEFORE the transaction can see its bytes.
+            # Read-only staging is confined to TEMP_DIR (no live host changes).
+            u_opti_prepare_source_tree() {
+                UPDATE_TREE_MANIFEST="$(mktemp "$TEMP_DIR/.source-tree-XXXXXXXX")" || return 1
+                if ! curl -fsSL --retry 2 --retry-delay 1 \
+                    --connect-timeout 10 --max-time 60 \
+                    -H 'Accept: application/vnd.github+json' \
+                    -H 'X-GitHub-Api-Version: 2022-11-28' \
+                    "https://api.github.com/repos/aghajani82/u-opti/git/trees/${SOURCE_SHA}?recursive=1" \
+                    -o "$UPDATE_TREE_MANIFEST"; then
+                    echo "HOLD: Could not obtain the pinned source-tree manifest." >&2
+                    return 1
+                fi
+                python3 -B - "$UPDATE_TREE_MANIFEST" <<'PY_UPDATER_TREE_CHECK'
+import json, pathlib, re, sys
+try:
+    data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    assert isinstance(data, dict) and data.get("truncated") is False
+    assert re.fullmatch(r"[0-9a-f]{40}", data.get("sha", ""))
+    assert isinstance(data.get("tree"), list) and data["tree"]
+except (ValueError, OSError, UnicodeError, AssertionError, TypeError):
+    sys.exit("HOLD: Invalid or truncated pinned Git tree.")
+PY_UPDATER_TREE_CHECK
+            }
+
+            u_opti_verify_source_blob() {
+                python3 -B - "$UPDATE_TREE_MANIFEST" "$1" "$2" <<'PY_UPDATER_BLOB_CHECK'
+import hashlib, json, pathlib, re, sys
+try:
+    manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    name, destination = sys.argv[2:]
+    if not isinstance(manifest, dict) or manifest.get("truncated") is not False:
+        raise ValueError("untrusted manifest")
+    entries = [e for e in manifest["tree"] if isinstance(e, dict) and e.get("path") == name]
+    if len(entries) != 1:
+        raise ValueError("missing or duplicate pinned path")
+    entry = entries[0]
+    size, sha = entry.get("size"), entry.get("sha")
+    if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
+            or type(size) is not int or not 0 < size <= 10485760
+            or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)):
+        raise ValueError("invalid pinned blob metadata")
+    raw = pathlib.Path(destination).read_bytes()
+    if len(raw) != size:
+        raise ValueError("incomplete blob (size mismatch)")
+    actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    if actual != sha:
+        raise ValueError("pinned Git blob SHA mismatch")
+except (OSError, ValueError, TypeError, KeyError) as exc:
+    sys.exit(f"HOLD: Update blob integrity verification failed: {exc}")
+PY_UPDATER_BLOB_CHECK
+            }
+
             download_repo_file() {
-                local REPO_PATH="$1"
-                local DESTINATION="$2"
-
-                local CACHE_BUST
-                CACHE_BUST="$(date +%s%N)"
-
-                curl -fsSL --retry 3 \
-                    -H "Accept: application/vnd.github.raw+json" \
-                    "${UPDATE_RAW_BASE_URL}/${REPO_PATH}?cb=${CACHE_BUST}" \
-                    -o "$DESTINATION"
+                local REPO_PATH="$1" DESTINATION="$2"
+                local staging="" attempt curl_rc http_code
+                # Paths are supplied from the existing fixed update inventory.
+                if [[ ! "$REPO_PATH" =~ ^(VERSION|u-opti|lib/common\.sh|modules/[a-zA-Z0-9._-]+)$ ]] ||
+                   [[ "$REPO_PATH" == *".."* ]] ||
+                   [[ "$DESTINATION" != "$TEMP_DIR/"* ]] ||
+                   [ -L "$DESTINATION" ]; then
+                    echo "HOLD: Unsafe update download path." >&2
+                    return 1
+                fi
+                staging="$(mktemp "$TEMP_DIR/.uopti-download-XXXXXXXX")" || return 1
+                for attempt in 1 2 3; do
+                    # A successful HTTP status alone does not prove a full file.
+                    # --max-time covers EACH attempt; the loop is strictly bounded.
+                    if http_code="$(curl -fsSL --retry 0 \
+                        --connect-timeout 10 --max-time 90 \
+                        --speed-limit 100 --speed-time 20 \
+                        -H "Accept: application/vnd.github.raw+json" \
+                        -w '%{http_code}' \
+                        "${UPDATE_RAW_BASE_URL}/${REPO_PATH}" -o "$staging")"; then
+                        if ! u_opti_verify_source_blob "$REPO_PATH" "$staging"; then
+                            rm -f -- "$staging"
+                            return 1
+                        fi
+                        if ! mv -f -- "$staging" "$DESTINATION"; then
+                            rm -f -- "$staging"
+                            echo "HOLD: Could not finalize verified download: $REPO_PATH" >&2
+                            return 1
+                        fi
+                        return 0
+                    else
+                        curl_rc=$?
+                        printf 'Update download failed: %s attempt %d/3 (curl=%d, HTTP=%s).\n' \
+                            "$REPO_PATH" "$attempt" "$curl_rc" "${http_code:-000}" >&2
+                    fi
+                    # No unverified or partial data survives into another attempt.
+                    : > "$staging" || { rm -f -- "$staging"; return 1; }
+                    if [ "$attempt" -lt 3 ]; then sleep "$attempt"; fi
+                done
+                rm -f -- "$staging"
+                echo "HOLD: Download retries exhausted; installed files unchanged." >&2
+                return 1
             }
 
             cleanup_update_temp() {
@@ -948,6 +1034,13 @@ print(sha)
             UPDATE_RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
             echo "Update source revision: $SOURCE_SHA"
             echo
+
+            if ! u_opti_prepare_source_tree; then
+                echo "Update cancelled before installed files were changed." >&2
+                cleanup_update_temp
+                read -rp "Press Enter to return..."
+                continue
+            fi
 
             echo "Downloading VERSION..."
 

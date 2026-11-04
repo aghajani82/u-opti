@@ -111,9 +111,15 @@ class SourcePinTest(unittest.TestCase):
             updater,
         )
         self.assertIn(
-            '"${UPDATE_RAW_BASE_URL}/${REPO_PATH}?cb=${CACHE_BUST}"',
+            '"${UPDATE_RAW_BASE_URL}/${REPO_PATH}"',
             updater,
         )
+        self.assertNotIn('?cb=${CACHE_BUST}', updater)
+        self.assertIn(
+            '"https://api.github.com/repos/aghajani82/u-opti/git/trees/${SOURCE_SHA}?recursive=1"',
+            updater,
+        )
+        self.assertIn('u_opti_verify_source_blob "$REPO_PATH" "$staging"', updater)
         self.assertNotIn('"${BASE_URL}/${REPO_PATH}?ref=${BRANCH}', updater)
         self.assertLess(install.index(marker), install.index('echo "Downloading VERSION..."'))
         self.assertLess(
