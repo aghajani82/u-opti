@@ -160,6 +160,28 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertEqual(snapshot["INSTALL_ALLOWED"], "NO")
         self.assertEqual(snapshot["ACTIVATION_GATE"], "HOLD")
 
+    def test_local_frp_process_receipt_remains_unattested_with_saved_tunnels(self):
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "active": {"core": "frp", "spec": {"secret": "DO_NOT_PRINT_ME"}}
+        }))
+        fake = {"FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+                "FRPS_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+                "FRPC_INSTANCE_SHA256": "a"*64,
+                "FRPS_INSTANCE_SHA256": "b"*64}
+        with patch.object(gate.host, "frp_process_footprint", return_value=fake):
+            result = self.report("backhaul")
+        self.assertEqual(result["FRPC_PROCESS_LOCAL"], "OBSERVED_UNATTESTED")
+        self.assertEqual(result["FRPS_INSTANCE_SHA256"], "b"*64)
+        self.assertEqual(result["BROKER_SOCKET_LOCAL"], "UNVERIFIED")
+        self.assertEqual(result["WSS_EDGE_JOURNAL_LOCAL"], "UNVERIFIED")
+        self.assertEqual(result["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(result["REASON"], "SAVED_TUNNELS_PRESENT")
+        self.assertEqual(result["SIGNED_NODE_HEALTH_AND_REPLAY"], "UNVERIFIED")
+        self.assertEqual(result["HOST_TRANSACTION_AND_ROLLBACK"], "NOT_IMPLEMENTED")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DO_NOT_PRINT_ME", str(result))
+
     def test_invalid_registry_blocks_baseline_and_can_never_open_install(self):
         self.runtime["Id"] = "invalid-id"
         (self.data / "tunnels.json").write_text('{"live": {"core": "frp"}}')
