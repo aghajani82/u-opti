@@ -12,12 +12,12 @@ permissions:
 jobs:
   rc7-wss-runtime-restart:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - name: DNS proof, negative cases, recovery and rollback
-        run: python3 -B tests/test-smite-rc7-wss-signature-recovery.py
+        run: sudo python3 -B tests/test-smite-rc7-wss-signature-recovery.py
       - name: Disposable container and daemon restart without recreation
         env:
           UOPTI_DISPOSABLE_DOCKER_LAB: 'YES'
