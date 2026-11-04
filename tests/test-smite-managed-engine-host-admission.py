@@ -267,6 +267,7 @@ class SharedHostAdmission(unittest.TestCase):
                               min_bytes=4096, **inputs)
         self.assertEqual(out["TARGET_ENGINE"], "NOT_INSTALLED")
         self.assertEqual(out["OTHER_ENGINE"], "ENROLLED_UNVERIFIED")
+        self.assertEqual(out["OTHER_ENGINE_LOCAL_REASON"], "LOCAL_ONLY")
         self.assertEqual(out["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
         self.assertEqual(out["REASON"], "SAVED_TUNNELS_PRESENT")
         self.assertEqual(out["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")

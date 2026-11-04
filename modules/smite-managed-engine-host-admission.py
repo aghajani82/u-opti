@@ -79,6 +79,7 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "SAVED_TUNNELS": "UNKNOWN",
         "TARGET_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE": "UNVERIFIED",
+        "OTHER_ENGINE_LOCAL_REASON": "UNVERIFIED",
         "OTHER_ENGINE_ACTION": "NEVER_MODIFY",
         "SIGNED_REGISTRY_PAIR_PROOF": "NOT_SUPPLIED",
         "NODE_RUNTIME_BYTES_AND_REPLAY": "UNVERIFIED",
@@ -143,7 +144,9 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
                 # Node, but its saved FRP tunnels remain an absolute
                 # no-recreate HOLD. These are NOT signed engine claims.
                 output["TARGET_ENGINE"] = local_state(engine, node)["state"]
-                output["OTHER_ENGINE"] = local_state(other, node)["state"]
+                other_state = local_state(other, node)
+                output["OTHER_ENGINE"] = other_state["state"]
+                output["OTHER_ENGINE_LOCAL_REASON"] = other_state["reason"]
             output["REASON"] = evidence.get("HOLD_REASON") or (
                 "SAVED_TUNNELS_PRESENT" if
                 evidence.get("HOST_PREFLIGHT") == "HOLD_EXISTING_TUNNELS"
@@ -164,6 +167,7 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         second = local_state(other, node)
         output["TARGET_ENGINE"] = first["state"]
         output["OTHER_ENGINE"] = second["state"]
+        output["OTHER_ENGINE_LOCAL_REASON"] = second["reason"]
         if hashlib.sha256(host._local_file(
                 node / "docker-compose.yml", max_bytes=131072,
                 require_root=True)).hexdigest() != first_hash:
