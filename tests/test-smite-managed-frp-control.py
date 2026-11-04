@@ -2,6 +2,7 @@
 """Managed FRP operator status / menu, no actual Docker operations."""
 from __future__ import annotations
 import hashlib
+import types
 import importlib.util
 import json
 import os
@@ -97,6 +98,106 @@ class FrpOperator(unittest.TestCase):
             "frp": {"sha256": "a" * 64}
         }}))
         self.assertIn("DUAL_FRP_DIGEST_REQUIRED", self.cli("status").stdout)
+
+    def rc7_bundled_fixture(self, *, state="COMMITTED", journal_role="foreign",
+                             altered_manifest=False, altered_binary=False):
+        directory = self.node / "config" / "engine-state"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        content = json.dumps({"schema": 1, "engines": {
+            "frp": {"sha256": "a" * 64, "server_sha256": "b" * 64}
+        }}, sort_keys=True).encode()
+        (directory / "engines.json").write_bytes(content)
+        raw = b"untrusted-inventory" if altered_manifest else content
+        digest = hashlib.sha256(raw).hexdigest()
+        binaries = {"frpc": "a" * 64, "frps": "c" * 64 if altered_binary else "b" * 64}
+        journal_doc = {
+            "schema": 1, "role": journal_role, "state": state,
+            "new": digest, "old": None, "binaries": binaries,
+        }
+        journal_dir = self.root / "rc7-enrollment"
+        journal_dir.mkdir(mode=0o700)
+        (journal_dir / "record.json").write_text(json.dumps(journal_doc))
+        return content, journal_doc, journal_dir
+
+    def inspect_with_rc7_fixture(self, content, journal_doc, journal_dir):
+        class FakeLoader:
+            def exec_module(self, module):
+                return None
+
+        fake = types.SimpleNamespace(
+            state=lambda: journal_doc,
+            read_private=lambda path: content,
+            sha=lambda raw: hashlib.sha256(raw).hexdigest(),
+        )
+        with patch.object(control, "RC7_ENROLLMENT_RECORD",
+                          journal_dir / "record.json"), \\
+             patch.object(control.importlib.util, "spec_from_file_location",
+                          return_value=types.SimpleNamespace(loader=FakeLoader())), \\
+             patch.object(control.importlib.util, "module_from_spec",
+                          return_value=fake):
+            return control.inspect(self.node)
+
+    def test_rc7_image_bundled_frp_enrollment_is_local_only_not_unavailable(self):
+        content, journal, journal_dir = self.rc7_bundled_fixture()
+        r = self.inspect_with_rc7_fixture(content, journal, journal_dir)
+        self.assertEqual(r["role"], "KH")
+        self.assertEqual(r["state"], "ENROLLED_UNVERIFIED")
+        self.assertEqual(r["reason"], "RC7_BUNDLED_FRP_SIGNED_STATUS_REQUIRED")
+        self.assertFalse("SIGNED_NODE_VERIFIED" in str(r))
+        self.assertEqual(self.cli("install").returncode, 2)
+        self.assertEqual(self.cli("rollback").returncode, 2)
+
+    def test_rc7_bundled_journal_rejects_incomplete_drift_and_wrong_role(self):
+        for variation in ("PREPARED", "HOLD", "ROLLED_BACK",
+                          "wrong-role", "manifest-drift", "binary-drift"):
+            with self.subTest(variation=variation):
+                if variation in ("PREPARED", "HOLD", "ROLLED_BACK"):
+                    values = dict(state=variation)
+                    expected = "RC7_ENROLLMENT_NOT_COMMITTED"
+                elif variation == "wrong-role":
+                    values = dict(journal_role="ir")
+                    expected = "RC7_ENROLLMENT_ROLE_MISMATCH"
+                elif variation == "manifest-drift":
+                    values = dict(altered_manifest=True)
+                    expected = "RC7_ENROLLMENT_MANIFEST_DRIFT"
+                else:
+                    values = dict(altered_binary=True)
+                    expected = "RC7_ENROLLMENT_MANIFEST_DRIFT"
+                content, journal, journal_dir = self.rc7_bundled_fixture(**values)
+                actual = self.inspect_with_rc7_fixture(content, journal, journal_dir)
+                self.assertEqual(actual["state"], "UNAVAILABLE")
+                self.assertEqual(actual["reason"], expected)
+                self.assertNotIn("READY", str(actual))
+
+    def test_rc7_invalid_private_journal_fails_closed_without_other_engine_actions(self):
+        content, journal, journal_dir = self.rc7_bundled_fixture()
+        class FakeLoader:
+            def exec_module(self, module):
+                return None
+        fake = types.SimpleNamespace(
+            state=lambda: (_ for _ in ()).throw(ValueError("SECRET_DATA")),
+            read_private=lambda path: content,
+            sha=lambda raw: hashlib.sha256(raw).hexdigest(),
+        )
+        with patch.object(control, "RC7_ENROLLMENT_RECORD",
+                          journal_dir / "record.json"), \\
+             patch.object(control.importlib.util, "spec_from_file_location",
+                          return_value=types.SimpleNamespace(loader=FakeLoader())), \\
+             patch.object(control.importlib.util, "module_from_spec",
+                          return_value=fake):
+            result = control.inspect(self.node)
+        self.assertEqual(result["state"], "UNAVAILABLE")
+        self.assertEqual(result["reason"], "RC7_ENROLLMENT_LOCAL_PROOF_INVALID")
+        self.assertNotIn("SECRET_DATA", str(result))
+
+    def test_partial_external_frp_mount_never_uses_rc7_bundled_fallback(self):
+        content, journal, journal_dir = self.rc7_bundled_fixture()
+        compose = (self.node / "docker-compose.yml").read_text()
+        compose += "      - /any/path:/usr/local/bin/frpc:ro\\n"
+        (self.node / "docker-compose.yml").write_text(compose)
+        result = self.inspect_with_rc7_fixture(content, journal, journal_dir)
+        self.assertEqual(result["state"], "UNAVAILABLE")
+        self.assertEqual(result["reason"], "MISSING_READONLY_MOUNT")
 
     def test_duplicate_env_and_untrusted_ports_rejected(self):
         (self.node / ".env").write_text(ENV + "SMITE_AGENT_AUTH_MODE=legacy\n")
