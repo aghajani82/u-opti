@@ -1,0 +1,50 @@
+name: FRP control write stall investigation (isolated)
+on:
+  pull_request:
+    paths:
+      - 'tests/lab/frp-control-stall/**'
+      - 'docs/FRP_CONTROL_STALL_INVESTIGATION.md'
+      - '.github/workflows/frp-control-stall-investigation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  upstream-and-shared-wss:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: fatedier/frp
+          ref: 4a23aa181c1d7e28eecaa8216024ed753b9d27c8
+          path: .frp-old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: fatedier/frp
+          ref: d8cf1800dc1abd7fda1828cab105d7a6b5a50eb1
+          path: .frp-new
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache-dependency-path: |
+            .frp-old/go.sum
+            .frp-new/go.sum
+      - name: Reproduce old failure, test fixed lifecycle and isolated WSS shared owner
+        env:
+          UOPTI_DISPOSABLE_FRP_LAB: 'YES'
+        run: bash tests/lab/frp-control-stall/run.sh
+      - name: Check RC7 pinned image binary bytes against verified official archive
+        run: python3 tests/lab/frp-control-stall/image_audit.py
+      - name: Retain non-secret test evidence (never lab private keys or raw configs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frp-control-stall-evidence
+          path: |
+            evidence/*.txt
+            evidence/*.json
+            evidence/*/*/*.buildinfo.txt
+          retention-days: 14
