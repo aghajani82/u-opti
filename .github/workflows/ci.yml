@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  rc7-wss-runtime-restart:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: DNS proof, negative cases, recovery and rollback
+        run: python3 -B tests/test-smite-rc7-wss-signature-recovery.py
+      - name: Disposable container and daemon restart without recreation
+        env:
+          UOPTI_DISPOSABLE_DOCKER_LAB: 'YES'
+        run: python3 -B tests/test-smite-rc7-wss-docker-restart.py
+
   stage15-foreign-signed-compatibility:
     # Exact source that produced the already installed Stage15 image pair.
     runs-on: ubuntu-latest
