@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import stat
+from types import SimpleNamespace
 import os
 from pathlib import Path
 import subprocess
@@ -359,6 +361,149 @@ class ReadOnlyGate(unittest.TestCase):
             gate.audit(self.node, runtime=self.runtime, min_bytes=10**15)["HOLD_REASON"],
             "INSUFFICIENT_FREE_DISK",
         )
+
+    def test_frp_process_names_and_start_ticks_are_hashed_without_argv(self):
+        proc = self.root / "proc"
+        proc.mkdir()
+
+        def put(pid, name, start):
+            p = proc / str(pid)
+            p.mkdir()
+            (p / "comm").write_text(name + "\n")
+            fields = ["S"] + ["0"] * 18 + [str(start)]
+            (p / "stat").write_text(
+                f"{pid} ({name}) " + " ".join(fields) + "\n"
+            )
+        put(1001, "frpc", 312)
+        put(1002, "frps", 445)
+        put(999, "unrelated", 122)
+        result = gate.frp_process_footprint(proc)
+        self.assertEqual(result["FRPC_PROCESS_LOCAL"], "OBSERVED_UNATTESTED")
+        self.assertEqual(result["FRPS_PROCESS_LOCAL"], "OBSERVED_UNATTESTED")
+        expected = hashlib.sha256(b"1001:312").hexdigest()
+        self.assertEqual(result["FRPC_INSTANCE_SHA256"], expected)
+        self.assertNotIn("1001", str(result))
+        self.assertNotIn("1002", str(result))
+        put(1003, "frps", 500)
+        changed = gate.frp_process_footprint(proc)
+        self.assertNotEqual(result["FRPS_INSTANCE_SHA256"],
+                            changed["FRPS_INSTANCE_SHA256"])
+        (proc / "1003" / "stat").write_text("invalid process stat")
+        rejected = gate.frp_process_footprint(proc)
+        self.assertEqual(rejected["FRPC_PROCESS_LOCAL"], "UNVERIFIED")
+        self.assertEqual(rejected["FRPS_INSTANCE_SHA256"], "UNVERIFIED")
+
+    def test_frp_process_symlink_metadata_never_read(self):
+        proc = self.root / "proc"
+        proc.mkdir()
+        p = proc / "24"
+        p.mkdir()
+        (self.root / "secret").write_text("TOP_SECRET")
+        (p / "comm").symlink_to(self.root / "secret")
+        state = gate.frp_process_footprint(proc)
+        self.assertEqual(state["FRPC_PROCESS_LOCAL"], "UNVERIFIED")
+        self.assertNotIn("TOP_SECRET", str(state))
+
+    def test_broker_socket_footprint_requires_exact_root_socket_shape(self):
+        socket_path = self.root / "smite" / "xhttp-broker.sock"
+        parent = SimpleNamespace(
+            st_mode=stat.S_IFDIR | 0o750, st_uid=0, st_gid=39100)
+        entry = SimpleNamespace(
+            st_mode=stat.S_IFSOCK | 0o660, st_uid=0, st_gid=39100,
+            st_nlink=1, st_dev=42, st_ino=77)
+
+        def fake_stat(path):
+            if path == socket_path.parent:
+                return parent
+            if path == socket_path:
+                return entry
+            raise AssertionError("UNEXPECTED_SOCKET_PATH")
+
+        good = gate.broker_socket_footprint(socket_path, stat_fn=fake_stat)
+        self.assertEqual(good["BROKER_SOCKET_LOCAL"], "PRESENT_UNATTESTED")
+        self.assertEqual(good["BROKER_SOCKET_ID_SHA256"],
+                         hashlib.sha256(b"42:77").hexdigest())
+        self.assertNotIn("39100", str(good))
+
+        entry.st_mode = stat.S_IFLNK | 0o777
+        bad = gate.broker_socket_footprint(socket_path, stat_fn=fake_stat)
+        self.assertEqual(bad["BROKER_SOCKET_LOCAL"], "UNTRUSTED")
+        self.assertEqual(bad["BROKER_SOCKET_ID_SHA256"], "UNVERIFIED")
+        entry.st_mode = stat.S_IFSOCK | 0o660
+        entry.st_uid = 1000
+        self.assertEqual(
+            gate.broker_socket_footprint(socket_path, stat_fn=fake_stat)[
+                "BROKER_SOCKET_LOCAL"], "UNTRUSTED")
+
+        def missing(path):
+            raise FileNotFoundError(path)
+        self.assertEqual(gate.broker_socket_footprint(
+            socket_path, stat_fn=missing)["BROKER_SOCKET_LOCAL"], "ABSENT")
+
+    def test_wss_edge_local_journal_is_private_committed_or_unverified(self):
+        data = json.dumps({
+            "schema": 1, "state": "COMMITTED",
+            "peer": "PRIVATE_PEER_ADDRESS", "domain": "secret.example",
+        }).encode()
+        path = Mock()
+        path.exists.return_value = True
+        path.is_symlink.return_value = False
+        path.lstat.return_value = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600, st_uid=0,
+            st_nlink=1, st_size=len(data))
+        with patch.object(gate, "_local_file", return_value=data):
+            good = gate.wss_edge_footprint(path)
+        self.assertEqual(good["WSS_EDGE_JOURNAL_LOCAL"],
+                         "COMMITTED_LOCAL_UNATTESTED")
+        self.assertEqual(good["WSS_EDGE_JOURNAL_SHA256"],
+                         hashlib.sha256(data).hexdigest())
+        self.assertNotIn("PRIVATE_PEER_ADDRESS", str(good))
+        self.assertNotIn("secret.example", str(good))
+
+        with patch.object(gate, "_local_file",
+                          return_value=b'{"schema":1,"state":"COMMITTED","state":"HOLD"}'):
+            bad = gate.wss_edge_footprint(path)
+        self.assertEqual(bad["WSS_EDGE_JOURNAL_LOCAL"], "UNVERIFIED")
+        self.assertEqual(bad["WSS_EDGE_JOURNAL_SHA256"], "UNVERIFIED")
+        path.lstat.return_value.st_mode = stat.S_IFREG | 0o644
+        self.assertEqual(gate.wss_edge_footprint(path)[
+            "WSS_EDGE_JOURNAL_LOCAL"], "UNVERIFIED")
+        path.exists.return_value = False
+        self.assertEqual(gate.wss_edge_footprint(path)[
+            "WSS_EDGE_JOURNAL_LOCAL"], "ABSENT")
+
+    def test_ir_saved_tunnels_still_hold_with_local_process_socket_hints(self):
+        self.use_rc6_ir()
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "frp": {"core": "frp", "spec": {"secret": "SHOULD_NOT_PRINT"}}
+        }))
+        with patch.object(gate, "_read_rc6_journal_bytes",
+                          return_value=json.dumps(RC6_JOURNAL).encode()), \
+             patch.object(gate, "frp_process_footprint",
+                          return_value={
+                              "FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+                              "FRPS_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+                              "FRPC_INSTANCE_SHA256": "a"*64,
+                              "FRPS_INSTANCE_SHA256": "b"*64,
+                          }), \
+             patch.object(gate, "broker_socket_footprint",
+                          return_value={
+                              "BROKER_SOCKET_LOCAL": "PRESENT_UNATTESTED",
+                              "BROKER_SOCKET_ID_SHA256": "c"*64,
+                          }), \
+             patch.object(gate, "wss_edge_footprint",
+                          return_value={
+                              "WSS_EDGE_JOURNAL_LOCAL": "COMMITTED_LOCAL_UNATTESTED",
+                              "WSS_EDGE_JOURNAL_SHA256": "d"*64,
+                          }):
+            report = self.report()
+        self.assertEqual(report["FRPC_INSTANCE_SHA256"], "a"*64)
+        self.assertEqual(report["BROKER_SOCKET_ID_SHA256"], "c"*64)
+        self.assertEqual(report["WSS_EDGE_JOURNAL_SHA256"], "d"*64)
+        self.assertEqual(report["PERSISTED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(report["HOST_PREFLIGHT"], "HOLD_EXISTING_TUNNELS")
+        self.assertEqual(report["HOST_INSTALL_AUTHORIZED"], "NO")
+        self.assertNotIn("SHOULD_NOT_PRINT", str(report))
 
     def test_node_env_and_docker_data_can_never_be_logged(self):
         cli = subprocess.run([sys.executable, "-B", str(SCRIPT), "--node-dir", str(self.node)],
