@@ -157,8 +157,13 @@ remotePort = {port}
             assert a.poll() is None and b.poll() is None
         for label,token,sni in [('bad-token','wrong','localhost'),('bad-tls','public-isolated-lab-token','wrong.invalid')]:
             bad=clientcfg(label,18003,token,sni)
-            negative,_=start(BINS/'0.71.1/amd64/frpc',bad,label)
-            time.sleep(2);assert not probe(18003),'INVALID_AUTH_ACCEPTED';stop(negative)
+            subprocess.run([str(BINS/'0.71.1/amd64/frpc'),'verify','-c',str(bad)],
+                           check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            negative,negative_log=start(BINS/'0.71.1/amd64/frpc',bad,label)
+            time.sleep(2);assert not probe(18003),'INVALID_AUTH_ACCEPTED'
+            rejection=negative_log.read_text().lower()
+            assert ('token' in rejection and 'match' in rejection) if label=='bad-token' else 'x509' in rejection, 'WRONG_NEGATIVE_FAILURE_REASON'
+            stop(negative)
         assert config_hashes=={str(p.name):hashlib.sha256(p.read_bytes()).hexdigest() for p in (servercfg,ca,cb)}
         print('OFFICIAL_UPGRADE_ROLLBACK_RECOVERY=PASS_CONFIG_TOKEN_RETAINED',flush=True)
         print('INVALID_TOKEN_AND_TLS_HOSTNAME=REJECTED',flush=True)

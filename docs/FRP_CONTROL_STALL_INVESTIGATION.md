@@ -22,7 +22,8 @@ the user; do not replay any earlier unconfirmed publication request.
 These are repository pins, NOT measurements of the user's currently running
 processes. The version string alone cannot prove that a running binary contains
 or lacks a patch. Actual RC7 image extraction and official-binary comparisons
-are performed by the CI audit; local live processes remain uninspected.
+passed in the CI audit: Node frpc/frps and Panel frps exactly match official
+0.71.0 linux/amd64 bytes. Live processes remain uninspected.
 
 Official release archive SHA-256 (distinct from per-binary SHA and OCI digest):
 
@@ -82,7 +83,7 @@ trustedCaFile plus serverName. It does not emit tcpMux or heartbeat overrides.
 The tests invoke the actual version-specific Complete methods on this omitted-
 field configuration; do not infer live values merely from documentation.
 
-Expected source-derived values, to be confirmed by CI:
+Values confirmed by executing both versions' Complete methods in CI:
 - wire v1; tcpMux=true on both sides; mux keepalive 30 seconds.
 - client application heartbeat interval/timeout -1/-1; server heartbeat -1.
 - client pool count 1. Application heartbeats are disabled by the mux default.
@@ -118,10 +119,48 @@ That upgrade/rollback test allows interruption: it does not claim zero downtime
 or that established streams survive owner replacement. Config and token bytes
 must remain identical. A corrupted archive must fail its SHA check.
 
-Status at PR preparation: CI pending. Evidence will be recorded after execution.
-Local syntax/static validation only; this workspace has no Go/Docker executable
-and cannot run the networked integration itself. GitHub's disposable runner
-provides the actual test environment.
+## Executed results
+
+[Successful isolated CI run](https://github.com/aghajani82/u-opti/actions/runs/41822583130/job/126549140809)
+on investigation commit `eee4a28f129a3fccf7253bd29d95cd8d0a68432c`:
+
+| Check | Observed result |
+|---|---|
+| Official old sticky encrypted writer test | PASS: retained write failure reproduced |
+| Official old failed-control closure regression | Expected FAIL: timed out waiting for failed control connection close |
+| Fixed msg suite, race detector, three repetitions | PASS, including shutdown and real TCP/yamux v1/v2 timeouts |
+| Fixed client/server/transport package suites | PASS |
+| Effective omitted-field settings, both versions | PASS; values recorded above |
+| Shared WSS, injected sticky write error, 0.71.0 | New requests stalled; explicit lab child restart recovered |
+| Shared WSS, injected sticky write error, 0.71.1 | Automatic control reconnect; same child process |
+| Unaffected child in both fault scenarios | Existing stream preserved; shared owner PID unchanged |
+| Official mixed client/server versions, both directions | PASS, two children through WSS/443 |
+| Official owner upgrade / rollback / recovery | PASS; configuration/token bytes retained; interruption allowed |
+| Wrong token / TLS hostname; corrupted archive | Rejected |
+| Pinned RC7 image binary byte comparison | PASS against official 0.71.0 amd64 artifacts |
+
+Artifacts contain sanitized results, package hashes and Go build metadata. This
+workspace only ran syntax/static validation; the disposable GitHub runner ran
+the Go, Docker and network-isolated integration tests. The integration injects a
+sticky message-write error; it does not prove an actual mobile/VPS network event.
+The independent upstream test exercises real encrypted-writer retention, and
+the fixed yamux test exercises a real TCP write timeout and read interruption.
+
+Per-binary SHA-256 calculated from the verified official release archives:
+
+| Version | Architecture | Binary | SHA-256 |
+|---|---|---|---|
+| 0.71.0 | amd64 | frpc | `f79fff8de3089ec711ff8bdd4b73e00dfe491a1c3d754983c8b0f8d58c21b068` |
+| 0.71.0 | amd64 | frps | `b95dee2bf29a021c562565cdf2116376b9fa7590361bd36ef57041a04d0e6654` |
+| 0.71.0 | arm64 | frpc | `6e8e45fd0c7514b636fd8d049212f8a5715e8b33c412cf968988252e7a8a00f2` |
+| 0.71.0 | arm64 | frps | `68263b9cab7d9a570593fd8e0593c5a4bafdd35f0dc386e9814ade063ffa6120` |
+| 0.71.1 | amd64 | frpc | `35c6054d4549bbcf2f02875543895fd9e44c2aae2925f61cd8ff5a693703c28b` |
+| 0.71.1 | amd64 | frps | `2322762939e66e66850bbc9103b6d73fec39e83bd8ad6c71ebeeb120d56d6ab3` |
+| 0.71.1 | arm64 | frpc | `651de3428bdc7f37b4bad76ed3236b221939a989c433cd7daee79d2817519f8b` |
+| 0.71.1 | arm64 | frps | `45a45650cf6ad2568a90f646b1ad79ac483510c1d845ecc55c532ad271ff5366` |
+
+Only amd64 binaries were executed; arm64 archives/binaries were hashed and ELF
+architecture checked. This is not an arm64 runtime qualification.
 
 ## Relationship to the reported 8–10 minute stalls
 
@@ -139,7 +178,8 @@ The isolated defect and the cause of the live symptom are separate conclusions.
 
 ## Limited upgrade decision and gates
 
-Provisional: recommend qualifying upstream 0.71.1, not immediate live upgrade;
+Decision: upgrade to upstream 0.71.1 is recommended to remove the reproduced,
+reachable defect, after the following qualification gates; no immediate live upgrade;
 causality for these stalls needs synchronized evidence. Do not deploy a local
 FRP repair patch or silently change heartbeat/tcpMux.
 
