@@ -35,6 +35,7 @@ def load(name: str, filename: str):
 host = load("managed_engine_common_host", "smite-managed-backhaul-host-gate.py")
 backhaul = load("managed_engine_bh_review", "smite-managed-backhaul-control.py")
 frp = load("managed_engine_frp_review", "smite-managed-frp-control.py")
+signed_pair = load("managed_engine_signed_pair", "smite-registry-pair-admission.py")
 
 
 class Hold(ValueError):
@@ -60,7 +61,12 @@ def local_state(engine: str, node: Path) -> dict[str, str]:
 
 def report(engine: str, node: Path, *, runtime: dict | None = None,
            min_bytes: int = host.MIN_FREE_BYTES,
-           expected_node_image: str | None = None) -> dict[str, str]:
+           expected_node_image: str | None = None,
+           signed_pair_manifest: Path | None = None,
+           signed_pair_manifest_sha256: str | None = None,
+           signed_pair_source_sha: str | None = None,
+           signed_pair_publish_ref: str | None = None,
+           signed_pair_trusted_root: Path | None = None) -> dict[str, str]:
     if engine not in ENGINES:
         raise Hold("UNKNOWN_ENGINE")
     other = "frp" if engine == "backhaul" else "backhaul"
@@ -74,6 +80,8 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "TARGET_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE": "UNVERIFIED",
         "OTHER_ENGINE_ACTION": "NEVER_MODIFY",
+        "SIGNED_REGISTRY_PAIR_PROOF": "NOT_SUPPLIED",
+        "NODE_RUNTIME_BYTES_AND_REPLAY": "UNVERIFIED",
         "SNAPSHOT_RESTORE": "UNVERIFIED",
         "EMERGENCY_CONSOLE": "UNVERIFIED",
         "SIGNED_NODE_HEALTH_AND_REPLAY": "UNVERIFIED",
@@ -84,6 +92,41 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         "INSTALL_ALLOWED": "NO",
         "ACTIVATION_GATE": "HOLD",
     }
+    # A locally reported Docker image digest is NOT proof of a signed
+    # release. Use the already reviewed paired-registry Cosign verifier.
+    # No implicit fallback to the old RC2 candidate or a mutable tag.
+    supplied = (signed_pair_manifest, signed_pair_manifest_sha256,
+                signed_pair_source_sha, signed_pair_publish_ref)
+    if any(value is not None for value in supplied) or signed_pair_trusted_root is not None:
+        if not all(value is not None for value in supplied):
+            output["REASON"] = "INCOMPLETE_SIGNED_PAIR_PROOF"
+            return output
+        try:
+            pair_evidence = signed_pair.verify_pair(
+                manifest=signed_pair_manifest,
+                manifest_sha256=signed_pair_manifest_sha256,
+                source_sha=signed_pair_source_sha,
+                publish_ref=signed_pair_publish_ref,
+                trusted_root=signed_pair_trusted_root,
+            )
+            signed_node = pair_evidence["images"]["node"]
+            if expected_node_image is not None and expected_node_image != signed_node:
+                output["REASON"] = "SIGNED_PAIR_IMAGE_PIN_CONFLICT"
+                return output
+            expected_node_image = signed_node
+            output["SIGNED_REGISTRY_PAIR_PROOF"] = "COSIGN_VERIFIED"
+        except (signed_pair.AdmissionHold, OSError, ValueError, KeyError,
+                TypeError, RuntimeError):
+            # Fail closed without exposing registry details, tokens, or
+            # verifier error bodies in a host report.
+            output["SIGNED_REGISTRY_PAIR_PROOF"] = "REJECTED"
+            output["REASON"] = "SIGNED_PAIR_PROOF_INVALID"
+            return output
+    else:
+        # Legacy manual digest equality can still be reviewed, but it is
+        # explicitly NOT a cryptographic registry signature.
+        output["SIGNED_REGISTRY_PAIR_PROOF"] = "NOT_SUPPLIED"
+
     try:
         evidence = host.audit(
             node, runtime=runtime, min_bytes=min_bytes,
@@ -152,11 +195,26 @@ def main() -> int:
         "--expected-node-image",
         help="Exact independently reviewed ghcr.io/aghajani82/smite-node@sha256:... ref",
     )
+    p.add_argument("--signed-pair-manifest", type=Path,
+                   help="External exact Panel/Node signed registry candidate")
+    p.add_argument("--signed-pair-manifest-sha256",
+                   help="Independently reviewed SHA256 of candidate bytes")
+    p.add_argument("--signed-pair-source-sha",
+                   help="Exact independently reviewed Smite source commit")
+    p.add_argument("--signed-pair-publish-ref",
+                   help="Signed release publisher refs/tags/v... identity")
+    p.add_argument("--signed-pair-trusted-root", type=Path,
+                   help="Optional independently pinned Sigstore trusted-root JSON")
     p.add_argument("--format", choices=("text", "json"), default="text")
     args = p.parse_args()
     result = report(
         args.engine, args.node_dir,
         expected_node_image=args.expected_node_image,
+        signed_pair_manifest=args.signed_pair_manifest,
+        signed_pair_manifest_sha256=args.signed_pair_manifest_sha256,
+        signed_pair_source_sha=args.signed_pair_source_sha,
+        signed_pair_publish_ref=args.signed_pair_publish_ref,
+        signed_pair_trusted_root=args.signed_pair_trusted_root,
     )
     if args.format == "json":
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
