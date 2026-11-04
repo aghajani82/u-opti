@@ -115,7 +115,7 @@ class FrpOperator(unittest.TestCase):
             "new": digest, "old": None, "binaries": binaries,
         }
         journal_dir = self.root / "rc7-enrollment"
-        journal_dir.mkdir(mode=0o700)
+        journal_dir.mkdir(mode=0o700, exist_ok=True)
         (journal_dir / "record.json").write_text(json.dumps(journal_doc))
         return content, journal_doc, journal_dir
 
@@ -130,9 +130,9 @@ class FrpOperator(unittest.TestCase):
             sha=lambda raw: hashlib.sha256(raw).hexdigest(),
         )
         with patch.object(control, "RC7_ENROLLMENT_RECORD",
-                          journal_dir / "record.json"), \\
+                          journal_dir / "record.json"), \
              patch.object(control.importlib.util, "spec_from_file_location",
-                          return_value=types.SimpleNamespace(loader=FakeLoader())), \\
+                          return_value=types.SimpleNamespace(loader=FakeLoader())), \
              patch.object(control.importlib.util, "module_from_spec",
                           return_value=fake):
             return control.inspect(self.node)
@@ -180,9 +180,9 @@ class FrpOperator(unittest.TestCase):
             sha=lambda raw: hashlib.sha256(raw).hexdigest(),
         )
         with patch.object(control, "RC7_ENROLLMENT_RECORD",
-                          journal_dir / "record.json"), \\
+                          journal_dir / "record.json"), \
              patch.object(control.importlib.util, "spec_from_file_location",
-                          return_value=types.SimpleNamespace(loader=FakeLoader())), \\
+                          return_value=types.SimpleNamespace(loader=FakeLoader())), \
              patch.object(control.importlib.util, "module_from_spec",
                           return_value=fake):
             result = control.inspect(self.node)
@@ -193,7 +193,7 @@ class FrpOperator(unittest.TestCase):
     def test_partial_external_frp_mount_never_uses_rc7_bundled_fallback(self):
         content, journal, journal_dir = self.rc7_bundled_fixture()
         compose = (self.node / "docker-compose.yml").read_text()
-        compose += "      - /any/path:/usr/local/bin/frpc:ro\\n"
+        compose += "      - /any/path:/usr/local/bin/frpc:ro\n"
         (self.node / "docker-compose.yml").write_text(compose)
         result = self.inspect_with_rc7_fixture(content, journal, journal_dir)
         self.assertEqual(result["state"], "UNAVAILABLE")
