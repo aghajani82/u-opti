@@ -340,7 +340,7 @@ def frp_process_footprint(proc_root: Path = FRP_PROC_ROOT) -> dict[str, str]:
                 return result
             try:
                 comm = (pid_dir / "comm").read_bytes()
-                if comm not in (b"frpc\\n", b"frps\\n"):
+                if comm not in (b"frpc\n", b"frps\n"):
                     continue
                 name = comm.strip().decode("ascii")
                 # /proc/PID/stat: after the final ') ', field 3 is process state,
@@ -365,7 +365,7 @@ def frp_process_footprint(proc_root: Path = FRP_PROC_ROOT) -> dict[str, str]:
                 "OBSERVED_UNATTESTED" if entries else "NOT_OBSERVED"
             )
             if entries:
-                payload = "\\n".join(sorted(entries)).encode("ascii")
+                payload = "\n".join(sorted(entries)).encode("ascii")
                 result[key + "_INSTANCE_SHA256"] = hashlib.sha256(payload).hexdigest()
             else:
                 result[key + "_INSTANCE_SHA256"] = "ABSENT"
