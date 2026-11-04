@@ -138,6 +138,12 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
         output["PERSISTENT_STORAGE"] = evidence.get("PERSISTENT_DATA", "UNVERIFIED")
         output["SAVED_TUNNELS"] = evidence.get("PERSISTED_TUNNELS", "UNKNOWN")
         if evidence.get("HOST_PREFLIGHT") != "PASS_LOCAL_ONLY_INCOMPLETE":
+            if evidence.get("HOST_PREFLIGHT") == "HOLD_EXISTING_TUNNELS":
+                # Safe local inventory can still be shown on a production
+                # Node, but its saved FRP tunnels remain an absolute
+                # no-recreate HOLD. These are NOT signed engine claims.
+                output["TARGET_ENGINE"] = local_state(engine, node)["state"]
+                output["OTHER_ENGINE"] = local_state(other, node)["state"]
             output["REASON"] = evidence.get("HOLD_REASON") or (
                 "SAVED_TUNNELS_PRESENT" if
                 evidence.get("HOST_PREFLIGHT") == "HOLD_EXISTING_TUNNELS"
