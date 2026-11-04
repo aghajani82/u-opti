@@ -315,6 +315,16 @@ def tunnel_count(data_dir: Path) -> int:
     return tunnel_inventory(data_dir)[0]
 
 
+def _read_proc_file(path: Path, limit: int) -> bytes:
+    """Bounded read with O_NOFOLLOW; no argv, environ, fd or secrets."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as stream:
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("OVERSIZED_PROCESS_METADATA")
+        return data
+
+
 def frp_process_footprint(proc_root: Path = FRP_PROC_ROOT) -> dict[str, str]:
     """Best-effort /proc *names and start ticks*, never arguments or secrets.
 
@@ -339,15 +349,13 @@ def frp_process_footprint(proc_root: Path = FRP_PROC_ROOT) -> dict[str, str]:
             if count > 65536:
                 return result
             try:
-                comm = (pid_dir / "comm").read_bytes()
+                comm = _read_proc_file(pid_dir / "comm", 64)
                 if comm not in (b"frpc\n", b"frps\n"):
                     continue
                 name = comm.strip().decode("ascii")
                 # /proc/PID/stat: after the final ') ', field 3 is process state,
                 # so field 22 (starttime) is at index 19 in this suffix.
-                raw = (pid_dir / "stat").read_bytes()
-                if len(raw) > 4096 or len(comm) > 64:
-                    return result
+                raw = _read_proc_file(pid_dir / "stat", 4096)
                 marker = raw.rfind(b") ")
                 if marker < 0:
                     return result
@@ -421,9 +429,16 @@ def wss_edge_footprint(journal: Path = WSS_EDGE_JOURNAL) -> dict[str, str]:
                 or not 0 < st.st_size <= 16384):
             return result
         blob = _local_file(journal, max_bytes=16384, require_root=True)
-        doc = json.loads(blob)
-        if (not isinstance(doc, dict) or doc.get("schema") != 1
-                or doc.get("state") != "COMMITTED"):
+        def reject_duplicate(pairs):
+            out = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError("DUPLICATE_EDGE_JOURNAL_FIELD")
+                out[key] = value
+            return out
+        doc = json.loads(blob, object_pairs_hook=reject_duplicate)
+        if (not isinstance(doc, dict) or type(doc.get("schema")) is not int
+                or doc.get("schema") != 1 or doc.get("state") != "COMMITTED"):
             return result
     except (OSError, ValueError, TypeError, UnicodeError):
         return result
