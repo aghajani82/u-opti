@@ -10,6 +10,7 @@ import contextlib
 import fcntl
 import hashlib
 import importlib.util
+import itertools
 import json
 import os
 from pathlib import Path
@@ -171,7 +172,10 @@ def check_protected(doc):
     current=protected_receipt(doc['protected'].keys())
     need(current==doc['protected'],'PROTECTED_CONFIG_OR_IDENTITY_DRIFT')
 
-def runtime_signature(obj):
+DNS_EMPTY_FIELDS=('Dns','DnsOptions','DnsSearch')
+DNS_EMPTY_POLICY='docker-dns-empty-v1'
+
+def runtime_signature(obj, *, canonical_dns=False):
     # Hash sensitive values privately without exposing them in output/logs.
     host=obj['HostConfig']
     env=p.runtime_env(obj)
@@ -182,6 +186,13 @@ def runtime_signature(obj):
         need(isinstance(binds,list) and all(isinstance(x,str) for x in binds),
              'UNSAFE_HOST_BINDS')
         norm['Binds']=sorted(binds)
+    if canonical_dns:
+        # Moby Container.readHostConfig -> InitDNSHostConfig converts precisely
+        # these three nil slices to empty slices on daemon reload. Missing keys
+        # and nonempty values remain significant; no other HostConfig is ignored.
+        for key in DNS_EMPTY_FIELDS:
+            if key in norm and norm[key] is None:
+                norm[key]=[]
     mounts=[{k:m.get(k) for k in ('Type','Source','Destination','RW')}
             for m in obj.get('Mounts',[])]
     return hashlib.sha256(json.dumps({
@@ -190,6 +201,66 @@ def runtime_signature(obj):
         'entrypoint':obj['Config'].get('Entrypoint'),
         'host':norm,'mounts':sorted(mounts,key=lambda m:m['Destination'] or ''),
     },sort_keys=True,default=str).encode()).hexdigest()
+
+def legacy_dns_proof(obj, signature):
+    """Prove equality to the original digest; never bless a current digest.
+
+    At most eight candidates, differing ONLY in present, empty DNS slices.
+    A concurrent security change or an unknown field still prevents a match.
+    """
+    need(isinstance(signature,str) and re.fullmatch('[0-9a-f]{64}',signature),
+         'INVALID_RUNTIME_SIGNATURE')
+    host=obj['HostConfig']
+    keys=[key for key in DNS_EMPTY_FIELDS
+          if key in host and (host[key] is None or host[key]==[])]
+    for values in itertools.product((None,[]),repeat=len(keys)):
+        candidate=dict(obj)
+        candidate['HostConfig']=dict(host,**dict(zip(keys,values)))
+        if runtime_signature(candidate)==signature:
+            return True
+    return False
+
+def check_runtime_signature(obj, baseline):
+    policy=baseline.get('signature_policy')
+    need(policy in (None,DNS_EMPTY_POLICY),'UNKNOWN_RUNTIME_SIGNATURE_POLICY')
+    if policy==DNS_EMPTY_POLICY:
+        valid=legacy_dns_proof(obj,baseline['signature'])
+    else:
+        valid=runtime_signature(obj)==baseline['signature']
+    need(valid,'WSS_RUNTIME_SECURITY_DRIFT')
+
+def signature_recovery(doc, *, commit=False, rollback=False):
+    """Read-only proof or explicit, atomic policy opt-in/out; no Docker writes.
+
+    Original signatures are retained byte-for-byte. Existing journals stay
+    strict until the operator explicitly enables the bounded equivalence.
+    No signed request, replay nonce, tunnel action or service restart is used.
+    """
+    need(doc['state']=='COMMITTED','WSS_RUNTIME_NOT_COMMITTED')
+    need(not (STATE/'record.next').exists() and not (STATE/'record.next').is_symlink(),
+         'PARTIAL_RECORD_NEEDS_REVIEW')
+    check_protected(doc)
+    candidate=json.loads(json.dumps(doc))
+    for name in doc['services']:
+        baseline=candidate['baseline'][name]
+        need(baseline.get('signature_policy') in (None,DNS_EMPTY_POLICY),
+             'UNKNOWN_RUNTIME_SIGNATURE_POLICY')
+        baseline['signature_policy']=DNS_EMPTY_POLICY
+        # Full existing image, health, signed-mode and Compose ownership gates.
+        # The original digest is compared using only empty DNS alternatives.
+        ensure_service(name,candidate,enabled=True)
+    check_protected(doc)
+    if rollback:
+        for name in candidate['services']:
+            candidate['baseline'][name].pop('signature_policy',None)
+    if commit:
+        atomic_record(candidate)
+    print('RC7_WSS_SIGNATURE_'+('ROLLBACK' if rollback else 'RECOVERY')+
+          ('=COMMITTED' if commit else '=PROVEN_READ_ONLY'))
+    print('ORIGINAL_RUNTIME_SIGNATURES=RETAINED')
+    print('SIGNED_REQUESTS_SENT=NO')
+    print('CONTAINERS_RECREATED=NO')
+
 
 def ensure_service(name,doc,*,enabled,healthy=True):
     obj=inspect_container(name)
@@ -220,8 +291,7 @@ def ensure_service(name,doc,*,enabled,healthy=True):
     project,files=p.compose_files(name,safe)
     need(project==doc['project'] and files==doc['baseline'][name]['files'],
          'WSS_COMPOSE_BASELINE_DRIFT')
-    need(runtime_signature(obj)==doc['baseline'][name]['signature'],
-         'WSS_RUNTIME_SECURITY_DRIFT')
+    check_runtime_signature(obj,doc['baseline'][name])
     return project,files
 
 def compose(name,doc,enabled):
@@ -302,7 +372,9 @@ def planned(role,peer_ip):
         owner=project
         need(not overlay_path(name).exists() and not overlay_path(name).is_symlink(),
              'WSS_RC7_OVERLAY_ALREADY_EXISTS')
-        baseline[name]={'files':files,'signature':runtime_signature(obj)}
+        baseline[name]={'files':files,
+                        'signature':runtime_signature(obj,canonical_dns=True),
+                        'signature_policy':DNS_EMPTY_POLICY}
     return {'schema':1,'role':role,'state':'PREPARED','domain':domain,
             'peer':peer_ip if role=='ir' else None,'project':owner,
             'services':names,'baseline':baseline,
@@ -406,14 +478,16 @@ def restore(doc):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('action',choices=('plan','apply','verify','rollback','recover'))
+    ap.add_argument('action',choices=('plan','apply','verify','rollback','recover',
+                                          'signature-check','signature-recover',
+                                          'signature-rollback'))
     ap.add_argument('--role',choices=('ir','foreign'),required=True)
     ap.add_argument('--peer-ip')
     ap.add_argument('--snapshot-confirm',default='')
     args=ap.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
-        if args.action not in ('verify','plan'):
+        if args.action not in ('verify','plan','signature-check'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'PROVIDER_SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
@@ -429,7 +503,10 @@ def main():
             with locked():
                 doc=record()
                 need(doc['role']==args.role,'WSS_ROLE_MISMATCH')
-                if args.action=='verify':
+                if args.action.startswith('signature-'):
+                    signature_recovery(doc,commit=args.action!='signature-check',
+                                       rollback=args.action=='signature-rollback')
+                elif args.action=='verify':
                     verify(doc)
                 elif args.action=='rollback':
                     need(doc['state']=='COMMITTED','USE_RECOVER_FOR_INCOMPLETE_TRANSACTION')

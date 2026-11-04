@@ -35,7 +35,7 @@ class WssControllerTests(unittest.TestCase):
         self.assertNotIn('cap_add',p.overlay_bytes('smite-node'))
         self.assertNotIn('devices',p.overlay_bytes('smite-node'))
         self.assertNotIn('volumes',p.overlay_bytes('smite-node'))
-        self.assertIn("choices=('plan','apply','verify','rollback','recover')",
+        self.assertIn("'signature-check','signature-recover',",
                       Path(rt.__file__).read_text())
         self.assertIn("no_tunnels()",Path(rt.__file__).read_text())
         self.assertIn("'pgrep','-x','frpc'",Path(rt.__file__).read_text())

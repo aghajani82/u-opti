@@ -210,6 +210,16 @@ class BrokerRegressionTests(unittest.TestCase):
         self.assertEqual(self._calls, [])
         self.assertEqual(self.accept(), "PASS_ROUTE_ADDED")
 
+    def test_wss_runtime_drift_prevents_nonce_consume_and_route_apply(self):
+        with patch.object(broker, "_verify_bridge",
+                          side_effect=broker.BrokerHold("WSS_RUNTIME_SECURITY_DRIFT")):
+            with self.assertRaisesRegex(broker.BrokerHold, "WSS_RUNTIME_SECURITY_DRIFT"):
+                self.accept()
+        self.assertEqual(self._calls, [])
+        # Same signed fixture remains admissible: rejected before ledger use.
+        # This is an isolated test, never a recommendation to replay live wire.
+        self.assertEqual(self.accept(), "PASS_ROUTE_ADDED")
+
     def test_failed_route_is_consumed_then_hold_no_automatic_retry(self):
         with patch.object(broker,"_apply_route", side_effect=RuntimeError("fake failure")):
             with self.assertRaisesRegex(broker.BrokerHold, "HOLD_RECONCILE_NO_RETRY"):
