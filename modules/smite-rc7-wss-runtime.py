@@ -221,13 +221,19 @@ def legacy_dns_proof(obj, signature):
             return True
     return False
 
-def check_runtime_signature(obj, baseline):
+def check_runtime_signature(obj, baseline, *, allow_legacy_ir_dns_proof=False):
     policy=baseline.get('signature_policy')
     need(policy in (None,DNS_EMPTY_POLICY),'UNKNOWN_RUNTIME_SIGNATURE_POLICY')
     if policy==DNS_EMPTY_POLICY:
         valid=legacy_dns_proof(obj,baseline['signature'])
     else:
         valid=runtime_signature(obj)==baseline['signature']
+        if not valid and allow_legacy_ir_dns_proof:
+            # Trial-only IR compatibility for previously committed legacy
+            # journals: prove the ORIGINAL digest with DNS empty-slice
+            # permutations, not a freshly blessed runtime fingerprint.
+            # Nonempty/missing DNS and every other HostConfig drift still HOLD.
+            valid=legacy_dns_proof(obj,baseline['signature'])
     need(valid,'WSS_RUNTIME_SECURITY_DRIFT')
 
 def signature_recovery(doc, *, commit=False, rollback=False):
@@ -292,7 +298,9 @@ def ensure_service(name,doc,*,enabled,healthy=True):
     project,files=p.compose_files(name,safe)
     need(project==doc['project'] and files==doc['baseline'][name]['files'],
          'WSS_COMPOSE_BASELINE_DRIFT')
-    check_runtime_signature(obj,doc['baseline'][name])
+    check_runtime_signature(obj,doc['baseline'][name],
+                            allow_legacy_ir_dns_proof=(doc['role']=='ir' and
+                                                       doc['state']=='COMMITTED'))
     return project,files
 
 def compose(name,doc,enabled):
