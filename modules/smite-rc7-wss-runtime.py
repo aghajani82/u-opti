@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import time
+import tempfile
 
 HERE=Path(__file__).resolve().parent
 STATE=Path('/var/lib/u-opti/smite-rc7-wss-runtime')
@@ -476,6 +477,89 @@ def restore(doc):
     print('RC7_WSS_RUNTIME_ROLLBACK=PASS')
     print('IDENTITY_REPLAY_RETAINED=YES')
 
+def recovery_console():
+    """Require a foreground Linux console, not an SSH/PTY assertion."""
+    need(not any(os.environ.get(k) for k in ('SSH_CONNECTION','SSH_CLIENT','SSH_TTY')),
+         'DIRECT_RECOVERY_CONSOLE_REQUIRED')
+    need(sys.stdin.isatty() and sys.stdout.isatty(),
+         'DIRECT_RECOVERY_CONSOLE_REQUIRED')
+    for stream in (sys.stdin,sys.stdout):
+        fd=stream.fileno()
+        name=os.ttyname(fd)
+        need(re.fullmatch(r'/dev/(?:tty[1-9][0-9]*|ttyS[0-9]+|hvc[0-9]+|ttyAMA[0-9]+)',name)
+             is not None and os.tcgetpgrp(fd)==os.getpgrp(),
+             'DIRECT_RECOVERY_CONSOLE_REQUIRED')
+    need(os.fstat(sys.stdin.fileno()).st_rdev==os.fstat(sys.stdout.fileno()).st_rdev,
+         'DIRECT_RECOVERY_CONSOLE_REQUIRED')
+
+def backup_bytes(path):
+    # Resolve every component using directory FDs: no symlink traversal, even
+    # through a parent. Do not extract archives or execute backup contents.
+    target=Path(path)
+    need(target.is_absolute() and '..' not in target.parts,'INVALID_BACKUP_PATH')
+    directory=os.open('/',os.O_RDONLY|os.O_DIRECTORY)
+    try:
+        for part in target.parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+            os.close(directory); directory=child
+            st=os.fstat(directory)
+            need(st.st_uid==0 and (not st.st_mode & 0o022 or st.st_mode & stat.S_ISVTX),
+                 'UNTRUSTED_BACKUP_DIRECTORY')
+        fd=os.open(target.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+        with os.fdopen(fd,'rb') as stream:
+            st=os.fstat(stream.fileno())
+            need(stat.S_ISREG(st.st_mode) and st.st_uid==0 and st.st_nlink==1
+                 and stat.S_IMODE(st.st_mode)==0o600 and 0<st.st_size<=1048576,
+                 'UNTRUSTED_RECOVERY_BACKUP')
+            live=(STATE/'record.json').stat()
+            need((st.st_dev,st.st_ino)!=(live.st_dev,live.st_ino),'BACKUP_IS_LIVE_JOURNAL')
+            raw=stream.read(1048577)
+            need(len(raw)==st.st_size,'RECOVERY_BACKUP_CHANGED')
+            return raw
+    finally:
+        os.close(directory)
+
+def unique_object(pairs):
+    result={}
+    for key,value in pairs:
+        need(key not in result,'DUPLICATE_BACKUP_JSON_KEY')
+        result[key]=value
+    return result
+
+def backup_recovery_proof(path, digest, doc):
+    """Validate a restored original journal against an OFF-HOST digest.
+
+    This proves bytes and a journal-only restore, not remote custody or whole
+    host restoration. The operator separately attests independent custody.
+    """
+    need(re.fullmatch('[0-9a-f]{64}',digest or '') is not None,
+         'INDEPENDENT_BACKUP_SHA256_REQUIRED')
+    raw=backup_bytes(path)
+    need(hashlib.sha256(raw).hexdigest()==digest,'RECOVERY_BACKUP_HASH_MISMATCH')
+    original=json.loads(raw,object_pairs_hook=unique_object)
+    expected=json.loads(json.dumps(doc))
+    need(expected.get('state')=='COMMITTED','WSS_RUNTIME_NOT_COMMITTED')
+    for name in expected['services']:
+        baseline=expected['baseline'][name]
+        need(baseline.get('signature_policy') in (None,DNS_EMPTY_POLICY),
+             'UNKNOWN_RUNTIME_SIGNATURE_POLICY')
+        baseline.pop('signature_policy',None)
+    # Exact original document: includes role, project, protected receipts,
+    # services and ORIGINAL fingerprints. No replacement/current-only backup.
+    need(json.dumps(original,sort_keys=True)==json.dumps(expected,sort_keys=True),
+         'BACKUP_NOT_ORIGINAL_WSS_JOURNAL')
+    with tempfile.TemporaryDirectory(prefix='uopti-wss-restore-') as temp:
+        restored=Path(temp)/'record.json'
+        atomic_new(restored,raw)
+        st=restored.stat()
+        need(st.st_uid==0 and stat.S_IMODE(st.st_mode)==0o600
+             and restored.read_bytes()==raw,'BACKUP_RESTORE_DRILL_FAILED')
+        need(json.loads(restored.read_bytes(),object_pairs_hook=unique_object)==expected,
+             'BACKUP_RESTORE_DRILL_FAILED')
+    print('ORIGINAL_WSS_BACKUP_INTEGRITY=PASS')
+    print('JOURNAL_ONLY_RESTORE_DRILL=PASS')
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action',choices=('plan','apply','verify','rollback','recover',
@@ -484,10 +568,19 @@ def main():
     ap.add_argument('--role',choices=('ir','foreign'),required=True)
     ap.add_argument('--peer-ip')
     ap.add_argument('--snapshot-confirm',default='')
+    ap.add_argument('--recovery-backup',help='Original WSS journal restored from independent backup')
+    ap.add_argument('--backup-sha256',help='SHA-256 retained and obtained OFF HOST')
     args=ap.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
-        if args.action not in ('verify','plan','signature-check'):
+        backup_mode=args.recovery_backup is not None or args.backup_sha256 is not None
+        if backup_mode:
+            need(args.action in ('signature-recover','signature-rollback'),
+                 'BACKUP_ALTERNATIVE_SIGNATURE_ONLY')
+            need(args.recovery_backup and args.backup_sha256 and not args.snapshot_confirm,
+                 'RECOVERY_PROOF_MODE_AMBIGUOUS_OR_INCOMPLETE')
+            recovery_console()
+        if not backup_mode and args.action not in ('verify','plan','signature-check'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'PROVIDER_SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
@@ -503,6 +596,16 @@ def main():
             with locked():
                 doc=record()
                 need(doc['role']==args.role,'WSS_ROLE_MISMATCH')
+                if backup_mode:
+                    backup_recovery_proof(args.recovery_backup,args.backup_sha256,doc)
+                    # Prove the entire runtime before requesting final consent.
+                    signature_recovery(doc)
+                    recovery_console()
+                    challenge='OFF-HOST-RESTORE-VERIFIED '+args.backup_sha256
+                    need(input('Confirm independent backup custody; type '+challenge+': ').strip()
+                         ==challenge,'INDEPENDENT_BACKUP_NOT_CONFIRMED')
+                    challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
+                    need(input('Type '+challenge+': ').strip()==challenge,'OPERATOR_CANCELLED')
                 if args.action.startswith('signature-'):
                     signature_recovery(doc,commit=args.action!='signature-check',
                                        rollback=args.action=='signature-rollback')
@@ -516,7 +619,7 @@ def main():
                          'RECOVERY_STATE_NOT_ALLOWED')
                     restore(doc)
         return 0
-    except (Hold,OSError,ValueError,KeyError,TypeError,sqlite3.Error) as exc:
+    except (Hold,OSError,ValueError,KeyError,TypeError,sqlite3.Error,EOFError) as exc:
         msg=str(exc)
         print('HOLD: '+(msg if re.fullmatch('[A-Z0-9_]{1,100}',msg)
                          else 'UNTRUSTED_WSS_RUNTIME_STATE'),file=sys.stderr)

@@ -17,7 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: DNS proof, negative cases, recovery and rollback
-        run: sudo python3 -B tests/test-smite-rc7-wss-signature-recovery.py
+        run: |
+          sudo python3 -B tests/test-smite-rc7-wss-signature-recovery.py
+          sudo python3 -B tests/test-smite-rc7-signature-backup.py
       - name: Disposable container and daemon restart without recreation
         env:
           UOPTI_DISPOSABLE_DOCKER_LAB: 'YES'
