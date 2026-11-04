@@ -182,6 +182,156 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertEqual(result["REASON"], "COMPOSE_CHANGED_DURING_REVIEW")
         self.assertEqual((self.node / "docker-compose.yml").read_text(), COMPOSE)
 
+    def signed_inputs(self):
+        import hashlib
+        candidate = self.base / "externally-reviewed-pair.json"
+        source = "e" * 40
+        publish_ref = "refs/tags/v2.0.0-rc.7"
+        candidate.write_text(json.dumps({
+            "schema": 1,
+            "kind": "smite_signed_registry_pair_candidate",
+            "source_repo": "aghajani82/Smite",
+            "source_commit": source,
+            "publish_ref": publish_ref,
+            "version": "2.0.0-rc.7",
+            "images": {
+                "panel": "ghcr.io/aghajani82/smite-panel@sha256:" + "b" * 64,
+                "node": IMAGE,
+            },
+            "activation_allowed": False,
+            "release_approved": False,
+        }), encoding="utf-8")
+        return dict(
+            signed_pair_manifest=candidate,
+            signed_pair_manifest_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            signed_pair_source_sha=source,
+            signed_pair_publish_ref=publish_ref,
+        )
+
+    def signed_cosign(self, args, **kwargs):
+        role = "panel" if "smite-panel@" in args[-1] else "node"
+        image_digest = args[-1].split("@", 1)[1]
+        source = next(x.split("=", 1)[1] for x in args
+                      if x.startswith("smite_source_sha="))
+        signed = [{"critical": {
+            "type": "cosign container image signature",
+            "image": {"docker-manifest-digest": image_digest}},
+            "optional": {"smite_source_sha": source, "smite_role": role}}]
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(signed), stderr="")
+
+    def test_signed_pair_cosign_verification_reaches_deeper_read_only_host_gate(self):
+        inputs = self.signed_inputs()
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign) as run:
+            result = gate.report("backhaul", self.node, runtime=self.runtime,
+                                 min_bytes=4096, **inputs)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(result["SIGNED_REGISTRY_PAIR_PROOF"], "COSIGN_VERIFIED")
+        self.assertEqual(result["NODE_CONTAINER"], "RUNNING_REVIEWED_IMAGE")
+        self.assertEqual(result["SAVED_TUNNELS"], "ZERO")
+        self.assertEqual(result["REASON"], "SNAPSHOT_SIGNED_NODE_AND_HOST_EXECUTOR_UNVERIFIED")
+        self.assertEqual(result["HOST_TRANSACTION_AND_ROLLBACK"], "NOT_IMPLEMENTED")
+        self.assertEqual(result["NODE_RUNTIME_BYTES_AND_REPLAY"], "UNVERIFIED")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DO_NOT_PRINT_ME", str(result))
+
+    def test_signed_pair_never_bypasses_existing_saved_tunnel_hold(self):
+        inputs = self.signed_inputs()
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "saved": {"core": "frp", "spec": {"secret": "DO_NOT_PRINT_ME"}}
+        }))
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign):
+            result = gate.report("backhaul", self.node, runtime=self.runtime,
+                                 min_bytes=4096, **inputs)
+        self.assertEqual(result["SIGNED_REGISTRY_PAIR_PROOF"], "COSIGN_VERIFIED")
+        self.assertEqual(result["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(result["REASON"], "SAVED_TUNNELS_PRESENT")
+        self.assertEqual(result["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertNotIn("DO_NOT_PRINT_ME", str(result))
+
+    def test_signed_production_frp_inventory_still_holds_saved_tunnels(self):
+        inputs = self.signed_inputs()
+        (self.data / "tunnels.json").write_text(json.dumps({
+            "saved": {"core": "frp", "spec": {"secret": "DO_NOT_PRINT_ME"}}
+        }))
+        def local_fixture(engine, node):
+            return {"state": "ENROLLED_UNVERIFIED" if engine == "frp" else "NOT_INSTALLED",
+                    "reason": "LOCAL_ONLY"}
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign), \
+             patch.object(gate, "local_state", side_effect=local_fixture):
+            out = gate.report("backhaul", self.node, runtime=self.runtime,
+                              min_bytes=4096, **inputs)
+        self.assertEqual(out["TARGET_ENGINE"], "NOT_INSTALLED")
+        self.assertEqual(out["OTHER_ENGINE"], "ENROLLED_UNVERIFIED")
+        self.assertEqual(out["OTHER_ENGINE_ACTION"], "NEVER_MODIFY")
+        self.assertEqual(out["REASON"], "SAVED_TUNNELS_PRESENT")
+        self.assertEqual(out["SAVED_TUNNELS"], "EXISTING_DO_NOT_RESTART")
+        self.assertEqual(out["SIGNED_NODE_HEALTH_AND_REPLAY"], "UNVERIFIED")
+        self.assertEqual(out["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(out["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DO_NOT_PRINT_ME", str(out))
+
+    def test_incomplete_or_invalid_signed_pair_never_queries_docker(self):
+        inputs = self.signed_inputs()
+        examples = [
+            {"signed_pair_manifest": inputs["signed_pair_manifest"]},
+            {**inputs, "signed_pair_manifest_sha256": "0" * 64},
+            {**inputs, "signed_pair_publish_ref": "refs/tags/v2.0.0-rc.5"},
+        ]
+        for values in examples:
+            with self.subTest(values=str(values)[:70]):
+                with patch.object(gate.signed_pair.subprocess, "run",
+                                  side_effect=self.signed_cosign) as run:
+                    out = gate.report("backhaul", self.node, runtime=self.runtime,
+                                      min_bytes=4096, **values)
+                self.assertEqual(out["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(out["ACTIVATION_GATE"], "HOLD")
+                self.assertEqual(out["NODE_CONTAINER"], "UNVERIFIED")
+                self.assertIn(out["REASON"], ("INCOMPLETE_SIGNED_PAIR_PROOF",
+                                               "SIGNED_PAIR_PROOF_INVALID"))
+                self.assertEqual(run.call_count, 0)
+
+    def test_failed_cosign_and_mismatched_runtime_image_hold(self):
+        inputs = self.signed_inputs()
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="secret")):
+            out = gate.report("backhaul", self.node, runtime=self.runtime,
+                              min_bytes=4096, **inputs)
+        self.assertEqual(out["REASON"], "SIGNED_PAIR_PROOF_INVALID")
+        self.assertNotIn("secret", str(out))
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign):
+            out = gate.report(
+                "backhaul", self.node, runtime=self.runtime, min_bytes=4096,
+                expected_node_image="ghcr.io/aghajani82/smite-node@sha256:" + "f" * 64,
+                **inputs)
+        self.assertEqual(out["REASON"], "SIGNED_PAIR_IMAGE_PIN_CONFLICT")
+        self.runtime["Config"]["Image"] = (
+            "ghcr.io/aghajani82/smite-node@sha256:" + "a" * 63 + "b"
+        )
+        with patch.object(gate.signed_pair.subprocess, "run",
+                          side_effect=self.signed_cosign):
+            out = gate.report("backhaul", self.node, runtime=self.runtime,
+                              min_bytes=4096, **inputs)
+        self.assertEqual(out["SIGNED_REGISTRY_PAIR_PROOF"], "COSIGN_VERIFIED")
+        self.assertEqual(out["REASON"], "NODE_IMAGE_DIGEST_MISMATCH")
+        self.assertEqual(out["INSTALL_ALLOWED"], "NO")
+
+    def test_backhaul_menu_forwards_only_external_proof_and_keeps_install_disabled(self):
+        menu = (ROOT / "modules/smite-managed-backhaul-menu.sh").read_text()
+        for name in ("SMITE_BH_PAIR_MANIFEST", "SMITE_BH_PAIR_SHA256",
+                     "SMITE_BH_PAIR_SOURCE_SHA", "SMITE_BH_PAIR_PUBLISH_REF",
+                     "--signed-pair-manifest", "--signed-pair-manifest-sha256",
+                     "--signed-pair-source-sha", "--signed-pair-publish-ref"):
+            self.assertIn(name, menu)
+        self.assertIn("HOLD: Backhaul installation on real IR/KH is disabled.", menu)
+        self.assertIn("HOLD: Host installation disabled. No changes made.", menu)
+        self.assertNotIn("docker compose up", menu)
+
     def test_no_external_executor_or_snapshot_proof(self):
         body = SCRIPT.read_text()
         for dangerous in ("docker compose up", "docker restart", "systemctl",

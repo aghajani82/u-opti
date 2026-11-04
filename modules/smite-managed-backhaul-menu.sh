@@ -58,8 +58,24 @@ smite_managed_bh_menu() {
                 smite_managed_bh_check review || :
                 echo "===== INDEPENDENT BACKHAUL HOST PREFLIGHT (READ ONLY) ====="
                 if [ -s "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" ]; then
+                    # Optional independent signed release evidence for this
+                    # read-only review. Four explicit external pins are
+                    # required; the verifier rejects incomplete/forged proof.
+                    # A Docker-reported digest is never used as the source.
+                    local -a signed_pair_args=()
+                    [ -z "${SMITE_BH_PAIR_MANIFEST:-}" ] || signed_pair_args+=(
+                        --signed-pair-manifest "$SMITE_BH_PAIR_MANIFEST")
+                    [ -z "${SMITE_BH_PAIR_SHA256:-}" ] || signed_pair_args+=(
+                        --signed-pair-manifest-sha256 "$SMITE_BH_PAIR_SHA256")
+                    [ -z "${SMITE_BH_PAIR_SOURCE_SHA:-}" ] || signed_pair_args+=(
+                        --signed-pair-source-sha "$SMITE_BH_PAIR_SOURCE_SHA")
+                    [ -z "${SMITE_BH_PAIR_PUBLISH_REF:-}" ] || signed_pair_args+=(
+                        --signed-pair-publish-ref "$SMITE_BH_PAIR_PUBLISH_REF")
+                    [ -z "${SMITE_BH_PAIR_TRUSTED_ROOT:-}" ] || signed_pair_args+=(
+                        --signed-pair-trusted-root "$SMITE_BH_PAIR_TRUSTED_ROOT")
                     python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \
-                        --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" || :
+                        --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" \
+                        "${signed_pair_args[@]}" || :
                 else
                     echo "HOLD: Common host admission helper missing."
                 fi
