@@ -606,6 +606,10 @@ def main():
                          ==challenge,'INDEPENDENT_BACKUP_NOT_CONFIRMED')
                     challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
                     need(input('Type '+challenge+': ').strip()==challenge,'OPERATOR_CANCELLED')
+                    # Consent may take time: do not commit using a removed or
+                    # changed local restore copy, or a detached console.
+                    recovery_console()
+                    backup_recovery_proof(args.recovery_backup,args.backup_sha256,doc)
                 if args.action.startswith('signature-'):
                     signature_recovery(doc,commit=args.action!='signature-check',
                                        rollback=args.action=='signature-rollback')

@@ -127,6 +127,17 @@ class BackupTests(unittest.TestCase):
         with self.assertRaises(rt.Hold):self.proof()
         self.root.chmod(0o700)
 
+    def test_backup_changed_during_confirmation_blocks_commit(self):
+        answers=iter(self.answers('signature-recover'))
+        def confirm(prompt):
+            self.backup.write_bytes(b'changed during consent')
+            return next(answers)
+        with patch('sys.argv',['runtime','signature-recover','--role','ir','--recovery-backup',str(self.backup),'--backup-sha256',self.digest]), \
+             patch.object(rt,'recovery_console'),patch.object(rt,'check_protected'), \
+             patch.object(rt,'ensure_service'),patch('builtins.input',side_effect=confirm):
+            self.assertEqual(rt.main(),2)
+        self.assertEqual(self.record.read_bytes(),self.raw)
+
     def test_alternative_cannot_authorize_other_actions(self):
         for action in ('apply','rollback','recover','plan','verify','signature-check'):
             self.assertEqual(self.cli(action),2)
