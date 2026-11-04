@@ -30,6 +30,11 @@ PRIVATE_PROFILES = {"managed", "strict"}
 NO_PROOF = "UNVERIFIED_MANUAL_OR_SEPARATE_SIGNED_TEST"
 # An RC6/RC7 fresh install may retain its transaction-owned named volume.
 # It is admitted for read-only inventory only with the exact COMMITTED journal.
+# Fixed, reviewed local evidence locations; never taken from untrusted env.
+# None of these observations is a live FRP owner/child or signed WSS proof.
+FRP_PROC_ROOT = Path("/proc")
+BROKER_SOCKET = Path("/run/u-opti/smite/xhttp-broker.sock")
+WSS_EDGE_JOURNAL = Path("/var/lib/u-opti/smite-rc7-wss-edge/record.json")
 RC6_JOURNAL = Path("/var/lib/u-opti/rc6-install-journal/current.json")
 RC6_ID = re.compile(r"^uopti_rc6_[0-9a-f]{32}$")
 RC6_SOURCES = frozenset({
@@ -310,6 +315,122 @@ def tunnel_count(data_dir: Path) -> int:
     return tunnel_inventory(data_dir)[0]
 
 
+def frp_process_footprint(proc_root: Path = FRP_PROC_ROOT) -> dict[str, str]:
+    """Best-effort /proc *names and start ticks*, never arguments or secrets.
+
+    A process named frps is NOT proof that it owns the reviewed FRPS service;
+    this only offers a local before/after restart-change hint.
+    """
+    result = {
+        "FRPC_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPS_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPC_INSTANCE_SHA256": "UNVERIFIED",
+        "FRPS_INSTANCE_SHA256": "UNVERIFIED",
+    }
+    observed: dict[str, list[str]] = {"frpc": [], "frps": []}
+    try:
+        if proc_root.is_symlink() or not proc_root.is_dir():
+            return result
+        count = 0
+        for pid_dir in proc_root.iterdir():
+            if not pid_dir.name.isdecimal() or not pid_dir.is_dir():
+                continue
+            count += 1
+            if count > 65536:
+                return result
+            try:
+                comm = (pid_dir / "comm").read_bytes()
+                if comm not in (b"frpc\\n", b"frps\\n"):
+                    continue
+                name = comm.strip().decode("ascii")
+                # /proc/PID/stat: after the final ') ', field 3 is process state,
+                # so field 22 (starttime) is at index 19 in this suffix.
+                raw = (pid_dir / "stat").read_bytes()
+                if len(raw) > 4096 or len(comm) > 64:
+                    return result
+                marker = raw.rfind(b") ")
+                if marker < 0:
+                    return result
+                fields = raw[marker + 2:].split()
+                if len(fields) < 20 or not fields[19].isdigit():
+                    return result
+                observed[name].append(pid_dir.name + ":" + fields[19].decode("ascii"))
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                # A process disappeared during inspection: cannot claim a
+                # stable snapshot, so fail closed instead of ignoring it.
+                return result
+        for name, entries in observed.items():
+            key = name.upper()
+            result[key + "_PROCESS_LOCAL"] = (
+                "OBSERVED_UNATTESTED" if entries else "NOT_OBSERVED"
+            )
+            if entries:
+                payload = "\\n".join(sorted(entries)).encode("ascii")
+                result[key + "_INSTANCE_SHA256"] = hashlib.sha256(payload).hexdigest()
+            else:
+                result[key + "_INSTANCE_SHA256"] = "ABSENT"
+    except (OSError, ValueError, UnicodeError):
+        return {
+            "FRPC_PROCESS_LOCAL": "UNVERIFIED",
+            "FRPS_PROCESS_LOCAL": "UNVERIFIED",
+            "FRPC_INSTANCE_SHA256": "UNVERIFIED",
+            "FRPS_INSTANCE_SHA256": "UNVERIFIED",
+        }
+    return result
+
+
+def broker_socket_footprint(socket_path: Path = BROKER_SOCKET,
+                            *, stat_fn=os.lstat) -> dict[str, str]:
+    """Check socket type, strict root/GID/mode and inode; do not connect."""
+    result = {"BROKER_SOCKET_LOCAL": "UNVERIFIED",
+              "BROKER_SOCKET_ID_SHA256": "UNVERIFIED"}
+    try:
+        parent = stat_fn(socket_path.parent)
+        entry = stat_fn(socket_path)
+    except FileNotFoundError:
+        result["BROKER_SOCKET_LOCAL"] = "ABSENT"
+        result["BROKER_SOCKET_ID_SHA256"] = "ABSENT"
+        return result
+    except OSError:
+        return result
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
+            or stat.S_IMODE(parent.st_mode) != 0o750
+            or not stat.S_ISSOCK(entry.st_mode) or entry.st_uid != 0
+            or entry.st_gid <= 0 or entry.st_gid != parent.st_gid
+            or entry.st_nlink != 1
+            or stat.S_IMODE(entry.st_mode) != 0o660):
+        result["BROKER_SOCKET_LOCAL"] = "UNTRUSTED"
+        return result
+    raw = f"{entry.st_dev}:{entry.st_ino}".encode("ascii")
+    return {"BROKER_SOCKET_LOCAL": "PRESENT_UNATTESTED",
+            "BROKER_SOCKET_ID_SHA256": hashlib.sha256(raw).hexdigest()}
+
+
+def wss_edge_footprint(journal: Path = WSS_EDGE_JOURNAL) -> dict[str, str]:
+    """Read only the exact root-owned RC7 edge journal; never log peer IP."""
+    result = {"WSS_EDGE_JOURNAL_LOCAL": "UNVERIFIED",
+              "WSS_EDGE_JOURNAL_SHA256": "UNVERIFIED"}
+    if not journal.exists() and not journal.is_symlink():
+        result["WSS_EDGE_JOURNAL_LOCAL"] = "ABSENT"
+        result["WSS_EDGE_JOURNAL_SHA256"] = "ABSENT"
+        return result
+    try:
+        st = journal.lstat()
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
+                or not 0 < st.st_size <= 16384):
+            return result
+        blob = _local_file(journal, max_bytes=16384, require_root=True)
+        doc = json.loads(blob)
+        if (not isinstance(doc, dict) or doc.get("schema") != 1
+                or doc.get("state") != "COMMITTED"):
+            return result
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return result
+    return {"WSS_EDGE_JOURNAL_LOCAL": "COMMITTED_LOCAL_UNATTESTED",
+            "WSS_EDGE_JOURNAL_SHA256": hashlib.sha256(blob).hexdigest()}
+
+
 def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
           min_bytes: int = MIN_FREE_BYTES,
           expected_node_image: str | None = None) -> dict[str, str]:
@@ -322,6 +443,14 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         "PERSISTED_TUNNELS": "UNKNOWN",
         "PERSISTED_TUNNEL_REGISTRY_SHA256": "UNVERIFIED",
         "NODE_CONTAINER_ID_SHA256": "UNVERIFIED",
+        "FRPC_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPS_PROCESS_LOCAL": "UNVERIFIED",
+        "FRPC_INSTANCE_SHA256": "UNVERIFIED",
+        "FRPS_INSTANCE_SHA256": "UNVERIFIED",
+        "BROKER_SOCKET_LOCAL": "UNVERIFIED",
+        "BROKER_SOCKET_ID_SHA256": "UNVERIFIED",
+        "WSS_EDGE_JOURNAL_LOCAL": "UNVERIFIED",
+        "WSS_EDGE_JOURNAL_SHA256": "UNVERIFIED",
         "DISK_SPACE": "HOLD",
         "ENGINE": "BACKHAUL_ONLY",
         "FRP_INSTALL_REQUIRED": "NO",
@@ -368,6 +497,12 @@ def audit(node: Path, *, runtime: dict | None = None, runner=subprocess.run,
         count, saved_sha256 = tunnel_inventory(data_dir)
         result["PERSISTED_TUNNEL_REGISTRY_SHA256"] = saved_sha256
         result["PERSISTED_TUNNELS"] = "ZERO" if count == 0 else "EXISTING_DO_NOT_RESTART"
+        # Local process/socket/journal evidence is independent of saved tunnels.
+        # A positive hint cannot override the hard saved-tunnel or snapshot HOLD.
+        result.update(frp_process_footprint())
+        if role == "IR":
+            result.update(broker_socket_footprint())
+            result.update(wss_edge_footprint())
         try:
             free = os.statvfs(node).f_bavail * os.statvfs(node).f_frsize
         except OSError as exc:
