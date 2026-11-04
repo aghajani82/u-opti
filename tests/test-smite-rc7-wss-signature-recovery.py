@@ -93,7 +93,7 @@ class Recovery(unittest.TestCase):
         common={'domain':'ir.example.test','project':'trial','baseline':{'smite-panel':{'files':['/config'],
                                                         'signature':digest}}}
         with patch.object(rt,'inspect_container',return_value=live), \
-             patch.object(rt.p,'runtime_env',return_value={'SMITE_FRP_STANDARD_WSS':'1','SECRET':'private'}), \
+             patch.object(rt.p,'runtime_env',side_effect=lambda _obj: {'SMITE_FRP_STANDARD_WSS':'1','SECRET':'private'}), \
              patch.object(rt.p,'service_gate'), \
              patch.object(rt.p,'compose_files',return_value=('trial',['/config'])):
             for role,state,should_pass in [('ir','COMMITTED',True),
