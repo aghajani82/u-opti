@@ -396,6 +396,36 @@ def _pair_atomic(path: Path, raw: bytes) -> None:
     _pair_fsync_dir(path.parent)
 
 
+def _pair_expected_transition(old_manifest: bytes, old_receipt: bytes,
+                              backhaul_sha256: str, *, role: str) -> tuple[bytes, bytes]:
+    """Recompute the ONLY permitted RC7 lab transition from original bytes.
+
+    Matching SHA256 values alone do not establish that a receipt belongs to
+    its Manifest. The same pure planner validates pre-change FRP binding and
+    unchanged FRP/other engines, both on apply and before recovery writes.
+    """
+    old_doc = _pair_load_json(old_receipt)
+    control_spec = importlib.util.spec_from_file_location(
+        "uopti_rc7_pair_lab_control", HERE / "smite-managed-backhaul-control.py")
+    if control_spec is None or control_spec.loader is None:
+        raise Hold("RC7_PAIR_PLANNER_MISSING")
+    control = importlib.util.module_from_spec(control_spec)
+    control_spec.loader.exec_module(control)
+    try:
+        next_manifest, review = control.plan_rc7_backhaul_manifest_pair(
+            old_manifest, old_doc, backhaul_sha256, role=role)
+    except control.Hold as exc:
+        raise Hold("RC7_PAIR_BASELINE_UNTRUSTED") from exc
+    if review.get("INSTALL_ALLOWED") != "NO" or review.get("ACTIVATION_GATE") != "HOLD":
+        raise Hold("RC7_PAIR_PLANNER_AUTHORIZATION_DRIFT")
+    next_doc = dict(old_doc)
+    next_doc["new"] = digest(next_manifest)
+    next_receipt = (json.dumps(next_doc, sort_keys=True) + "\n").encode()
+    if not (0 < len(next_receipt) <= 8192):
+        raise Hold("RC7_PAIR_RECEIPT_OVERSIZED")
+    return next_manifest, next_receipt
+
+
 def rc7_pair_apply_lab(root: Path, backhaul_sha256: str, *,
                        role: str, inject: str = "") -> str:
     """Serialize this internal rehearsal against the existing engine lab."""
@@ -415,28 +445,9 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
         raise Hold("RC7_PAIR_INTERRUPTED_TRANSACTION_REQUIRES_RECOVERY")
     old_manifest = _pair_read_private(manifest)
     old_receipt = _pair_read_private(frp_receipt)
-    old_doc = _pair_load_json(old_receipt)
-
-    # Use the reviewed pure planner rather than inventing a second engine
-    # manifest contract. Imported lazily to avoid module import cycles.
-    control_spec = importlib.util.spec_from_file_location(
-        "uopti_rc7_pair_lab_control", HERE / "smite-managed-backhaul-control.py")
-    if control_spec is None or control_spec.loader is None:
-        raise Hold("RC7_PAIR_PLANNER_MISSING")
-    control = importlib.util.module_from_spec(control_spec)
-    control_spec.loader.exec_module(control)
-    try:
-        next_manifest, review = control.plan_rc7_backhaul_manifest_pair(
-            old_manifest, old_doc, backhaul_sha256, role=role)
-    except control.Hold as exc:
-        raise Hold("RC7_PAIR_BASELINE_UNTRUSTED") from exc
-    if review.get("INSTALL_ALLOWED") != "NO" or review.get("ACTIVATION_GATE") != "HOLD":
-        raise Hold("RC7_PAIR_PLANNER_AUTHORIZATION_DRIFT")
-    next_doc = dict(old_doc)
-    next_doc["new"] = digest(next_manifest)
-    next_receipt = (json.dumps(next_doc, sort_keys=True) + "\n").encode()
-    if not (0 < len(next_receipt) <= 8192):
-        raise Hold("RC7_PAIR_RECEIPT_OVERSIZED")
+    # Keep exactly the same pure contract for apply and future recovery.
+    next_manifest, next_receipt = _pair_expected_transition(
+        old_manifest, old_receipt, backhaul_sha256, role=role)
 
     # Journal ALL exact old/new bytes and checksums, and sync the directory
     # BEFORE touching either reviewed engine source file.
@@ -513,6 +524,27 @@ def _rc7_pair_recover_locked(root: Path) -> str:
         pieces[name] = _pair_read_private(journal / name)
         if digest(pieces[name]) != record[checksum]:
             raise Hold("RC7_PAIR_RECOVERY_BACKUP_DRIFT")
+
+    # Hashes are necessary but NOT sufficient: reject even hash-consistent
+    # backups whose prior FRP receipt no longer binds the original Manifest,
+    # or whose proposed receipt/Manifest differs from the reviewed pure plan.
+    # All four snapshots are checked before any file is restored.
+    try:
+        proposed = _pair_load_json(pieces["manifest.next"])
+        engines = proposed.get("engines")
+        backhaul = engines.get("backhaul") if isinstance(engines, dict) else None
+        if (not isinstance(backhaul, dict) or set(backhaul) != {"sha256"}
+                or not isinstance(backhaul["sha256"], str)
+                or SHA.fullmatch(backhaul["sha256"]) is None):
+            raise Hold("RC7_PAIR_RECOVERY_SEMANTIC_DRIFT")
+        expected_manifest, expected_receipt = _pair_expected_transition(
+            pieces["manifest.before"], pieces["frp.before"],
+            backhaul["sha256"], role=record["role"])
+    except Hold as exc:
+        raise Hold("RC7_PAIR_RECOVERY_SEMANTIC_DRIFT") from exc
+    if (pieces["manifest.next"] != expected_manifest
+            or pieces["frp.next"] != expected_receipt):
+        raise Hold("RC7_PAIR_RECOVERY_SEMANTIC_DRIFT")
 
     # Check both current files BEFORE changing either one. A third-party
     # edit must never be silently overwritten by a recovery.
