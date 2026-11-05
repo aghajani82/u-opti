@@ -81,23 +81,7 @@ class EnrollmentTests(unittest.TestCase):
         })
         result=ctl.signed_owner_payload(raw)
         self.assertEqual(len(result),64)
-        self.assertRegex(result,r'^[0-9a-f]{64}
-        src=PATH.read_text()
-        self.assertIn("choices=('plan','apply','verify','verify-owner','rollback','recover')",src)
-        self.assertIn("SNAPSHOTS-CONSOLES-VERIFIED",src)
-        self.assertIn("SIGNED_INVENTORY",src)
-        self.assertIn("FRP_BINARY_EXTERNAL_MOUNT",src)
-        self.assertIn("rt.no_tunnels()",src)
-        self.assertIn("verify_file(entry)",src)
-        for prohibited in ('--force-recreate','docker restart','docker stop',
-                           'systemctl reload','apt install','pip install'):
-            self.assertNotIn(prohibited,src)
-        self.assertIn("NODE_RESTARTED=NO",src)
-        self.assertIn("SANAEI_CHANGED=NO",src)
-
-if __name__=='__main__':
-    unittest.main(verbosity=2)
-)
+        self.assertRegex(result,r'^[0-9a-f]{64}$')
         self.assertNotIn('Grandoptical',result)
 
     def test_signed_owner_rejects_missing_duplicate_spoofed_or_invalid_data(self):
@@ -222,7 +206,7 @@ if __name__=='__main__':
 
     def test_no_host_binaries_or_network_listener_side_effects(self):
         src=PATH.read_text()
-        self.assertIn("choices=('plan','apply','verify','rollback','recover')",src)
+        self.assertIn("choices=('plan','apply','verify','verify-owner','rollback','recover')",src)
         self.assertIn("SNAPSHOTS-CONSOLES-VERIFIED",src)
         self.assertIn("SIGNED_INVENTORY",src)
         self.assertIn("FRP_BINARY_EXTERNAL_MOUNT",src)
