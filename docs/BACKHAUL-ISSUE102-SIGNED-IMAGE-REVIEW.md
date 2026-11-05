@@ -336,6 +336,31 @@ preflight; it is not a new installer or menu item. It:
    secrets, Node ID, process ID, tunnel specs or ingress address is printed.
    Invalid/mismatched evidence is a fixed HOLD.
 
+### Official Backhaul executable pinning for this same read-only gate
+
+The reviewed RC7 bundle audit previously required only a correctly formatted
+SHA-256 digest for `/usr/local/bin/backhaul`. That did **not** reject a
+different executable on the inspected Node. PR #121 derives the official
+**extracted executable** SHA-256 separately for `amd64` and `arm64` by
+rechecking each already-pinned Backhaul v0.7.2 release tarball with the
+existing strict archive verifier in isolated GitHub PR CI. These are distinct
+from the archive digests and now reside next to the existing archive pins
+in `smite-managed-backhaul.py`.
+
+The opt-in `verify-rc7-bundle` preflight audits the actual architecture
+**inside the running container**, the exact regular-file executable
+bytes, and compares them with the corresponding reviewed official binary
+digest. An unsupported architecture, wrong architecture/digest pair,
+unexpected JSON shape, or a syntactically valid but nonofficial digest
+now fails closed *before* evaluating a multi-engine enrollment candidate.
+No binary bytes or expected SHA-256 are disclosed in preflight output;
+only the fixed status `RC7_BACKHAUL_BINARY_PIN=OFFICIAL_V0_7_2_ARCH_EXACT_MATCH`
+may appear when the check succeeds.
+
+This is a **byte-provenance check, not a signed image attestation** or
+permission to install. It does not change any container, Nginx/443, FRP
+record, active tunnel, or signed Node replay identity.
+
 As an additional **read-only gate**, this same opt-in preflight now,
 under the existing RC7 host engine lock, reads the *actual private*
 `engines.json` and FRP enrollment `record.json` paths, checks duplicate-key

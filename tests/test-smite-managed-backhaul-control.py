@@ -130,7 +130,8 @@ class OperatorControl(unittest.TestCase):
         if inventory is None:
             inventory = {"mode": "managed", "engines": engines}
         if binary is None:
-            binary = {"sha256": "a" * 64}
+            binary = {"architecture": "amd64",
+                      "sha256": control.package.OFFICIAL_BINARY_SHA256["amd64"]}
         calls = []
         def node_details():
             calls.append("runtime")
@@ -193,6 +194,8 @@ class OperatorControl(unittest.TestCase):
         self.assertEqual(calls,["runtime","mounts","replay","binary",
                                 "signed-inventory","manifest-read","receipt-read",
                                 "receipt-state","frp-verify","manifest-read","receipt-read"])
+        self.assertEqual(status["RC7_BACKHAUL_BINARY_PIN"],
+                         "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH")
         self.assertEqual(status["RC7_FRP_RECEIPT_BINDING"],
                          "COMMITTED_EXACT_MANIFEST_REVIEWED")
         self.assertEqual(status["RC7_BACKHAUL_MANIFEST_PLAN"],
@@ -343,6 +346,55 @@ class OperatorControl(unittest.TestCase):
                 control.verify_rc7_bundled_backhaul("foreign")
         self.assertNotIn("PRIVATE_FRP_TOKEN_NOT_FOR_LOGS",str(held.exception))
         self.assertIn("frp-verify", calls)
+
+    def test_rc7_bundle_accepts_only_exact_official_architecture_binary_pin(self):
+        # The binary SHA must equal the separately archived official pin;
+        # allowing any well-formed hex string would make this preflight weak.
+        for arch in ("amd64", "arm64"):
+            with self.subTest(arch=arch):
+                trusted = control.package.OFFICIAL_BINARY_SHA256[arch]
+                fake,calls = self._rc7_bundle_fake(
+                    binary={"architecture": arch, "sha256":trusted})
+                with patch.object(control.os, "geteuid", return_value=0), \
+                     patch.object(control, "_load", return_value=fake):
+                    report=control.verify_rc7_bundled_backhaul("foreign")
+                self.assertEqual(report["RC7_BACKHAUL_BINARY_PIN"],
+                                 "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH")
+                self.assertNotIn(trusted, str(report))
+                self.assertEqual(calls.count("frp-verify"),1)
+
+        wrong_sha = "b"*64
+        amd64_pin = control.package.OFFICIAL_BINARY_SHA256["amd64"]
+        arm64_pin = control.package.OFFICIAL_BINARY_SHA256["arm64"]
+        bad = [
+            {"architecture":"amd64","sha256":wrong_sha},
+            {"architecture":"amd64","sha256":arm64_pin},
+            {"architecture":"arm64","sha256":amd64_pin},
+        ]
+        for binary in bad:
+            with self.subTest(binary=binary["architecture"]):
+                fake,calls = self._rc7_bundle_fake(binary=binary)
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaisesRegex(
+                            control.Hold,"RC7_BUNDLED_BINARY_DIGEST_MISMATCH"):
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertNotIn("manifest-read", calls)
+                self.assertNotIn("frp-verify", calls)
+
+    def test_rc7_bundle_binary_architecture_schema_is_fail_closed(self):
+        pin = control.package.OFFICIAL_BINARY_SHA256["amd64"]
+        for bad_arch in ("x86_64","aarch64","i386","",None,23,True,["amd64"]):
+            with self.subTest(arch=str(bad_arch)):
+                fake,_=self._rc7_bundle_fake(
+                    binary={"architecture":bad_arch,"sha256":pin})
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaises(control.Hold):
+                        control.verify_rc7_bundled_backhaul("foreign")
+        compile(control.RC7_BUNDLED_BACKHAUL_AUDIT,
+                "<reviewed-arch-audit>", "exec")
+        self.assertIn("platform.machine()",control.RC7_BUNDLED_BACKHAUL_AUDIT)
 
     def test_rc7_bundle_binary_hash_invalid_or_unsafe_payload_refused(self):
         for blob in (
