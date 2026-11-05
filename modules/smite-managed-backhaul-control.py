@@ -274,6 +274,120 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     }
 
 
+# A committed RC7 FRP enrollment receipt pins the SHA256 of the *whole*
+# engines.json file. Therefore appending Backhaul alone would break existing
+# FRP verification even if all FRP binaries and tunnels remained unchanged.
+# This pure in-memory planner supplies the *two* expected digests to a future
+# separately verified transactional enrollment. It NEVER mutates either file
+# and it never grants Backhaul installation/readiness.
+RC7_ENGINE_SHA = re.compile(r"^[a-f0-9]{64}$")
+
+
+def _parse_rc7_manifest_snapshot(raw: bytes) -> dict:
+    if not isinstance(raw, bytes) or not (0 < len(raw) <= 8192):
+        raise Hold("RC7_ENGINE_SNAPSHOT_UNTRUSTED")
+
+    def reject_duplicates(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise Hold("RC7_ENGINE_SNAPSHOT_UNTRUSTED")
+            out[key] = value
+        return out
+
+    try:
+        parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise Hold("RC7_ENGINE_SNAPSHOT_UNTRUSTED") from exc
+    if (not isinstance(parsed, dict) or set(parsed) != {"schema", "engines"}
+            or type(parsed["schema"]) is not int or parsed["schema"] != 1
+            or not isinstance(parsed["engines"], dict)
+            or not set(parsed["engines"]).issubset(ENGINES)):
+        raise Hold("RC7_ENGINE_SNAPSHOT_UNTRUSTED")
+    for name, item in parsed["engines"].items():
+        required = {"sha256", "server_sha256"} if name == "frp" else {"sha256"}
+        if (not isinstance(item, dict) or set(item) != required
+                or any(not isinstance(v, str) or RC7_ENGINE_SHA.fullmatch(v) is None
+                       for v in item.values())):
+            raise Hold("RC7_ENGINE_SNAPSHOT_UNTRUSTED")
+    return parsed
+
+
+def plan_rc7_backhaul_manifest_pair(
+        existing_manifest: bytes, frp_journal: object,
+        bundled_backhaul_sha256: str, *, role: str) -> tuple[bytes, dict[str, str]]:
+    """Pure, non-installing plan for an atomic FRP+Backhaul manifest change.
+
+    The FRP journal's COMMITTED 'new' digest binds the exact initial manifest
+    bytes. The candidate is NEVER approved for a standalone manifest write.
+    A future separate durable *two-file* transaction must hold the shared
+    engine lock, snapshot both exact byte sequences, and restore/verify the
+    prior signed FRP inventory after any interruption.
+    """
+    if role not in ("ir", "foreign"):
+        raise Hold("RC7_ENGINE_ROLE_UNTRUSTED")
+    if (not isinstance(bundled_backhaul_sha256, str)
+            or RC7_ENGINE_SHA.fullmatch(bundled_backhaul_sha256) is None):
+        raise Hold("RC7_BACKHAUL_BINARY_DIGEST_UNTRUSTED")
+    doc = _parse_rc7_manifest_snapshot(existing_manifest)
+    existing = doc["engines"]
+    if "backhaul" in existing:
+        raise Hold("RC7_BACKHAUL_ENROLLED_OR_UNREVIEWED")
+    if "frp" not in existing:
+        raise Hold("RC7_FRP_ENROLLMENT_REQUIRED")
+    if (not isinstance(frp_journal, dict)
+            or set(frp_journal) != {
+                "schema", "role", "state", "old", "new", "binaries"}
+            or type(frp_journal["schema"]) is not int
+            or frp_journal["schema"] != 1
+            or frp_journal["state"] != "COMMITTED"
+            or frp_journal["role"] != role
+            or not isinstance(frp_journal["new"], str)
+            or RC7_ENGINE_SHA.fullmatch(frp_journal["new"]) is None
+            or (frp_journal["old"] is not None
+                and (not isinstance(frp_journal["old"], str)
+                     or RC7_ENGINE_SHA.fullmatch(frp_journal["old"]) is None))
+            or not isinstance(frp_journal["binaries"], dict)
+            or set(frp_journal["binaries"]) != {"frpc", "frps"}
+            or any(not isinstance(v, str) or RC7_ENGINE_SHA.fullmatch(v) is None
+                   for v in frp_journal["binaries"].values())):
+        raise Hold("RC7_FRP_RECEIPT_UNTRUSTED")
+
+    before_hash = hashlib.sha256(existing_manifest).hexdigest()
+    if frp_journal["new"] != before_hash:
+        raise Hold("RC7_FRP_RECEIPT_MANIFEST_MISMATCH")
+    expected_frp = {
+        "sha256": frp_journal["binaries"]["frpc"],
+        "server_sha256": frp_journal["binaries"]["frps"],
+    }
+    if existing["frp"] != expected_frp:
+        raise Hold("RC7_FRP_RECEIPT_BINARY_MISMATCH")
+
+    # No source manifest/receipt mutation; all original unrelated engine
+    # records are retained. Only the exact new Backhaul digest is inserted.
+    candidate_engines = dict(existing)
+    candidate_engines["backhaul"] = {"sha256": bundled_backhaul_sha256}
+    candidate = (json.dumps({"schema": 1, "engines": candidate_engines},
+                            sort_keys=True, indent=2) + "\n").encode("utf-8")
+    if len(candidate) > 8192:
+        raise Hold("RC7_ENGINE_CANDIDATE_OVERSIZED")
+    after_hash = hashlib.sha256(candidate).hexdigest()
+    if after_hash == before_hash:
+        raise Hold("RC7_ENGINE_CANDIDATE_NOT_CHANGED")
+    return candidate, {
+        "RC7_BACKHAUL_MANIFEST_PLAN": "CANDIDATE_ONLY",
+        "RC7_FRP_RECEIPT_BINDING": "EXACT_PRIOR_MANIFEST_MATCH",
+        "RC7_FRP_RECEIPT_REBIND": "ATOMIC_TRANSACTION_REQUIRED",
+        "RC7_PRIOR_MANIFEST_SHA256": before_hash,
+        "RC7_CANDIDATE_MANIFEST_SHA256": after_hash,
+        "MANIFEST_WRITTEN": "NO",
+        "FRP_JOURNAL_WRITTEN": "NO",
+        "NODE_RECREATED": "NO",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+
+
 def verified_candidate(stage: Path) -> dict[str, str]:
     if stage.is_symlink() or not stage.is_absolute():
         raise Hold("Unsafe candidate path")
