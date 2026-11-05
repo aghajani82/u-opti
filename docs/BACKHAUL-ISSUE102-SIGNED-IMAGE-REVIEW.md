@@ -123,6 +123,52 @@ health/replay probes. A changed hash is a reason for HOLD, never an automatic
 restore/restart. On non-IR roles Broker/WSS fields remain `UNVERIFIED`.
 No new menu entry, login UI, installation mechanism or daemon is added.
 
+## IR offline before/after preservation comparison (Issue #102 increment)
+
+`smite-managed-engine-host-admission.py` now exposes an **internal, pure,
+non-installing** helper `compare_ir_local_preservation(before, after)`.
+It accepts two separately obtained **untrusted** sanitized host review
+dictionaries and returns **only** fixed allowlisted status/reason codes. The
+current menu, CLI behavior, installation gates, Docker and live runtime are
+unchanged. It does not read the host, network or command arguments.
+
+For this deliberately narrow IR-with-active-FRP scenario, both reports must
+describe a reviewed running managed-strict IR Node; independently supplied
+Cosign-verified signed-pair status; preserved saved tunnels; locally enrolled
+but still **unverified** FRP; an observed local FRPS process; an intact root
+Broker socket and committed WSS edge journal; and explicitly
+`INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD`. Each local SHA-256 must
+be a strict 64-character lowercase hex digest; missing, malformed or
+`UNVERIFIED` values fail closed. The FRPC process may legitimately be
+absent on IR, but `NOT_OBSERVED` must be paired with `ABSENT` in both
+reports. The comparator rejects changes to:
+
+- exact persisted tunnel registry bytes;
+- `smite-node` container identity (so a recreated Node cannot silently pass);
+- the local FRPC/FRPS process instance pairings;
+- Broker socket device/inode identity;
+- RC7 WSS edge journal bytes.
+
+Any incomplete or changed evidence yields `PRESERVATION_LOCAL=HOLD` with
+a redacted fixed reason. When all matching local hints are present it returns
+`PRESERVATION_LOCAL=MATCH_UNATTESTED` and
+`PRESERVATION_REASON=LOCAL_HASHES_MATCH_NOT_SIGNED_HEALTH` — deliberately
+**not** `PASS`, `READY`, or approval. Every return **always** contains
+`SIGNED_RUNTIME_CONTINUITY=NOT_PROVEN`,
+`BACKHAUL_HOST_TRANSACTION=NOT_AUTHORIZED`,
+`INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
+
+**Security boundary:** local report dictionaries, even when their
+`SIGNED_REGISTRY_PAIR_PROOF` fields say `COSIGN_VERIFIED`, are not
+authenticated by this comparison helper. The helper cannot independently
+prove the release signature, running FRPS Owner/Child mapping, health,
+signed replay, Broker listener responsiveness, WSS/443 availability,
+continuous forwarding (zero interruption), rollback or externally verified
+snapshots. A matching hash may still coexist with a short service outage.
+Production decisions require independently verified live before/after signed
+evidence and explicit operator recovery/rollback approval on **both** hosts.
+No new install or automated recovery path is enabled.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
