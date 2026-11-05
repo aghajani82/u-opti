@@ -1090,6 +1090,39 @@ def private_transport_audit():
         print("CI_WSS_UPGRADE_AUDIT=UNAVAILABLE", flush=True)
 
 
+
+def official_retained_binary_probe(node: str):
+    """Run the actual production read-only file verifier in a live CI Node.
+
+    This CI fixture mounts the independently verified official Backhaul
+    executable already when Node starts. Real hosts must prove their own
+    running image has these bytes; this does NOT authorize host enrollment.
+    """
+    check(node in ("ci-uopti-ir", "ci-uopti-foreign"),
+          "CI_BINARY_NODE_IDENTITY_UNTRUSTED")
+    source = REPO / "modules/smite-managed-backhaul-host-executor.py"
+    spec = importlib.util.spec_from_file_location(
+        "ci_retained_node_binary_review", source)
+    check(spec is not None and spec.loader is not None,
+          "CI_RETAINED_BACKHAUL_REVIEW_MISSING")
+    executor = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = executor
+    spec.loader.exec_module(executor)
+    digest = executor.package.OFFICIAL_BINARY_SHA256["amd64"]
+    try:
+        result = subprocess.run([
+            "docker", "exec", "-i", "--env",
+            "UOPTI_EXPECTED_BACKHAUL_SHA256=" + digest,
+            node, "python", "-B", "-",
+        ], input=executor.IN_PLACE_BINARY_PROBE,
+            capture_output=True,text=True,timeout=18,check=False)
+    except (OSError,subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_RETAINED_BACKHAUL_BINARY_READ_FAILED") from exc
+    check(result.returncode == 0
+          and result.stdout.strip() == "OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS",
+          "CI_RETAINED_BACKHAUL_BINARY_NOT_VERIFIED")
+
+
 def forward_probe(phase: str):
     for attempt in range(28):
         try:
@@ -1187,6 +1220,9 @@ def main():
         signed_child_apply(token)
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY_PASS", flush=True)
         forward_probe("initial")
+        official_retained_binary_probe("ci-uopti-ir")
+        official_retained_binary_probe("ci-uopti-foreign")
+        print("CI_WSS_STAGE=RETAINED_NODE_OFFICIAL_BINARY_READ_PASS", flush=True)
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_FORWARD_PASS", flush=True)
         signed_child_probe()
         signed_owner_action("status", "active")
@@ -1214,6 +1250,8 @@ def main():
             signed_probe("ci-uopti-ir", ir_state)
             signed_probe("ci-uopti-foreign", foreign_state)
             signed_child_probe()
+            official_retained_binary_probe("ci-uopti-ir")
+            official_retained_binary_probe("ci-uopti-foreign")
             broker_probe(root_ir, broker_baseline)
             signed_owner_action("status", "active")
             check(tracked_owner_process_identity() == owner_process_identity,
@@ -1269,6 +1307,8 @@ def main():
         print("RC7_REAL_ROOT_BROKER_UDS_SIGNED_DENIAL=PASS")
         print("RC7_REAL_BROKER_RESTART_NO_NODE_RECREATE=PASS")
         print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
+        print("RC7_RETAINED_FRP_NODE_OFFICIAL_BACKHAUL_BYTES_WITHOUT_RECREATE=PASS")
+        print("RC7_LIVE_HOST_IN_PLACE_TRANSACTION=NOT_IMPLEMENTED")
         print("RC7_SIGNED_MANAGED_IR_OWNER_AND_FOREIGN_CHILD=PASS")
         print("RC7_TRACKED_IR_FRPS_OWNER_SAVED_TUNNEL_AND_PID_STABLE=PASS")
         print("RC7_SECOND_OWNER_FAIL_CLOSED=PASS")
