@@ -298,7 +298,7 @@ class TransactionLab(unittest.TestCase):
         manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
         before_compose = self.compose.read_bytes()
         result = lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
-        self.assertEqual(result, "LAB_PAIR_BYTES_APPLIED_UNATTESTATED_RECOVERY_REQUIRED")
+        self.assertEqual(result, "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED")
         self.assertNotEqual(manifest.read_bytes(), old_manifest)
         self.assertNotEqual(receipt.read_bytes(), old_receipt)
         candidate = json.loads(manifest.read_bytes())
