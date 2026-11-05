@@ -417,6 +417,14 @@ pre-change Manifest SHA256 and the COMMITTED FRP receipt's role and pinned
 binary digests. The candidate retains all FRP and unrelated engine entries
 and introduces only the SHA-pinned Backhaul entry.
 
+The two internal pair-lab entry points now take the **same nonblocking,
+caller-owned private `.smite-engine-transaction.lock`** used by existing
+`control.exercise` in the disposable PR root. Both apply and recovery hold
+this one lock for the full operation and fail closed if it is already held,
+symlinked or has unsafe file permissions. The lock inode is never unlinked.
+This is PR-lab serialization only: it does **not** prove production-wide
+coordination with the RC7 enrollment writer, signed Node or Docker runtime.
+
 The rehearsal records **exact old and new bytes of both files** plus their
 SHA256 values in a private, fsync-backed journal *before any source write*.
 It then atomically replaces each file separately with directory fsync.

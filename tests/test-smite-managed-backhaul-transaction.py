@@ -392,6 +392,47 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(receipt.read_bytes(), receipt_before)
         self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
 
+    def test_rc7_pair_uses_legacy_engine_shared_lock_for_apply_and_recovery(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        control = load("bh_control_pair_lock_test",
+                       ROOT / "smite-managed-backhaul-control.py")
+        with control._lab_lock(self.root):
+            with self.assertRaisesRegex(lab.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-manifest")
+        intermediate_manifest = manifest.read_bytes()
+        intermediate_receipt = receipt.read_bytes()
+        with control._lab_lock(self.root):
+            with self.assertRaisesRegex(lab.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), intermediate_manifest)
+        self.assertEqual(receipt.read_bytes(), intermediate_receipt)
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+
+    def test_rc7_pair_shared_lock_fail_closed_on_symlink_and_bad_mode(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        lock = self.root / ".smite-engine-transaction.lock"
+        lock.symlink_to(self.root / "EXPERIMENTAL-LAB")
+        with self.assertRaisesRegex(lab.Hold, "SHARED_LOCK_UNTRUSTED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        lock.unlink()
+        lock.write_bytes(b"")
+        lock.chmod(0o644)
+        with self.assertRaisesRegex(lab.Hold, "SHARED_LOCK_UNTRUSTED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
     def test_no_shell_docker_or_network_execution_available(self):
         src = (ROOT / "smite-managed-backhaul-transaction.py").read_text()
         for dangerous in ("subprocess", "os.system(", "socket.", "requests.", "httpx.",

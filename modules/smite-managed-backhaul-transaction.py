@@ -10,6 +10,8 @@ signed health preflight and operator confirmation will still be necessary.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -358,6 +360,35 @@ def _pair_paths(root: Path) -> tuple[Path, Path, Path]:
     return manifest, frp_dir / "record.json", root / PAIR_JOURNAL
 
 
+@contextmanager
+def _rc7_pair_shared_lock(root: Path):
+    """Reuse the existing PR-lab engine lock; do not invent a live-host lock.
+
+    The legacy control.exercise path takes this same inode via _lab_lock.
+    Never unlink it: removing a held flock's name would allow split locks.
+    """
+    admission(root)
+    lock = root / ".smite-engine-transaction.lock"
+    if lock.is_symlink():
+        raise Hold("RC7_PAIR_SHARED_LOCK_UNTRUSTED")
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as exc:
+        raise Hold("RC7_PAIR_SHARED_LOCK_UNTRUSTED") from exc
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1):
+            raise Hold("RC7_PAIR_SHARED_LOCK_UNTRUSTED")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Hold("RC7_PAIR_ANOTHER_ENGINE_TRANSACTION_ACTIVE") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
 def _pair_atomic(path: Path, raw: bytes) -> None:
     # Reject any unknown/missing/symlinked target before replacing it.
     _pair_read_private(path)
@@ -367,6 +398,14 @@ def _pair_atomic(path: Path, raw: bytes) -> None:
 
 def rc7_pair_apply_lab(root: Path, backhaul_sha256: str, *,
                        role: str, inject: str = "") -> str:
+    """Serialize this internal rehearsal against the existing engine lab."""
+    with _rc7_pair_shared_lock(root):
+        return _rc7_pair_apply_locked(root, backhaul_sha256,
+                                      role=role, inject=inject)
+
+
+def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
+                           role: str, inject: str = "") -> str:
     """Rehearse *only* a byte-for-byte, two-receipt CI transaction.
 
     No signed runtime attestation and NO live server activation are possible.
@@ -439,6 +478,12 @@ def rc7_pair_apply_lab(root: Path, backhaul_sha256: str, *,
 
 
 def rc7_pair_recover_lab(root: Path) -> str:
+    """Hold the same lock throughout validation, restoration and cleanup."""
+    with _rc7_pair_shared_lock(root):
+        return _rc7_pair_recover_locked(root)
+
+
+def _rc7_pair_recover_locked(root: Path) -> str:
     """Fail-closed exact dual-file rollback after any rehearsed crash point."""
     manifest, frp_receipt, journal = _pair_paths(root)
     private_dir(journal)
