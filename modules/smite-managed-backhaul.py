@@ -24,6 +24,13 @@ OFFICIAL_TAR_SHA256 = {
     "amd64": "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc",
     "arm64": "9a424c97ff16fc3f682e8314c418790d2b5bf3136e008edbb6cd402ea00999f6",
 }
+# Exact executable bytes extracted by CI from the above immutable official
+# v0.7.2 archives, NOT tarball checksums or trust in Docker metadata.
+# Review source: PR #121, the official artifact job for both architectures.
+OFFICIAL_BINARY_SHA256 = {
+    "amd64": "7f1b1439d7fe1d15ae0b376e15614fe13d8a12f6e07a90263e310ea2a9d601fb",
+    "arm64": "f8533e29fac489b179e191c81f6bdcb0247302dc01ad1c06a8f5664f32f5ba6b",
+}
 ENGINE_NAMES = {"backhaul", "frp", "gost", "rathole", "chisel"}
 SHA_RE = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
