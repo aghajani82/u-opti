@@ -269,6 +269,7 @@ sudo docker run --rm --platform linux/amd64 --network none \
   --tmpfs /tmp:rw,nosuid,nodev,size=32m \
   --env GITHUB_ACTIONS=true --env GITHUB_EVENT_NAME=pull_request \
   --env GITHUB_REPOSITORY=aghajani82/u-opti \
+  --env PYTHONPATH=/app \
   --mount "type=bind,src=$owner_source/node/app,dst=/app/app,readonly" \
   --mount "type=bind,src=$root/tests/test-smite-managed-backhaul-tracked-owner-live-ci.py,dst=/ci-tracked-owner.py,readonly" \
   --mount "type=bind,src=$lab/installed/frp/frps,dst=/usr/local/bin/frps,readonly" \
