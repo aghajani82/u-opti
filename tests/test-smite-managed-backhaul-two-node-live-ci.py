@@ -391,6 +391,10 @@ assert get(sign_request(secret=key,node_id=other,method='GET',
                        target=target,body=b''))[0]==401,'foreign node identity accepted'
 valid=sign_request(secret=key,node_id=node_id,method='GET',target=target,body=b'')
 status,doc=get(valid)
+print('CI_CHILD_SIGNED_STATUS_HTTP='+str(status))
+print('CI_CHILD_SIGNED_STATUS_ACTIVE='+(
+ 'YES' if isinstance(doc,dict) and isinstance(doc.get('data'),dict)
+ and doc['data'].get('active') is True else 'NO'))
 assert status==200 and doc.get('status')=='success',(status,doc)
 assert doc['data']=={'active':True,'type':'frp','process_running':True},doc
 assert get(valid)[0]==401,'signed child status nonce replay accepted'
@@ -455,10 +459,24 @@ def signed_child_apply(token: str):
 
 
 def signed_child_probe():
-    status = run(
-        "docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
-        SIGNED_CHILD_STATUS, timeout=20)
-    check("CI_SIGNED_REAL_MANAGED_FOREIGN_CHILD_STATUS=PASS" in status,
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             SIGNED_CHILD_STATUS],
+            capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_SIGNED_FOREIGN_CHILD_STATUS_PROCESS_FAILED") from exc
+    for line in result.stdout.splitlines():
+        if line.startswith("CI_CHILD_SIGNED_STATUS_HTTP="):
+            status = line.removeprefix("CI_CHILD_SIGNED_STATUS_HTTP=")
+            if status.isdecimal() and len(status) == 3:
+                print("CI_CHILD_SIGNED_STATUS_HTTP=" + status, flush=True)
+        if line in ("CI_CHILD_SIGNED_STATUS_ACTIVE=YES",
+                    "CI_CHILD_SIGNED_STATUS_ACTIVE=NO"):
+            print(line, flush=True)
+    check(result.returncode == 0
+          and "CI_SIGNED_REAL_MANAGED_FOREIGN_CHILD_STATUS=PASS"
+          in result.stdout,
           "CI_SIGNED_FOREIGN_CHILD_STATUS_UNPROVEN")
 
 
@@ -707,10 +725,14 @@ def main():
         signed_child_ready()
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY", flush=True)
         signed_child_apply(token)
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY_PASS", flush=True)
         forward_probe("initial")
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_FORWARD_PASS", flush=True)
         signed_child_probe()
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_STATUS_PASS", flush=True)
         saved_child_state = (root_foreign / "node-data/tunnels.json").read_bytes()
         child_process_identity = tracked_child_process_identity()
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_PID_PASS", flush=True)
         print("CI_WSS_STAGE=RUN_PAIRED_MANIFEST_RECEIPT_TEST", flush=True)
         seen = []
 
