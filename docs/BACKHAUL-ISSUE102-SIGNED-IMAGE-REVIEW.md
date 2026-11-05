@@ -741,6 +741,17 @@ CA cert explicitly covers both names. That CA is mounted read-only
 as the disposable foreign Node's system trust bundle. The existing
 foreign echo service stays on loopback.
 
+**Version-bound replay identity:** the newer signed Smite source requires
+an independently authenticated `key_binding` in its strict Replay
+enrollment marker. The first paired CI experiment had provisioned both
+roles with the older Smite bootstrap while running the newer foreign
+Agent; that correctly failed closed at signed API preflight. The CI now
+provisions the foreign role using the **same SHA-pinned newer Smite
+source** that later authenticates its requests. The IR role retains
+its older SHA-pinned bootstrap. No marker is rewritten after boot,
+no nonce or key is reset, and production enrollment migration still
+requires separate review.
+
 Instead of starting `frpc` outside Smite, the test makes one **actual
 strict HMAC-signed POST** to the foreign Node's existing
 `/api/agent/tunnels/apply` for one disposable
