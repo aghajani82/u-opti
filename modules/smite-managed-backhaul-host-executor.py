@@ -295,7 +295,64 @@ assert status_doc=={"status":"ok","active_tunnels":0,"tunnels":[]}
 print("UOPTI_SIGNED_RUNTIME=PASS")
 '''
 
+
+def _no_frp_in_manifest(raw: bytes | None) -> None:
+    """Refuse to recreate a Node where FRP is/was explicitly enrolled.
+
+    Must be checked against both the journaled prior manifest and the current
+    manifest *before* modifying any Node-managed bytes. This function is
+    intentionally stricter than the disposable-host candidate preparer.
+    """
+    if raw is None:
+        return
+    def reject_duplicate_keys(pairs):
+        values = {}
+        for key, value in pairs:
+            if key in values:
+                raise Hold("FRP_RECREATE_MANIFEST_UNTRUSTED")
+            values[key] = value
+        return values
+    try:
+        record = json.loads(raw, object_pairs_hook=reject_duplicate_keys)
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("FRP_RECREATE_MANIFEST_UNTRUSTED") from exc
+    if (not isinstance(record, dict)
+            or set(record) != {"schema", "engines"}
+            or type(record["schema"]) is not int or record["schema"] != 1
+            or not isinstance(record["engines"], dict)
+            or not set(record["engines"]).issubset(set(ENGINE_NAMES))):
+        raise Hold("FRP_RECREATE_MANIFEST_UNTRUSTED")
+    if "frp" in record["engines"]:
+        raise Hold("ENROLLED_FRP_NODE_RECREATE_FORBIDDEN")
+
+
+def _assert_no_frp_before_recreate(paths: Paths, *,
+                                   previous_manifest: bytes | None = None) -> None:
+    """Defense-in-depth guard across install, recovery and rollback.
+
+    A missing manifest never proves that a currently running FRPC/FRPS is
+    harmless. Refuse unknown /proc evidence; never terminate a process.
+    This check is not an attestation and cannot defeat external races.
+    """
+    _no_frp_in_manifest(previous_manifest)
+    manifest = paths.node / "config" / "engine-state" / "engines.json"
+    current = _read(manifest, 8192) if manifest.exists() or manifest.is_symlink() else None
+    _no_frp_in_manifest(current)
+    try:
+        evidence = admission.host.frp_process_footprint()
+    except (OSError, ValueError, RuntimeError, AttributeError) as exc:
+        raise Hold("FRP_PROCESS_PRESENCE_OR_UNVERIFIED") from exc
+    if (not isinstance(evidence, dict)
+            or evidence.get("FRPC_PROCESS_LOCAL") != "NOT_OBSERVED"
+            or evidence.get("FRPS_PROCESS_LOCAL") != "NOT_OBSERVED"
+            or evidence.get("FRPC_INSTANCE_SHA256") != "ABSENT"
+            or evidence.get("FRPS_INSTANCE_SHA256") != "ABSENT"):
+        raise Hold("FRP_PROCESS_PRESENCE_OR_UNVERIFIED")
+
+
 def _run_restart(paths: Paths, runner=subprocess.run) -> None:
+    # Recheck directly before the only container recreation.
+    _assert_no_frp_before_recreate(paths)
     argv = ["docker", "compose", "-f", str(paths.node / "docker-compose.yml"),
             "up", "-d", "--no-build", "--force-recreate", "--no-deps", "smite-node"]
     try:
@@ -345,6 +402,9 @@ def _candidate(paths: Paths, stage: Path, expected_image: str,
     manifest_path = paths.node / "config" / "engine-state" / "engines.json"
     old_manifest = (_read(manifest_path, 8192)
                     if manifest_path.exists() or manifest_path.is_symlink() else None)
+    # Separate pre-journal safety check. An enrolled FRP means this executor
+    # is the wrong architecture even when the saved-tunnels list is empty.
+    _assert_no_frp_before_recreate(paths, previous_manifest=old_manifest)
     if _sha(raw_binary) != reviewed["BINARIES_SHA256"][0]:
         raise Hold("CANDIDATE_BINARY_DRIFT")
     if _sha(raw_manifest) != reviewed["CANDIDATE_MANIFEST_SHA256"]:
@@ -401,6 +461,10 @@ def _archive(paths: Paths, record: dict, suffix: str) -> None:
 
 def _rollback_locked(paths: Paths, record: dict, runner=subprocess.run,
                      *, archive: bool = True) -> None:
+    # Fail BEFORE updating the journal or restoring/deleting any Node files.
+    prior = (_read(_journal(paths) / "manifest.before", 8192)
+             if record["manifest_old"] is not None else None)
+    _assert_no_frp_before_recreate(paths, previous_manifest=prior)
     record["state"] = "RECOVERING"
     _write_record(paths, record)
     compose = paths.node / "docker-compose.yml"

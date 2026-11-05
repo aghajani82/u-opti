@@ -261,6 +261,48 @@ can lift `SAVED_TUNNELS=EXISTING_DO_NOT_RESTART`,
 `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`, or the requirement
 for explicit operator signoff after verified two-host recovery.
 
+## Explicit no-recreate protection for active/enrolled FRP — all executor actions
+
+The pre-existing disposable-host Backhaul transaction executor still uses
+`docker compose up --force-recreate smite-node` to mount the Backhaul binary.
+That approach **cannot** be accepted on IR/KH where signed RC7 FRP and
+existing tunnels must survive. Issue #102 remains unresolved until a
+separately reviewed **no-Node-recreation** architecture and two-host recovery
+are proved.
+
+The existing executor now adds a strict **fail-closed FRP guard** on all
+potential Node recreation paths: install, explicit rollback, interrupted
+recovery, and immediately before each `--force-recreate` subprocess.
+Before altering the private transaction journal or any Node file in
+rollback/recovery, it checks:
+
+- journaled previous manifest and current manifest for enrolled FRP,
+  rejecting duplicate keys, malformed schema and all unknown entries;
+- the read-only host `/proc` FRPC/FRPS process observation and its
+  footprint. Both must report `NOT_OBSERVED` and `ABSENT`; an observed,
+  unreadable or inconsistent process inventory causes HOLD;
+- saved active tunnels still independently block the existing admission.
+
+If FRP is enrolled, reject with
+`ENROLLED_FRP_NODE_RECREATE_FORBIDDEN`. If FRPC/FRPS is present or its
+presence cannot be determined, reject with
+`FRP_PROCESS_PRESENCE_OR_UNVERIFIED`. Missing or suspect manifest fails
+closed with `FRP_RECREATE_MANIFEST_UNTRUSTED`. No automatic cleanup,
+restart, stop, rollback or removal is attempted to work around HOLD.
+These checks also prevent a previously prepared crash/rollback journal from
+recreating an FRP Node when production FRP was enabled later.
+
+**Boundary:** the proc scan and local manifest cannot prove continuous
+network forwarding and have possible external timing races. They are
+**negative safety gates**, not independent signed runtime attestations.
+A successful no-FRP test-host run must still satisfy signed Node replay,
+official archive provenance and operator-approved recovery prerequisites.
+
+Most importantly, this fix **does not install Backhaul into an active FRP
+Node** or change the Smite Panel's truthful `Engine not ready on both nodes`
+message. An independently verified, non-disruptive topology must be designed
+and tested before authorizing any Backhaul installation on Grandoptical/IR.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
