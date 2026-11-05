@@ -303,6 +303,56 @@ Node** or change the Smite Panel's truthful `Engine not ready on both nodes`
 message. An independently verified, non-disruptive topology must be designed
 and tested before authorizing any Backhaul installation on Grandoptical/IR.
 
+## RC7 image-bundled Backhaul: signed read-only no-recreate feasibility check
+
+A review of the **exact Smite RC7 source** at
+`9a1270b31e8d44f13d09b71ab6b9798410b09c12` confirms that the
+Node Dockerfile's final stage copies the officially SHA-256-pinned
+Backhaul v0.7.2 binary to `/usr/local/bin/backhaul`. The existing
+Smite Node signed engine inventory, however, only reports `ready`
+when the protected `/etc/smite-node/engine-state/engines.json`
+manifest contains a matching binary SHA256. Having the executable
+bundled is **not** an engine enrollment or runtime readiness proof.
+
+The **existing** `smite-managed-backhaul-control.py` now offers a
+separate opt-in *read-only* `verify-rc7-bundle --role ir|foreign`
+preflight; it is not a new installer or menu item. It:
+
+1. Checks the existing committed, reviewed RC7 WSS/443 runtime journal,
+   protected Compose/runtime and pinned Node image via the existing RC7
+   verification helper. Confirms the requested IR/foreign role and
+   denies external mounts covering the Backhaul binary or its parents.
+2. Executes only a bounded, root-owned, executable/no-writable-modes
+   `/usr/local/bin/backhaul` binary SHA-256 audit **inside the existing
+   smite-node** without changing the executable.
+3. Runs the existing signed Node HMAC/replay health probe and a fresh
+   signed `GET /api/agent/engines` on Node loopback with no proxy,
+   redirect or arbitrary destination. Requires `frp=ready`,
+   `backhaul=not-installed` and strict managed inventory schema.
+   Consumes one durable replay nonce; no service, tunnel, binary, or
+   configuration changes.
+4. Returns **only fixed nonsecret status codes** and
+   `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`. No raw hash,
+   secrets, Node ID, process ID, tunnel specs or ingress address is printed.
+   Invalid/mismatched evidence is a fixed HOLD.
+
+This does **not** independently verify the Cosign registry signature in
+this action, prove the live image's build provenance, guarantee that
+the API responses are signed back to the caller, establish uninterrupted
+forwarding, or authorize host registration. Even the positive probe only
+confirms a binary exists in a *reviewed running image*, the existing
+signed Agent request/replay path works, and Backhaul is **not yet
+enrolled**. It does not change the Panel UI; the message
+`Engine not ready on both nodes` remains accurate.
+
+The next separately reviewed milestone is an **exact manifest-only,
+journaled and recoverable** engine enrollment in the existing mounted
+Node config. It must avoid Docker Compose recreation, preserve FRP
+Owner/Child, Broker/WSS and replay identity, and prove after/rollback
+signed inventory on **both** test hosts before any real-host approval.
+No use of `docker cp`, runtime binary injection, sidecar readiness
+spoofing, or active FRP replacement is allowed.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
