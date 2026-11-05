@@ -355,8 +355,9 @@ wire=json.dumps({'intent_b64':base64.b64encode(b'{}').decode('ascii')},
                 separators=(',',':')).encode('utf-8')
 url='http://127.0.0.1:8888'+target
 def post(headers=None):
- req=urllib.request.Request(url,data=wire,headers=headers or {},
-                            method='POST')
+ http_headers={'Content-Type':'application/json'}
+ http_headers.update(headers or {})
+ req=urllib.request.Request(url,data=wire,headers=http_headers,method='POST')
  try:
   with urllib.request.urlopen(req,timeout=9) as response:
    return response.status
