@@ -948,10 +948,11 @@ jobs:
           bash tests/test-smite-backhaul-sidecar-docker-executor.sh
 
   managed-backhaul-official-artifact:
-    # Real pinned official archive and real Compose merge, but no live install.
+    # Pinned artifact + disposable real dual-Node signed FRP/TCP LAN;
+    # NO live host install, WSS/443 claim, Node recreation during pair.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout U-OPTI proposed branch
         uses: actions/checkout@v4
