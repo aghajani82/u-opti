@@ -216,6 +216,51 @@ real shared-WSS transaction test are still required. `INSTALL_ALLOWED=NO`
 and `ACTIVATION_GATE=HOLD` stay mandatory for existing FRP tunnels.
 This diagnostic is not a request to execute any command on IR or Grandoptical.
 
+## RC7 bundled-FRP compatibility in the existing Backhaul offline preparer
+
+The Backhaul v0.7.2 **offline stage** originally assumed that every enrolled
+FRP engine supplies two external read-only host binary mounts. RC7 has a
+different, already-reviewed layout: the signed `smite-node` image itself
+bundles both pinned `frpc` and `frps`, with **no** FRP binary bind mounts.
+
+The existing `smite-managed-backhaul.py` candidate preparer now distinguishes
+the two formats without migrating or touching the running Node:
+
+- The legacy externally mounted FRP branch still demands **both** readonly
+  frpc/frps mounts, private executable files and matching recorded SHA256.
+  A partial, writable, corrupted or mixed mount remains HOLD; no fallback.
+- An RC7 image-bundled FRP branch is admitted **for offline candidate
+  preparation only** if the existing manifest pins both engine binary
+  digests, the reviewed base Node Compose has a **fixed
+  `ghcr.io/aghajani82/smite-node@sha256:<digest>` reference**, and the
+  existing RC7 enrollment helper's private root-owned journal is COMMITTED
+  for the exact IR or foreign role, with journal-manifest digest binding.
+  An absent, incomplete, misbound or invalid journal fails closed. No
+  candidate is prepared on an unknown/mutable Node image.
+- The preparer preserves original FRP manifest entries byte-for-byte in the
+  candidate, writes only within the private staging directory, and adds
+  **only** an inert Backhaul binary/manifest/Compose-overlay proposal.
+  There is no FRP binary reinstall, engine re-enrollment, Node recreation,
+  FRPS restart, Nginx change or tunnel creation.
+
+This is **local enrollment proof**, not signed live runtime approval. The
+separately reviewed RC7 `verify --role` and `verify-owner --role ir` still
+have distinct duties; neither locally generated candidate nor a green
+offline test can prove live FRPC Child reachability, snapshot availability,
+two-host recovery, or uninterrupted service.
+
+The Backhaul form's `3080` is a *future tunnel control port setting*;
+offline candidate preparation **never binds/opens 3080**, uses no public
+ports, and does not assert its availability. Public port/path collision
+checks belong to the later independently authorized tunnel publication.
+
+**Production status unchanged:** the existing host executor still uses
+`docker compose --force-recreate` in its disposable test lane and the
+live IR has saved FRP tunnels. Neither this fix nor a successful stage
+can lift `SAVED_TUNNELS=EXISTING_DO_NOT_RESTART`,
+`INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`, or the requirement
+for explicit operator signoff after verified two-host recovery.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
