@@ -333,6 +333,7 @@ class OperatorControl(unittest.TestCase):
     def test_rc7_bundle_refuses_frp_verifier_failure_without_secret_leak(self):
         fake,calls = self._rc7_bundle_fake()
         def failed(_):
+            calls.append("frp-verify")
             raise fake.Hold("PRIVATE_FRP_TOKEN_NOT_FOR_LOGS")
         fake.verify_file = failed
         with patch.object(control.os,"geteuid",return_value=0), \
