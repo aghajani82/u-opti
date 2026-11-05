@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""PR-only real two-Node signed API + active FRP TCP forwarding, NO recreation.
+"""PR-only real signed Nodes + FRP WSS/443 forwarding, NO recreation.
 
 Two ordinary Docker containers on a private --internal bridge, never on real
 IR/Grandoptical. This tests the existing RC7 *filesystem* two-receipt lab
-while genuine signed Smite API and FRP 0.71.0 forwarding remain operational.
-NO real Nginx/WSS/443, no host-port publishes, no production activation.
+while genuine signed Smite API and FRP 0.71.0 WSS-over-TLS forwarding persist.
+A disposable Nginx runs in a third isolated container: NO host port publish,
+no production Nginx/443 access, no Broker or signed Owner/Child claim.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ IMAGE = ("ghcr.io/zzedix/smite-node@sha256:"
 FRP_ARCHIVE_SHA = "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 BACKHAUL_ARCHIVE_SHA = "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
 MARKER = "U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n"
-DOCKER_NAMES = ("ci-uopti-ir", "ci-uopti-foreign")
+DOCKER_NAMES = ("ci-uopti-ir", "ci-uopti-foreign", "ci-uopti-wss")
 
 
 class Hold(RuntimeError):
@@ -154,8 +155,12 @@ def initial_role(root: Path, role: str, frp: dict[str, bytes],
                   "auth.method = \"token\"\nauth.token = " + json.dumps(token) + "\n")
         write(root / "node/config/frps.toml", config.encode())
     else:
-        config = ("serverAddr = \"ci-uopti-ir\"\nserverPort = 7000\n"
+        config = ("serverAddr = \"ci-uopti-wss\"\nserverPort = 443\n"
                   "auth.method = \"token\"\nauth.token = " + json.dumps(token) + "\n"
+                  "transport.protocol = \"wss\"\n"
+                  "transport.tls.enable = true\n"
+                  "transport.tls.trustedCaFile = \"/etc/smite-node/ci-ca.crt\"\n"
+                  "transport.tls.serverName = \"ci-uopti-wss\"\n"
                   "[[proxies]]\nname = \"ci-only-20182\"\ntype = \"tcp\"\n"
                   "localIP = \"127.0.0.1\"\nlocalPort = 39001\n"
                   "remotePort = 20182\n")
@@ -212,6 +217,103 @@ with socket.socket() as srv:
    data=conn.recv(256)
    conn.sendall(b'CI-ACK:'+data)
 """
+
+
+# Actual Nginx HTTP Upgrade and real CA/hostname validation are tested
+# inside the internal-only bridge. Existing repository WSS control-stall
+# Dockerfile is reused, not a separate production gateway/installer.
+HTTPS_PROBE = r"""
+import ssl,sys,urllib.error,urllib.request
+ca='/etc/smite-node/ci-ca.crt'
+ctx=ssl.create_default_context(cafile=ca)
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                  urllib.request.HTTPSHandler(context=ctx))
+with opener.open('https://ci-uopti-wss:443/ci-health',timeout=5) as response:
+ assert response.status==200 and response.read()==b'ci-wss-gateway-ok\n'
+# Same TLS server, invalid hostname: cert checking must refuse it.
+try:
+ opener.open('https://ci-uopti-ir:443/ci-health',timeout=3)
+except (ssl.SSLError,urllib.error.URLError,ConnectionError,OSError):
+ pass
+else:
+ raise AssertionError('invalid WSS hostname unexpectedly accepted')
+print('CI_REAL_NGINX_TLS_CA_AND_HOSTNAME=PASS')
+"""
+
+
+def wss_gateway(network: str, root_ir: Path, root_foreign: Path):
+    """Disposable Nginx on a private bridge, no host port mappings."""
+    tls = root_ir / "tls"
+    directory(tls)
+    cert = tls / "cert.pem"
+    key = tls / "key.pem"
+    run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-days", "1", "-subj", "/CN=ci-uopti-wss",
+        "-addext", "subjectAltName=DNS:ci-uopti-wss",
+        "-keyout", str(key), "-out", str(cert), timeout=40)
+    cert.chmod(0o600)
+    key.chmod(0o600)
+    write(root_foreign / "node/config/ci-ca.crt", cert.read_bytes())
+    conf = tls / "nginx.conf"
+    write(conf, b"""pid /tmp/ci-nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 256; }
+http {
+  access_log off;
+  client_body_temp_path /tmp;
+  proxy_temp_path /tmp;
+  fastcgi_temp_path /tmp;
+  uwsgi_temp_path /tmp;
+  scgi_temp_path /tmp;
+  server {
+    listen 443 ssl;
+    server_name ci-uopti-wss;
+    ssl_certificate /ci/cert.pem;
+    ssl_certificate_key /ci/key.pem;
+    location = /ci-health { return 200 "ci-wss-gateway-ok\\n"; }
+    location = /~!frp {
+      proxy_pass http://ci-uopti-ir:7000;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+      proxy_buffering off;
+    }
+  }
+}
+""")
+    image = "uopti-ci-wss-issue102"
+    run("docker", "build", "-t", image,
+        str(REPO / "tests/lab/frp-control-stall"), timeout=280)
+    run("docker", "run", "-d", "--name", "ci-uopti-wss",
+        "--network", network, "--network-alias", "ci-uopti-wss",
+        "--read-only", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
+        "--pids-limit", "96", "--memory", "192m",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
+        "--mount", f"type=bind,src={conf},dst=/ci/nginx.conf,readonly",
+        "--mount", f"type=bind,src={cert},dst=/ci/cert.pem,readonly",
+        "--mount", f"type=bind,src={key},dst=/ci/key.pem,readonly",
+        "--entrypoint", "nginx", image, "-c", "/ci/nginx.conf",
+        "-g", "daemon off;", timeout=150)
+    doc = json.loads(run("docker", "inspect", "ci-uopti-wss"))[0]
+    check(doc["HostConfig"]["NetworkMode"] == network
+          and doc["HostConfig"]["ReadonlyRootfs"] is True
+          and doc["HostConfig"]["CapDrop"] == ["ALL"]
+          and not doc["HostConfig"]["PortBindings"]
+          and doc["HostConfig"]["PublishAllPorts"] is False
+          and doc["State"]["Running"] is True,
+          "CI_NGINX_WSS_ISOLATION_FAILED")
+    return doc["Id"], doc["State"]["StartedAt"]
+
+
+def https_probe():
+    out = run("docker", "exec", "ci-uopti-foreign",
+              "python", "-B", "-c", HTTPS_PROBE, timeout=18)
+    check("CI_REAL_NGINX_TLS_CA_AND_HOSTNAME=PASS" in out,
+          "CI_TLS_CA_HOSTNAME_PROOF_FAILED")
 
 
 def docker_node(name: str, network: str, root: Path):
@@ -325,9 +427,15 @@ def main():
             enrollment(root)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
+        # Build and run the Nginx TLS sidecar with the same Docker
+        # internal-only network. Nodes and WSS gateway are never restarted
+        # during any RC7 transaction or rollback.
+        started["ci-uopti-wss"] = wss_gateway(
+            network, root_ir, root_foreign)
         for role, root, name in roots:
             started[name] = docker_node(name, network, root)
-        # Genuine FRP 0.71.0 in the two persistent Node containers.
+        https_probe()
+        # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "python", "-B", "-c", ECHO)
         run("docker", "exec", "-d", "ci-uopti-ir",
@@ -345,7 +453,8 @@ def main():
             signed_probe("ci-uopti-ir", ir_state)
             signed_probe("ci-uopti-foreign", foreign_state)
             forward_probe(phase)
-            for _, _, name in roots:
+            https_probe()
+            for name in DOCKER_NAMES:
                 doc = json.loads(run("docker", "inspect", name))[0]
                 check((doc["Id"], doc["State"]["StartedAt"]) == started[name]
                       and doc["State"]["Running"] is True,
@@ -383,10 +492,12 @@ def main():
                   and not (root / tx.PAIR_CLEANUP_SEAL).exists(),
                   "CI_TWO_HOST_EXACT_FRP_RECEIPT_ROLLBACK_FAILED")
         print("RC7_REAL_TWO_NODE_SIGNED_INVENTORY_AND_REPLAY=PASS")
-        print("RC7_REAL_FRP_0_71_0_TCP_FORWARDING_ALL_PHASES=PASS")
+        print("RC7_REAL_FRP_0_71_0_WSS_443_TLS_FORWARDING_ALL_PHASES=PASS")
+        print("RC7_REAL_NGINX_CA_HOSTNAME_VALIDATION=PASS")
+        print("RC7_WSS_443_SHARED_HOST_EDGE=NOT_PROVEN")
         print("RC7_REAL_TWO_NODE_NO_RECREATE=PASS")
         print("RC7_REAL_TWO_NODE_DUAL_RECEIPT_ROLLBACK=PASS")
-        print("RC7_WSS_443_AND_BROKER_LIVE_CONTINUITY=NOT_PROVEN")
+        print("RC7_BROKER_AND_SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN")
         print("INSTALL_ALLOWED=NO")
         print("ACTIVATION_GATE=HOLD")
     finally:
