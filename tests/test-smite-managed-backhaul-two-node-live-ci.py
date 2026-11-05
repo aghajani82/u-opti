@@ -5,7 +5,7 @@ Two ordinary Docker containers on a private --internal bridge, never on real
 IR/Grandoptical. This tests the existing RC7 *filesystem* two-receipt lab
 while genuine signed Smite API and FRP 0.71.0 WSS-over-TLS forwarding persist.
 A disposable Nginx runs in a third isolated container: NO host port publish,
-no production Nginx/443 access, no Broker or signed Owner/Child claim.
+no production Nginx/443 access and no Broker/XHTTP claim.
 """
 from __future__ import annotations
 
@@ -159,11 +159,7 @@ def initial_role(root: Path, role: str, frp: dict[str, bytes],
     ):
         write(root / "node-data" / name,
               (json.dumps(doc, sort_keys=True) + "\n").encode())
-    if role == "ir":
-        config = ("bindAddr = \"0.0.0.0\"\nbindPort = 7000\n"
-                  "auth.method = \"token\"\nauth.token = " + json.dumps(token) + "\n")
-        write(root / "node/config/frps.toml", config.encode())
-    else:
+    if role != "ir":
         config = ("serverAddr = \"ci-uopti-wss\"\nserverPort = 443\n"
                   "loginFailExit = false\n"
                   "auth.method = \"token\"\nauth.token = " + json.dumps(token) + "\n"
@@ -291,7 +287,7 @@ http {
     ssl_certificate_key /ci/key.pem;
     location = /ci-health { return 200 "ci-wss-gateway-ok"; }
     location = /~!frp {
-      proxy_pass http://ci-uopti-ir:7000;
+      proxy_pass http://127.0.0.1:7000;
       proxy_http_version 1.1;
       proxy_set_header Upgrade $http_upgrade;
       proxy_set_header Connection "upgrade";
@@ -308,11 +304,9 @@ http {
         str(REPO / "tests/lab/frp-control-stall"), timeout=280)
     print("CI_WSS_STAGE=START_PRIVATE_NGINX", flush=True)
     run("docker", "run", "-d", "--name", "ci-uopti-wss",
-        "--network", network, "--network-alias", "ci-uopti-wss",
-        "--network-alias", "ci-uopti-wss.local",
+        "--network", "container:ci-uopti-ir",
         "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
-        "--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
         "--pids-limit", "96", "--memory", "192m",
         "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
         "--mount", f"type=bind,src={conf},dst=/ci/nginx.conf,readonly",
@@ -321,7 +315,7 @@ http {
         "--entrypoint", "nginx", image, "-c", "/ci/nginx.conf",
         "-g", "daemon off;", timeout=150)
     doc = json.loads(run("docker", "inspect", "ci-uopti-wss"))[0]
-    check(doc["HostConfig"]["NetworkMode"] == network
+    check(doc["HostConfig"]["NetworkMode"] == "container:ci-uopti-ir"
           and doc["HostConfig"]["ReadonlyRootfs"] is True
           and doc["HostConfig"]["CapDrop"] == ["ALL"]
           and not doc["HostConfig"]["PortBindings"]
@@ -336,6 +330,124 @@ def https_probe():
               "python", "-B", "-c", HTTPS_PROBE, timeout=18)
     check("CI_REAL_NGINX_TLS_CA_AND_HOSTNAME=PASS" in out,
           "CI_TLS_CA_HOSTNAME_PROOF_FAILED")
+
+
+
+SIGNED_OWNER_CONTROL = r"""
+import json,sys,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+mode=sys.argv[1]
+target='/api/agent/frp/owners' if mode=='status' else '/api/agent/tunnels/apply'
+def call(headers=None,wire=None):
+ req=urllib.request.Request('http://127.0.0.1:8888'+target,
+     data=wire,headers=headers or {},method='POST' if wire is not None else 'GET')
+ try:
+  with urllib.request.urlopen(req,timeout=12) as response:
+   return response.status,json.load(response)
+ except urllib.error.HTTPError as exc:
+  return exc.code,{}
+if mode=='status':
+ assert call()[0]==401,'unsigned owner status accepted'
+ other='smitecibackhaul02'
+ assert call(sign_request(secret=key,node_id=other,
+     method='GET',target=target,body=b''))[0]==401,'foreign identity accepted'
+ signed=sign_request(secret=key,node_id=node_id,method='GET',
+                     target=target,body=b'')
+ status,body=call(signed)
+ assert status==200 and isinstance(body,dict),(status,body)
+ assert set(body)=={'status','owners'} and body['status']=='success',body
+ assert len(body['owners'])==1 and isinstance(body['owners'][0],dict),body
+ owner=body['owners'][0]
+ assert set(owner)=={'tunnel_id','control_port','proxy_ports'} and \
+        owner['tunnel_id']=='ci-owner' and owner['control_port']==7000,owner
+ assert isinstance(owner['proxy_ports'],list),owner
+ if sys.argv[2]=='active':
+  assert 20182 in owner['proxy_ports'],'real owner proxy listener absent'
+ else:
+  assert owner['proxy_ports']==[],'unexpected owner proxy before child'
+ assert call(signed)[0]==401,'owner replay accepted'
+ print('CI_SIGNED_REAL_MANAGED_FRPS_OWNER_STATUS=PASS')
+elif mode in ('apply','duplicate'):
+ token=sys.argv[2]
+ payload={'tunnel_id':'ci-owner' if mode=='apply' else 'ci-owner-duplicate',
+          'core':'frp','type':'tcp','spec':{'mode':'server',
+          'bind_port':7000,'token':token}}
+ wire=json.dumps(payload,separators=(',',':')).encode('utf-8')
+ headers=sign_request(secret=key,node_id=node_id,method='POST',
+                      target=target,body=wire)
+ headers['Content-Type']='application/json'
+ status,body=call(headers,wire)
+ if mode=='apply':
+  assert status==200 and body.get('status')=='success',status
+  print('CI_SIGNED_REAL_MANAGED_FRPS_OWNER_APPLY=PASS')
+ else:
+  assert status==500,'second FRPS owner not refused'
+  print('CI_SECOND_FRPS_OWNER_REFUSED=PASS')
+else:
+ raise AssertionError('invalid owner CI action')
+"""
+
+
+OWNER_FRPS_PID_AUDIT = r"""
+import json,psutil
+expected=['/usr/local/bin/frps','-c','/etc/smite-node/frp/frps_ci-owner.yaml']
+matches=[]
+for p in psutil.process_iter(['pid','cmdline','create_time','status']):
+ try:
+  if p.info['cmdline']!=expected or p.info['status']==psutil.STATUS_ZOMBIE:
+   continue
+  method=p.net_connections if hasattr(p,'net_connections') else p.connections
+  ports={(getattr(c.laddr,'ip',None),getattr(c.laddr,'port',None))
+         for c in method(kind='tcp') if c.status==psutil.CONN_LISTEN}
+  if ('127.0.0.1',7000) in ports:
+   matches.append({'pid':p.info['pid'],'start':p.info['create_time']})
+ except (psutil.Error,OSError,ValueError,KeyError):
+  continue
+assert len(matches)==1,'real managed FRPS owner PID/listener not unique'
+print(json.dumps(matches[0],sort_keys=True))
+"""
+
+
+def signed_owner_action(action: str, value: str):
+    check(action in ("apply", "status", "duplicate"), "CI_OWNER_ACTION_INVALID")
+    # No raw HTTP body/config/credentials are exposed by CI.
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-ir", "python", "-B", "-c",
+             SIGNED_OWNER_CONTROL, action, value],
+            capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_SIGNED_FRPS_OWNER_ACTION_UNAVAILABLE") from exc
+    label = {
+        "apply": "CI_SIGNED_REAL_MANAGED_FRPS_OWNER_APPLY=PASS",
+        "status": "CI_SIGNED_REAL_MANAGED_FRPS_OWNER_STATUS=PASS",
+        "duplicate": "CI_SECOND_FRPS_OWNER_REFUSED=PASS",
+    }[action]
+    check(result.returncode == 0 and label in result.stdout,
+          "CI_SIGNED_REAL_MANAGED_FRPS_OWNER_UNPROVEN")
+    print(label, flush=True)
+
+
+def tracked_owner_process_identity():
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-ir", "python", "-B", "-c",
+             OWNER_FRPS_PID_AUDIT],
+            capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_OWNER_PID_AUDIT_UNAVAILABLE") from exc
+    check(result.returncode == 0, "CI_OWNER_PID_AUDIT_FAILED")
+    try:
+        identity = json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError) as exc:
+        raise Hold("CI_OWNER_PID_AUDIT_INVALID") from exc
+    check(set(identity)=={"pid","start"}
+          and type(identity["pid"]) is int and identity["pid"] > 1
+          and type(identity["start"]) in (float,int),
+          "CI_OWNER_PID_AUDIT_INVALID")
+    return identity
 
 
 SIGNED_CHILD_APPLY = r"""
@@ -518,10 +630,14 @@ def tracked_child_process_identity():
 
 def docker_node(name: str, network: str, root: Path):
     child = name == "ci-uopti-foreign"
-    source = CHILD_SOURCE if child else NODE_SOURCE
+    # Both roles use the exact reviewed Smite revision with signed Owner API.
+    source = CHILD_SOURCE
     command = [
         "docker", "run", "-d", "--name", name, "--network", network,
-        "--network-alias", name, "--platform", "linux/amd64",
+        "--network-alias", name,
+        *([] if child else ["--network-alias", "ci-uopti-wss",
+                            "--network-alias", "ci-uopti-wss.local"]),
+        "--platform", "linux/amd64",
         "--read-only", "--cap-drop", "ALL", "--pids-limit", "128",
         "--memory", "384m", "--security-opt", "no-new-privileges",
         "--user", "0:0", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=16m",
@@ -529,6 +645,8 @@ def docker_node(name: str, network: str, root: Path):
         "--env", "SMITE_AGENT_AUTH_MODE=strict",
         "--env", "SMITE_NODE_PANEL_AUTH_MODE=paused",
         "--env", "SMITE_ENGINE_INVENTORY_MODE=managed",
+        "--env", "SMITE_FRP_STANDARD_WSS=1",
+        "--env", "PANEL_ADDRESS=ci-uopti-wss.local:443",
         "--env", "SMITE_AGENT_IDENTITY_PATH=/etc/smite-node/identity/node-identity.json",
         "--env", "SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3",
         "--env", "SMITE_ENGINE_MANIFEST_PATH=/etc/smite-node/engine-state/engines.json",
@@ -542,8 +660,6 @@ def docker_node(name: str, network: str, root: Path):
         "--mount", f"type=bind,src={root}/engines/frps,dst=/usr/local/bin/frps,readonly",
         "--mount", f"type=bind,src={root}/engines/backhaul,dst=/usr/local/bin/backhaul,readonly",
         *([
-            "--env", "SMITE_FRP_STANDARD_WSS=1",
-            "--env", "PANEL_ADDRESS=ci-uopti-wss.local:443",
             "--mount", f"type=bind,src={root}/node/config/ci-ca.crt,dst=/etc/ssl/certs/ca-certificates.crt,readonly",
         ] if child else []),
         "--entrypoint", "python", IMAGE,
@@ -570,7 +686,7 @@ def enrollment(root: Path, *, role: str):
     # authenticated identity/Replay key-binding marker. Enroll each role
     # with exactly the code that will authenticate its later requests.
     check(role in ("ir", "foreign"), "CI_REPLAY_ROLE_INVALID")
-    source = CHILD_SOURCE if role == "foreign" else NODE_SOURCE
+    source = CHILD_SOURCE
     run("docker", "run", "--rm", "--platform", "linux/amd64",
         "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "0:0",
@@ -738,9 +854,14 @@ def main():
         print("CI_WSS_STAGE=START_REAL_FRP_WSS_CONTROL", flush=True)
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "python", "-B", "-c", ECHO)
-        run("docker", "exec", "-d", "ci-uopti-ir",
-            "/usr/local/bin/frps", "-c", "/etc/smite-node/frps.toml")
+        # The IR Node must itself create and track its sole FRPS owner via
+        # strict HMAC and durable replay, rather than docker-exec orphan FRPS.
+        print("CI_WSS_STAGE=SIGNED_IR_OWNER_APPLY", flush=True)
+        signed_owner_action("apply", token)
         wait_frps_loopback()
+        signed_owner_action("status", "before")
+        owner_process_identity = tracked_owner_process_identity()
+        saved_owner_state = (root_ir / "node-data/tunnels.json").read_bytes()
         # The actual foreign Smite Node (not a docker-exec orphan) must
         # receive the signed apply, create and track its own FRPC child.
         print("CI_WSS_STAGE=FOREIGN_SIGNED_API_PREFLIGHT", flush=True)
@@ -751,6 +872,11 @@ def main():
         forward_probe("initial")
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_FORWARD_PASS", flush=True)
         signed_child_probe()
+        signed_owner_action("status", "active")
+        signed_owner_action("duplicate", token)
+        signed_owner_action("status", "active")
+        check(tracked_owner_process_identity() == owner_process_identity,
+              "CI_DUPLICATE_OWNER_REPLACED_FRPS")
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_STATUS_PASS", flush=True)
         saved_child_state = (root_foreign / "node-data/tunnels.json").read_bytes()
         child_process_identity = tracked_child_process_identity()
@@ -766,6 +892,11 @@ def main():
             signed_probe("ci-uopti-ir", ir_state)
             signed_probe("ci-uopti-foreign", foreign_state)
             signed_child_probe()
+            signed_owner_action("status", "active")
+            check(tracked_owner_process_identity() == owner_process_identity,
+                  "CI_IR_OWNER_FRPS_RESTARTED_OR_REPLACED")
+            check((root_ir / "node-data/tunnels.json").read_bytes() == saved_owner_state,
+                  "CI_IR_OWNER_SAVED_TUNNEL_DRIFT")
             check(tracked_child_process_identity() == child_process_identity,
                   "CI_FOREIGN_CHILD_FRPC_RESTARTED_OR_REPLACED")
             check((root_foreign / "node-data/tunnels.json").read_bytes() == saved_child_state,
@@ -809,6 +940,9 @@ def main():
                   and not (root / tx.PAIR_JOURNAL).exists()
                   and not (root / tx.PAIR_CLEANUP_SEAL).exists(),
                   "CI_TWO_HOST_EXACT_FRP_RECEIPT_ROLLBACK_FAILED")
+        print("RC7_SIGNED_MANAGED_IR_OWNER_AND_FOREIGN_CHILD=PASS")
+        print("RC7_TRACKED_IR_FRPS_OWNER_SAVED_TUNNEL_AND_PID_STABLE=PASS")
+        print("RC7_SECOND_OWNER_FAIL_CLOSED=PASS")
         print("RC7_SIGNED_FOREIGN_CHILD_APPLY_AND_STATUS=PASS")
         print("RC7_TRACKED_FOREIGN_FRPC_SAVED_TUNNEL_AND_PID_STABLE=PASS")
         print("RC7_REAL_TWO_NODE_SIGNED_INVENTORY_AND_REPLAY=PASS")
@@ -817,7 +951,8 @@ def main():
         print("RC7_WSS_443_SHARED_HOST_EDGE=NOT_PROVEN")
         print("RC7_REAL_TWO_NODE_NO_RECREATE=PASS")
         print("RC7_REAL_TWO_NODE_DUAL_RECEIPT_ROLLBACK=PASS")
-        print("RC7_BROKER_AND_SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN")
+        print("RC7_REAL_SIGNED_OWNER_AND_CHILD_CONTINUITY=PASS")
+        print("RC7_BROKER_XHTTP_CONTINUITY=NOT_PROVEN")
         print("INSTALL_ALLOWED=NO")
         print("ACTIVATION_GATE=HOLD")
     finally:
