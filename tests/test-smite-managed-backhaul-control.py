@@ -3,6 +3,7 @@
 from __future__ import annotations
 import importlib.util
 import json
+import hashlib
 import contextlib
 from types import SimpleNamespace
 import os
@@ -253,6 +254,147 @@ class OperatorControl(unittest.TestCase):
                     with self.assertRaises(control.Hold):
                         control.verify_rc7_bundled_backhaul("foreign")
         self.assertNotIn("DONT_LOG_THIS",str(control._strict_rc7_response.__doc__))
+
+    @staticmethod
+    def rc7_manifest_pair_fixture(*, extra=False):
+        one = "1" * 64
+        two = "2" * 64
+        engines = {
+            "frp": {"sha256": one, "server_sha256": two},
+        }
+        if extra:
+            engines["gost"] = {"sha256": "3" * 64}
+            engines["rathole"] = {"sha256": "4" * 64}
+        raw = (json.dumps({"schema": 1, "engines": engines},
+                          sort_keys=True, indent=2) + "\n").encode()
+        receipt = {
+            "schema": 1, "role": "foreign", "state": "COMMITTED",
+            "old": None, "new": hashlib.sha256(raw).hexdigest(),
+            "binaries": {"frpc": one, "frps": two},
+        }
+        return raw, receipt
+
+    def test_rc7_manifest_pair_plan_preserves_frp_receipt_and_other_engines(self):
+        raw, receipt = self.rc7_manifest_pair_fixture(extra=True)
+        manifest_path = self.node / "config/engine-state/engines.json"
+        manifest_path.parent.mkdir(mode=0o700)
+        manifest_path.write_bytes(raw)
+        journal_before = json.dumps(receipt, sort_keys=True).encode()
+        candidate, report = control.plan_rc7_backhaul_manifest_pair(
+            manifest_path.read_bytes(), receipt, "a" * 64, role="foreign")
+        parsed = json.loads(candidate)
+        original = json.loads(raw)
+        self.assertEqual(parsed["engines"]["frp"], original["engines"]["frp"])
+        self.assertEqual(parsed["engines"]["gost"], original["engines"]["gost"])
+        self.assertEqual(parsed["engines"]["rathole"], original["engines"]["rathole"])
+        self.assertEqual(parsed["engines"]["backhaul"], {"sha256": "a" * 64})
+        self.assertEqual(report["RC7_PRIOR_MANIFEST_SHA256"],
+                         hashlib.sha256(raw).hexdigest())
+        self.assertEqual(report["RC7_CANDIDATE_MANIFEST_SHA256"],
+                         hashlib.sha256(candidate).hexdigest())
+        self.assertNotEqual(report["RC7_PRIOR_MANIFEST_SHA256"],
+                            report["RC7_CANDIDATE_MANIFEST_SHA256"])
+        self.assertEqual(report["RC7_FRP_RECEIPT_REBIND"],
+                         "ATOMIC_TRANSACTION_REQUIRED")
+        self.assertEqual(report["MANIFEST_WRITTEN"], "NO")
+        self.assertEqual(report["FRP_JOURNAL_WRITTEN"], "NO")
+        self.assertEqual(report["NODE_RECREATED"], "NO")
+        self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(report["ACTIVATION_GATE"], "HOLD")
+        self.assertEqual(manifest_path.read_bytes(), raw)
+        self.assertEqual(json.dumps(receipt, sort_keys=True).encode(), journal_before)
+        self.assertNotIn("a" * 64, str(report))
+
+    def test_rc7_manifest_pair_cannot_accept_unbound_or_forged_frp_receipt(self):
+        raw, receipt = self.rc7_manifest_pair_fixture(extra=True)
+        cases = [
+            {**receipt, "new": "f" * 64},
+            {**receipt, "role": "ir"},
+            {**receipt, "state": "HOLD"},
+            {**receipt, "state": "PREPARED"},
+            {**receipt, "schema": True},
+            {**receipt, "old": "NOT_SHA256"},
+            {**receipt, "binaries": {"frpc": "1" * 64}},
+            {**receipt, "binaries": {"frpc": "1" * 64, "frps": "f" * 64}},
+            {**receipt, "binaries": {"frpc": "1" * 64, "frps": True}},
+            {**receipt, "binaries": None},
+            {**receipt, "debug": "DO_NOT_PRINT_ME"},
+            {},
+            None,
+        ]
+        for item in cases:
+            with self.subTest(item=str(item)[:50]):
+                with self.assertRaises(control.Hold):
+                    control.plan_rc7_backhaul_manifest_pair(
+                        raw, item, "a" * 64, role="foreign")
+        self.assertNotIn("DO_NOT_PRINT_ME",
+                         str(control.plan_rc7_backhaul_manifest_pair.__doc__))
+
+    def test_rc7_manifest_pair_rejects_bad_or_ambiguous_manifest(self):
+        raw, receipt = self.rc7_manifest_pair_fixture()
+        cases = [
+            b"",
+            b"{" + b"x" * 8192 + b"}",
+            b"INVALID JSON",
+            b'{"schema":1,"schema":1,"engines":{}}',
+            b'{"schema":true,"engines":{}}',
+            b'{"schema":1,"engines":{"frp":null}}',
+            b'{"schema":1,"engines":{"frp":{"sha256":"1","server_sha256":"2"}}}',
+            b'{"schema":1,"engines":{"frp":{"sha256":"1"*64}}}',
+            json.dumps({"schema": 1, "engines": {
+                "frp": {"sha256": "1" * 64, "server_sha256": "2" * 64},
+                "backhaul": {"sha256": "a" * 64},
+            }}).encode(),
+            json.dumps({"schema": 1, "engines": {
+                "frp": {"sha256": "1" * 64, "server_sha256": "2" * 64},
+                "unknown": {"sha256": "a" * 64},
+            }}).encode(),
+            json.dumps({"schema": 1, "engines": {
+                "gost": {"sha256": "1" * 64},
+            }}).encode(),
+            [],
+            "not bytes",
+            None,
+        ]
+        for case in cases:
+            with self.subTest(case=str(case)[:40]):
+                with self.assertRaises(control.Hold):
+                    control.plan_rc7_backhaul_manifest_pair(
+                        case, receipt, "a" * 64, role="foreign")
+        self.assertEqual(control._parse_rc7_manifest_snapshot(raw)["schema"], 1)
+
+    def test_rc7_manifest_pair_invalid_role_and_backhaul_sha_are_hold(self):
+        raw, receipt = self.rc7_manifest_pair_fixture()
+        for role in ("", "KH", "panel-iran", None, "foreign\nbad"):
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(control.Hold,
+                                            "RC7_ENGINE_ROLE_UNTRUSTED"):
+                    control.plan_rc7_backhaul_manifest_pair(
+                        raw, receipt, "a" * 64, role=role)
+        for sha in ("a" * 63, "G" * 64, "ABSENT", "", 42, None):
+            with self.subTest(sha=sha):
+                with self.assertRaisesRegex(control.Hold,
+                                            "RC7_BACKHAUL_BINARY_DIGEST_UNTRUSTED"):
+                    control.plan_rc7_backhaul_manifest_pair(
+                        raw, receipt, sha, role="foreign")
+
+    def test_rc7_manifest_pair_requires_coherent_journal_on_each_role(self):
+        raw, receipt = self.rc7_manifest_pair_fixture(extra=True)
+        iran = {**receipt, "role": "ir"}
+        candidate, report = control.plan_rc7_backhaul_manifest_pair(
+            raw, iran, "b" * 64, role="ir")
+        self.assertNotEqual(candidate, raw)
+        self.assertEqual(report["RC7_FRP_RECEIPT_BINDING"],
+                         "EXACT_PRIOR_MANIFEST_MATCH")
+        with self.assertRaises(control.Hold):
+            control.plan_rc7_backhaul_manifest_pair(
+                raw, iran, "b" * 64, role="foreign")
+        # A manifest-only write would invalidate the exact legacy RC7
+        # enrollment journal's 'new' digest. The future two-file
+        # transaction must handle this, and must not silently call PASS.
+        self.assertNotEqual(hashlib.sha256(candidate).hexdigest(), iran["new"])
+        self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(report["RC7_BACKHAUL_MANIFEST_PLAN"], "CANDIDATE_ONLY")
 
     def test_rc7_preflight_actions_have_fixed_signed_and_no_mutation_contract(self):
         compile(control.RC7_BUNDLED_BACKHAUL_AUDIT,"<image-audit>","exec")
