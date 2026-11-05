@@ -5,10 +5,11 @@ Two ordinary Docker containers on a private --internal bridge, never on real
 IR/Grandoptical. This tests the existing RC7 *filesystem* two-receipt lab
 while genuine signed Smite API and FRP 0.71.0 WSS-over-TLS forwarding persist.
 A disposable Nginx runs in a third isolated container: NO host port publish,
-no production Nginx/443 access and no Broker/XHTTP claim.
+no production Nginx/443 access. A real isolated IR Broker Unix socket\ncan only deny an invalid route; XHTTP publication is not proven.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -34,7 +35,10 @@ IMAGE = ("ghcr.io/zzedix/smite-node@sha256:"
 FRP_ARCHIVE_SHA = "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 BACKHAUL_ARCHIVE_SHA = "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
 MARKER = "U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n"
-DOCKER_NAMES = ("ci-uopti-ir", "ci-uopti-foreign", "ci-uopti-wss")
+DOCKER_NAMES = ("ci-uopti-ir", "ci-uopti-foreign", "ci-uopti-wss",
+                "ci-uopti-broker")
+BROKER_GID = 1348
+BROKER_INSTANCE = "ci-broker-ir-0001"
 
 
 class Hold(RuntimeError):
@@ -337,6 +341,173 @@ def https_probe():
               "python", "-B", "-c", HTTPS_PROBE, timeout=18)
     check("CI_REAL_NGINX_TLS_CA_AND_HOSTNAME=PASS" in out,
           "CI_TLS_CA_HOSTNAME_PROOF_FAILED")
+
+
+
+
+BROKER_IR_SIGNED_DENIAL = r"""
+import base64,json,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+target='/api/agent/uopti/xhttp-route'
+wire=json.dumps({'intent_b64':base64.b64encode(b'{}').decode('ascii')},
+                separators=(',',':')).encode('utf-8')
+url='http://127.0.0.1:8888'+target
+def post(headers=None):
+ req=urllib.request.Request(url,data=wire,headers=headers or {},
+                            method='POST')
+ try:
+  with urllib.request.urlopen(req,timeout=9) as response:
+   return response.status
+ except urllib.error.HTTPError as exc:
+  return exc.code
+assert post()==401,'anonymous broker access accepted'
+assert post(sign_request(secret=key,node_id='smitecibackhaul02',
+    method='POST',target=target,body=wire))==401,'foreign ID accepted'
+headers=sign_request(secret=key,node_id=node_id,
+                     method='POST',target=target,body=wire)
+headers['Content-Type']='application/json'
+assert post(headers)==503,'unapproved broker route must HOLD'
+assert post(headers)==401,'broker intent replay accepted'
+print('CI_REAL_SIGNED_NODE_TO_BROKER_FAIL_CLOSED=PASS')
+"""
+
+BROKER_IR_SOCKET_AUDIT = r"""
+import os,socket,stat
+path='/run/u-opti/smite/xhttp-broker.sock'
+dirpath='/run/u-opti/smite'
+dir_st=os.stat(dirpath)
+sock_st=os.stat(path)
+assert stat.S_ISDIR(dir_st.st_mode) and (dir_st.st_mode & 0o777)==0o750
+assert stat.S_ISSOCK(sock_st.st_mode) and (sock_st.st_mode & 0o777)==0o660
+assert sock_st.st_uid==0 and sock_st.st_gid==1348
+with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
+ s.settimeout(5)
+ s.connect(path)
+ s.sendall(b'{}\n')
+ assert s.recv(64)==b'HOLD\n','invalid wire must never publish'
+print(str(dir_st.st_dev)+':'+str(dir_st.st_ino))
+print('CI_REAL_NODE_BROKER_UNIX_SOCKET_DENIAL=PASS')
+"""
+
+
+def broker_prepare(root: Path):
+    """Real root-broker state; no grant and no Nginx/helper route is installed."""
+    conf = root / "broker-conf"
+    runtime = root / "broker-runtime"
+    state = root / "broker-ledger"
+    for path in (conf, runtime, state):
+        directory(path)
+    directory(conf / "route-grants")
+    runtime.chmod(0o750)
+    os.chown(runtime, 0, BROKER_GID)
+    # Broker trusts neither Node identities nor a caller-created root grant.
+    write(conf / "route-broker.key", secrets.token_bytes(32))
+    doc = {"schema": 1, "instance_id": BROKER_INSTANCE,
+           "peer_uid": 0, "peer_gid": BROKER_GID,
+           "helper_sha256": sha((REPO / "modules/smite-xhttp-nginx-route").read_bytes()),
+           "planner_sha256": sha((REPO / "modules/smite_xhttp_nginx_plan.py").read_bytes())}
+    write(conf / "route-broker.json",
+          (json.dumps(doc, sort_keys=True) + "\n").encode())
+    ledger = load("ci_broker_nonce", REPO / "modules/smite-rc5-xhttp-nonce-ledger.py")
+    ledger.DurableNonceLedger.bootstrap_new(
+        state / "nonce.db", instance_id=BROKER_INSTANCE)
+    return conf, runtime, state
+
+
+def broker_start(root: Path):
+    name = "ci-uopti-broker"
+    run("docker", "run", "-d", "--name", name, "--hostname", "ir",
+        "--network", "none", "--platform", "linux/amd64",
+        "--read-only", "--cap-drop", "ALL", "--cap-add", "CHOWN",
+        "--security-opt", "no-new-privileges", "--pids-limit", "64",
+        "--memory", "192m", "--user", "0:0",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=8m",
+        "--env", "PYTHONDONTWRITEBYTECODE=1",
+        "--mount", f"type=bind,src={REPO}/modules,dst=/usr/local/lib/u-opti/modules,readonly",
+        "--mount", f"type=bind,src={root}/broker-conf,dst=/etc/u-opti/smite,readonly",
+        "--mount", f"type=bind,src={root}/broker-ledger,dst=/var/lib/u-opti/smite-xhttp-broker",
+        "--mount", f"type=bind,src={root}/broker-runtime,dst=/run/u-opti/smite",
+        "--entrypoint", "python", IMAGE, "-B",
+        "/usr/local/lib/u-opti/modules/smite-rc5-xhttp-root-broker.py",
+        "--serve", timeout=150)
+    doc = json.loads(run("docker", "inspect", name))[0]
+    check(doc["HostConfig"]["NetworkMode"] == "none"
+          and doc["HostConfig"]["ReadonlyRootfs"] is True
+          and doc["HostConfig"]["CapDrop"] == ["ALL"]
+          and doc["HostConfig"]["CapAdd"] == ["CHOWN"]
+          and not doc["HostConfig"]["PortBindings"]
+          and doc["HostConfig"]["PublishAllPorts"] is False
+          and doc["State"]["Running"] is True,
+          "CI_BROKER_DOCKER_ISOLATION_FAILED")
+    return doc["Id"], doc["State"]["StartedAt"]
+
+
+def broker_probe(root: Path, original: dict):
+    """Both genuine UDS and signed Node->Broker request must deny mutation."""
+    for attempt in range(35):
+        try:
+            reply = run("docker", "exec", "ci-uopti-ir", "python", "-B",
+                        "-c", BROKER_IR_SOCKET_AUDIT, timeout=11)
+            if "CI_REAL_NODE_BROKER_UNIX_SOCKET_DENIAL=PASS" in reply:
+                break
+        except Hold:
+            if attempt == 34:
+                raise Hold("CI_REAL_BROKER_UNIX_SOCKET_NOT_READY") from None
+            time.sleep(0.25)
+    else:
+        raise Hold("CI_BROKER_UDS_READINESS_HOLD")
+    directory_inode = reply.strip().splitlines()[0]
+    actual_dir = root / "broker-runtime"
+    check(directory_inode == str(actual_dir.stat().st_dev) + ":" +
+          str(actual_dir.stat().st_ino),
+          "CI_BROKER_NODE_MOUNT_INODE_DRIFT")
+    response = run("docker", "exec", "ci-uopti-ir", "python", "-B",
+                   "-c", BROKER_IR_SIGNED_DENIAL, timeout=16)
+    check("CI_REAL_SIGNED_NODE_TO_BROKER_FAIL_CLOSED=PASS" in response,
+          "CI_REAL_SIGNED_BROKER_DENIAL_UNPROVEN")
+    tracked = {
+        "conf": sha((root / "broker-conf/route-broker.json").read_bytes()),
+        "key": sha((root / "broker-conf/route-broker.key").read_bytes()),
+        "ledger": sha((root / "broker-ledger/nonce.db").read_bytes()),
+        "dir_inode": directory_inode,
+    }
+    check(tracked == original and not list((root / "broker-conf/route-grants").iterdir())
+          and not (root / "broker-ledger/approval-request.json").exists(),
+          "CI_BROKER_GRANT_LEDGER_OR_INODE_DRIFT")
+    print("CI_REAL_SIGNED_NODE_BROKER_UDS_DENIAL=PASS", flush=True)
+
+
+def broker_restart(root: Path):
+    before = json.loads(run("docker", "inspect", "ci-uopti-broker"))[0]
+    old_inode = (root / "broker-runtime").stat()
+    old_socket = (root / "broker-runtime/xhttp-broker.sock").stat()
+    run("docker", "restart", "ci-uopti-broker", timeout=40)
+    after = json.loads(run("docker", "inspect", "ci-uopti-broker"))[0]
+    new_inode = (root / "broker-runtime").stat()
+    check(before["Id"] == after["Id"]
+          and before["State"]["StartedAt"] != after["State"]["StartedAt"]
+          and after["State"]["Running"]
+          and (old_inode.st_dev, old_inode.st_ino)
+              == (new_inode.st_dev, new_inode.st_ino),
+          "CI_BROKER_PRESERVED_DIRECTORY_RESTART_FAILED")
+    # New broker must safely retire its own stale UDS pathname; it must
+    # never unlink a live or unexpected socket or require restarting Node.
+    for attempt in range(35):
+        try:
+            new_socket = (root / "broker-runtime/xhttp-broker.sock").stat()
+            if stat.S_ISSOCK(new_socket.st_mode) and (
+                old_socket.st_dev, old_socket.st_ino
+            ) != (new_socket.st_dev, new_socket.st_ino):
+                break
+        except OSError:
+            pass
+        if attempt == 34:
+            raise Hold("CI_BROKER_SOCKET_NOT_RECOVERED") from None
+        time.sleep(0.25)
+    print("CI_REAL_BROKER_RESTART_PRESERVED_NODE_BIND=PASS", flush=True)
+    return after["Id"], after["State"]["StartedAt"]
 
 
 
@@ -658,7 +829,8 @@ def docker_node(name: str, network: str, root: Path):
         "--platform", "linux/amd64",
         "--read-only", "--cap-drop", "ALL", "--pids-limit", "128",
         "--memory", "384m", "--security-opt", "no-new-privileges",
-        "--user", "0:0", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=16m",
+        "--user", "0:0" if child else f"0:{BROKER_GID}",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=16m",
         "--env", "PYTHONDONTWRITEBYTECODE=1",
         "--env", "SMITE_AGENT_AUTH_MODE=strict",
         "--env", "SMITE_NODE_PANEL_AUTH_MODE=paused",
@@ -670,6 +842,11 @@ def docker_node(name: str, network: str, root: Path):
         "--env", "SMITE_ENGINE_MANIFEST_PATH=/etc/smite-node/engine-state/engines.json",
         "--env", "NODE_API_PORT=8888",
         "--env", "NODE_ROLE=foreign" if child else "NODE_ROLE=iran",
+        *([] if child else [
+            "--env", "SMITE_UOPTI_ROUTE_BROKER_ENABLED=true",
+            "--env", "SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock",
+            "--mount", f"type=bind,src={root}/broker-runtime,dst=/run/u-opti/smite,readonly",
+        ]),
         "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
         "--mount", f"type=bind,src={source}/node/main.py,dst=/app/main.py,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
@@ -853,6 +1030,7 @@ def main():
             originals[role] = initial_role(root, role, frp, backhaul_bytes,
                                           secrets.token_hex(32), token, tx)
             enrollment(root, role=role)
+        broker_prepare(root_ir)
         print("CI_WSS_STAGE=START_INTERNAL_DOCKER_NETWORK", flush=True)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
@@ -860,6 +1038,15 @@ def main():
         # IR must exist before Nginx can resolve its internal FRPS upstream.
         # Then the foreign Node mounts the ephemeral trusted CA at startup.
         started["ci-uopti-ir"] = docker_node("ci-uopti-ir", network, root_ir)
+        print("CI_WSS_STAGE=START_REAL_PRIVATE_ROOT_BROKER", flush=True)
+        started["ci-uopti-broker"] = broker_start(root_ir)
+        broker_baseline = {
+            "conf": sha((root_ir / "broker-conf/route-broker.json").read_bytes()),
+            "key": sha((root_ir / "broker-conf/route-broker.key").read_bytes()),
+            "ledger": sha((root_ir / "broker-ledger/nonce.db").read_bytes()),
+            "dir_inode": str((root_ir / "broker-runtime").stat().st_dev) + ":" +
+                         str((root_ir / "broker-runtime").stat().st_ino),
+        }
         print("CI_WSS_STAGE=START_TLS_GATEWAY", flush=True)
         started["ci-uopti-wss"] = wss_gateway(
             network, root_ir, root_foreign)
@@ -876,6 +1063,7 @@ def main():
         # strict HMAC and durable replay, rather than docker-exec orphan FRPS.
         print("CI_WSS_STAGE=SIGNED_IR_OWNER_API_PREFLIGHT", flush=True)
         signed_owner_ready()
+        broker_probe(root_ir, broker_baseline)
         print("CI_WSS_STAGE=SIGNED_IR_OWNER_APPLY", flush=True)
         signed_owner_action("apply", token)
         wait_frps_loopback()
@@ -903,8 +1091,13 @@ def main():
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_PID_PASS", flush=True)
         print("CI_WSS_STAGE=RUN_PAIRED_MANIFEST_RECEIPT_TEST", flush=True)
         seen = []
+        broker_restarted = False
 
         def observe(phase, ir, foreign):
+            nonlocal broker_restarted
+            if phase == "after-ir" and not broker_restarted:
+                started["ci-uopti-broker"] = broker_restart(root_ir)
+                broker_restarted = True
             check(ir == root_ir and foreign == root_foreign,
                   "CI_TWO_HOST_ROLE_PATH_DRIFT")
             ir_state = "ready" if phase in ("after-ir", "after-both") else "absent"
@@ -912,6 +1105,7 @@ def main():
             signed_probe("ci-uopti-ir", ir_state)
             signed_probe("ci-uopti-foreign", foreign_state)
             signed_child_probe()
+            broker_probe(root_ir, broker_baseline)
             signed_owner_action("status", "active")
             check(tracked_owner_process_identity() == owner_process_identity,
                   "CI_IR_OWNER_FRPS_RESTARTED_OR_REPLACED")
@@ -960,6 +1154,10 @@ def main():
                   and not (root / tx.PAIR_JOURNAL).exists()
                   and not (root / tx.PAIR_CLEANUP_SEAL).exists(),
                   "CI_TWO_HOST_EXACT_FRP_RECEIPT_ROLLBACK_FAILED")
+        check(broker_restarted, "CI_BROKER_LIFECYCLE_NOT_EXERCISED")
+        print("RC7_REAL_ROOT_BROKER_UDS_SIGNED_DENIAL=PASS")
+        print("RC7_REAL_BROKER_RESTART_NO_NODE_RECREATE=PASS")
+        print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
         print("RC7_SIGNED_MANAGED_IR_OWNER_AND_FOREIGN_CHILD=PASS")
         print("RC7_TRACKED_IR_FRPS_OWNER_SAVED_TUNNEL_AND_PID_STABLE=PASS")
         print("RC7_SECOND_OWNER_FAIL_CLOSED=PASS")
@@ -972,7 +1170,8 @@ def main():
         print("RC7_REAL_TWO_NODE_NO_RECREATE=PASS")
         print("RC7_REAL_TWO_NODE_DUAL_RECEIPT_ROLLBACK=PASS")
         print("RC7_REAL_SIGNED_OWNER_AND_CHILD_CONTINUITY=PASS")
-        print("RC7_BROKER_XHTTP_CONTINUITY=NOT_PROVEN")
+        print("RC7_BROKER_UDS_DENIAL_AND_INODE_CONTINUITY=PASS")
+        print("RC7_BROKER_XHTTP_ROUTE_PUBLISH=NOT_PROVEN")
         print("INSTALL_ALLOWED=NO")
         print("ACTIVATION_GATE=HOLD")
     finally:
