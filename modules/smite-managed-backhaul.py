@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -99,6 +100,29 @@ def _existing_manifest(config: Path) -> dict:
     return body["engines"]
 
 
+
+def _rc7_bundled_frp_local_status(node_dir: Path, role: str,
+                                  frp_record: dict) -> dict[str, str] | None:
+    """Reuse the existing strict RC7 COMMITTED journal + digest review.
+
+    No Docker, signed request or live operation. This is *local-only*
+    enrollment evidence; it cannot authorize installation or a Node restart.
+    """
+    path = Path(__file__).resolve().parent / "smite-managed-frp-control.py"
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "smite_backhaul_rc7_frp_local_review", path)
+        if spec is None or spec.loader is None:
+            raise Hold("RC7_BUNDLED_FRP_REVIEW_MISSING")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module._rc7_bundled_local_review(node_dir, role, frp_record)
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError,
+            ImportError, AttributeError) as exc:
+        raise Hold("RC7_BUNDLED_FRP_LOCAL_PROOF_INVALID") from exc
+
+
+
 def _core_preflight(node_dir: Path) -> tuple[bytes, dict]:
     if not node_dir.is_absolute() or node_dir.is_symlink():
         raise Hold("Unsafe Node directory")
@@ -141,26 +165,47 @@ def _core_preflight(node_dir: Path) -> tuple[bytes, dict]:
     else:
         if set(frp_record) != {"sha256", "server_sha256"}:
             raise Hold("Existing FRP requires both verified role binaries")
-        for name, target in frp_targets.items():
-            lines = frp_mount_lines[name]
-            if len(lines) != 1 or not lines[0].endswith(f":{target}:ro"):
-                raise Hold("Incomplete or writable FRP mount blocks Backhaul")
-            source = lines[0][2:].removesuffix(f":{target}:ro")
-            binary = Path(source)
-            if (not binary.is_absolute() or binary.is_symlink()
-                    or not binary.is_file()):
-                raise Hold("Existing FRP binary missing or unsafe")
-            meta = binary.lstat()
-            if (not stat.S_ISREG(meta.st_mode)
-                    or meta.st_uid != os.geteuid() or meta.st_nlink != 1
-                    or stat.S_IMODE(meta.st_mode) & 0o022
-                    or not (stat.S_IMODE(meta.st_mode) & 0o111)
-                    or meta.st_size > MAX_BINARY_BYTES):
-                raise Hold("Existing FRP binary permissions untrusted")
-            expected = (frp_record["sha256"] if name == "frpc"
-                        else frp_record["server_sha256"])
-            if hashlib.sha256(_file(binary, max_size=MAX_BINARY_BYTES)).hexdigest() != expected:
-                raise Hold("Existing FRP binary digest mismatch")
+        if not any(frp_mount_lines.values()):
+            # RC7 ships frpc+frps inside the signed, digest-pinned Node image.
+            # A healthy RC7 install has NO external FRP binary mounts.
+            # Strict local journal review is required; its result remains
+            # UNVERIFIED until independent signed Agent and runtime checks.
+            role = {"iran": "IR", "panel-iran": "IR",
+                    "foreign": "KH"}.get(values.get("NODE_ROLE"))
+            image_lines = re.findall(r"(?m)^    image: ([^\\s#]+)\\s*$", text)
+            if (role is None or len(image_lines) != 1
+                    or re.fullmatch(
+                        r"ghcr\\.io/aghajani82/smite-node@sha256:[0-9a-f]{64}",
+                        image_lines[0]) is None):
+                raise Hold("RC7_BUNDLED_FRP_PINNED_NODE_REQUIRED")
+            status = _rc7_bundled_frp_local_status(node_dir, role, frp_record)
+            if (not isinstance(status, dict)
+                    or status.get("state") != "ENROLLED_UNVERIFIED"
+                    or status.get("reason") != "RC7_BUNDLED_FRP_SIGNED_STATUS_REQUIRED"):
+                raise Hold("RC7_BUNDLED_FRP_LOCAL_PROOF_REQUIRED")
+        else:
+            # A partial/mixed external-mount layout must never be accepted as
+            # image-bundled FRP, even if a local RC7 journal also exists.
+            for name, target in frp_targets.items():
+                lines = frp_mount_lines[name]
+                if len(lines) != 1 or not lines[0].endswith(f":{target}:ro"):
+                    raise Hold("Incomplete or writable FRP mount blocks Backhaul")
+                source = lines[0][2:].removesuffix(f":{target}:ro")
+                binary = Path(source)
+                if (not binary.is_absolute() or binary.is_symlink()
+                        or not binary.is_file()):
+                    raise Hold("Existing FRP binary missing or unsafe")
+                meta = binary.lstat()
+                if (not stat.S_ISREG(meta.st_mode)
+                        or meta.st_uid != os.geteuid() or meta.st_nlink != 1
+                        or stat.S_IMODE(meta.st_mode) & 0o022
+                        or not (stat.S_IMODE(meta.st_mode) & 0o111)
+                        or meta.st_size > MAX_BINARY_BYTES):
+                    raise Hold("Existing FRP binary permissions untrusted")
+                expected = (frp_record["sha256"] if name == "frpc"
+                            else frp_record["server_sha256"])
+                if hashlib.sha256(_file(binary, max_size=MAX_BINARY_BYTES)).hexdigest() != expected:
+                    raise Hold("Existing FRP binary digest mismatch")
     return compose, engines
 
 
