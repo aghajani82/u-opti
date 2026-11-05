@@ -172,10 +172,10 @@ def _core_preflight(node_dir: Path) -> tuple[bytes, dict]:
             # UNVERIFIED until independent signed Agent and runtime checks.
             role = {"iran": "IR", "panel-iran": "IR",
                     "foreign": "KH"}.get(values.get("NODE_ROLE"))
-            image_lines = re.findall(r"(?m)^    image: ([^\\s#]+)\\s*$", text)
+            image_lines = re.findall(r"(?m)^    image: ([^\s#]+)\s*$", text)
             if (role is None or len(image_lines) != 1
                     or re.fullmatch(
-                        r"ghcr\\.io/aghajani82/smite-node@sha256:[0-9a-f]{64}",
+                        r"ghcr\.io/aghajani82/smite-node@sha256:[0-9a-f]{64}",
                         image_lines[0]) is None):
                 raise Hold("RC7_BUNDLED_FRP_PINNED_NODE_REQUIRED")
             status = _rc7_bundled_frp_local_status(node_dir, role, frp_record)
