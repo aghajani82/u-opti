@@ -117,7 +117,7 @@ def inspect(node: Path, *, lab_binary: Path | None = None) -> dict[str, str]:
 # This opt-in verification intentionally does NOT write the engine manifest,
 # start any Backhaul process or recreate the FRP-owning Node.
 RC7_BUNDLED_BACKHAUL_AUDIT = r"""
-import hashlib,json,os,stat
+import hashlib,json,os,platform,stat
 from app.config import settings
 assert settings.smite_engine_inventory_mode == "managed"
 assert settings.smite_engine_manifest_path == "/etc/smite-node/engine-state/engines.json"
@@ -142,7 +142,11 @@ except BaseException:
     try: os.close(fd)
     except OSError: pass
     raise
-print(json.dumps({"sha256":digest.hexdigest()},sort_keys=True))
+architecture = {"x86_64":"amd64", "amd64":"amd64",
+                "aarch64":"arm64", "arm64":"arm64"}.get(platform.machine().lower())
+assert architecture in ("amd64","arm64")
+print(json.dumps({"architecture":architecture,
+                  "sha256":digest.hexdigest()},sort_keys=True))
 """
 
 # A signed GET uses the reviewed Node's own HMAC identity and durable replay
@@ -187,7 +191,10 @@ def _strict_rc7_response(raw: str, *, kind: str) -> dict:
     except (ValueError, TypeError, UnicodeError) as exc:
         raise Hold("RC7_BUNDLED_READONLY_PROOF_INVALID") from exc
     if kind == "binary":
-        if (not isinstance(doc, dict) or set(doc) != {"sha256"}
+        if (not isinstance(doc, dict)
+                or set(doc) != {"sha256", "architecture"}
+                or type(doc["architecture"]) is not str
+                or doc["architecture"] not in package.OFFICIAL_BINARY_SHA256
                 or not isinstance(doc["sha256"], str)
                 or RC7_SHA256.fullmatch(doc["sha256"]) is None):
             raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
@@ -209,7 +216,8 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
 
     No install, no manifest/FRP receipt write or output of hashes/Node
-    identities. Validate original RC7 FRP receipt-to-Manifest binding and
+    identities. Verify exact official architecture-bound Backhaul binary
+    SHA256 (not just a well-formed digest) and RC7 FRP receipt binding;
     stage an in-memory Backhaul-only candidate under the existing host lock.
     The authenticated Agent read consumes a durable replay nonce, but no
     service/process/configuration is changed. A PASS is not permission.
@@ -251,8 +259,12 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 raise Hold("RC7_BUNDLED_EXISTING_FRP_NOT_READY")
             if inventory["engines"]["backhaul"] != "not-installed":
                 raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
-            if not RC7_SHA256.fullmatch(binary["sha256"]):
-                raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
+            # A well-formed hash is not provenance: demand the exact
+            # architecture-bound official executable digest independently
+            # extracted from the archive already pinned in this project.
+            if (binary["sha256"] != package.OFFICIAL_BINARY_SHA256[
+                    binary["architecture"]]):
+                raise Hold("RC7_BUNDLED_BINARY_DIGEST_MISMATCH")
 
             # Production paths, READ ONLY. Existing RC7 FRP verification
             # binds the *whole* engines.json to the committed receipt.
@@ -289,6 +301,7 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
         # Never leak Docker stdout, secrets, process IDs or image metadata.
         raise Hold("RC7_BUNDLED_READONLY_PROBE_FAILED") from exc
     return {
+        "RC7_BACKHAUL_BINARY_PIN": "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH",
         "RC7_FRP_RECEIPT_BINDING": "COMMITTED_EXACT_MANIFEST_REVIEWED",
         "RC7_BACKHAUL_MANIFEST_PLAN": "CANDIDATE_ONLY_NO_WRITE",
         "RC7_BACKHAUL_IMAGE_BINARY": "OBSERVED_PINNED_IMAGE_NO_MOUNT",
