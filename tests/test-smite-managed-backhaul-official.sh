@@ -243,3 +243,12 @@ test "$(sudo sha256sum "$lab/node/config/engine-state/engines.json" | awk '{prin
 sudo test ! -e "$lab/installed/backhaul"
 sudo test ! -e "$lab/recovery-journal"
 echo "OFFICIAL_DUAL_ENGINE_FRP_SURVIVED_BACKHAUL_SIGNED_RECREATE_AND_ROLLBACK=PASS"
+
+# Independent stronger lane: ACTUAL two Node API daemons and a continuous,
+# internal-bridge-only FRP 0.71.0 TCP forwarding socket during the existing
+# RC7 dual-receipt apply + compensation, WITHOUT restarting either container.
+# This does NOT simulate production WSS/443 or grant a host install.
+sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+  GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
+  python3 -B "$root/tests/test-smite-managed-backhaul-two-node-live-ci.py" \
+  "$lab/$frp_asset" "$lab/backhaul.tar.gz"
