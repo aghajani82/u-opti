@@ -732,8 +732,8 @@ def _rc7_two_host_guards(root: Path, *, role: str) -> tuple[str, ...]:
         node_data / "broker-replay.fixture.json",
     )
     values = tuple(checked(path, 131072) for path in paths)
-    for doc in values[2:]:
-        _pair_read_private(paths[values.index(doc)], limit=8192)
+    for path in paths[2:]:
+        _pair_read_private(path, limit=8192)
     session = _pair_load_json(values[2])
     replay = _pair_load_json(values[3])
     if (set(session) != {"role", "frp", "tunnels"}
