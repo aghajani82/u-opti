@@ -251,8 +251,9 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
             if not RC7_SHA256.fullmatch(binary["sha256"]):
                 raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
-    except frp.Hold as exc:
-        # Preserve only a fixed local HOLD, never an untrusted verifier body.
+    except (frp.Hold, frp.rt.Hold) as exc:
+        # Independently imported WSS/FRP modules have distinct Hold classes.
+        # Preserve only a fixed local HOLD, never a private verifier body.
         raise Hold("RC7_BUNDLED_RUNTIME_UNVERIFIED") from exc
     except (OSError, RuntimeError, TypeError, KeyError, AttributeError,
             ValueError) as exc:
