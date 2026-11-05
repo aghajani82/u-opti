@@ -12,6 +12,7 @@ import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -111,6 +112,164 @@ def inspect(node: Path, *, lab_binary: Path | None = None) -> dict[str, str]:
     return {"role": role, "state": "ENROLLED_UNVERIFIED", "reason": "SIGNED_NODE_RECHECK_REQUIRED"}
 
 
+
+# RC7 already bundles the official SHA-pinned Backhaul v0.7.2 image binary.
+# This opt-in verification intentionally does NOT write the engine manifest,
+# start any Backhaul process or recreate the FRP-owning Node.
+RC7_BUNDLED_BACKHAUL_AUDIT = r"""
+import hashlib,json,os,stat
+from app.config import settings
+assert settings.smite_engine_inventory_mode == "managed"
+assert settings.smite_engine_manifest_path == "/etc/smite-node/engine-state/engines.json"
+path = "/usr/local/bin/backhaul"
+meta = os.lstat(path)
+assert stat.S_ISREG(meta.st_mode) and meta.st_uid == 0
+assert meta.st_mode & 0o111 and not (meta.st_mode & 0o022)
+assert 0 < meta.st_size <= 48*1024*1024 and meta.st_nlink == 1
+fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+try:
+    opened = os.fstat(fd)
+    assert (opened.st_dev,opened.st_ino) == (meta.st_dev,meta.st_ino)
+    digest = hashlib.sha256()
+    with os.fdopen(fd, "rb") as f:
+        total = 0
+        for chunk in iter(lambda:f.read(1024*1024),b""):
+            total += len(chunk)
+            assert total <= 48*1024*1024
+            digest.update(chunk)
+        assert total == meta.st_size
+except BaseException:
+    try: os.close(fd)
+    except OSError: pass
+    raise
+print(json.dumps({"sha256":digest.hexdigest()},sort_keys=True))
+"""
+
+# A signed GET uses the reviewed Node's own HMAC identity and durable replay
+# nonce; no outbound network, proxy or redirect is permitted.
+RC7_BUNDLED_SIGNED_INVENTORY = r"""
+import json,secrets,urllib.request
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        return None
+node_id,secret=read_identity('/run/smite-node-identity/node-identity.json')
+target='/api/agent/engines'
+headers=sign_request(secret=secret,node_id=node_id,method='GET',target=target,
+                     body=b'',nonce=secrets.token_hex(16))
+url='http://127.0.0.1:8888'+target
+request=urllib.request.Request(url,headers=headers,method='GET')
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+with opener.open(request,timeout=6) as response:
+    assert response.status==200 and response.geturl()==url
+    raw=response.read(4097)
+    assert 0<len(raw)<=4096
+    json.loads(raw)
+print(raw.decode('utf-8'))
+"""
+
+RC7_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _strict_rc7_response(raw: str, *, kind: str) -> dict:
+    if not isinstance(raw, str) or not 0 < len(raw.encode("utf-8")) <= 4096:
+        raise Hold("RC7_BUNDLED_READONLY_PROOF_INVALID")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise Hold("RC7_BUNDLED_READONLY_PROOF_INVALID")
+            result[key] = value
+        return result
+    try:
+        doc = json.loads(raw, object_pairs_hook=unique)
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("RC7_BUNDLED_READONLY_PROOF_INVALID") from exc
+    if kind == "binary":
+        if (not isinstance(doc, dict) or set(doc) != {"sha256"}
+                or not isinstance(doc["sha256"], str)
+                or RC7_SHA256.fullmatch(doc["sha256"]) is None):
+            raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
+    elif kind == "inventory":
+        if (not isinstance(doc, dict) or set(doc) != {"mode", "engines"}
+                or doc["mode"] != "managed"
+                or not isinstance(doc["engines"], dict)
+                or set(doc["engines"]) != set(ENGINES)
+                or any(type(value) is not str
+                       or value not in ("ready", "not-installed", "unavailable")
+                       for value in doc["engines"].values())):
+            raise Hold("RC7_BUNDLED_INVENTORY_UNTRUSTED")
+    else:
+        raise Hold("RC7_BUNDLED_READONLY_PROOF_INVALID")
+    return doc
+
+
+def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
+    """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
+
+    No install, no manifest write, no output of hashes/Node identities.
+    The authenticated Agent read consumes a durable replay nonce, but no
+    service/process/configuration is changed. A PASS is not permission.
+    """
+    if role not in ("ir", "foreign"):
+        raise Hold("RC7_BUNDLED_ROLE_INVALID")
+    if os.geteuid() != 0:
+        raise Hold("RC7_BUNDLED_ROOT_REQUIRED")
+    frp = _load("uopti_bh_rc7_runtime_probe", "smite-rc7-frp-enrollment.py")
+    try:
+        with frp.rt.locked():
+            doc = frp.node_details()
+            if doc.get("role") != role:
+                raise Hold("RC7_BUNDLED_RUNTIME_ROLE_MISMATCH")
+            runtime = frp.rt.inspect_container("smite-node")
+            mounts = runtime.get("Mounts")
+            if not isinstance(mounts, list):
+                raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
+            for mount in mounts:
+                if not isinstance(mount, dict):
+                    raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
+                destination = mount.get("Destination")
+                if not isinstance(destination, str):
+                    raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
+                if (destination == "/usr/local/bin"
+                        or destination == "/usr/local/bin/backhaul"
+                        or destination.startswith("/usr/local/bin/backhaul/")):
+                    raise Hold("RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT")
+            frp.rt.signed_probe()
+            binary = _strict_rc7_response(
+                frp.rt.run(["docker","exec","smite-node","python3","-B","-c",
+                            RC7_BUNDLED_BACKHAUL_AUDIT],timeout=30),
+                kind="binary")
+            inventory = _strict_rc7_response(
+                frp.rt.run(["docker","exec","smite-node","python3","-B","-c",
+                            RC7_BUNDLED_SIGNED_INVENTORY],timeout=30),
+                kind="inventory")
+            if inventory["engines"]["frp"] != "ready":
+                raise Hold("RC7_BUNDLED_EXISTING_FRP_NOT_READY")
+            if inventory["engines"]["backhaul"] != "not-installed":
+                raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
+            if not RC7_SHA256.fullmatch(binary["sha256"]):
+                raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
+    except (OSError, RuntimeError, TypeError, KeyError, AttributeError,
+            ValueError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        # Never leak Docker stdout, secrets, process IDs or image metadata.
+        raise Hold("RC7_BUNDLED_READONLY_PROBE_FAILED") from exc
+    return {
+        "RC7_BACKHAUL_IMAGE_BINARY": "OBSERVED_PINNED_IMAGE_NO_MOUNT",
+        "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+        "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+        "RC7_SIGNED_REPLAY": "PASS",
+        "NODE_RECREATED": "NO",
+        "FRP_OR_TUNNELS_CHANGED": "NOT_REQUESTED",
+        "SIGNED_OWNER_CHILD_CONTINUITY": "NOT_PROVEN",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+
+
 def verified_candidate(stage: Path) -> dict[str, str]:
     if stage.is_symlink() or not stage.is_absolute():
         raise Hold("Unsafe candidate path")
@@ -184,13 +343,18 @@ def exercise(root: Path, *, action: str, stage: Path | None = None) -> dict[str,
 
 def main() -> int:
     arg = argparse.ArgumentParser(description="Managed Backhaul: safe review, CI-only activation")
-    arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback"))
+    arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback", "verify-rc7-bundle"))
     arg.add_argument("--node-dir", type=Path, default=NODE_DEFAULT)
+    arg.add_argument("--role", choices=("ir", "foreign"))
     arg.add_argument("--stage", type=Path)
     arg.add_argument("--lab-root", type=Path)
     args = arg.parse_args()
     try:
-        if args.action in ("install", "rollback"):
+        if args.action == "verify-rc7-bundle":
+            if not args.role:
+                raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
+            _format(verify_rc7_bundled_backhaul(args.role))
+        elif args.action in ("install", "rollback"):
             if args.lab_root is None:
                 raise Hold("Real host engine activation is NOT enabled; no server changed")
             _format(exercise(args.lab_root, action=args.action, stage=args.stage))
