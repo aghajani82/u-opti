@@ -560,6 +560,44 @@ a disposable two-host RC7 WSS topology. The system continues to report
 `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; there is no live enrollment
 switch in this PR.
 
+## Two-host RC7 no-recreate orchestration — disposable paired lab ONLY
+
+The existing internal transaction code now has an additional **CI-only
+Python entry** `rc7_two_host_rehearsal_lab(ir_root, foreign_root,
+backhaul_sha256, observe=..., inject=...)` (not exposed by a menu or CLI).
+It requires **two distinct PR-runner private roots**, each containing an
+exactly bound, role-specific `COMMITTED` RC7 FRP receipt/Manifest pair.
+It takes and holds **both existing shared engine locks** in deterministic
+IR → foreign order, checks **both role receipts and the baseline** before
+mutating either root, and rejects pending recovery journals or completion
+seals. Active saved-tunnel identities are represented in the test by
+synthetic immutable owner/child data for `20182`, `optical` and `nahavi`.
+Broker/replay and Node Compose/.env are synthetic protected byte fixtures,
+not real live runtime observations.
+
+In the isolated test it applies the exact reviewed Manifest/receipt
+transition to IR, observes a synthetic phase, applies to foreign, observes
+again, and **always** recovers both roots in reverse order under the same
+two engine locks. It verifies the exact original FRP/other engine receipts
+and protected bytes again after recovery. A simulated failure after IR,
+during the foreign receipt transition, after both transitions, or from a
+negative synthetic observation must either produce an **exact two-host
+rollback** or **HOLD with recovery journals retained for manual inspection**
+when independent protected evidence has drifted. Both roles are tested.
+The module itself invokes **no** Docker, Compose restart, FRPS, network,
+Nginx, signed Agent API or credential exchange. Neither fixture indicates
+live Owner/Child or packet-forwarding continuity; the result explicitly
+reports `SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN`, as well as
+`INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
+
+This review narrows the two-host coordination/test gap without claiming
+a distributed atomic commit, a real authenticated owner/child probe or
+a production-safe live installer. A **real isolated two-host RC7 WSS
+topology with real signed health and forwarding checks before/during/after**
+remains required, followed by real-host transaction design and independent
+operator approval. The existing force-recreate disposable host executor
+is not reused for active FRP environments.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
