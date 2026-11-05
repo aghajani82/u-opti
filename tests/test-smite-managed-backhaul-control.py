@@ -568,6 +568,46 @@ class OperatorControl(unittest.TestCase):
         self.assertIn("HOLD: RC7_BUNDLED_ROLE_REQUIRED",out.stderr)
         self.assertFalse((self.node/"config/engine-state").exists())
 
+
+    def test_rc7_menu_auto_role_denies_arbitrary_node_dir_without_docker(self):
+        # The review may classify only the real /opt/smite-node; a sandbox
+        # with a valid-looking .env is not field-server evidence.
+        result = self.run_control(
+            "verify-rc7-bundle", "--auto-role",
+            "--node-dir", self.node)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "HOLD: RC7_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertFalse((self.node/"config/engine-state").exists())
+        conflict = self.run_control(
+            "verify-rc7-bundle", "--auto-role", "--role", "ir")
+        self.assertEqual(conflict.returncode, 2)
+        self.assertIn("HOLD: RC7_BUNDLED_CONFLICTING_ROLE_SELECTION",
+                      conflict.stderr)
+        self.assertFalse((self.node/"config/engine-state").exists())
+
+    def test_rc7_auto_role_uses_existing_env_parser_not_sourcing(self):
+        with patch.object(control,"NODE_DEFAULT",self.node):
+            self.assertEqual(control._rc7_operator_review_role(self.node),
+                             "foreign")
+            (self.node/".env").write_text(
+                ENV.replace("NODE_ROLE=foreign","NODE_ROLE=panel-iran"))
+            self.assertEqual(control._rc7_operator_review_role(self.node),
+                             "ir")
+            (self.node/".env").write_text(
+                ENV.replace("NODE_ROLE=foreign","NODE_ROLE=iran")+
+                "NODE_ROLE=foreign\n")
+            with self.assertRaisesRegex(
+                    control.Hold,"Duplicate protected Node"):
+                control._rc7_operator_review_role(self.node)
+            (self.node/".env").write_text(ENV)
+            symlink = self.root/"linked"
+            symlink.symlink_to(self.node,target_is_directory=True)
+            with self.assertRaisesRegex(
+                    control.Hold,"RC7_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED"):
+                control._rc7_operator_review_role(symlink)
+
     def test_menu_is_clear_and_inert(self):
         result = subprocess.run(
             ["bash", str(MENU), "--install"],
@@ -593,6 +633,9 @@ class OperatorControl(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("STATE=NOT_INSTALLED", result.stdout)
         self.assertIn("INSTALL_ALLOWED=NO", result.stdout)
+        self.assertIn("RC7 BUNDLED BACKHAUL + SIGNED INVENTORY", result.stdout)
+        self.assertIn("HOLD: RC7_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED", result.stderr)
+        self.assertIn("ACTIVATION_GATE=HOLD",result.stdout)
         self.assertIn("installation on real IR/KH is disabled", result.stdout)
         self.assertFalse((self.node / "config/engine-state").exists())
 
@@ -607,6 +650,11 @@ class OperatorControl(unittest.TestCase):
     def test_no_network_or_live_service_actions_in_menu_or_controller(self):
         script = MENU.read_text()
         controller = FILE.read_text()
+        self.assertIn("verify-rc7-bundle --auto-role",script)
+        self.assertIn('echo "INSTALL_ALLOWED=NO"',script)
+        self.assertIn('echo "ACTIVATION_GATE=HOLD"',script)
+        self.assertNotIn("docker exec",script)
+        self.assertNotIn("docker restart",script)
         for text in ("apt-get ", "curl ", "docker compose up", "systemctl ",
                      "iptables ", "ufw ", "ssh ", "nginx -s"):
             self.assertNotIn(text, script)
