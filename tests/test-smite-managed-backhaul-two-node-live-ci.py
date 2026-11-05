@@ -37,7 +37,7 @@ FRP_ARCHIVE_SHA = "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea
 BACKHAUL_ARCHIVE_SHA = "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
 MARKER = "U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n"
 DOCKER_NAMES = ("ci-uopti-ir", "ci-uopti-foreign", "ci-uopti-wss",
-                "ci-uopti-broker")
+                "ci-uopti-bh-bridge", "ci-uopti-broker")
 BROKER_GID = 1348
 BROKER_INSTANCE = "ci-broker-ir-0001"
 
@@ -274,6 +274,13 @@ def wss_gateway(network: str, root_ir: Path, root_foreign: Path):
     key.chmod(0o600)
     write(root_foreign / "node/config/ci-ca.crt", cert.read_bytes())
     conf = tls / "nginx.conf"
+    # Render existing reviewed Standard Backhaul WS locations. These are
+    # added only to the disposable Nginx, never to a live 443 gateway.
+    ir_control = run("bash", str(REPO / "modules/smite-backhaul-standard.sh"),
+                     "--render-ir-control", "3080")
+    check("location = /channel {" in ir_control
+          and "location ^~ /tunnel/ {" in ir_control,
+          "CI_BACKHAUL_IR_WS_ROUTES_NOT_REVIEWED")
     write(conf, b"""user root;
 pid /tmp/ci-nginx.pid;
 error_log /dev/stderr warn;
@@ -300,7 +307,7 @@ http {
       proxy_send_timeout 3600s;
       proxy_buffering off;
     }
-  }
+""" + ir_control.encode() + b"""  }
 }
 """)
     image = "uopti-ci-wss-issue102"
@@ -345,6 +352,128 @@ def https_probe():
 
 
 
+
+
+
+def foreign_backhaul_bridge(root_foreign: Path):
+    """Actual existing KH Standard renderer with isolated, verified TLS."""
+    config = root_foreign / "backhaul-bridge.conf"
+    rendered = run(
+        "bash", str(REPO / "modules/smite-backhaul-standard.sh"),
+        "--render-kh-bridge", "ci-uopti-wss.local", "13080")
+    check("listen 127.0.0.1:13080;" in rendered
+          and "proxy_ssl_verify on;" in rendered
+          and "proxy_ssl_name ci-uopti-wss.local;" in rendered,
+          "CI_FOREIGN_BACKHAUL_BRIDGE_NOT_TLS_VERIFIED")
+    write(config, ("""user root;
+pid /tmp/ci-bh-nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 256; }
+http {
+  access_log off;
+  client_body_temp_path /tmp;
+  proxy_temp_path /tmp;
+  fastcgi_temp_path /tmp;
+  uwsgi_temp_path /tmp;
+  scgi_temp_path /tmp;
+""" + rendered + "\n}\n").encode(), 0o600)
+    cert = root_foreign / "node/config/ci-ca.crt"
+    check(cert.is_file() and cert.stat().st_size > 1000,
+          "CI_FOREIGN_TRUSTED_CA_UNAVAILABLE")
+    run("docker", "run", "-d", "--name", "ci-uopti-bh-bridge",
+        "--network", "container:ci-uopti-foreign",
+        "--read-only", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--pids-limit", "96", "--memory", "192m",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
+        "--mount", f"type=bind,src={config},dst=/ci/nginx.conf,readonly",
+        "--mount", f"type=bind,src={cert},dst=/etc/ssl/certs/ca-certificates.crt,readonly",
+        "--entrypoint", "nginx", "uopti-ci-wss-issue102",
+        "-c", "/ci/nginx.conf", "-g", "daemon off;", timeout=150)
+    doc = json.loads(run("docker", "inspect", "ci-uopti-bh-bridge"))[0]
+    foreign = json.loads(run("docker", "inspect", "ci-uopti-foreign"))[0]
+    mode = doc["HostConfig"]["NetworkMode"]
+    check(mode in ("container:ci-uopti-foreign",
+                   "container:" + foreign["Id"],
+                   "container:" + foreign["Id"][:12])
+          and doc["HostConfig"]["ReadonlyRootfs"] is True
+          and doc["HostConfig"]["CapDrop"] == ["ALL"]
+          and not doc["HostConfig"]["PortBindings"]
+          and doc["HostConfig"]["PublishAllPorts"] is False
+          and doc["State"]["Running"] is True,
+          "CI_FOREIGN_BACKHAUL_TLS_BRIDGE_ISOLATION_FAILED")
+    return doc["Id"], doc["State"]["StartedAt"]
+
+
+BRIDGE_LOOPBACK_ONLY = r"""
+import socket
+with socket.socket() as peer:
+ peer.settimeout(1)
+ try:
+  peer.connect(('ci-uopti-foreign',13080))
+ except (ConnectionRefusedError,TimeoutError,OSError):
+  pass
+ else:
+  raise AssertionError('foreign bridge exposed on private network')
+print('CI_FOREIGN_BRIDGE_LOOPBACK_ONLY=PASS')
+"""
+
+
+BACKHAUL_FOREIGN_ECHO = r"""
+from http.server import HTTPServer,BaseHTTPRequestHandler
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path!='/ci-backhaul-health':
+   self.send_error(404)
+   return
+  payload=b'CI-REAL-FOREIGN-BACKHAUL-ROUNDTRIP'
+  self.send_response(200)
+  self.send_header('Content-Length',str(len(payload)))
+  self.end_headers()
+  self.wfile.write(payload)
+ def log_message(self,*args):pass
+HTTPServer(('127.0.0.1',56053),Handler).serve_forever()
+"""
+
+
+BACKHAUL_IR_FORWARD = r"""
+import sys,time,urllib.request
+if sys.argv[1]=='absent':
+ try:
+  with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+          'http://127.0.0.1:56053/ci-backhaul-health',timeout=1):
+   raise AssertionError('data path still published after signed removal')
+ except (OSError,TimeoutError):
+  print('CI_BACKHAUL_DATA_LISTENER_REMOVED=PASS')
+else:
+ for attempt in range(40):
+  try:
+   opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+   with opener.open('http://127.0.0.1:56053/ci-backhaul-health',timeout=2) as resp:
+    assert resp.status==200
+    assert resp.read()==b'CI-REAL-FOREIGN-BACKHAUL-ROUNDTRIP'
+    print('CI_BACKHAUL_REAL_FOREIGN_DATA_OVER_VERIFIED_TLS_443=PASS')
+    break
+  except (OSError,TimeoutError):
+   if attempt==39:raise
+   time.sleep(0.5)
+"""
+
+
+def backhaul_data_probe(phase: str):
+    check(phase in ("active", "absent"), "CI_BACKHAUL_DATA_PROBE_PHASE_INVALID")
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "ci-uopti-ir", "python", "-B", "-c",
+             BACKHAUL_IR_FORWARD,phase],
+            capture_output=True,text=True,timeout=110,check=False)
+    except (OSError,subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_BACKHAUL_REAL_DATA_PROBE_UNAVAILABLE") from exc
+    label=("CI_BACKHAUL_REAL_FOREIGN_DATA_OVER_VERIFIED_TLS_443=PASS"
+           if phase=="active" else "CI_BACKHAUL_DATA_LISTENER_REMOVED=PASS")
+    check(proc.returncode==0 and label in proc.stdout,
+          "CI_BACKHAUL_FOREIGN_DATA_ROUNDTRIP_NOT_PROVEN")
+    print(label,flush=True)
 
 
 BROKER_BRIDGE_GATE_AUDIT = r"""
@@ -852,6 +981,98 @@ def verify_frp_registry_with_backhaul(root: Path, baseline: bytes):
           "CI_BACKHAUL_REGISTRY_ENGINE_INVALID")
 
 
+
+SIGNED_BACKHAUL_CLIENT = r"""
+import json,socket,sys,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+action=sys.argv[1]
+token=sys.argv[2]
+tunnel='ci-backhaul-client-56053'
+base='http://127.0.0.1:8888'
+def call(target,wire=None,headers=None):
+ h=dict(headers or {})
+ if wire is not None:
+  h['Content-Type']='application/json'
+ method='POST' if wire is not None else 'GET'
+ req=urllib.request.Request(base+target,data=wire,method=method,headers=h)
+ try:
+  with urllib.request.urlopen(req,timeout=16) as response:
+   return response.status,json.load(response)
+ except urllib.error.HTTPError as error:
+  return error.code,{}
+def signed(target,wire=None,identity=None):
+ return sign_request(secret=key,node_id=identity or node_id,
+                     method='POST' if wire is not None else 'GET',
+                     target=target,body=wire or b'')
+if action in ('deny','apply'):
+ target='/api/agent/tunnels/apply'
+ payload={'tunnel_id':tunnel,'core':'backhaul','type':'ws',
+          'spec':{'uopti_standard_backhaul':True,'mode':'client',
+                  'transport':'ws','type':'ws','token':token,
+                  'control_port':3080,'bridge_port':13080,'data_port':56053,
+                  'remote_addr':'127.0.0.1:13080','ports':[56053]}}
+ wire=json.dumps(payload,separators=(',',':')).encode()
+ assert call(target,wire)[0]==401,'unauthenticated client Apply accepted'
+ assert call(target,wire,signed(target,wire,'smitecibackhaul01'))[0]==401,\
+       'wrong-node client Apply accepted'
+ auth=signed(target,wire)
+ status,doc=call(target,wire,auth)
+ assert status==(409 if action=='deny' else 200),(action,status)
+ if action=='apply':
+  assert doc.get('status')=='success','signed client Apply did not succeed'
+ assert call(target,wire,auth)[0]==401,'replay of client Apply accepted'
+ print('CI_BACKHAUL_SIGNED_FOREIGN_CLIENT_'+action.upper()+'=PASS')
+elif action in ('status','remove','absent'):
+ if action=='remove':
+  target='/api/agent/tunnels/remove'
+  wire=json.dumps({'tunnel_id':tunnel},separators=(',',':')).encode()
+  assert call(target,wire)[0]==401,'unsigned client Remove accepted'
+  auth=signed(target,wire)
+  status,doc=call(target,wire,auth)
+  assert status==200 and doc.get('status')=='success',(action,status)
+  assert call(target,wire,auth)[0]==401,'client Remove replay accepted'
+ target='/api/agent/tunnels/status?tunnel_id='+tunnel
+ auth=signed(target)
+ status,doc=call(target,headers=auth)
+ assert status==200 and doc.get('status')=='success',(action,status)
+ active=doc.get('data',{}).get('active')
+ assert active is (action=='status'),(action,active)
+ assert call(target,headers=auth)[0]==401,'client Status replay accepted'
+ print('CI_BACKHAUL_SIGNED_FOREIGN_CLIENT_'+action.upper()+'=PASS')
+else:
+ raise AssertionError('invalid signed client action')
+"""
+
+
+def signed_backhaul_client(action: str, token: str):
+    check(action in ("deny","apply","status","remove","absent"),
+          "CI_BACKHAUL_CLIENT_ACTION_UNTRUSTED")
+    try:
+        process=subprocess.run(
+            ["docker","exec","ci-uopti-foreign","python","-B","-c",
+             SIGNED_BACKHAUL_CLIENT,action,token],
+            capture_output=True,text=True,timeout=45,check=False)
+    except (OSError,subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_BACKHAUL_CLIENT_SIGNED_REQUEST_UNAVAILABLE") from exc
+    label="CI_BACKHAUL_SIGNED_FOREIGN_CLIENT_"+action.upper()+"=PASS"
+    check(process.returncode==0 and label in process.stdout,
+          "CI_BACKHAUL_CLIENT_SIGNED_RUNTIME_UNPROVEN")
+    print(label,flush=True)
+
+
+def verify_foreign_frp_registry_with_backhaul(root: Path, baseline: bytes):
+    saved=json.loads(baseline)
+    current=json.loads((root/"node-data/tunnels.json").read_bytes())
+    check(set(current)==set(saved)|{"ci-backhaul-client-56053"},
+          "CI_BACKHAUL_FOREIGN_REGISTRY_SCOPE_DRIFT")
+    check(all(current[k]==v for k,v in saved.items()),
+          "CI_BACKHAUL_FOREIGN_FRP_SPECS_CHANGED")
+    check(current["ci-backhaul-client-56053"].get("core")=="backhaul",
+          "CI_BACKHAUL_FOREIGN_RUNTIME_CORE_INVALID")
+
+
 SIGNED_CHILD_APPLY = r"""
 import json,sys,urllib.request,urllib.error
 from app.agent_auth import read_identity
@@ -1310,12 +1531,20 @@ def main():
         print("CI_WSS_STAGE=START_SIGNED_FOREIGN_CHILD_NODE", flush=True)
         started["ci-uopti-foreign"] = docker_node(
             "ci-uopti-foreign", network, root_foreign)
+        print("CI_WSS_STAGE=START_FOREIGN_BACKHAUL_TLS_BRIDGE", flush=True)
+        started["ci-uopti-bh-bridge"] = foreign_backhaul_bridge(root_foreign)
+        isolation = run("docker","exec","ci-uopti-ir","python","-B","-c",
+                        BRIDGE_LOOPBACK_ONLY, timeout=10)
+        check("CI_FOREIGN_BRIDGE_LOOPBACK_ONLY=PASS" in isolation,
+              "CI_FOREIGN_BACKHAUL_BRIDGE_PUBLIC_EXPOSURE")
         print("CI_WSS_STAGE=PROBE_TLS_CA_HOSTNAME", flush=True)
         https_probe()
         # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
         print("CI_WSS_STAGE=START_REAL_FRP_WSS_CONTROL", flush=True)
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "python", "-B", "-c", ECHO)
+        run("docker", "exec", "-d", "ci-uopti-foreign",
+            "python", "-B", "-c", BACKHAUL_FOREIGN_ECHO)
         # The IR Node must itself create and track its sole FRPS owner via
         # strict HMAC and durable replay, rather than docker-exec orphan FRPS.
         print("CI_WSS_STAGE=SIGNED_IR_OWNER_API_PREFLIGHT", flush=True)
@@ -1353,10 +1582,11 @@ def main():
         seen = []
         broker_restarted = False
         backhaul_active = False
+        backhaul_client_active = False
         backhaul_token = secrets.token_hex(24)
 
         def observe(phase, ir, foreign):
-            nonlocal broker_restarted, backhaul_active
+            nonlocal broker_restarted, backhaul_active, backhaul_client_active
             if phase == "after-ir" and not broker_restarted:
                 started["ci-uopti-broker"] = broker_restart(root_ir)
                 broker_restarted = True
@@ -1368,18 +1598,29 @@ def main():
             signed_probe("ci-uopti-foreign", foreign_state)
             if phase == "before":
                 signed_backhaul_action("deny", backhaul_token)
+                signed_backhaul_client("deny", backhaul_token)
             elif phase == "after-ir":
                 signed_backhaul_action("apply", backhaul_token)
                 backhaul_active = True
                 signed_backhaul_action("status", backhaul_token)
+                signed_backhaul_client("absent", backhaul_token)
             elif phase == "after-both":
                 check(backhaul_active, "CI_BACKHAUL_RUNTIME_MISSING_AT_BOTH")
                 signed_backhaul_action("status", backhaul_token)
+                signed_backhaul_client("apply", backhaul_token)
+                backhaul_client_active = True
+                signed_backhaul_client("status", backhaul_token)
+                backhaul_data_probe("active")
             elif phase == "after-rollback":
+                if backhaul_client_active:
+                    signed_backhaul_client("remove", backhaul_token)
+                    backhaul_client_active = False
                 if backhaul_active:
                     signed_backhaul_action("remove", backhaul_token)
                     backhaul_active = False
+                signed_backhaul_client("absent", backhaul_token)
                 signed_backhaul_action("absent", backhaul_token)
+                backhaul_data_probe("absent")
             signed_child_probe()
             official_retained_binary_probe("ci-uopti-ir")
             official_retained_binary_probe("ci-uopti-foreign")
@@ -1394,8 +1635,12 @@ def main():
                       "CI_IR_OWNER_SAVED_TUNNEL_DRIFT")
             check(tracked_child_process_identity() == child_process_identity,
                   "CI_FOREIGN_CHILD_FRPC_RESTARTED_OR_REPLACED")
-            check((root_foreign / "node-data/tunnels.json").read_bytes() == saved_child_state,
-                  "CI_FOREIGN_CHILD_SAVED_TUNNEL_DRIFT")
+            if backhaul_client_active:
+                verify_foreign_frp_registry_with_backhaul(
+                    root_foreign, saved_child_state)
+            else:
+                check((root_foreign / "node-data/tunnels.json").read_bytes() ==
+                      saved_child_state, "CI_FOREIGN_CHILD_SAVED_TUNNEL_DRIFT")
             forward_probe(phase)
             https_probe()
             for name in DOCKER_NAMES:
@@ -1404,13 +1649,20 @@ def main():
                       and doc["State"]["Running"] is True,
                       "CI_NODE_RECREATED_OR_RESTARTED")
             if phase == "after-both":
-                # Remove ONLY this CI Backhaul server before the shared
-                # transaction's manifest/receipt rollback. Never stop FRP.
+                # No Backhaul runtime may survive the paired receipt rollback.
+                # Remove ONLY each engine's ephemeral signed CI tunnel.
+                signed_backhaul_client("remove", backhaul_token)
+                backhaul_client_active = False
+                signed_backhaul_client("absent", backhaul_token)
+                check((root_foreign / "node-data/tunnels.json").read_bytes() ==
+                      saved_child_state,
+                      "CI_SIGNED_BACKHAUL_CLIENT_REMOVE_FRP_REGISTRY_DRIFT")
                 signed_backhaul_action("remove", backhaul_token)
                 backhaul_active = False
+                signed_backhaul_action("absent", backhaul_token)
+                backhaul_data_probe("absent")
                 check((root_ir / "node-data/tunnels.json").read_bytes() ==
                       saved_owner_state, "CI_SIGNED_BACKHAUL_REMOVE_FRP_REGISTRY_DRIFT")
-                signed_backhaul_action("absent", backhaul_token)
             seen.append(phase)
             return True
 
@@ -1449,10 +1701,14 @@ def main():
         print("RC7_REAL_ROOT_BROKER_UDS_SIGNED_DENIAL=PASS")
         print("RC7_REAL_BROKER_RESTART_NO_NODE_RECREATE=PASS")
         print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
-        check(not backhaul_active, "CI_BACKHAUL_LEFT_RUNNING_AFTER_RECOVERY")
+        check(not backhaul_active and not backhaul_client_active,
+              "CI_BACKHAUL_LEFT_RUNNING_AFTER_RECOVERY")
+        print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_TLS_443_WS_DATA_ROUNDTRIP=PASS")
+        print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_EXACT_ROLLBACK=PASS")
         print("RC7_SIGNED_BACKHAUL_SERVER_WITH_LIVE_FRP_OWNER_CHILD=PASS")
         print("RC7_SIGNED_BACKHAUL_REMOVE_AND_FRP_REGISTRY_EXACT_RESTORE=PASS")
-        print("RC7_BACKHAUL_CROSS_HOST_DATA_TUNNEL=NOT_PROVEN")
+        print("RC7_BACKHAUL_CROSS_HOST_DATA_TUNNEL=PASS_ISOLATED_REAL_WS_TLS_443")
+        print("RC7_BACKHAUL_PUBLIC_HOST_DEPLOYMENT=NOT_PROVEN")
         print("RC7_RETAINED_FRP_NODE_OFFICIAL_BACKHAUL_BYTES_WITHOUT_RECREATE=PASS")
         print("RC7_LIVE_HOST_IN_PLACE_TRANSACTION=NOT_IMPLEMENTED")
         print("RC7_SIGNED_MANAGED_IR_OWNER_AND_FOREIGN_CHILD=PASS")
