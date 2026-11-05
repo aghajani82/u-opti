@@ -26,6 +26,8 @@ import time
 
 REPO = Path(__file__).resolve().parents[1]
 NODE_SOURCE = REPO / ".managed-smite-source"
+CHILD_SOURCE = REPO / ".signed-owner-smite-source"
+CHILD_SHA = "115f032761564a069d0aa2ca891e55d53a1c6ea0"
 SMITE_SHA = "02d05056d3a4baf577c9d3781d62af61c000f1ac"
 IMAGE = ("ghcr.io/zzedix/smite-node@sha256:"
          "967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e")
@@ -265,7 +267,7 @@ def wss_gateway(network: str, root_ir: Path, root_foreign: Path):
     key = tls / "key.pem"
     run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
         "-days", "1", "-subj", "/CN=ci-uopti-wss",
-        "-addext", "subjectAltName=DNS:ci-uopti-wss",
+        "-addext", "subjectAltName=DNS:ci-uopti-wss,DNS:ci-uopti-wss.local",
         "-keyout", str(key), "-out", str(cert), timeout=40)
     cert.chmod(0o600)
     key.chmod(0o600)
@@ -307,6 +309,7 @@ http {
     print("CI_WSS_STAGE=START_PRIVATE_NGINX", flush=True)
     run("docker", "run", "-d", "--name", "ci-uopti-wss",
         "--network", network, "--network-alias", "ci-uopti-wss",
+        "--network-alias", "ci-uopti-wss.local",
         "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
         "--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
@@ -335,7 +338,187 @@ def https_probe():
           "CI_TLS_CA_HOSTNAME_PROOF_FAILED")
 
 
+SIGNED_CHILD_APPLY = r"""
+import json,sys,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+token=sys.argv[1]
+target='/api/agent/tunnels/apply'
+payload={'tunnel_id':'ci-child-20182','core':'frp','type':'tcp','spec':{
+ 'mode':'client', 'shared_frps_owner':'ci-owner',
+ 'server_addr':'ci-uopti-wss.local','server_port':7000,'frp_gateway_port':443,
+ 'frp_tls_server_name':'ci-uopti-wss.local',
+ 'token':token,'type':'tcp','local_ip':'127.0.0.1',
+ 'local_port':39001,'remote_port':20182,
+}}
+wire=json.dumps(payload,separators=(',',':')).encode('utf-8')
+headers=sign_request(secret=key,node_id=node_id,method='POST',
+                     target=target,body=wire)
+headers['Content-Type']='application/json'
+request=urllib.request.Request(
+ 'http://127.0.0.1:8888'+target,data=wire,headers=headers,method='POST')
+try:
+ with urllib.request.urlopen(request,timeout=16) as resp:
+  data=json.load(resp)
+  assert resp.status==200 and data['status']=='success',data
+except urllib.error.HTTPError as exc:
+ print('CI_FOREIGN_SIGNED_APPLY_STATUS='+str(exc.code),flush=True)
+ raise
+except urllib.error.URLError:
+ print('CI_FOREIGN_SIGNED_APPLY_STATUS=API_UNAVAILABLE',flush=True)
+ raise
+print('CI_FOREIGN_SIGNED_APPLY=PASS')
+"""
+
+
+SIGNED_CHILD_STATUS = r"""
+import json,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+target='/api/agent/tunnels/status?tunnel_id=ci-child-20182'
+url='http://127.0.0.1:8888'+target
+def get(headers=None):
+ try:
+  with urllib.request.urlopen(urllib.request.Request(url,headers=headers or {}),timeout=5) as response:
+   return response.status,json.load(response)
+ except urllib.error.HTTPError as exc:
+  return exc.code,{}
+assert get()[0]==401,'unsigned child status accepted'
+other='smitecibackhaul01'
+assert get(sign_request(secret=key,node_id=other,method='GET',
+                       target=target,body=b''))[0]==401,'foreign node identity accepted'
+valid=sign_request(secret=key,node_id=node_id,method='GET',target=target,body=b'')
+status,doc=get(valid)
+print('CI_CHILD_SIGNED_STATUS_HTTP='+str(status))
+print('CI_CHILD_SIGNED_STATUS_ACTIVE='+(
+ 'YES' if isinstance(doc,dict) and isinstance(doc.get('data'),dict)
+ and doc['data'].get('active') is True else 'NO'))
+assert status==200 and doc.get('status')=='success',(status,doc)
+assert doc['data']=={'active':True,'type':'frp','process_running':True},doc
+assert get(valid)[0]==401,'signed child status nonce replay accepted'
+print('CI_SIGNED_REAL_MANAGED_FOREIGN_CHILD_STATUS=PASS')
+"""
+
+
+CHILD_FRPC_PID_AUDIT = r"""
+import json,psutil
+configs='/etc/smite-node/frp/frpc_ci-child-20182.yaml'
+expected=['/usr/local/bin/frpc','-c',configs]
+found=[]
+matched_commands=0
+for p in psutil.process_iter(['pid','cmdline','create_time','status']):
+ try:
+  if p.info['cmdline'] != expected or p.info['status']==psutil.STATUS_ZOMBIE:
+   continue
+  matched_commands+=1
+  # A running process is NOT sufficient. psutil 5.9.6, used by the
+  # pinned Smite image, exposes Process.connections(), while >=6 exposes
+  # Process.net_connections(). Both inspect the actual tracked PID.
+  method=(p.net_connections if hasattr(p,'net_connections')
+          else p.connections)
+  socks=method(kind='tcp')
+  if not any(s.status==psutil.CONN_ESTABLISHED
+             and getattr(s.raddr,'port',None)==443 for s in socks):
+   continue
+  found.append({'pid':p.info['pid'],'start':p.info['create_time']})
+ except (psutil.Error,OSError,ValueError,KeyError):
+  continue
+print('CI_CHILD_FRPC_CMD_MATCH_COUNT='+str(matched_commands))
+print('CI_CHILD_FRPC_WSS_ESTABLISHED_COUNT='+str(len(found)))
+assert matched_commands==1 and len(found)==1,'REAL_FRPC_WSS_CONTROL_PID_NOT_UNIQUE'
+print(json.dumps(found[0],sort_keys=True))
+"""
+
+
+def signed_child_ready():
+    # Require the actual signed Node API to be ready *before* requesting
+    # a new child. A Docker Running flag alone does not prove FastAPI boot.
+    for i in range(35):
+        try:
+            signed_probe("ci-uopti-foreign", "absent")
+            return
+        except Hold:
+            if i == 34:
+                raise Hold("CI_FOREIGN_SIGNED_API_NOT_READY") from None
+            time.sleep(0.3)
+
+
+def signed_child_apply(token: str):
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             SIGNED_CHILD_APPLY, token],
+            capture_output=True, text=True, timeout=35, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_SIGNED_FOREIGN_CHILD_APPLY_PROCESS_FAILED") from exc
+    # Only fixed proof labels and the numeric HTTP status may reach CI logs.
+    # Never print raw subprocess stdout/stderr: the signed body has a token.
+    for line in result.stdout.splitlines():
+        if line.startswith("CI_FOREIGN_SIGNED_APPLY_STATUS="):
+            code = line.removeprefix("CI_FOREIGN_SIGNED_APPLY_STATUS=")
+            if code == "API_UNAVAILABLE" or (code.isdecimal() and len(code) == 3):
+                print("CI_FOREIGN_SIGNED_APPLY_STATUS=" + code, flush=True)
+    check(result.returncode == 0
+          and "CI_FOREIGN_SIGNED_APPLY=PASS" in result.stdout,
+          "CI_SIGNED_FOREIGN_CHILD_APPLY_UNPROVEN")
+
+
+def signed_child_probe():
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             SIGNED_CHILD_STATUS],
+            capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_SIGNED_FOREIGN_CHILD_STATUS_PROCESS_FAILED") from exc
+    for line in result.stdout.splitlines():
+        if line.startswith("CI_CHILD_SIGNED_STATUS_HTTP="):
+            status = line.removeprefix("CI_CHILD_SIGNED_STATUS_HTTP=")
+            if status.isdecimal() and len(status) == 3:
+                print("CI_CHILD_SIGNED_STATUS_HTTP=" + status, flush=True)
+        if line in ("CI_CHILD_SIGNED_STATUS_ACTIVE=YES",
+                    "CI_CHILD_SIGNED_STATUS_ACTIVE=NO"):
+            print(line, flush=True)
+    check(result.returncode == 0
+          and "CI_SIGNED_REAL_MANAGED_FOREIGN_CHILD_STATUS=PASS"
+          in result.stdout,
+          "CI_SIGNED_FOREIGN_CHILD_STATUS_UNPROVEN")
+
+
+def tracked_child_process_identity():
+    # The PID/create-time and ESTABLISHED 443 socket are from the real
+    # foreign Node container; never accept just "process_running=true".
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             CHILD_FRPC_PID_AUDIT],
+            capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_CHILD_FRPC_PID_AUDIT_UNAVAILABLE") from exc
+    for line in result.stdout.splitlines():
+        for key in ("CI_CHILD_FRPC_CMD_MATCH_COUNT=",
+                    "CI_CHILD_FRPC_WSS_ESTABLISHED_COUNT="):
+            if line.startswith(key) and line[len(key):].isdigit():
+                print(key + line[len(key):], flush=True)
+    check(result.returncode == 0, "CI_CHILD_FRPC_PID_AUDIT_FAILED")
+    lines = result.stdout.strip().splitlines()
+    check(bool(lines), "CI_CHILD_FRPC_PID_AUDIT_EMPTY")
+    try:
+        doc = json.loads(lines[-1])
+    except ValueError as exc:
+        raise Hold("CI_CHILD_FRPC_PID_AUDIT_INVALID") from exc
+    check(set(doc) == {"pid", "start"}
+          and type(doc["pid"]) is int and doc["pid"] > 1
+          and type(doc["start"]) in (float, int),
+          "CI_SIGNED_FOREIGN_CHILD_REAL_PROCESS_INVALID")
+    return doc
+
+
 def docker_node(name: str, network: str, root: Path):
+    child = name == "ci-uopti-foreign"
+    source = CHILD_SOURCE if child else NODE_SOURCE
     command = [
         "docker", "run", "-d", "--name", name, "--network", network,
         "--network-alias", name, "--platform", "linux/amd64",
@@ -350,13 +533,19 @@ def docker_node(name: str, network: str, root: Path):
         "--env", "SMITE_AGENT_REPLAY_DB=/var/lib/smite-node/auth/agent-replay.sqlite3",
         "--env", "SMITE_ENGINE_MANIFEST_PATH=/etc/smite-node/engine-state/engines.json",
         "--env", "NODE_API_PORT=8888",
-        "--mount", f"type=bind,src={NODE_SOURCE}/node/app,dst=/app/app,readonly",
-        "--mount", f"type=bind,src={NODE_SOURCE}/node/main.py,dst=/app/main.py,readonly",
+        "--env", "NODE_ROLE=foreign" if child else "NODE_ROLE=iran",
+        "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
+        "--mount", f"type=bind,src={source}/node/main.py,dst=/app/main.py,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
         "--mount", f"type=bind,src={root}/node-data,dst=/var/lib/smite-node",
         "--mount", f"type=bind,src={root}/engines/frpc,dst=/usr/local/bin/frpc,readonly",
         "--mount", f"type=bind,src={root}/engines/frps,dst=/usr/local/bin/frps,readonly",
         "--mount", f"type=bind,src={root}/engines/backhaul,dst=/usr/local/bin/backhaul,readonly",
+        *([
+            "--env", "SMITE_FRP_STANDARD_WSS=1",
+            "--env", "PANEL_ADDRESS=ci-uopti-wss.local:443",
+            "--mount", f"type=bind,src={root}/node/config/ci-ca.crt,dst=/etc/ssl/certs/ca-certificates.crt,readonly",
+        ] if child else []),
         "--entrypoint", "python", IMAGE,
         "-m", "uvicorn", "main:app", "--host", "127.0.0.1",
         "--port", "8888", "--no-access-log",
@@ -376,11 +565,16 @@ def docker_node(name: str, network: str, root: Path):
     return state[0]["Id"], state[0]["State"]["StartedAt"]
 
 
-def enrollment(root: Path):
+def enrollment(root: Path, *, role: str):
+    # The newer signed foreign Child source added an independently
+    # authenticated identity/Replay key-binding marker. Enroll each role
+    # with exactly the code that will authenticate its later requests.
+    check(role in ("ir", "foreign"), "CI_REPLAY_ROLE_INVALID")
+    source = CHILD_SOURCE if role == "foreign" else NODE_SOURCE
     run("docker", "run", "--rm", "--platform", "linux/amd64",
         "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "0:0",
-        "--mount", f"type=bind,src={NODE_SOURCE}/node/app,dst=/app/app,readonly",
+        "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
         "--mount", f"type=bind,src={root}/node-data,dst=/var/lib/smite-node",
         "--entrypoint", "python", IMAGE, "-m", "app.replay_enrollment",
@@ -501,6 +695,8 @@ def main():
     check(runner.is_absolute() and runner.is_dir(), "RUNNER_TEMP_REQUIRED")
     check(run("git", "-C", str(NODE_SOURCE), "rev-parse", "HEAD") == SMITE_SHA,
           "REVIEWED_SIGNED_NODE_SOURCE_MISMATCH")
+    check(run("git", "-C", str(CHILD_SOURCE), "rev-parse", "HEAD") == CHILD_SHA,
+          "REVIEWED_SIGNED_CHILD_SOURCE_MISMATCH")
     tx = load("two_live_node_tx",
               REPO / "modules/smite-managed-backhaul-transaction.py")
     pkg = load("two_live_node_pkg",
@@ -522,18 +718,20 @@ def main():
         for role, root, _ in roots:
             originals[role] = initial_role(root, role, frp, backhaul_bytes,
                                           secrets.token_hex(32), token, tx)
-            enrollment(root)
+            enrollment(root, role=role)
         print("CI_WSS_STAGE=START_INTERNAL_DOCKER_NETWORK", flush=True)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
-        print("CI_WSS_STAGE=START_TWO_SIGNED_NODES", flush=True)
-        # Docker DNS must resolve the IR upstream before Nginx starts.
-        # All three containers then remain untouched by the transaction.
-        for role, root, name in roots:
-            started[name] = docker_node(name, network, root)
+        print("CI_WSS_STAGE=START_SIGNED_IR_NODE", flush=True)
+        # IR must exist before Nginx can resolve its internal FRPS upstream.
+        # Then the foreign Node mounts the ephemeral trusted CA at startup.
+        started["ci-uopti-ir"] = docker_node("ci-uopti-ir", network, root_ir)
         print("CI_WSS_STAGE=START_TLS_GATEWAY", flush=True)
         started["ci-uopti-wss"] = wss_gateway(
             network, root_ir, root_foreign)
+        print("CI_WSS_STAGE=START_SIGNED_FOREIGN_CHILD_NODE", flush=True)
+        started["ci-uopti-foreign"] = docker_node(
+            "ci-uopti-foreign", network, root_foreign)
         print("CI_WSS_STAGE=PROBE_TLS_CA_HOSTNAME", flush=True)
         https_probe()
         # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
@@ -543,9 +741,20 @@ def main():
         run("docker", "exec", "-d", "ci-uopti-ir",
             "/usr/local/bin/frps", "-c", "/etc/smite-node/frps.toml")
         wait_frps_loopback()
-        run("docker", "exec", "-d", "ci-uopti-foreign",
-            "/usr/local/bin/frpc", "-c", "/etc/smite-node/frpc.toml")
+        # The actual foreign Smite Node (not a docker-exec orphan) must
+        # receive the signed apply, create and track its own FRPC child.
+        print("CI_WSS_STAGE=FOREIGN_SIGNED_API_PREFLIGHT", flush=True)
+        signed_child_ready()
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY", flush=True)
+        signed_child_apply(token)
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY_PASS", flush=True)
         forward_probe("initial")
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_FORWARD_PASS", flush=True)
+        signed_child_probe()
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_STATUS_PASS", flush=True)
+        saved_child_state = (root_foreign / "node-data/tunnels.json").read_bytes()
+        child_process_identity = tracked_child_process_identity()
+        print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_PID_PASS", flush=True)
         print("CI_WSS_STAGE=RUN_PAIRED_MANIFEST_RECEIPT_TEST", flush=True)
         seen = []
 
@@ -556,6 +765,11 @@ def main():
             foreign_state = "ready" if phase == "after-both" else "absent"
             signed_probe("ci-uopti-ir", ir_state)
             signed_probe("ci-uopti-foreign", foreign_state)
+            signed_child_probe()
+            check(tracked_child_process_identity() == child_process_identity,
+                  "CI_FOREIGN_CHILD_FRPC_RESTARTED_OR_REPLACED")
+            check((root_foreign / "node-data/tunnels.json").read_bytes() == saved_child_state,
+                  "CI_FOREIGN_CHILD_SAVED_TUNNEL_DRIFT")
             forward_probe(phase)
             https_probe()
             for name in DOCKER_NAMES:
@@ -595,6 +809,8 @@ def main():
                   and not (root / tx.PAIR_JOURNAL).exists()
                   and not (root / tx.PAIR_CLEANUP_SEAL).exists(),
                   "CI_TWO_HOST_EXACT_FRP_RECEIPT_ROLLBACK_FAILED")
+        print("RC7_SIGNED_FOREIGN_CHILD_APPLY_AND_STATUS=PASS")
+        print("RC7_TRACKED_FOREIGN_FRPC_SAVED_TUNNEL_AND_PID_STABLE=PASS")
         print("RC7_REAL_TWO_NODE_SIGNED_INVENTORY_AND_REPLAY=PASS")
         print("RC7_REAL_FRP_0_71_0_WSS_443_TLS_FORWARDING_ALL_PHASES=PASS")
         print("RC7_REAL_NGINX_CA_HOSTNAME_VALIDATION=PASS")
