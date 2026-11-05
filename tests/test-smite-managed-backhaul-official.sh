@@ -47,6 +47,28 @@ stage="$(sudo find "$lab/stages" -mindepth 1 -maxdepth 1 -type d -name 'backhaul
 test -n "$stage"
 sudo python3 "$root/modules/smite-managed-backhaul.py" verify --stage "$stage"
 test "$(sudo "$stage/backhaul.bin" -v)" = "v0.7.2"
+
+# Derive independent binary pins from both immutable, SHA-pinned OFFICIAL
+# archives. A tarball checksum alone cannot verify an already running
+# image's extracted /usr/local/bin/backhaul. The binary hashes are public.
+arm_archive="$lab/backhaul_linux_arm64.tar.gz"
+curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 \
+  --proto '=https' --proto-redir '=https' \
+  "https://github.com/Musixal/Backhaul/releases/download/v0.7.2/backhaul_linux_arm64.tar.gz" \
+  -o "$arm_archive"
+python3 - "$root" "$lab/backhaul.tar.gz" "$arm_archive" <<'PY_BINARY_PINS'
+import hashlib, importlib.util, sys
+from pathlib import Path
+root, amd64, arm64 = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+path = root / "modules/smite-managed-backhaul.py"
+spec = importlib.util.spec_from_file_location("backhaul_official_pinned_binary_proof", path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for arch, archive in (("amd64", amd64), ("arm64", arm64)):
+    binary = module._verified_binary(archive, module.OFFICIAL_TAR_SHA256[arch])
+    print("REVIEWED_OFFICIAL_BACKHAUL_BINARY_SHA256_" + arch.upper()
+          + "=" + hashlib.sha256(binary).hexdigest())
+PY_BINARY_PINS
 sudo docker compose -f "$lab/node/docker-compose.yml" \
   -f "$stage/compose.override.candidate.yml" config --format json > "$lab/merged.json"
 python3 - "$lab/merged.json" <<'PY'
