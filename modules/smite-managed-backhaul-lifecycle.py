@@ -111,7 +111,7 @@ def run_lab_rehearsal(root: Path, stage: Path, *,
         previous_runtime_ok = False
         failure = None
         try:
-            tx.activate(root, stage, inject=inject or "")
+            tx._activate_locked(root, stage, inject=inject or "")
             if ctl.inspect(node, lab_binary=binary)["state"] != "ENROLLED_UNVERIFIED":
                 raise Hold("INSTALLED_BYTES_NOT_VERIFIED")
             if not _unchanged_protected_data(root, tunnels_before, identity_before):
@@ -134,7 +134,7 @@ def run_lab_rehearsal(root: Path, stage: Path, *,
         journal = root / "recovery-journal"
         try:
             if journal.exists() or journal.is_symlink():
-                tx.rollback(root)
+                tx._rollback_locked(root)
             else:
                 if tx.checked(compose, max_size=131072) != compose_before:
                     raise Hold("COMPOSE_CHANGED_WITHOUT_JOURNAL")
