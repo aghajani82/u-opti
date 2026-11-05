@@ -353,6 +353,52 @@ signed inventory on **both** test hosts before any real-host approval.
 No use of `docker cp`, runtime binary injection, sidecar readiness
 spoofing, or active FRP replacement is allowed.
 
+## Critical RC7 multi-engine receipt blocker: exact manifest / FRP journal binding
+
+The **already committed** RC7 FRP enrollment's protected `record.json` has
+`new=sha256(original engines.json bytes)`, and the existing FRP `verify`
+requires an **exact** SHA256 match against the **whole** running
+`engines.json`. Although the pinned RC7 image already bundles Backhaul,
+**writing just a new Backhaul manifest entry would immediately make FRP's
+`verify` return `ENROLLMENT_MANIFEST_DRIFT`**. No amount of positive
+Backhaul binary inventory checks makes that safe.
+
+The existing Backhaul controller now has a **pure in-memory, non-installing**
+`plan_rc7_backhaul_manifest_pair(existing_manifest, frp_journal,
+bundled_backhaul_sha256, role=...)` helper. It accepts only a small
+duplicate-key-free, strict, 8192-byte-or-less engine manifest with
+existing `frp` digests; requires the exact known RC7 FRP journal
+`COMMITTED`, matching role, two pinned binary digests, valid `old`,
+and `journal.new == sha256(exact original manifest bytes)`. It prepares
+a deterministic candidate manifest which retains every existing engine
+record and inserts only the proposed Backhaul binary digest, plus
+two SHA256 **planning receipts**. It does **not** read paths, access
+Docker/network, change files, or enable any menu/host action.
+
+Even if candidate construction succeeds:
+- `RC7_BACKHAUL_MANIFEST_PLAN=CANDIDATE_ONLY`;
+- `RC7_FRP_RECEIPT_REBIND=ATOMIC_TRANSACTION_REQUIRED`;
+- `MANIFEST_WRITTEN=NO`, `FRP_JOURNAL_WRITTEN=NO`;
+- `INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`.
+
+The helper returns the digest data **to internal callers only**; neither
+the menu nor any production command calls it or prints sensitive
+engine records. These receipt hashes do not attest live signed health,
+preserve uptime or grant authorization.
+
+**Mandatory next transaction design:** under the shared host engine lock,
+freeze a separately authenticated FRP Owner/Child and Broker/WSS baseline,
+back up the exact `engines.json` and FRP `record.json` bytes to private
+durable storage, and coordinate the manifest update with the FRP
+journal's expected `new` digest through a fully versioned,
+interruption-safe two-resource transaction. At *every* crash boundary,
+an independent recovery path must restore/validate **both** previous
+receipts without changing existing FRP tunnels, signing identity or
+FRPS processes. Neither overwriting FRP's receipt in isolation nor
+relaxing `smite-rc7-frp-enrollment.py verify_file` is acceptable.
+A separately reviewed full two-host RC7-like disposable test is
+required before any production activation.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
