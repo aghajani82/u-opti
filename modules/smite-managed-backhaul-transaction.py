@@ -327,6 +327,9 @@ def _rollback_locked(root: Path) -> str:
 # Dual-file rename is not atomic: the durable rehearsal record is necessary
 # to reject/restore intermediate states, not to claim zero live interruption.
 PAIR_JOURNAL = "rc7-pair-recovery"
+# Private, fsync-backed terminal seal survives *partial journal deletion*.
+# This is only the disposable PR filesystem lab, never a production receipt.
+PAIR_CLEANUP_SEAL = "rc7-pair-recovery-complete.json"
 PAIR_RECEIPT_DIR = "rc7-frp-enrollment"
 
 
@@ -337,9 +340,12 @@ def _reject_competing_recovery(root: Path, *, pair_operation: bool) -> None:
     corrupt or symlinked record also requires review. Called with the SAME
     shared engine flock held and after strict disposable-lab admission.
     """
-    competing = root / ("recovery-journal" if pair_operation else PAIR_JOURNAL)
-    if competing.exists() or competing.is_symlink():
-        raise Hold("OTHER_ENGINE_RECOVERY_JOURNAL_PENDING")
+    names = (("recovery-journal",) if pair_operation else
+             (PAIR_JOURNAL, PAIR_CLEANUP_SEAL))
+    for name in names:
+        competing = root / name
+        if competing.exists() or competing.is_symlink():
+            raise Hold("OTHER_ENGINE_RECOVERY_JOURNAL_PENDING")
 
 
 def _pair_fsync_dir(folder: Path) -> None:
@@ -471,7 +477,9 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
     """
     manifest, frp_receipt, journal = _pair_paths(root)
     _reject_competing_recovery(root, pair_operation=True)
-    if journal.exists() or journal.is_symlink():
+    seal = root / PAIR_CLEANUP_SEAL
+    if (journal.exists() or journal.is_symlink()
+            or seal.exists() or seal.is_symlink()):
         raise Hold("RC7_PAIR_INTERRUPTED_TRANSACTION_REQUIRES_RECOVERY")
     old_manifest = _pair_read_private(manifest)
     old_receipt = _pair_read_private(frp_receipt)
@@ -528,12 +536,95 @@ def rc7_pair_recover_lab(root: Path, *, inject: str = "") -> str:
         return _rc7_pair_recover_locked(root, inject=inject)
 
 
+def _rc7_pair_finish_cleanup_locked(root: Path, manifest: Path,
+                                   frp_receipt: Path, journal: Path, *,
+                                   inject: str = "") -> str:
+    """Resume destructive cleanup only from the fsynced RESTORED seal.
+
+    The full journal was validated semantically before this seal was written.
+    With a partially deleted journal, re-prove that the current baseline
+    corresponds to the same exact receipt/Manifest transition and verify
+    every remaining journal part. The seal is not an external signature.
+    """
+    seal_path = root / PAIR_CLEANUP_SEAL
+    seal = _pair_load_json(_pair_read_private(seal_path, limit=4096))
+    hashes = ("manifest_before", "frp_before", "manifest_next",
+              "frp_next", "journal_record", "backhaul_sha256")
+    if (set(seal) != {"schema", "phase", "role", *hashes}
+            or type(seal["schema"]) is not int or seal["schema"] != 1
+            or seal["phase"] != "RESTORED" or seal["role"] not in ("ir", "foreign")
+            or any(type(seal[k]) is not str or SHA.fullmatch(seal[k]) is None
+                   for k in hashes)):
+        raise Hold("RC7_PAIR_CLEANUP_SEAL_UNTRUSTED")
+
+    # These must already be the original *exact* bytes: do not restore from
+    # a partial journal or trust a seal while other operators changed state.
+    old_manifest = _pair_read_private(manifest)
+    old_receipt = _pair_read_private(frp_receipt)
+    if (digest(old_manifest) != seal["manifest_before"]
+            or digest(old_receipt) != seal["frp_before"]):
+        raise Hold("RC7_PAIR_CLEANUP_BASELINE_DRIFT")
+    try:
+        candidate, new_receipt = _pair_expected_transition(
+            old_manifest, old_receipt, seal["backhaul_sha256"],
+            role=seal["role"])
+    except Hold as exc:
+        raise Hold("RC7_PAIR_CLEANUP_SEMANTIC_DRIFT") from exc
+    if (digest(candidate) != seal["manifest_next"]
+            or digest(new_receipt) != seal["frp_next"]):
+        raise Hold("RC7_PAIR_CLEANUP_SEMANTIC_DRIFT")
+
+    names = {
+        "manifest.before": ("manifest_before", old_manifest),
+        "frp.before": ("frp_before", old_receipt),
+        "manifest.next": ("manifest_next", candidate),
+        "frp.next": ("frp_next", new_receipt),
+        "record.json": ("journal_record", None),
+    }
+    if journal.exists() or journal.is_symlink():
+        private_dir(journal)
+        existing = set(p.name for p in journal.iterdir())
+        if not existing.issubset(names):
+            raise Hold("RC7_PAIR_CLEANUP_JOURNAL_UNTRUSTED")
+        # Check all remnants BEFORE unlinking any of them. Unrecognized or
+        # altered remnants block cleanup, rather than being discarded.
+        for name in existing:
+            key, expected = names[name]
+            data = _pair_read_private(journal / name)
+            if (digest(data) != seal[key]
+                    or (expected is not None and data != expected)):
+                raise Hold("RC7_PAIR_CLEANUP_JOURNAL_DRIFT")
+
+        # Deterministic deletion with a directory fsync at each boundary.
+        # The terminal seal is retained until the directory is fully gone.
+        for index, name in enumerate(names, start=1):
+            if name in existing:
+                (journal / name).unlink()
+                _pair_fsync_dir(journal)
+            if inject == f"after-cleanup-{index}":
+                raise Hold("RC7_PAIR_INJECTED_CLEANUP_CRASH_RESUME_REQUIRED")
+        journal.rmdir()
+        _pair_fsync_dir(root)
+    if inject == "after-cleanup-rmdir":
+        raise Hold("RC7_PAIR_INJECTED_CLEANUP_CRASH_RESUME_REQUIRED")
+    # Even a crash before unlinking this seal has a fully restored baseline
+    # and no remaining journal; the next recovery can finish safely.
+    seal_path.unlink()
+    _pair_fsync_dir(root)
+    return "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION"
+
+
 def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
     """Fail-closed exact dual-file rollback after any rehearsed crash point."""
     manifest, frp_receipt, journal = _pair_paths(root)
     _reject_competing_recovery(root, pair_operation=True)
+    seal = root / PAIR_CLEANUP_SEAL
+    if seal.exists() or seal.is_symlink():
+        return _rc7_pair_finish_cleanup_locked(
+            root, manifest, frp_receipt, journal, inject=inject)
     private_dir(journal)
-    record = _pair_load_json(_pair_read_private(journal / "record.json", limit=4096))
+    raw_record = _pair_read_private(journal / "record.json", limit=4096)
+    record = _pair_load_json(raw_record)
     required = {
         "schema", "phase", "role", "manifest_before", "frp_before",
         "manifest_next", "frp_next",
@@ -606,13 +697,21 @@ def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
     if inject == "before-journal-cleanup":
         raise Hold("RC7_PAIR_INJECTED_ROLLBACK_CRASH_RESUME_REQUIRED")
 
-    for name in sorted(pieces):
-        (journal / name).unlink()
-    (journal / "record.json").unlink()
-    _pair_fsync_dir(journal)
-    journal.rmdir()
+    # Persist independent terminal proof BEFORE deleting a single part.
+    # If cleanup crashes at any unlink, this survives and lets us validate
+    # the exact original two resources and remaining journal pieces.
+    proposed = _pair_load_json(pieces["manifest.next"])
+    cleanup = {
+        **record, "phase": "RESTORED",
+        "backhaul_sha256": proposed["engines"]["backhaul"]["sha256"],
+        "journal_record": digest(raw_record),
+    }
+    new_file(seal, (json.dumps(cleanup, sort_keys=True) + "\n").encode(), 0o600)
     _pair_fsync_dir(root)
-    return "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION"
+    if inject == "after-completion-seal":
+        raise Hold("RC7_PAIR_INJECTED_CLEANUP_CRASH_RESUME_REQUIRED")
+    return _rc7_pair_finish_cleanup_locked(
+        root, manifest, frp_receipt, journal, inject=inject)
 
 
 def main() -> int:
