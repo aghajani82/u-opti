@@ -518,13 +518,17 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
     return "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED"
 
 
-def rc7_pair_recover_lab(root: Path) -> str:
-    """Hold the same lock throughout validation, restoration and cleanup."""
+def rc7_pair_recover_lab(root: Path, *, inject: str = "") -> str:
+    """Hold the same lock during BOTH restoration and resumable lab recovery.
+
+    `inject` is internal to this PR-only Python rehearsal: it is never a
+    public CLI action and never enables real-host enrollment/recovery.
+    """
     with _rc7_pair_shared_lock(root):
-        return _rc7_pair_recover_locked(root)
+        return _rc7_pair_recover_locked(root, inject=inject)
 
 
-def _rc7_pair_recover_locked(root: Path) -> str:
+def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
     """Fail-closed exact dual-file rollback after any rehearsed crash point."""
     manifest, frp_receipt, journal = _pair_paths(root)
     _reject_competing_recovery(root, pair_operation=True)
@@ -587,11 +591,20 @@ def _rc7_pair_recover_locked(root: Path) -> str:
 
     if current_manifest != pieces["manifest.before"]:
         _pair_atomic(manifest, pieces["manifest.before"])
+    if inject == "after-restore-manifest":
+        raise Hold("RC7_PAIR_INJECTED_ROLLBACK_CRASH_RESUME_REQUIRED")
     if current_frp != pieces["frp.before"]:
         _pair_atomic(frp_receipt, pieces["frp.before"])
+    if inject == "after-restore-receipt":
+        raise Hold("RC7_PAIR_INJECTED_ROLLBACK_CRASH_RESUME_REQUIRED")
     if (_pair_read_private(manifest) != pieces["manifest.before"]
             or _pair_read_private(frp_receipt) != pieces["frp.before"]):
         raise Hold("RC7_PAIR_RECOVERY_NOT_PROVEN")
+    # No journal byte is deleted until both original receipts are proven
+    # restored. A second recovery after either synthetic crash revalidates
+    # all four snapshots, original semantics and live current bytes anew.
+    if inject == "before-journal-cleanup":
+        raise Hold("RC7_PAIR_INJECTED_ROLLBACK_CRASH_RESUME_REQUIRED")
 
     for name in sorted(pieces):
         (journal / name).unlink()

@@ -335,6 +335,83 @@ class TransactionLab(unittest.TestCase):
                 self.assertEqual(receipt.read_bytes(), old_receipt)
                 self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
 
+    def test_rc7_pair_rollback_crash_at_each_restore_boundary_then_resume(self):
+        # Simulate a power cut *inside recovery*, not merely during Apply.
+        # Every restart revalidates the same durable four-part journal.
+        for role in ("ir", "foreign"):
+            for crash in ("after-restore-manifest", "after-restore-receipt",
+                          "before-journal-cleanup"):
+                with self.subTest(role=role, crash=crash):
+                    manifest, receipt, original, original_receipt = (
+                        self._rc7_pair_lab_fixture())
+                    if role == "foreign":
+                        data = json.loads(original_receipt)
+                        data["role"] = "foreign"
+                        original_receipt = (
+                            json.dumps(data, sort_keys=True) + "\n").encode()
+                        receipt.write_bytes(original_receipt)
+                    prior_compose = self.compose.read_bytes()
+                    prior_env = (self.node / ".env").read_bytes()
+                    self.assertEqual(
+                        lab.rc7_pair_apply_lab(self.root, "a" * 64, role=role),
+                        "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED")
+                    self.assertNotEqual(manifest.read_bytes(), original)
+                    self.assertNotEqual(receipt.read_bytes(), original_receipt)
+                    with self.assertRaisesRegex(
+                            lab.Hold, "ROLLBACK_CRASH_RESUME_REQUIRED"):
+                        lab.rc7_pair_recover_lab(self.root, inject=crash)
+                    # Manifest is restored first; receipt may remain at
+                    # the candidate until the second restoration boundary.
+                    self.assertEqual(manifest.read_bytes(), original)
+                    if crash == "after-restore-manifest":
+                        self.assertNotEqual(receipt.read_bytes(), original_receipt)
+                    else:
+                        self.assertEqual(receipt.read_bytes(), original_receipt)
+                    journal = self.root / lab.PAIR_JOURNAL
+                    self.assertEqual(set(p.name for p in journal.iterdir()), {
+                        "record.json", "manifest.before", "frp.before",
+                        "manifest.next", "frp.next"})
+                    self.assertEqual(
+                        lab.rc7_pair_recover_lab(self.root),
+                        "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+                    self.assertEqual(manifest.read_bytes(), original)
+                    self.assertEqual(receipt.read_bytes(), original_receipt)
+                    self.assertEqual(self.compose.read_bytes(), prior_compose)
+                    self.assertEqual((self.node / ".env").read_bytes(), prior_env)
+                    self.assertFalse(journal.exists())
+                    self.assertFalse((self.root / "installed").exists())
+                    # New independent rehearsal permitted only after full
+                    # proof and journal cleanup; no stale recovery remains.
+                    manifest.parent.joinpath("engines.json").unlink()
+                    receipt.unlink()
+                    receipt.parent.rmdir()
+                    manifest.parent.rmdir()
+
+    def test_rc7_pair_recovery_repeat_crash_and_external_drift_hold(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir",
+                                   inject="after-receipt")
+        for crash in ("after-restore-manifest", "after-restore-manifest",
+                      "after-restore-receipt", "before-journal-cleanup"):
+            with self.subTest(crash=crash):
+                with self.assertRaisesRegex(
+                        lab.Hold, "ROLLBACK_CRASH_RESUME_REQUIRED"):
+                    lab.rc7_pair_recover_lab(self.root, inject=crash)
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertTrue((self.root / lab.PAIR_JOURNAL).exists())
+        receipt.write_bytes(old_receipt + b"OUT_OF_BAND")
+        altered = receipt.read_bytes()
+        with self.assertRaisesRegex(lab.Hold, "RECOVERY_EXTERNAL_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(receipt.read_bytes(), altered)
+        self.assertTrue((self.root / lab.PAIR_JOURNAL).exists())
+        receipt.write_bytes(old_receipt)
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+
     def test_rc7_pair_recovery_detects_external_edits_before_any_restore(self):
         manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
         with self.assertRaises(lab.Hold):
