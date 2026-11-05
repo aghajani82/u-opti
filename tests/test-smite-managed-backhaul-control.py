@@ -355,7 +355,7 @@ class OperatorControl(unittest.TestCase):
                 trusted = control.package.OFFICIAL_BINARY_SHA256[arch]
                 fake,calls = self._rc7_bundle_fake(
                     binary={"architecture": arch, "sha256":trusted})
-                with patch.object(control.os, "geteuid", return_value=0), \\
+                with patch.object(control.os, "geteuid", return_value=0), \
                      patch.object(control, "_load", return_value=fake):
                     report=control.verify_rc7_bundled_backhaul("foreign")
                 self.assertEqual(report["RC7_BACKHAUL_BINARY_PIN"],
@@ -374,7 +374,7 @@ class OperatorControl(unittest.TestCase):
         for binary in bad:
             with self.subTest(binary=binary["architecture"]):
                 fake,calls = self._rc7_bundle_fake(binary=binary)
-                with patch.object(control.os,"geteuid",return_value=0), \\
+                with patch.object(control.os,"geteuid",return_value=0), \
                      patch.object(control,"_load",return_value=fake):
                     with self.assertRaisesRegex(
                             control.Hold,"RC7_BUNDLED_BINARY_DIGEST_MISMATCH"):
@@ -388,7 +388,7 @@ class OperatorControl(unittest.TestCase):
             with self.subTest(arch=str(bad_arch)):
                 fake,_=self._rc7_bundle_fake(
                     binary={"architecture":bad_arch,"sha256":pin})
-                with patch.object(control.os,"geteuid",return_value=0), \\
+                with patch.object(control.os,"geteuid",return_value=0), \
                      patch.object(control,"_load",return_value=fake):
                     with self.assertRaises(control.Hold):
                         control.verify_rc7_bundled_backhaul("foreign")
