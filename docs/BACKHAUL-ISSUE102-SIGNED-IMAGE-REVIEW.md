@@ -636,6 +636,40 @@ provider snapshots/console recovery, or a deployment-ready transaction**.
 The original `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain
 mandatory and no live installation entry is enabled.
 
+## Real private WSS/TLS/443 — two signed Nodes without recreation (CI ONLY)
+
+The existing PR-only pinned-official-artifact job now extends its real
+two-Node FRP 0.71.0 test: a **third disposable Nginx TLS container** is
+built from the repository's existing FRP WSS lab Dockerfile and joins the
+same Docker **internal-only** bridge. There are **no host published ports**.
+The IR Node still runs real FRPS bound to the isolated bridge (internal
+7000). The foreign Node's real FRPC uses `transport.protocol=wss` and
+connects to the Nginx sidecar on **443 inside Docker**; Nginx proxies the
+FRP Upgrade path `/~!frp` to the IR FRPS. The temporary CA is provisioned
+inside the private foreign fixture, with real TLS certificate and hostname
+checking (positive test and a negative *same-address* wrong-SNI test).
+
+At the same four stages as the existing #125 test, and at rollback after
+a deliberately interrupted foreign Manifest replacement, the CI checks:
+- genuine signed HMAC inventory/status on **both** running Smite Nodes,
+  including refused unsigned and replayed requests;
+- real TCP challenge crossing **FRPC -> WSS/TLS/443 -> Nginx -> FRPS**
+  and returning through the same foreign echo endpoint;
+- CA/hostname TLS validation, no published Docker host ports, and the
+  exact unchanged container IDs and StartedAt timestamps on both Nodes
+  **and** the Nginx sidecar;
+- exact original FRP receipt and Manifest bytes after two-host recovery.
+
+The Nginx test uses an ephemeral self-signed CA and its own new private
+container, **not** the live RC7 shared Nginx configuration, production
+domain, Sanaei service or public network. Synthetic broker and
+Owner/Child fixtures still are *not* signed management evidence. A
+positive result explicitly **does not** prove public WSS/443 coexistence,
+foreign peer source restrictions, Broker socket/XHTTP continuity, live
+signed Owner/Child route state, saved tunnel availability through every
+instant or deployment safety. The existing host authorization remains
+`INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD`; keep Issue #102 open.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
