@@ -218,6 +218,94 @@ def report(engine: str, node: Path, *, runtime: dict | None = None,
     return output
 
 
+
+# Local-only, fail-closed comparator for a future *separately reviewed*
+# Backhaul transaction. Existing admission remains HARD HOLD regardless.
+LOCAL_PRESERVATION_SHA = re.compile(r"^[a-f0-9]{64}$")
+LOCAL_PRESERVATION_STATIC = {
+    "ENGINE": "BACKHAUL",
+    "NODE_ROLE": "IR",
+    "CORE_PROFILE": "MANAGED_STRICT",
+    "NODE_CONTAINER": "RUNNING_REVIEWED_IMAGE",
+    "PERSISTENT_STORAGE": "LOCAL_NAMED_VOLUME_CONFIRMED",
+    "SAVED_TUNNELS": "EXISTING_DO_NOT_RESTART",
+    "OTHER_ENGINE": "ENROLLED_UNVERIFIED",
+    "OTHER_ENGINE_ACTION": "NEVER_MODIFY",
+    "SIGNED_REGISTRY_PAIR_PROOF": "COSIGN_VERIFIED",
+    "REASON": "SAVED_TUNNELS_PRESENT",
+    "INSTALL_ALLOWED": "NO",
+    "ACTIVATION_GATE": "HOLD",
+    "HOST_TRANSACTION_AND_ROLLBACK": "NOT_IMPLEMENTED",
+}
+LOCAL_PRESERVATION_STATUS = {
+    "FRPS_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+    "BROKER_SOCKET_LOCAL": "PRESENT_UNATTESTED",
+    "WSS_EDGE_JOURNAL_LOCAL": "COMMITTED_LOCAL_UNATTESTED",
+}
+LOCAL_PRESERVATION_DIGEST_REASON = {
+    "SAVED_TUNNEL_REGISTRY_SHA256": "TUNNEL_REGISTRY_CHANGED",
+    "NODE_CONTAINER_ID_SHA256": "NODE_CONTAINER_CHANGED",
+    "FRPC_INSTANCE_SHA256": "FRPC_PROCESS_CHANGED",
+    "FRPS_INSTANCE_SHA256": "FRPS_PROCESS_CHANGED",
+    "BROKER_SOCKET_ID_SHA256": "BROKER_SOCKET_CHANGED",
+    "WSS_EDGE_JOURNAL_SHA256": "WSS_EDGE_JOURNAL_CHANGED",
+}
+
+
+def compare_ir_local_preservation(before: object, after: object) -> dict[str, str]:
+    """Compare *untrusted* IR host gate reports without side effects.
+
+    This does NOT authenticate the two supplied reports, attest FRPS
+    Owner/Child identity, prove no traffic interruption, or authorize
+    installation/rollback. A stable local fingerprint is insufficient for
+    those claims. No input values, paths, ports or credentials are returned.
+    """
+    result = {
+        "PRESERVATION_LOCAL": "HOLD",
+        "PRESERVATION_REASON": "INCOMPLETE_LOCAL_EVIDENCE",
+        "PRESERVATION_SCOPE": "UNATTESTED_LOCAL_ONLY",
+        "SIGNED_RUNTIME_CONTINUITY": "NOT_PROVEN",
+        "BACKHAUL_HOST_TRANSACTION": "NOT_AUTHORIZED",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return result
+    for item in (before, after):
+        if any(item.get(k) != v for k, v in LOCAL_PRESERVATION_STATIC.items()):
+            return result
+        if any(item.get(k) != v for k, v in LOCAL_PRESERVATION_STATUS.items()):
+            return result
+        frpc_status = item.get("FRPC_PROCESS_LOCAL")
+        frpc_digest = item.get("FRPC_INSTANCE_SHA256")
+        if frpc_status == "NOT_OBSERVED":
+            if frpc_digest != "ABSENT":
+                return result
+        elif frpc_status == "OBSERVED_UNATTESTED":
+            if not isinstance(frpc_digest, str) or not LOCAL_PRESERVATION_SHA.fullmatch(frpc_digest):
+                return result
+        else:
+            return result
+        for key in LOCAL_PRESERVATION_DIGEST_REASON:
+            if key == "FRPC_INSTANCE_SHA256" and frpc_status == "NOT_OBSERVED":
+                continue
+            value = item.get(key)
+            if not isinstance(value, str) or not LOCAL_PRESERVATION_SHA.fullmatch(value):
+                return result
+    if before["FRPC_PROCESS_LOCAL"] != after["FRPC_PROCESS_LOCAL"]:
+        result["PRESERVATION_REASON"] = "FRPC_PROCESS_CHANGED"
+        return result
+    for key, reason in LOCAL_PRESERVATION_DIGEST_REASON.items():
+        if before[key] != after[key]:
+            result["PRESERVATION_REASON"] = reason
+            return result
+    # Deliberately no PASS, READY or activation promotion: this merely
+    # agrees on the permitted *local* observations at two points in time.
+    result["PRESERVATION_LOCAL"] = "MATCH_UNATTESTED"
+    result["PRESERVATION_REASON"] = "LOCAL_HASHES_MATCH_NOT_SIGNED_HEALTH"
+    return result
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description="Backhaul/FRP standalone host admission, ALWAYS read-only HOLD")
