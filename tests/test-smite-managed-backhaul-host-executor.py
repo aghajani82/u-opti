@@ -114,6 +114,17 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual(reviewed["STAGE_ADMISSION"],"VERIFIED_PREVIEW_ONLY",{"status":status,"reviewed":reviewed})
         self.plan=reviewed["PLAN_SHA256_NOT_AUTHORIZATION"]
         self.runner=FakeRunner()
+        # Never depend on the GitHub runner's unrelated /proc processes.
+        # Production code always performs the real read-only kernel check.
+        proc_stub = patch.object(exe.admission.host, "frp_process_footprint",
+                                 return_value={
+                                     "FRPC_PROCESS_LOCAL": "NOT_OBSERVED",
+                                     "FRPS_PROCESS_LOCAL": "NOT_OBSERVED",
+                                     "FRPC_INSTANCE_SHA256": "ABSENT",
+                                     "FRPS_INSTANCE_SHA256": "ABSENT",
+                                 })
+        proc_stub.start()
+        self.addCleanup(proc_stub.stop)
         self.old_compose=(self.node/"docker-compose.yml").read_bytes()
 
     def install(self,**kwargs):
@@ -192,6 +203,122 @@ class HostExecutor(unittest.TestCase):
                          paths=self.paths,runner=self.runner)
         self.assertTrue(exe._journal(self.paths).exists())
         self.assertTrue(self.binary.exists())
+
+    def test_enrolled_frp_is_never_recreated_even_when_no_tunnels_exist(self):
+        # Explicit FRP enrollment is a stronger guard than an empty tunnel
+        # registry; the installer cannot repurpose a running FRP Node.
+        manifest = self.config / "engine-state" / "engines.json"
+        manifest.parent.mkdir(mode=0o700)
+        original = (json.dumps({
+            "schema": 1, "engines": {
+                "frp": {"sha256": "b" * 64, "server_sha256": "c" * 64},
+            },
+        }) + "\n").encode()
+        manifest.write_bytes(original)
+        manifest.chmod(0o600)
+        before_env = (self.node / ".env").read_bytes()
+        before_compose = (self.node / "docker-compose.yml").read_bytes()
+        with self.assertRaises(exe.Hold):
+            self.install()
+        self.assertEqual(manifest.read_bytes(), original)
+        self.assertEqual((self.node / ".env").read_bytes(), before_env)
+        self.assertEqual((self.node / "docker-compose.yml").read_bytes(), before_compose)
+        self.assertFalse(self.binary.exists())
+        self.assertFalse(exe._journal(self.paths).exists())
+        self.assertEqual(self.runner.calls, [])
+
+    def test_frp_process_or_unknown_proc_footprint_blocks_before_mutation(self):
+        for value in ("OBSERVED_UNATTESTED", "UNVERIFIED"):
+            with self.subTest(value=value), patch.object(
+                exe.admission.host, "frp_process_footprint",
+                return_value={
+                    "FRPC_PROCESS_LOCAL": "NOT_OBSERVED",
+                    "FRPS_PROCESS_LOCAL": value,
+                    "FRPC_INSTANCE_SHA256": "ABSENT",
+                    "FRPS_INSTANCE_SHA256": "b" * 64 if value == "OBSERVED_UNATTESTED"
+                                              else "UNVERIFIED",
+                },
+            ):
+                before = (self.node / "docker-compose.yml").read_bytes()
+                with self.assertRaisesRegex(
+                        exe.Hold, "FRP_PROCESS_PRESENCE_OR_UNVERIFIED"):
+                    self.install()
+                self.assertEqual((self.node / "docker-compose.yml").read_bytes(), before)
+                self.assertFalse(self.binary.exists())
+                self.assertFalse(exe._journal(self.paths).exists())
+                self.assertEqual(self.runner.calls, [])
+
+    def test_frp_detected_after_trial_commit_blocks_rollback_before_journal(self):
+        self.install()
+        original_record = (exe._journal(self.paths) / "record.json").read_bytes()
+        original_compose = (self.node / "docker-compose.yml").read_bytes()
+        manifest = self.config / "engine-state" / "engines.json"
+        doc = json.loads(manifest.read_bytes())
+        doc["engines"]["frp"] = {"sha256": "b" * 64,
+                                 "server_sha256": "c" * 64}
+        manifest.write_text(json.dumps(doc))
+        current = manifest.read_bytes()
+        prior_calls = len(self.runner.calls)
+        with self.assertRaisesRegex(
+                exe.Hold, "ENROLLED_FRP_NODE_RECREATE_FORBIDDEN"):
+            exe.rollback(expected_node_image=IMAGE,
+                         role_confirm="ROLLBACK-BACKHAUL-KH-TRIAL",
+                         paths=self.paths, runner=self.runner)
+        self.assertEqual(current, manifest.read_bytes())
+        self.assertEqual(original_compose,
+                         (self.node / "docker-compose.yml").read_bytes())
+        self.assertEqual(original_record,
+                         (exe._journal(self.paths) / "record.json").read_bytes())
+        self.assertTrue(self.binary.exists())
+        self.assertEqual(prior_calls, len(self.runner.calls))
+
+    def test_existing_frp_process_blocks_recovery_without_core_mutation(self):
+        with self.assertRaises(exe.SimulatedCrash):
+            self.install(inject="after-compose")
+        original_record = (exe._journal(self.paths) / "record.json").read_bytes()
+        before_compose = (self.node / "docker-compose.yml").read_bytes()
+        before_binary = self.binary.read_bytes()
+        runner_calls = len(self.runner.calls)
+        with patch.object(exe.admission.host, "frp_process_footprint",
+                          return_value={
+                              "FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+                              "FRPS_PROCESS_LOCAL": "NOT_OBSERVED",
+                              "FRPC_INSTANCE_SHA256": "b" * 64,
+                              "FRPS_INSTANCE_SHA256": "ABSENT",
+                          }):
+            with self.assertRaisesRegex(
+                    exe.Hold, "FRP_PROCESS_PRESENCE_OR_UNVERIFIED"):
+                exe.recover(expected_node_image=IMAGE,
+                            role_confirm="RECOVER-BACKHAUL-KH-TRIAL",
+                            paths=self.paths, runner=self.runner)
+        self.assertEqual((exe._journal(self.paths) / "record.json").read_bytes(),
+                         original_record)
+        self.assertEqual((self.node / "docker-compose.yml").read_bytes(),
+                         before_compose)
+        self.assertEqual(self.binary.read_bytes(), before_binary)
+        self.assertEqual(len(self.runner.calls), runner_calls)
+
+    def test_frp_in_trusted_prior_manifest_blocks_even_if_current_is_empty(self):
+        original_manifest = (json.dumps({
+            "schema": 1, "engines": {"frp": {
+                "sha256": "b" * 64, "server_sha256": "c" * 64,
+            }},
+        }) + "\n").encode()
+        with self.assertRaisesRegex(
+                exe.Hold, "ENROLLED_FRP_NODE_RECREATE_FORBIDDEN"):
+            exe._assert_no_frp_before_recreate(
+                self.paths, previous_manifest=original_manifest)
+        for malformed in (
+            b'{"schema":1,"engines":{},"engines":{"frp":{}}}',
+            b'{"schema":true,"engines":{}}',
+            b'{"schema":1,"engines":null}',
+            b'{',
+        ):
+            with self.subTest(malformed=malformed[:30]):
+                with self.assertRaisesRegex(
+                        exe.Hold, "FRP_RECREATE_MANIFEST_UNTRUSTED"):
+                    exe._assert_no_frp_before_recreate(
+                        self.paths, previous_manifest=malformed)
 
     def test_executor_has_no_nginx_firewall_xray_or_tunnel_apply_actions(self):
         source=SRC.read_text()
