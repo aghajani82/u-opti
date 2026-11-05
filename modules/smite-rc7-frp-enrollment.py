@@ -165,7 +165,7 @@ with opener.open(request,timeout=6) as response:
 print(raw.decode('utf-8'))
 """
 
-OWNER_ID=re.compile(r'[A-Za-z0-9_-]{1,128}\\Z')
+OWNER_ID=re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
 
 
 def signed_owner_payload(raw):
