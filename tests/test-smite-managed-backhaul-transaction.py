@@ -791,6 +791,195 @@ class TransactionLab(unittest.TestCase):
                          "LAB_FILES_APPLIED_NO_DOCKER_NO_LIVE_ENGINE")
         self.assertEqual(lab.rollback(self.root), "LAB_EXACT_ROLLBACK_CONFIRMED")
 
+    def _two_host_rc7_fixture(self):
+        """Two distinct private PR-runner roots; all runtime evidence synthetic."""
+        ir_manifest, ir_receipt, ir_before, ir_journal = (
+            self._rc7_pair_lab_fixture())
+        foreign_tmp = tempfile.TemporaryDirectory(
+            prefix="bh-foreign-rc7-pair-", dir=self.root.parent)
+        self.addCleanup(foreign_tmp.cleanup)
+        foreign = Path(foreign_tmp.name)
+        foreign.chmod(0o700)
+        (foreign / "EXPERIMENTAL-LAB").write_text(lab.MARKER)
+        foreign_node = foreign / "node"
+        foreign_node.mkdir(mode=0o700)
+        foreign_config = foreign_node / "config"
+        foreign_config.mkdir(mode=0o700)
+        (foreign / "stages").mkdir(mode=0o700)
+        (foreign_node / ".env").write_text(ENV.replace(
+            "NODE_ROLE=iran", "NODE_ROLE=foreign"))
+        (foreign_node / "docker-compose.yml").write_text(COMPOSE)
+        state = foreign_config / "engine-state"
+        state.mkdir(mode=0o700)
+        manifest = state / "engines.json"
+        # Prior FRP binary pins are exact and identical across both fixtures,
+        # but role-specific enrollment receipts may never be exchanged.
+        foreign_before = ir_before
+        manifest.write_bytes(foreign_before)
+        manifest.chmod(0o600)
+        frp_dir = foreign / lab.PAIR_RECEIPT_DIR
+        frp_dir.mkdir(mode=0o700)
+        receipt = frp_dir / "record.json"
+        record = json.loads(ir_journal)
+        record["role"] = "foreign"
+        foreign_receipt = (json.dumps(record, sort_keys=True) + "\n").encode()
+        receipt.write_bytes(foreign_receipt)
+        receipt.chmod(0o600)
+        protected = {}
+        for role, root in (("ir", self.root), ("foreign", foreign)):
+            node_data = root / "node-data"
+            node_data.mkdir(mode=0o700)
+            files = {
+                "frp-owner-child.fixture.json": {
+                    "role": role, "frp": "0.71.0",
+                    "tunnels": ["20182", "optical", "nahavi"]},
+                "broker-replay.fixture.json": {
+                    "role": role, "identity": role + "-synthetic-identity",
+                    "broker": "up", "replay": "durable"},
+            }
+            for name, body in files.items():
+                file = node_data / name
+                file.write_text(json.dumps(body, sort_keys=True) + "\n")
+                file.chmod(0o600)
+            protected[role] = tuple(
+                (root / name).read_bytes() for name in (
+                    "node/docker-compose.yml", "node/.env",
+                    "node-data/frp-owner-child.fixture.json",
+                    "node-data/broker-replay.fixture.json"))
+        return foreign, {
+            "ir": (ir_manifest, ir_receipt, ir_before, ir_journal),
+            "foreign": (manifest, receipt, foreign_before, foreign_receipt),
+        }, protected
+
+    def _assert_two_host_originals(self, fixtures, protected, foreign):
+        for role, root in (("ir", self.root), ("foreign", foreign)):
+            manifest, receipt, original_manifest, original_receipt = fixtures[role]
+            self.assertEqual(manifest.read_bytes(), original_manifest)
+            self.assertEqual(receipt.read_bytes(), original_receipt)
+            self.assertFalse((root / lab.PAIR_JOURNAL).exists())
+            self.assertFalse((root / lab.PAIR_CLEANUP_SEAL).exists())
+            actual = tuple((root / name).read_bytes() for name in (
+                "node/docker-compose.yml", "node/.env",
+                "node-data/frp-owner-child.fixture.json",
+                "node-data/broker-replay.fixture.json"))
+            self.assertEqual(actual, protected[role])
+
+    def test_rc7_two_host_coordinator_preserves_existing_frp_without_recreate(self):
+        foreign, fixtures, protected = self._two_host_rc7_fixture()
+        calls = []
+        def observe(phase, ir, kh):
+            self.assertEqual(ir, self.root)
+            self.assertEqual(kh, foreign)
+            calls.append(phase)
+            return True
+        report = lab.rc7_two_host_rehearsal_lab(
+            self.root, foreign, "a" * 64, observe=observe)
+        self.assertEqual(calls,
+                         ["before", "after-ir", "after-both", "after-rollback"])
+        self.assertEqual(report["RC7_TWO_HOST_PAIR"],
+                         "DISPOSABLE_ROLE_PAIRED_EXACT_ROLLBACK")
+        self.assertEqual(report["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(report["NODE_RECREATED"], "NO_DOCKER_EXECUTED_IN_LAB")
+        self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(report["ACTIVATION_GATE"], "HOLD")
+        self._assert_two_host_originals(fixtures, protected, foreign)
+
+    def test_rc7_two_host_abort_at_each_boundary_compensates_both(self):
+        for injected in ("after-ir", "foreign-after-manifest", "after-both"):
+            with self.subTest(injected=injected):
+                foreign, fixtures, protected = self._two_host_rc7_fixture()
+                phases = []
+                def observe(phase, *_):
+                    phases.append(phase)
+                    return True
+                with self.assertRaisesRegex(
+                        lab.Hold, "TWO_HOST_ABORTED_EXACT_ROLLBACK_PROVED"):
+                    lab.rc7_two_host_rehearsal_lab(
+                        self.root, foreign, "a" * 64, observe=observe,
+                        inject=injected)
+                self.assertEqual(phases[-1], "after-rollback")
+                self._assert_two_host_originals(fixtures, protected, foreign)
+                self._remove_two_host_originals(fixtures, foreign)
+
+    def _remove_two_host_originals(self, fixtures, foreign):
+        # Dispose only these synthetic enrollment fixtures; preserve
+        # other CI temporary directories for the remaining test methods.
+        for role in ("ir", "foreign"):
+            manifest, receipt, _, _ = fixtures[role]
+            receipt.unlink()
+            receipt.parent.rmdir()
+            manifest.unlink()
+            manifest.parent.rmdir()
+        for root in (self.root, foreign):
+            for name in ("frp-owner-child.fixture.json",
+                         "broker-replay.fixture.json"):
+                (root / "node-data" / name).unlink()
+            (root / "node-data").rmdir()
+
+    def test_rc7_two_host_preflight_checks_foreign_before_ir_mutation(self):
+        foreign, fixtures, protected = self._two_host_rc7_fixture()
+        foreign_receipt = fixtures["foreign"][1]
+        altered = json.loads(foreign_receipt.read_bytes())
+        altered["role"] = "ir"
+        foreign_receipt.write_text(json.dumps(altered, sort_keys=True) + "\n")
+        called = []
+        with self.assertRaises(lab.Hold):
+            lab.rc7_two_host_rehearsal_lab(
+                self.root, foreign, "a" * 64,
+                observe=lambda phase, *_: called.append(phase) or True)
+        self.assertEqual(called, [])
+        self.assertEqual(fixtures["ir"][0].read_bytes(), fixtures["ir"][2])
+        self.assertEqual(fixtures["ir"][1].read_bytes(), fixtures["ir"][3])
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+        self.assertFalse((foreign / lab.PAIR_JOURNAL).exists())
+        with self.assertRaisesRegex(lab.Hold, "DISTINCT_OBSERVER_REQUIRED"):
+            lab.rc7_two_host_rehearsal_lab(
+                self.root, self.root, "a" * 64, observe=lambda *_: True)
+        foreign_receipt.write_bytes(fixtures["foreign"][3])
+        self._assert_two_host_originals(fixtures, protected, foreign)
+
+    def test_rc7_two_host_probe_failure_exact_rollback_or_manual_hold(self):
+        foreign, fixtures, protected = self._two_host_rc7_fixture()
+        with self.assertRaisesRegex(
+                lab.Hold, "TWO_HOST_ABORTED_EXACT_ROLLBACK_PROVED"):
+            lab.rc7_two_host_rehearsal_lab(
+                self.root, foreign, "a" * 64,
+                observe=lambda phase, *_: phase != "after-both")
+        self._assert_two_host_originals(fixtures, protected, foreign)
+        # Drifting the simulated protected child receipt at after-ir must
+        # preserve the IR recovery journal for manual inspection.
+        foreign_guard = foreign / "node-data/frp-owner-child.fixture.json"
+        def mutate(phase, *_):
+            if phase == "after-ir":
+                foreign_guard.write_bytes(b"UNTRUSTED OUT OF BAND CHANGE")
+            return True
+        with self.assertRaisesRegex(
+                lab.Hold, "TWO_HOST_ROLLBACK_MANUAL_REVIEW_REQUIRED"):
+            lab.rc7_two_host_rehearsal_lab(
+                self.root, foreign, "a" * 64, observe=mutate)
+        self.assertTrue((self.root / lab.PAIR_JOURNAL).is_dir())
+        self.assertFalse((foreign / lab.PAIR_JOURNAL).exists())
+        foreign_guard.write_bytes(protected["foreign"][2])
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self._assert_two_host_originals(fixtures, protected, foreign)
+
+    def test_rc7_two_host_lock_or_pending_journal_blocks_both(self):
+        foreign, fixtures, protected = self._two_host_rc7_fixture()
+        with lab._rc7_pair_shared_lock(foreign):
+            with self.assertRaisesRegex(
+                    lab.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                lab.rc7_two_host_rehearsal_lab(
+                    self.root, foreign, "a" * 64, observe=lambda *_: True)
+        self._assert_two_host_originals(fixtures, protected, foreign)
+        (foreign / lab.PAIR_JOURNAL).mkdir(mode=0o700)
+        with self.assertRaisesRegex(lab.Hold, "TWO_HOST_PENDING_RECOVERY"):
+            lab.rc7_two_host_rehearsal_lab(
+                self.root, foreign, "a" * 64, observe=lambda *_: True)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+        (foreign / lab.PAIR_JOURNAL).rmdir()
+        self._assert_two_host_originals(fixtures, protected, foreign)
+
     def test_no_shell_docker_or_network_execution_available(self):
         src = (ROOT / "smite-managed-backhaul-transaction.py").read_text()
         for dangerous in ("subprocess", "os.system(", "socket.", "requests.", "httpx.",
