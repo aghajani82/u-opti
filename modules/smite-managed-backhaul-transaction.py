@@ -302,6 +302,198 @@ def rollback(root: Path) -> str:
     return "LAB_EXACT_ROLLBACK_CONFIRMED"
 
 
+
+# This experiment is deliberately NOT callable through this module's CLI.
+# It writes ONLY in the marked temporary GitHub PR lab, and never runs Docker.
+# Dual-file rename is not atomic: the durable rehearsal record is necessary
+# to reject/restore intermediate states, not to claim zero live interruption.
+PAIR_JOURNAL = "rc7-pair-recovery"
+PAIR_RECEIPT_DIR = "rc7-frp-enrollment"
+
+
+def _pair_fsync_dir(folder: Path) -> None:
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _pair_read_private(path: Path, *, limit: int = 8192) -> bytes:
+    if path.is_symlink():
+        raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+    st = path.lstat()
+    if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
+            or not 0 < st.st_size <= limit):
+        raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+    return checked(path, limit)
+
+
+def _pair_load_json(raw: bytes) -> dict:
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise Hold("RC7_PAIR_RECEIPT_UNTRUSTED")
+            result[key] = value
+        return result
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise Hold("RC7_PAIR_RECEIPT_UNTRUSTED") from exc
+    if not isinstance(value, dict):
+        raise Hold("RC7_PAIR_RECEIPT_UNTRUSTED")
+    return value
+
+
+def _pair_paths(root: Path) -> tuple[Path, Path, Path]:
+    # Existing lab admission checks the GitHub PR marker, path containment,
+    # private permissions, and the absence of a production activation path.
+    _, manifest, _, _ = admission(root)
+    private_dir(manifest.parent)
+    frp_dir = root / PAIR_RECEIPT_DIR
+    ensure_in_lab(root, frp_dir)
+    private_dir(frp_dir)
+    return manifest, frp_dir / "record.json", root / PAIR_JOURNAL
+
+
+def _pair_atomic(path: Path, raw: bytes) -> None:
+    # Reject any unknown/missing/symlinked target before replacing it.
+    _pair_read_private(path)
+    atomic(path, raw, 0o600)
+    _pair_fsync_dir(path.parent)
+
+
+def rc7_pair_apply_lab(root: Path, backhaul_sha256: str, *,
+                       role: str, inject: str = "") -> str:
+    """Rehearse *only* a byte-for-byte, two-receipt CI transaction.
+
+    No signed runtime attestation and NO live server activation are possible.
+    """
+    manifest, frp_receipt, journal = _pair_paths(root)
+    if journal.exists() or journal.is_symlink():
+        raise Hold("RC7_PAIR_INTERRUPTED_TRANSACTION_REQUIRES_RECOVERY")
+    old_manifest = _pair_read_private(manifest)
+    old_receipt = _pair_read_private(frp_receipt)
+    old_doc = _pair_load_json(old_receipt)
+
+    # Use the reviewed pure planner rather than inventing a second engine
+    # manifest contract. Imported lazily to avoid module import cycles.
+    control_spec = importlib.util.spec_from_file_location(
+        "uopti_rc7_pair_lab_control", HERE / "smite-managed-backhaul-control.py")
+    if control_spec is None or control_spec.loader is None:
+        raise Hold("RC7_PAIR_PLANNER_MISSING")
+    control = importlib.util.module_from_spec(control_spec)
+    control_spec.loader.exec_module(control)
+    try:
+        next_manifest, review = control.plan_rc7_backhaul_manifest_pair(
+            old_manifest, old_doc, backhaul_sha256, role=role)
+    except control.Hold as exc:
+        raise Hold("RC7_PAIR_BASELINE_UNTRUSTED") from exc
+    if review.get("INSTALL_ALLOWED") != "NO" or review.get("ACTIVATION_GATE") != "HOLD":
+        raise Hold("RC7_PAIR_PLANNER_AUTHORIZATION_DRIFT")
+    next_doc = dict(old_doc)
+    next_doc["new"] = digest(next_manifest)
+    next_receipt = (json.dumps(next_doc, sort_keys=True) + "\n").encode()
+    if not (0 < len(next_receipt) <= 8192):
+        raise Hold("RC7_PAIR_RECEIPT_OVERSIZED")
+
+    # Journal ALL exact old/new bytes and checksums, and sync the directory
+    # BEFORE touching either reviewed engine source file.
+    journal.mkdir(mode=0o700)
+    _pair_fsync_dir(root)
+    for name, data in (
+        ("manifest.before", old_manifest),
+        ("frp.before", old_receipt),
+        ("manifest.next", next_manifest),
+        ("frp.next", next_receipt),
+    ):
+        new_file(journal / name, data, 0o600)
+    stamp = {
+        "schema": 1, "phase": "PREPARED", "role": role,
+        "manifest_before": digest(old_manifest),
+        "frp_before": digest(old_receipt),
+        "manifest_next": digest(next_manifest),
+        "frp_next": digest(next_receipt),
+    }
+    new_file(journal / "record.json",
+             (json.dumps(stamp, sort_keys=True) + "\n").encode(), 0o600)
+    _pair_fsync_dir(journal)
+    if inject == "after-journal":
+        raise Hold("RC7_PAIR_INJECTED_CRASH_RECOVER_REQUIRED")
+
+    if (_pair_read_private(manifest) != old_manifest
+            or _pair_read_private(frp_receipt) != old_receipt):
+        raise Hold("RC7_PAIR_CONCURRENT_BASELINE_CHANGE")
+    _pair_atomic(manifest, next_manifest)
+    if inject == "after-manifest":
+        raise Hold("RC7_PAIR_INJECTED_CRASH_RECOVER_REQUIRED")
+    _pair_atomic(frp_receipt, next_receipt)
+    if inject == "after-receipt":
+        raise Hold("RC7_PAIR_INJECTED_CRASH_RECOVER_REQUIRED")
+    if (_pair_read_private(manifest) != next_manifest
+            or _pair_read_private(frp_receipt) != next_receipt):
+        raise Hold("RC7_PAIR_UNVERIFIED_FINAL_BYTES")
+    return "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED"
+
+
+def rc7_pair_recover_lab(root: Path) -> str:
+    """Fail-closed exact dual-file rollback after any rehearsed crash point."""
+    manifest, frp_receipt, journal = _pair_paths(root)
+    private_dir(journal)
+    record = _pair_load_json(_pair_read_private(journal / "record.json", limit=4096))
+    required = {
+        "schema", "phase", "role", "manifest_before", "frp_before",
+        "manifest_next", "frp_next",
+    }
+    if (set(record) != required or type(record["schema"]) is not int
+            or record["schema"] != 1 or record["phase"] != "PREPARED"
+            or record["role"] not in ("ir", "foreign")
+            or any(not isinstance(record[k], str) or SHA.fullmatch(record[k]) is None
+                   for k in ("manifest_before", "frp_before",
+                             "manifest_next", "frp_next"))):
+        raise Hold("RC7_PAIR_RECOVERY_JOURNAL_UNTRUSTED")
+    if set(p.name for p in journal.iterdir()) != {
+        "record.json", "manifest.before", "frp.before", "manifest.next", "frp.next",
+    }:
+        raise Hold("RC7_PAIR_RECOVERY_JOURNAL_UNTRUSTED")
+    pieces = {}
+    for name, checksum in (
+        ("manifest.before", "manifest_before"),
+        ("frp.before", "frp_before"),
+        ("manifest.next", "manifest_next"),
+        ("frp.next", "frp_next"),
+    ):
+        pieces[name] = _pair_read_private(journal / name)
+        if digest(pieces[name]) != record[checksum]:
+            raise Hold("RC7_PAIR_RECOVERY_BACKUP_DRIFT")
+
+    # Check both current files BEFORE changing either one. A third-party
+    # edit must never be silently overwritten by a recovery.
+    current_manifest = _pair_read_private(manifest)
+    current_frp = _pair_read_private(frp_receipt)
+    if (current_manifest not in (pieces["manifest.before"], pieces["manifest.next"])
+            or current_frp not in (pieces["frp.before"], pieces["frp.next"])):
+        raise Hold("RC7_PAIR_RECOVERY_EXTERNAL_DRIFT")
+
+    if current_manifest != pieces["manifest.before"]:
+        _pair_atomic(manifest, pieces["manifest.before"])
+    if current_frp != pieces["frp.before"]:
+        _pair_atomic(frp_receipt, pieces["frp.before"])
+    if (_pair_read_private(manifest) != pieces["manifest.before"]
+            or _pair_read_private(frp_receipt) != pieces["frp.before"]):
+        raise Hold("RC7_PAIR_RECOVERY_NOT_PROVEN")
+
+    for name in sorted(pieces):
+        (journal / name).unlink()
+    (journal / "record.json").unlink()
+    _pair_fsync_dir(journal)
+    journal.rmdir()
+    _pair_fsync_dir(root)
+    return "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="CI-only Backhaul installation + rollback rehearsal")
     p.add_argument("action", choices=["activate", "rollback"])

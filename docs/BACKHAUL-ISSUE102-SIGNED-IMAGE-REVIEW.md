@@ -399,6 +399,56 @@ relaxing `smite-rc7-frp-enrollment.py verify_file` is acceptable.
 A separately reviewed full two-host RC7-like disposable test is
 required before any production activation.
 
+## RC7 two-receipt crash/recovery rehearsal — disposable GitHub PR lab ONLY
+
+The existing `smite-managed-backhaul-transaction.py` CI-only lab now
+supports two **internal Python functions**:
+`rc7_pair_apply_lab(root, backhaul_sha256, role=..., inject=...)` and
+`rc7_pair_recover_lab(root)`. Neither is available via the public
+installer/menu/CLI. The existing disposable PR root marker, private directory
+checks and CI-only admission are mandatory before any filesystem access.
+
+The rehearsal mirrors the two relevant *bytes-on-disk* resources inside the
+temporary test root: `node/config/engine-state/engines.json` and
+`rc7-frp-enrollment/record.json`. The second location is **not** the real
+production FRP journal path. Both inputs must be private regular `0600`
+files. The existing strict in-memory planner is reused to bind the exact
+pre-change Manifest SHA256 and the COMMITTED FRP receipt's role and pinned
+binary digests. The candidate retains all FRP and unrelated engine entries
+and introduces only the SHA-pinned Backhaul entry.
+
+The rehearsal records **exact old and new bytes of both files** plus their
+SHA256 values in a private, fsync-backed journal *before any source write*.
+It then atomically replaces each file separately with directory fsync.
+Synthetic crashes at `after-journal`, `after-manifest`, and
+`after-receipt` leave a recoverable record. Recovery first validates every
+saved byte, private mode and hash, then validates **both** current resources
+against only their allowlisted old/new bytes. Any unknown external edit or
+incomplete/tampered journal fails closed **before any restore**. Only then
+does recovery restore both source files byte-for-byte, verify them, and
+remove the lab journal.
+
+**Critical limitation:** two independent file replacements are NOT one
+atomic transaction. Between writes, RC7 FRP's existing verify may properly
+report an inconsistency. Successful byte restoration does NOT prove
+uninterrupted FRPS Owner/Child forwarding, signed replay, Broker/WSS health
+or correct Provider snapshot/console. The test is **not** a real
+`smite-node` engine install or an authorization to rewrite a production FRP
+enrollment record. No Docker, live Nginx, Panel, tunnel, port 3080, or
+systemd command is issued, and the lab never touches real
+`/opt/smite-node` or `/var/lib/u-opti` production resources.
+
+The legacy Backhaul disposable engine transaction remains separate; its
+`--force-recreate` host executor must never be used when signed FRP or
+saved tunnels are present. Future work must add a separately reviewed
+**production-capable**, interruption-safe state machine that preserves
+existing FRP signed provenance (without weakening `verify_file`),
+shared lock, signed pre/post Owner and foreign Child inventories, explicit
+rollback/recovery, snapshots/console and no interruption proof across
+a disposable two-host RC7 WSS topology. The system continues to report
+`INSTALL_ALLOWED=NO`, `ACTIVATION_GATE=HOLD`; there is no live enrollment
+switch in this PR.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
