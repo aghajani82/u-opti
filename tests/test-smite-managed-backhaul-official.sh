@@ -252,3 +252,28 @@ sudo env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
   GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?}" RUNNER_TEMP="${RUNNER_TEMP:?}" \
   python3 -B "$root/tests/test-smite-managed-backhaul-two-node-live-ci.py" \
   "$lab/$frp_asset" "$lab/backhaul.tar.gz"
+
+# Close the distinct tracked-FRPS-Owner evidence gap: the older pinned
+# runtime source used for the two-Node WSS test has NO /frp/owners route.
+# A SECOND immutable Smite RC7 source now exercises the real strict Agent
+# Owner endpoint against the actual official FRPS 0.71.0 process/socket.
+# This is a disposable --network none container, not the running Node,
+# not a foreign-child claim, and never a production install authorization.
+owner_source="$root/.signed-owner-smite-source"
+test "$(git -C "$owner_source" rev-parse HEAD)" = \
+  "115f032761564a069d0aa2ca891e55d53a1c6ea0"
+sudo test -f "$lab/installed/frp/frps"
+sudo docker run --rm --platform linux/amd64 --network none \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 96 --memory 384m --user 0:0 \
+  --tmpfs /tmp:rw,nosuid,nodev,size=32m \
+  --env GITHUB_ACTIONS=true --env GITHUB_EVENT_NAME=pull_request \
+  --env GITHUB_REPOSITORY=aghajani82/u-opti \
+  --env PYTHONPATH=/app \
+  --mount "type=bind,src=$owner_source/node/app,dst=/app/app,readonly" \
+  --mount "type=bind,src=$root/tests/test-smite-managed-backhaul-tracked-owner-live-ci.py,dst=/ci-tracked-owner.py,readonly" \
+  --mount "type=bind,src=$lab/installed/frp/frps,dst=/usr/local/bin/frps,readonly" \
+  --entrypoint python \
+  "ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e" \
+  -B /ci-tracked-owner.py
+echo "RC7_TRACKED_OWNER_ACTUAL_SIGNED_ENDPOINT_FRPS_NO_PUBLIC_PORT=PASS"

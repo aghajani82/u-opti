@@ -963,6 +963,13 @@ jobs:
           ref: 02d05056d3a4baf577c9d3781d62af61c000f1ac
           path: .managed-smite-source
           persist-credentials: false
+      - name: Checkout exact reviewed Smite RC7 signed FRPS owner source
+        uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 115f032761564a069d0aa2ca891e55d53a1c6ea0
+          path: .signed-owner-smite-source
+          persist-credentials: false
       - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
         shell: bash
         run: |

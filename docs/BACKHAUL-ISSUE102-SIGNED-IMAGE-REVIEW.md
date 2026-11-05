@@ -688,6 +688,41 @@ Smite's production tracked-owner workflow. Broker/XHTTP signed runtime
 continuity and true Owner/Child proof remain separate mandatory gates.
 This test does not unlock real-host installation.
 
+## Signed tracked FRPS Owner: real loopback process and API (PR CI only)
+
+The older pinned Smite source used by the existing dual-Node WSS/443
+forwarding test does **not** contain the actual signed
+`GET /api/agent/frp/owners` route. The full CI suite may pass while
+claiming only signed **engine availability**, never tracked Owner
+health. To close this gap without silently changing the existing WSS
+experiment's source/image, the same PR-only official-artifact job now
+checks out a **separately immutable** reviewed Smite RC7 source
+(`115f032761564a069d0aa2ca891e55d53a1c6ea0`) and executes its
+real Agent Owner router, strict HMAC, persistent SQLite Replay and
+`frp_owner_status.active_signed_frps_owners` inside a throwaway,
+`--network none` Docker container. FRPS **v0.71.0 is the exact
+SHA-pinned official executable** extracted earlier in that job, and
+runs as a *real tracked process* listening on `127.0.0.1:7000`.
+
+The read-only signed endpoint must return exactly one owner only when
+its adapter's tracked process PID owns that loopback LISTEN socket;
+unsigned, bad HMAC, an opposite Node ID and repeated nonce must be
+rejected. Wrong PID, client-mode config, missing tracked adapter and
+terminated real FRPS must produce an empty Owner set, even with a
+well-formed valid signature. The response never prints FRP tokens,
+Node secrets or owner private data. This **does not** exercise the
+production AdapterManager's actual FRP start operation: its
+in-memory manager entries are synthetic, but the signed endpoint,
+HMAC/Replay implementation and PID/socket are genuine.
+
+This is narrower than a two-host **tracked** Owner/Child management
+trial. The separate existing isolated WSS test still starts FRPS and
+FRPC outside Smite's tracked adapter, and there remains **no signed
+foreign-Child route proof, no genuine Broker/XHTTP socket continuity,
+no real-host attestation or production-safe receipt migration**.
+Passing this test cannot change `INSTALL_ALLOWED=NO` or
+`ACTIVATION_GATE=HOLD`. Do not deploy Backhaul on IR/Grandoptical.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
