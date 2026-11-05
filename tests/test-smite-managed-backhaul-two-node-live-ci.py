@@ -5,12 +5,13 @@ Two ordinary Docker containers on a private --internal bridge, never on real
 IR/Grandoptical. This tests the existing RC7 *filesystem* two-receipt lab
 while genuine signed Smite API and FRP 0.71.0 WSS-over-TLS forwarding persist.
 A disposable Nginx runs in a third isolated container: NO host port publish,
-no production Nginx/443 access. A real isolated IR Broker Unix socket\ncan only deny an invalid route; XHTTP publication is not proven.
+no production Nginx/443 access. Real isolated Broker/Node UDS denial\nis checked without bypassing the missing committed XHTTP Bridge.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -345,6 +346,84 @@ def https_probe():
 
 
 
+
+BROKER_BRIDGE_GATE_AUDIT = r"""
+import importlib.util,sys
+path='/usr/local/lib/u-opti/modules/smite-rc5-xhttp-root-broker.py'
+spec=importlib.util.spec_from_file_location('ci_real_broker_gate',path)
+mod=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=mod;spec.loader.exec_module(mod)
+conf=mod._configuration()
+mod._verify_helper(conf)  # The real root-owned, digest-pinned helper bytes.
+try:
+ mod._verify_bridge()      # No fake Bridge receipt; fail closed.
+except mod.BrokerHold as exc:
+ assert str(exc)=='XHTTP_BRIDGE_REQUIRED','unexpected Bridge status'
+else:
+ raise AssertionError('uncommitted Bridge accepted')
+print('CI_REAL_BROKER_PINNED_HELPER_AND_BRIDGE_HOLD=PASS')
+"""
+
+
+BROKER_REAL_SIGNED_UNAPPROVED = r"""
+import base64,json,sys,urllib.request,urllib.error
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+node_id,key=read_identity('/etc/smite-node/identity/node-identity.json')
+with open(sys.argv[1],'rb') as f:
+ intent=f.read()
+wire=json.dumps({'intent_b64':base64.b64encode(intent).decode('ascii')},
+                separators=(',',':')).encode('utf-8')
+target='/api/agent/uopti/xhttp-route'
+url='http://127.0.0.1:8888'+target
+def request(headers=None):
+ h={'Content-Type':'application/json'}
+ h.update(headers or {})
+ req=urllib.request.Request(url,data=wire,headers=h,method='POST')
+ try:
+  with urllib.request.urlopen(req,timeout=8) as response:
+   return response.status
+ except urllib.error.HTTPError as exc:
+  return exc.code
+assert request()==401,'anonymous route accepted'
+assert request(sign_request(secret=key,node_id='smitecibackhaul02',
+    method='POST',target=target,body=wire))==401,'foreign identity accepted'
+headers=sign_request(secret=key,node_id=node_id,method='POST',
+                     target=target,body=wire)
+assert request(headers)==503,'missing Bridge must HOLD valid signed intent'
+assert request(headers)==401,'agent request Replay accepted'
+print('CI_CANONICAL_HMAC_INTENT_MISSING_BRIDGE_FAIL_CLOSED=PASS')
+"""
+
+
+def fresh_unapproved_intent(root: Path) -> str:
+    """Private, canonical Broker HMAC wire; synthetic evidence is NEVER a grant."""
+    contract = load("ci_broker_intent_contract",
+                    REPO / "modules/smite-rc5-xhttp-signed-intent.py")
+    key = (root / "broker-conf/route-broker.key").read_bytes()
+    now = int(time.time())
+    body = {
+        "schema": 1, "audience": contract.AUDIENCE, "action": "create",
+        "ir_node": "smitecibackhaul01", "kh_node": "smitecibackhaul02",
+        "owner": "ci-owner", "child": "ci-child-20282",
+        "lease": "ci-lease-20282", "port": 20282,
+        "path": "/20282/ci-xhttp",
+        "owner_proof_sha256": "a" * 64, # deliberately untrusted
+        "kh_inventory_sha256": "b" * 64, # deliberately untrusted
+        "issued_at": now, "expires_at": now + 45,
+        "nonce": secrets.token_hex(16),
+    }
+    wire = contract.canonical({
+        **body, "mac": hmac.new(key, contract.canonical(body),
+                              hashlib.sha256).hexdigest(),
+    })
+    path = root / "node/config" / ("ci-unsigned-root-grant-" +
+                                 secrets.token_hex(8) + ".json")
+    write(path, wire, 0o600)
+    # No Broker HMAC key is ever present in Node or supplied via command line.
+    return "/etc/smite-node/" + path.name
+
+
 BROKER_IR_SIGNED_DENIAL = r"""
 import base64,json,urllib.request,urllib.error
 from app.agent_auth import read_identity
@@ -401,6 +480,11 @@ def broker_prepare(root: Path):
     for path in (conf, runtime, state):
         directory(path)
     directory(conf / "route-grants")
+    bin_dir = root / "broker-bin"
+    directory(bin_dir)
+    bin_dir.chmod(0o755)
+    for tool in ("smite-xhttp-nginx-route", "smite_xhttp_nginx_plan.py"):
+        write(bin_dir / tool, (REPO / "modules" / tool).read_bytes(), 0o755)
     runtime.chmod(0o750)
     os.chown(runtime, 0, BROKER_GID)
     # Broker trusts neither Node identities nor a caller-created root grant.
@@ -428,6 +512,7 @@ def broker_start(root: Path):
         "--env", "PYTHONDONTWRITEBYTECODE=1",
         "--mount", f"type=bind,src={REPO}/modules,dst=/usr/local/lib/u-opti/modules,readonly",
         "--mount", f"type=bind,src={root}/broker-conf,dst=/etc/u-opti/smite,readonly",
+        "--mount", f"type=bind,src={root}/broker-bin,dst=/usr/local/libexec,readonly",
         "--mount", f"type=bind,src={root}/broker-ledger,dst=/var/lib/u-opti/smite-xhttp-broker",
         "--mount", f"type=bind,src={root}/broker-runtime,dst=/run/u-opti/smite",
         "--entrypoint", "python", IMAGE, "-B",
@@ -471,6 +556,16 @@ def broker_probe(root: Path, original: dict):
     check(directory_inode == str(actual_dir.stat().st_dev) + ":" +
           str(actual_dir.stat().st_ino),
           "CI_BROKER_NODE_MOUNT_INODE_DRIFT")
+    real_gate = run("docker", "exec", "ci-uopti-broker", "python",
+                    "-B", "-c", BROKER_BRIDGE_GATE_AUDIT, timeout=18)
+    check("CI_REAL_BROKER_PINNED_HELPER_AND_BRIDGE_HOLD=PASS" in real_gate,
+          "CI_BROKER_COMMITTED_BRIDGE_UNPROVEN")
+    signed_path = fresh_unapproved_intent(root)
+    real_intent = run("docker", "exec", "ci-uopti-ir", "python", "-B",
+                      "-c", BROKER_REAL_SIGNED_UNAPPROVED, signed_path,
+                      timeout=18)
+    check("CI_CANONICAL_HMAC_INTENT_MISSING_BRIDGE_FAIL_CLOSED=PASS" in real_intent,
+          "CI_VALID_INTENT_BROKER_BRIDGE_GATE_FAILED")
     response = run("docker", "exec", "ci-uopti-ir", "python", "-B",
                    "-c", BROKER_IR_SIGNED_DENIAL, timeout=16)
     check("CI_REAL_SIGNED_NODE_TO_BROKER_FAIL_CLOSED=PASS" in response,
@@ -1163,6 +1258,8 @@ def main():
                   and not (root / tx.PAIR_CLEANUP_SEAL).exists(),
                   "CI_TWO_HOST_EXACT_FRP_RECEIPT_ROLLBACK_FAILED")
         check(broker_restarted, "CI_BROKER_LIFECYCLE_NOT_EXERCISED")
+        print("RC7_BROKER_ROOT_PINNED_HELPERS_AND_COMMITTED_BRIDGE_GATE=PASS")
+        print("RC7_CANONICAL_HMAC_INTENT_REJECTED_WITHOUT_BRIDGE=PASS")
         print("RC7_REAL_ROOT_BROKER_UDS_SIGNED_DENIAL=PASS")
         print("RC7_REAL_BROKER_RESTART_NO_NODE_RECREATE=PASS")
         print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
