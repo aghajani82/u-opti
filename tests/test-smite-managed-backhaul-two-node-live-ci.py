@@ -256,7 +256,8 @@ def wss_gateway(network: str, root_ir: Path, root_foreign: Path):
     key.chmod(0o600)
     write(root_foreign / "node/config/ci-ca.crt", cert.read_bytes())
     conf = tls / "nginx.conf"
-    write(conf, b"""pid /tmp/ci-nginx.pid;
+    write(conf, b"""user root;
+pid /tmp/ci-nginx.pid;
 error_log /dev/stderr warn;
 events { worker_connections 256; }
 http {
