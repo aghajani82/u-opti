@@ -163,6 +163,7 @@ def initial_role(root: Path, role: str, frp: dict[str, bytes],
         write(root / "node/config/frps.toml", config.encode())
     else:
         config = ("serverAddr = \"ci-uopti-wss\"\nserverPort = 443\n"
+                  "loginFailExit = false\n"
                   "auth.method = \"token\"\nauth.token = " + json.dumps(token) + "\n"
                   "transport.protocol = \"wss\"\n"
                   "transport.tls.enable = true\n"
@@ -391,6 +392,83 @@ def signed_probe(name: str, phase: str):
           "CI_REAL_SIGNED_NODE_PROBE_FAILED")
 
 
+def wait_frps_loopback():
+    # FRPC loginFailExit default may terminate on an early 502 from Nginx.
+    # Wait for *real* FRPS listening before launching the WSS client.
+    probe = """import socket
+with socket.create_connection(('127.0.0.1',7000),timeout=2):
+ print('CI_FRPS_LISTENER=PASS')
+"""
+    for attempt in range(28):
+        try:
+            out = run("docker", "exec", "ci-uopti-ir",
+                      "python", "-B", "-c", probe, timeout=7)
+            if "CI_FRPS_LISTENER=PASS" in out:
+                return
+        except Hold:
+            pass
+        time.sleep(0.35)
+    raise Hold("CI_FRPS_LISTENER_UNAVAILABLE")
+
+
+TRANSPORT_AUDIT = r"""
+import os,socket,ssl,sys
+name=sys.argv[1]
+port=int(sys.argv[2])
+has_process=False
+for pid in os.listdir('/proc'):
+ if not pid.isdecimal():continue
+ try:
+  proc=open('/proc/'+pid+'/comm').read().strip()
+ except (OSError,UnicodeError):continue
+ if proc==name:has_process=True
+try:
+ with socket.create_connection(('127.0.0.1',port),timeout=2):
+  socket_ok=True
+except OSError:socket_ok=False
+print('CI_PROCESS_'+name.upper()+'='+('PRESENT' if has_process else 'MISSING'))
+print('CI_LOOPBACK_'+str(port)+'='+('OPEN' if socket_ok else 'CLOSED'))
+"""
+
+
+WSS_UPGRADE_AUDIT = r"""
+import socket,ssl
+ctx=ssl.create_default_context(cafile='/etc/smite-node/ci-ca.crt')
+request=('GET /~!frp HTTP/1.1\r\n'
+         'Host: ci-uopti-wss\r\n'
+         'Upgrade: websocket\r\n'
+         'Connection: Upgrade\r\n'
+         'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+         'Sec-WebSocket-Version: 13\r\n\r\n').encode()
+with socket.create_connection(('ci-uopti-wss',443),timeout=4) as raw:
+ with ctx.wrap_socket(raw,server_hostname='ci-uopti-wss') as peer:
+  peer.settimeout(4);peer.sendall(request)
+  code=peer.recv(128).split(b'\r\n',1)[0].split()
+  status=code[1].decode('ascii') if len(code)>=2 else 'UNKNOWN'
+assert status in ('101','400','403','404','502','503','500'),status
+print('CI_WSS_UPGRADE_HTTP='+status)
+"""
+
+
+def private_transport_audit():
+    # Print only fixed public readiness states and HTTP status, never logs,
+    # private keys, FRP tokens or raw headers.
+    for node, proc, port in (("ci-uopti-ir", "frps", "7000"),
+                             ("ci-uopti-foreign", "frpc", "39001")):
+        try:
+            out = run("docker", "exec", node, "python", "-B", "-c",
+                      TRANSPORT_AUDIT, proc, port, timeout=10)
+            print(out, flush=True)
+        except Hold:
+            print("CI_TRANSPORT_AUDIT_"+proc.upper()+"=UNAVAILABLE", flush=True)
+    try:
+        out = run("docker", "exec", "ci-uopti-foreign",
+                  "python", "-B", "-c", WSS_UPGRADE_AUDIT, timeout=10)
+        print(out, flush=True)
+    except Hold:
+        print("CI_WSS_UPGRADE_AUDIT=UNAVAILABLE", flush=True)
+
+
 def forward_probe(phase: str):
     for attempt in range(28):
         try:
@@ -401,6 +479,7 @@ def forward_probe(phase: str):
             return
         except Hold:
             if attempt == 27:
+                private_transport_audit()
                 raise Hold("CI_ACTIVE_FRP_FORWARDING_UNAVAILABLE")
             time.sleep(0.6)
 
@@ -456,6 +535,7 @@ def main():
             "python", "-B", "-c", ECHO)
         run("docker", "exec", "-d", "ci-uopti-ir",
             "/usr/local/bin/frps", "-c", "/etc/smite-node/frps.toml")
+        wait_frps_loopback()
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "/usr/local/bin/frpc", "-c", "/etc/smite-node/frpc.toml")
         forward_probe("initial")
