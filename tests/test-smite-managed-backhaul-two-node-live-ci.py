@@ -525,11 +525,16 @@ def docker_node(name: str, network: str, root: Path):
     return state[0]["Id"], state[0]["State"]["StartedAt"]
 
 
-def enrollment(root: Path):
+def enrollment(root: Path, *, role: str):
+    # The newer signed foreign Child source added an independently
+    # authenticated identity/Replay key-binding marker. Enroll each role
+    # with exactly the code that will authenticate its later requests.
+    check(role in ("ir", "foreign"), "CI_REPLAY_ROLE_INVALID")
+    source = CHILD_SOURCE if role == "foreign" else NODE_SOURCE
     run("docker", "run", "--rm", "--platform", "linux/amd64",
         "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "0:0",
-        "--mount", f"type=bind,src={NODE_SOURCE}/node/app,dst=/app/app,readonly",
+        "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
         "--mount", f"type=bind,src={root}/node-data,dst=/var/lib/smite-node",
         "--entrypoint", "python", IMAGE, "-m", "app.replay_enrollment",
@@ -673,7 +678,7 @@ def main():
         for role, root, _ in roots:
             originals[role] = initial_role(root, role, frp, backhaul_bytes,
                                           secrets.token_hex(32), token, tx)
-            enrollment(root)
+            enrollment(root, role=role)
         print("CI_WSS_STAGE=START_INTERNAL_DOCKER_NETWORK", flush=True)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
