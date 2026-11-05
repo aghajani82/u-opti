@@ -501,11 +501,31 @@ interruption, an out-of-band edit between attempts, exact unchanged
 Compose/.env, and restoration of both original FRP and unrelated engine
 entries. Unknown drift retains the journal and refuses further writes.
 
-This closes a **pre-cleanup Rollback crash** test gap only. It does not
-claim crash-safe partial **journal deletion**, live two-host signed proof,
-uninterrupted owner/child forwarding, or a production-capable recover CLI.
-All fault-injection arguments are Python-internal and require the existing
-PR lab admission; the beginner menu and production activation remain HOLD.
+This also closes the **partial journal-deletion crash** gap in the
+**disposable CI lab only**. The existing recovery first verifies the full
+four-file journal, both original resources and the precise FRP receipt
+semantics. Before deleting the first journal file it creates and fsyncs a
+root-private `rc7-pair-recovery-complete.json` terminal seal, containing
+only the role, original/next digests and the reviewed Backhaul binary
+digest. Recovery can resume even if the journal has only a subset of its
+files or has already been removed: it requires the original Manifest and
+FRP receipt exact bytes by SHA-256, recomputes the allowed transition with
+the existing pure planner, verifies each surviving journal part and refuses
+unexpected paths, symlinks, unsafe file modes and drift **before unlink**.
+The terminal seal remains until the journal directory has been removed
+and fsynced, so the independent legacy lab cannot start while cleanup is
+pending. The latest tests inject crashes after persisting the seal, after
+each of five file removals, and after journal-directory removal, on **both**
+IR and foreign roles; repeated restart and tampering are fail-closed.
+The terminal seal is **not signed** and cannot defend against a privileged
+attacker controlling the complete private PR-lab root.
+
+This does **not** prove live two-host signed Owner/Child continuity,
+concurrent external FRP verifiers at every intermediate write, production
+receipt migration, provider snapshots, or a production-capable recovery
+CLI. All fault-injection arguments are Python-internal and require the
+existing PR lab admission; the beginner menu and production activation
+remain HOLD.
 
 The legacy disposable Backhaul file transaction and this RC7 pair
 rehearsal use distinct recovery journals but share the same test-root
