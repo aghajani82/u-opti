@@ -191,6 +191,13 @@ def get(path,headers=None):
   return exc.code,{}
 endpoint='/api/agent/engines'
 assert get(endpoint)[0]==401
+# Even an authentically signed request for the *other* CI Node must
+# not be accepted by this Node. Both identities persist through rollback.
+foreign_id=('smitecibackhaul02' if node_id=='smitecibackhaul01'
+            else 'smitecibackhaul01')
+assert get(endpoint,sign_request(secret=secret,node_id=foreign_id,
+             method='GET',target=endpoint,body=b''))[0]==401, \
+       'cross-node identity accepted'
 signed=sign_request(secret=secret,node_id=node_id,method='GET',target=endpoint,body=b'')
 status,body=get(endpoint,signed)
 assert status==200 and body['mode']=='managed',(status,body)
