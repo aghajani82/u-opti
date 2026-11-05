@@ -407,20 +407,27 @@ import json,psutil
 configs='/etc/smite-node/frp/frpc_ci-child-20182.yaml'
 expected=['/usr/local/bin/frpc','-c',configs]
 found=[]
+matched_commands=0
 for p in psutil.process_iter(['pid','cmdline','create_time','status']):
  try:
   if p.info['cmdline'] != expected or p.info['status']==psutil.STATUS_ZOMBIE:
    continue
-  # A running process is NOT sufficient; inspect the actual established
-  # WSS/TLS control socket to the private Nginx port 443.
-  socks=p.net_connections(kind='tcp')
+  matched_commands+=1
+  # A running process is NOT sufficient. psutil 5.9.6, used by the
+  # pinned Smite image, exposes Process.connections(), while >=6 exposes
+  # Process.net_connections(). Both inspect the actual tracked PID.
+  method=(p.net_connections if hasattr(p,'net_connections')
+          else p.connections)
+  socks=method(kind='tcp')
   if not any(s.status==psutil.CONN_ESTABLISHED
              and getattr(s.raddr,'port',None)==443 for s in socks):
    continue
   found.append({'pid':p.info['pid'],'start':p.info['create_time']})
  except (psutil.Error,OSError,ValueError,KeyError):
   continue
-assert len(found)==1,'REAL_FRPC_WSS_CONTROL_PID_NOT_UNIQUE'
+print('CI_CHILD_FRPC_CMD_MATCH_COUNT='+str(matched_commands))
+print('CI_CHILD_FRPC_WSS_ESTABLISHED_COUNT='+str(len(found)))
+assert matched_commands==1 and len(found)==1,'REAL_FRPC_WSS_CONTROL_PID_NOT_UNIQUE'
 print(json.dumps(found[0],sort_keys=True))
 """
 
@@ -481,12 +488,27 @@ def signed_child_probe():
 
 
 def tracked_child_process_identity():
-    # The PID/create-time and an ESTABLISHED 443 socket are from the real
+    # The PID/create-time and ESTABLISHED 443 socket are from the real
     # foreign Node container; never accept just "process_running=true".
-    raw = run(
-        "docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
-        CHILD_FRPC_PID_AUDIT, timeout=15)
-    doc = json.loads(raw)
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             CHILD_FRPC_PID_AUDIT],
+            capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_CHILD_FRPC_PID_AUDIT_UNAVAILABLE") from exc
+    for line in result.stdout.splitlines():
+        for key in ("CI_CHILD_FRPC_CMD_MATCH_COUNT=",
+                    "CI_CHILD_FRPC_WSS_ESTABLISHED_COUNT="):
+            if line.startswith(key) and line[len(key):].isdigit():
+                print(key + line[len(key):], flush=True)
+    check(result.returncode == 0, "CI_CHILD_FRPC_PID_AUDIT_FAILED")
+    lines = result.stdout.strip().splitlines()
+    check(bool(lines), "CI_CHILD_FRPC_PID_AUDIT_EMPTY")
+    try:
+        doc = json.loads(lines[-1])
+    except ValueError as exc:
+        raise Hold("CI_CHILD_FRPC_PID_AUDIT_INVALID") from exc
     check(set(doc) == {"pid", "start"}
           and type(doc["pid"]) is int and doc["pid"] > 1
           and type(doc["start"]) in (float, int),
