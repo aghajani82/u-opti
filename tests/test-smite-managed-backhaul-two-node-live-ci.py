@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -55,7 +56,13 @@ def run(*command: str, timeout: int = 75) -> str:
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Hold("ISOLATED_PROCESS_UNAVAILABLE") from exc
     if result.returncode != 0:
-        raise Hold("ISOLATED_PROCESS_FAILED")
+        # Static error category only. Never echo command arguments: these
+        # may include ephemeral credentials or private filesystem paths.
+        category = ("DOCKER_" + command[1].upper()
+                    if command[0] == "docker" and len(command) >= 2
+                    else "OPENSSL" if command[0] == "openssl"
+                    else "OTHER")
+        raise Hold("ISOLATED_" + category + "_PROCESS_FAILED")
     return result.stdout.strip()
 
 
@@ -286,8 +293,10 @@ http {
 }
 """)
     image = "uopti-ci-wss-issue102"
+    print("CI_WSS_STAGE=BUILD_NGINX_IMAGE", flush=True)
     run("docker", "build", "-t", image,
         str(REPO / "tests/lab/frp-control-stall"), timeout=280)
+    print("CI_WSS_STAGE=START_PRIVATE_NGINX", flush=True)
     run("docker", "run", "-d", "--name", "ci-uopti-wss",
         "--network", network, "--network-alias", "ci-uopti-wss",
         "--read-only", "--cap-drop", "ALL",
@@ -423,20 +432,26 @@ def main():
                  ("foreign", root_foreign, "ci-uopti-foreign"))
         token = secrets.token_hex(32)
         originals = {}
+        print("CI_WSS_STAGE=PREPARE_TWO_PRIVATE_ROLES", flush=True)
         for role, root, _ in roots:
             originals[role] = initial_role(root, role, frp, backhaul_bytes,
                                           secrets.token_hex(32), token, tx)
             enrollment(root)
+        print("CI_WSS_STAGE=START_INTERNAL_DOCKER_NETWORK", flush=True)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
+        print("CI_WSS_STAGE=START_TWO_SIGNED_NODES", flush=True)
         # Docker DNS must resolve the IR upstream before Nginx starts.
         # All three containers then remain untouched by the transaction.
         for role, root, name in roots:
             started[name] = docker_node(name, network, root)
+        print("CI_WSS_STAGE=START_TLS_GATEWAY", flush=True)
         started["ci-uopti-wss"] = wss_gateway(
             network, root_ir, root_foreign)
+        print("CI_WSS_STAGE=PROBE_TLS_CA_HOSTNAME", flush=True)
         https_probe()
         # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
+        print("CI_WSS_STAGE=START_REAL_FRP_WSS_CONTROL", flush=True)
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "python", "-B", "-c", ECHO)
         run("docker", "exec", "-d", "ci-uopti-ir",
@@ -444,6 +459,7 @@ def main():
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "/usr/local/bin/frpc", "-c", "/etc/smite-node/frpc.toml")
         forward_probe("initial")
+        print("CI_WSS_STAGE=RUN_PAIRED_MANIFEST_RECEIPT_TEST", flush=True)
         seen = []
 
         def observe(phase, ir, foreign):
@@ -517,6 +533,10 @@ if __name__ == "__main__":
     try:
         main()
     except (Hold, OSError, AssertionError, ValueError, KeyError) as exc:
-        # Only fixed public status, never synthetic secret or archive content.
+        # Only fixed codes: never raw subprocess output or synthetic secrets.
+        reason = str(exc) if isinstance(exc, Hold) else "ISOLATED_UNEXPECTED_TEST_ERROR"
+        if re.fullmatch(r"[A-Z0-9_]{1,100}", reason) is None:
+            reason = "ISOLATED_UNEXPECTED_TEST_ERROR"
+        print("HOLD: " + reason, file=sys.stderr)
         print("HOLD: REAL_TWO_NODE_SIGNED_FRP_CI_NOT_PROVEN", file=sys.stderr)
         raise SystemExit(2) from None
