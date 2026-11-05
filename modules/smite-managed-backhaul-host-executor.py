@@ -256,6 +256,175 @@ def _expected_states(manifest_bytes: bytes | None) -> dict[str, str]:
     return {name: ("ready" if name in engines else "not-installed")
             for name in ENGINE_NAMES}
 
+
+# A retained, signed RC7 Node may ALREADY bundle the exact official Backhaul
+# executable at the path consumed by Smite's managed engine inventory. If so,
+# a future manifest-only transaction may avoid recreating smite-node entirely.
+# This review DOES NOT enroll it, write a manifest or declare live readiness.
+IN_PLACE_BINARY_PROBE = r'''
+import hashlib,os,stat,sys
+expected=os.environ.get("UOPTI_EXPECTED_BACKHAUL_SHA256","")
+path="/usr/local/bin/backhaul"
+try:
+    original=os.lstat(path)
+    if (not stat.S_ISREG(original.st_mode) or original.st_uid!=0
+            or original.st_nlink!=1 or not original.st_mode&0o111
+            or original.st_mode&0o022 or not 100000<original.st_size<48*1024*1024):
+        raise RuntimeError("not trusted")
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        actual=os.fstat(fd)
+        if (actual.st_dev,actual.st_ino,actual.st_size)!=(
+                original.st_dev,original.st_ino,original.st_size):
+            raise RuntimeError("raced binary")
+        digest=hashlib.sha256()
+        while True:
+            chunk=os.read(fd,65536)
+            if not chunk: break
+            digest.update(chunk)
+    finally:
+        os.close(fd)
+    if digest.hexdigest()!=expected:
+        raise RuntimeError("not official")
+except (OSError,RuntimeError):
+    sys.exit(2)
+print("OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS")
+'''
+
+
+def _retained_container_fingerprint(doc: dict) -> tuple:
+    """Pin actual running container identity, image and immutable mounts.
+
+    Docker metadata is NOT an externally authenticated image signature. It
+    only lets us ensure a read-only probe did not observe a recreated Node.
+    """
+    try:
+        ident = doc["Id"]
+        image = doc["Image"]
+        started = doc["State"]["StartedAt"]
+        mounts = doc["Mounts"]
+        if (not isinstance(ident,str) or not re.fullmatch("[a-f0-9]{64}",ident)
+                or not isinstance(image,str) or not re.fullmatch("sha256:[a-f0-9]{64}",image)
+                or not isinstance(started,str) or not started
+                or doc["State"]["Running"] is not True
+                or not isinstance(mounts,list)):
+            raise Hold("RETAINED_NODE_RUNTIME_IDENTITY_UNVERIFIED")
+        # No credentials, mount contents or paths leave the process.
+        return (ident,image,started,
+                _sha(json.dumps(mounts,sort_keys=True).encode()))
+    except (KeyError,TypeError,ValueError) as exc:
+        raise Hold("RETAINED_NODE_RUNTIME_IDENTITY_UNVERIFIED") from exc
+
+
+def review_in_place_binary(*, expected_node_image: str, arch: str,
+                           paths: Paths = Paths(), runner=subprocess.run,
+                           signed_pair_manifest: Path | None = None,
+                           signed_pair_manifest_sha256: str | None = None,
+                           signed_pair_source_sha: str | None = None,
+                           signed_pair_publish_ref: str | None = None,
+                           signed_pair_trusted_root: Path | None = None) -> dict[str,str]:
+    """Read-only feasibility of future Backhaul enrollment on an active FRP Node.
+
+    It deliberately does NOT use _candidate/install/rollback: all of those
+    demand empty tunnels and may recreate Node. No filesystem or Docker change,
+    signed API request, restart, tunnel, service, or container copy is made.
+    """
+    report = {
+        "RETAINED_NODE_BACKHAUL_BINARY": "UNVERIFIED",
+        "IN_PLACE_MANIFEST_TRANSACTION": "NOT_IMPLEMENTED",
+        "SIGNED_RUNTIME_PRESERVATION": "NOT_PROVEN",
+        "NODE_RECREATE": "FORBIDDEN",
+        "HOST_TRANSACTION_AND_ROLLBACK": "NOT_IMPLEMENTED",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+    def hold(reason: str):
+        report["REASON"] = reason
+        return report
+    if IMAGE.fullmatch(expected_node_image) is None:
+        return hold("EXTERNAL_NODE_IMAGE_PIN_REQUIRED")
+    if arch not in package.OFFICIAL_BINARY_SHA256:
+        return hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
+    try:
+        before = admission.host.read_only_docker_inspect(runner=runner)
+        identity = _retained_container_fingerprint(before)
+        review = admission.report(
+            "backhaul", paths.node, runtime=before,
+            expected_node_image=expected_node_image,
+            signed_pair_manifest=signed_pair_manifest,
+            signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+            signed_pair_source_sha=signed_pair_source_sha,
+            signed_pair_publish_ref=signed_pair_publish_ref,
+            signed_pair_trusted_root=signed_pair_trusted_root,
+        )
+        report["SIGNED_REGISTRY_PAIR_PROOF"] = review.get(
+            "SIGNED_REGISTRY_PAIR_PROOF","UNVERIFIED")
+        # An *existing* protected FRP registry is the reason we explore
+        # in-place access. Keep original admission's no-recreate HOLD intact.
+        if (review.get("NODE_CONTAINER")!="RUNNING_REVIEWED_IMAGE"
+                or review.get("CORE_PROFILE")!="MANAGED_STRICT"
+                or review.get("SAVED_TUNNELS")!="EXISTING_DO_NOT_RESTART"
+                or review.get("TARGET_ENGINE")!="NOT_INSTALLED"
+                or review.get("OTHER_ENGINE")!="ENROLLED_UNVERIFIED"
+                or review.get("INSTALL_ALLOWED")!="NO"
+                or review.get("ACTIVATION_GATE")!="HOLD"
+                or review.get("OTHER_ENGINE_ACTION")!="NEVER_MODIFY"):
+            return hold("RETAINED_FRP_HOST_ADMISSION_HOLD")
+        # Don't equate a Docker digest with an immutable signed artifact.
+        # This may still classify candidate binary bytes for a later audit.
+        env_before = _sha(_read(paths.node/".env",16384))
+        compose_before = _sha(_read(paths.node/"docker-compose.yml",131072))
+        manifest_before = _sha(_read(
+            paths.node/"config/engine-state/engines.json",8192))
+        protected_before = (review.get("SAVED_TUNNEL_REGISTRY_SHA256"),
+                            review.get("BROKER_SOCKET_ID_SHA256"),
+                            review.get("WSS_EDGE_JOURNAL_SHA256"),
+                            review.get("FRPC_INSTANCE_SHA256"),
+                            review.get("FRPS_INSTANCE_SHA256"))
+        digest = package.OFFICIAL_BINARY_SHA256[arch]
+        argv = ["docker","exec","-i","--env",
+                "UOPTI_EXPECTED_BACKHAUL_SHA256="+digest,
+                "smite-node","python","-B","-"]
+        try:
+            result = runner(argv,input=IN_PLACE_BINARY_PROBE,
+                            capture_output=True,text=True,timeout=25,check=False)
+        except (OSError,subprocess.TimeoutExpired):
+            return hold("RETAINED_NODE_BINARY_READ_UNAVAILABLE")
+        if (result.returncode!=0
+                or result.stdout.strip()!="OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS"):
+            return hold("RETAINED_NODE_BINARY_ABSENT_OR_HASH_DRIFT")
+        after = admission.host.read_only_docker_inspect(runner=runner)
+        if _retained_container_fingerprint(after)!=identity:
+            return hold("RETAINED_NODE_RECREATED_DURING_REVIEW")
+        verify = admission.report(
+            "backhaul", paths.node, runtime=after,
+            expected_node_image=expected_node_image,
+            signed_pair_manifest=signed_pair_manifest,
+            signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+            signed_pair_source_sha=signed_pair_source_sha,
+            signed_pair_publish_ref=signed_pair_publish_ref,
+            signed_pair_trusted_root=signed_pair_trusted_root,
+        )
+        if (verify.get("SAVED_TUNNEL_REGISTRY_SHA256"),
+            verify.get("BROKER_SOCKET_ID_SHA256"),
+            verify.get("WSS_EDGE_JOURNAL_SHA256"),
+            verify.get("FRPC_INSTANCE_SHA256"),
+            verify.get("FRPS_INSTANCE_SHA256"))!=protected_before:
+            return hold("FRP_OR_BROKER_LOCAL_EVIDENCE_CHANGED")
+        if (_sha(_read(paths.node/".env",16384))!=env_before
+                or _sha(_read(paths.node/"docker-compose.yml",131072))!=compose_before
+                or _sha(_read(paths.node/"config/engine-state/engines.json",8192))
+                    !=manifest_before):
+            return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+        report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
+        return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED"
+                    if report["SIGNED_REGISTRY_PAIR_PROOF"]!="COSIGN_VERIFIED"
+                    else "IN_PLACE_SIGNED_TRANSACTION_NOT_IMPLEMENTED")
+    except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
+            RuntimeError,TypeError):
+        return hold("RETAINED_NODE_PREVIEW_UNVERIFIED")
+
+
 PROBE = r'''
 import json, os, secrets, urllib.error, urllib.request
 from app.agent_auth import read_identity
@@ -613,8 +782,14 @@ def recover(*, expected_node_image: str, role_confirm: str,
 def main() -> int:
     p = argparse.ArgumentParser(
         description="Backhaul disposable-host executor; explicit trial only, no tunnel Apply")
-    p.add_argument("action", choices=("install", "rollback", "recover"))
+    p.add_argument("action", choices=("install", "rollback", "recover", "review-in-place"))
     p.add_argument("--stage", type=Path)
+    p.add_argument("--arch", choices=tuple(package.OFFICIAL_BINARY_SHA256))
+    p.add_argument("--signed-pair-manifest", type=Path)
+    p.add_argument("--signed-pair-manifest-sha256")
+    p.add_argument("--signed-pair-source-sha")
+    p.add_argument("--signed-pair-publish-ref")
+    p.add_argument("--signed-pair-trusted-root", type=Path)
     p.add_argument("--expected-node-image", required=True)
     p.add_argument("--expected-plan-sha256")
     p.add_argument("--confirm-snapshot-and-console")
@@ -623,7 +798,18 @@ def main() -> int:
     try:
         if os.geteuid() != 0:
             raise Hold("ROOT_REQUIRED")
-        if args.action == "install":
+        if args.action == "review-in-place":
+            if args.arch is None or args.confirm_role != "REVIEW-BACKHAUL-IN-PLACE":
+                raise Hold("IN_PLACE_REVIEW_ARCH_AND_CONFIRMATION_REQUIRED")
+            result = review_in_place_binary(
+                expected_node_image=args.expected_node_image,arch=args.arch,
+                signed_pair_manifest=args.signed_pair_manifest,
+                signed_pair_manifest_sha256=args.signed_pair_manifest_sha256,
+                signed_pair_source_sha=args.signed_pair_source_sha,
+                signed_pair_publish_ref=args.signed_pair_publish_ref,
+                signed_pair_trusted_root=args.signed_pair_trusted_root,
+            )
+        elif args.action == "install":
             if args.stage is None or args.expected_plan_sha256 is None:
                 raise Hold("STAGE_AND_PLAN_REQUIRED")
             result = install(
@@ -645,7 +831,7 @@ def main() -> int:
             )
         for key, value in result.items():
             print(f"{key}={value}")
-        return 0
+        return 2 if args.action == "review-in-place" else 0
     except SimulatedCrash:
         print("HOLD: INTERRUPTED_TRIAL_JOURNAL_REQUIRES_RECOVER", file=sys.stderr)
         return 91
