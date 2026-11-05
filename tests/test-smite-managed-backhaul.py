@@ -210,17 +210,18 @@ class BackhaulPrepare(unittest.TestCase):
         compose_path = self.node / "docker-compose.yml"
         base_compose = compose_path.read_text()
         base_env = env.read_text()
+        def role_check(node, role, record):
+            if role != "KH":
+                return {"state": "UNAVAILABLE",
+                        "reason": "RC7_ENROLLMENT_ROLE_MISMATCH"}
+            return proof
         with patch.object(engine, "_rc7_bundled_frp_local_status",
-                          return_value=proof) as review:
+                          side_effect=role_check):
             for bad_env in (base_env.replace("NODE_ROLE=foreign", "NODE_ROLE=unknown"),
                             base_env.replace("NODE_ROLE=foreign", "NODE_ROLE=iran")):
                 env.write_text(bad_env)
-                if "unknown" in bad_env:
-                    with self.assertRaises(engine.Hold):
-                        self.prepare()
-                else:
-                    with self.assertRaises(engine.Hold):
-                        self.prepare()
+                with self.assertRaises(engine.Hold):
+                    self.prepare()
             env.write_text(base_env)
             for bad in (
                 base_compose.replace("ghcr.io/aghajani82/smite-node@sha256:" + "a" * 64,
