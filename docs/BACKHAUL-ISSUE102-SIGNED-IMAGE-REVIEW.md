@@ -169,6 +169,53 @@ Production decisions require independently verified live before/after signed
 evidence and explicit operator recovery/rollback approval on **both** hosts.
 No new install or automated recovery path is enabled.
 
+## RC7 independently signed FRPS Owner listener verification (incremental)
+
+The existing `smite-rc7-frp-enrollment.py` RC7 lifecycle module has a new
+**read-only diagnostic action** `verify-owner --role ir`, separate from
+`verify` because a fresh enrolled FRP engine need not have any owner yet.
+
+For an already COMMITTED **IR** enrollment it first revalidates the exact
+protected WSS runtime, Node image, root-owned enrollment journal/engine
+manifest and pinned frpc/frps binary digests. It then performs the existing
+signed HMAC/replay health check and signed `/api/agent/engines` inventory
+check. **Only after those pass**, the same existing signed Node identity
+creates a fresh anti-replay nonce and sends a signed GET to the existing Smite
+Agent `/api/agent/frp/owners` endpoint on `127.0.0.1:8888` **inside the
+reviewed Node container**. The request uses no proxy and refuses redirects.
+No new Smite API or secrets are exposed.
+
+The current Smite endpoint validates the single tracked server-mode FRPS
+process, its matching PID, and a local `127.0.0.1:7000` TCP LISTEN socket.
+The host side requires an exact, bounded, duplicate-key-free response with
+one Owner, control port 7000, and a strictly typed, sorted, unique,
+bounded list of locally observed proxy listener ports. Any missing, multiple,
+malformed or inconsistent Owner leads to HOLD, not an invented success.
+The output is **only**:
+
+```text
+RC7_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER
+FRPS_CHILD_FORWARDING=NOT_PROVEN
+LIVE_CONFIG_CHANGES=NONE
+```
+
+On a failed probe, the result is a sanitized `HOLD: ...` and no raw Owner ID,
+FRPS token, child specification, peer address or signed HTTP response is
+printed. The signed GET **does consume a nonce in the durable Replay store**
+but does not alter FRP, Node, Nginx, the Broker or any tunnel. No docker
+restart/recreate, no new public port, no installation side effects. The
+existing plain `verify` behavior remains unchanged and works on pre-Owner
+enrollment. This diagnostic is not exposed as a new installer/menu item.
+
+**Important distinction:** proving the IR Owner and its local listeners is
+not proving live foreign FRPC children, individual child/port grants,
+end-to-end XHTTP over WSS/443, zero disconnection, continuous forwarding,
+safe Backhaul coexistence, or rollback. Separate authenticated Panel/foreign
+node child inventories, an independent trusted baseline and a disposable
+real shared-WSS transaction test are still required. `INSTALL_ALLOWED=NO`
+and `ACTIVATION_GATE=HOLD` stay mandatory for existing FRP tunnels.
+This diagnostic is not a request to execute any command on IR or Grandoptical.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime

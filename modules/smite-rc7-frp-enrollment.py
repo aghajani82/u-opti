@@ -137,6 +137,79 @@ with opener.open(request,timeout=6) as response:
 print('SIGNED_FRP_INVENTORY=PASS')
 """
 
+
+# The existing Smite Agent FRPS owner endpoint checks a *tracked* server-mode
+# frps process and its loopback :7000 LISTEN socket. It does not prove any
+# foreign child, live forwarding, nginx/443, or zero-disruption continuity.
+# Send a real signed GET with a fresh replay nonce; response stays internal to
+# the host verifier and cannot contain a secret in operator output.
+SIGNED_OWNER_REQUEST=r"""
+import json,secrets,urllib.request
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        return None
+node_id,secret=read_identity('/run/smite-node-identity/node-identity.json')
+target='/api/agent/frp/owners'
+headers=sign_request(secret=secret,node_id=node_id,method='GET',target=target,
+                     body=b'',nonce=secrets.token_hex(16))
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+url='http://127.0.0.1:8888'+target
+request=urllib.request.Request(url,headers=headers,method='GET')
+with opener.open(request,timeout=6) as response:
+    assert response.status==200 and response.geturl()==url
+    raw=response.read(8193)
+    assert 0<len(raw)<=8192
+    json.loads(raw)
+print(raw.decode('utf-8'))
+"""
+
+OWNER_ID=re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
+
+
+def signed_owner_payload(raw):
+    """Validate existing signed Agent owner response, not caller-provided state.
+
+    This is only meaningful for data obtained by SIGNED_OWNER_REQUEST; never
+    call it proof of a signed response for arbitrary local JSON.
+    """
+    need(isinstance(raw,str) and 0<len(raw.encode('utf-8'))<=8192,
+         'SIGNED_FRPS_OWNER_RESPONSE_INVALID')
+    def no_duplicates(pairs):
+        obj={}
+        for key,value in pairs:
+            if key in obj: raise Hold('SIGNED_FRPS_OWNER_RESPONSE_INVALID')
+            obj[key]=value
+        return obj
+    try: body=json.loads(raw,object_pairs_hook=no_duplicates)
+    except (ValueError,UnicodeError,TypeError) as exc:
+        raise Hold('SIGNED_FRPS_OWNER_RESPONSE_INVALID') from exc
+    need(isinstance(body,dict) and set(body)=={'status','owners'}
+         and body['status']=='success'
+         and isinstance(body['owners'],list) and len(body['owners'])==1,
+         'SIGNED_FRPS_OWNER_RESPONSE_INVALID')
+    owner=body['owners'][0]
+    need(isinstance(owner,dict)
+         and set(owner)=={'tunnel_id','control_port','proxy_ports'}
+         and isinstance(owner['tunnel_id'],str)
+         and OWNER_ID.fullmatch(owner['tunnel_id'])
+         and type(owner['control_port']) is int and owner['control_port']==7000
+         and isinstance(owner['proxy_ports'],list)
+         and len(owner['proxy_ports'])<=128
+         and all(type(p) is int and 1<=p<=65535 and p!=7000
+                 for p in owner['proxy_ports'])
+         and owner['proxy_ports']==sorted(set(owner['proxy_ports'])),
+         'SIGNED_FRPS_OWNER_RESPONSE_INVALID')
+    # No owner ID, per-port claims or auth data is ever printed.
+    return sha(owner['tunnel_id'].encode('ascii'))
+
+
+def signed_owner_inventory():
+    raw=rt.run(['docker','exec','smite-node','python3','-B','-c',
+                SIGNED_OWNER_REQUEST],timeout=30)
+    return signed_owner_payload(raw)
+
 def binaries():
     raw=p.run(['docker','exec','smite-node','python3','-B','-c',BINARY_AUDIT])
     try:digests=json.loads(raw)
@@ -290,13 +363,13 @@ def restore(entry):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('plan','apply','verify','rollback','recover'))
+    parser.add_argument('action',choices=('plan','apply','verify','verify-owner','rollback','recover'))
     parser.add_argument('--role',choices=('ir','foreign'),required=True)
     parser.add_argument('--snapshot-confirm',default='')
     args=parser.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
-        if args.action not in ('plan','verify'):
+        if args.action not in ('plan','verify','verify-owner'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-RC7-FRP-'+args.role.upper()
@@ -317,10 +390,17 @@ def main():
             with rt.locked():
                 entry=state()
                 need(entry['role']==args.role,'ROLE_MISMATCH')
-                if args.action=='verify':
+                if args.action in ('verify','verify-owner'):
                     need(entry['state']=='COMMITTED','ENROLLMENT_NOT_COMMITTED')
+                    if args.action=='verify-owner':
+                        need(args.role=='ir','IR_FRPS_OWNER_ONLY')
                     verify_file(entry);rt.signed_probe();enrolled_status()
-                    print('RC7_FRP_ENROLLMENT_VERIFY=PASS_SIGNED')
+                    if args.action=='verify-owner':
+                        signed_owner_inventory()
+                        print('RC7_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER')
+                        print('FRPS_CHILD_FORWARDING=NOT_PROVEN')
+                    else:
+                        print('RC7_FRP_ENROLLMENT_VERIFY=PASS_SIGNED')
                     print('LIVE_CONFIG_CHANGES=NONE')
                 else:
                     need(args.action=='recover' or entry['state']=='COMMITTED',

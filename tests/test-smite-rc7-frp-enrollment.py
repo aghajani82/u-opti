@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """RC7 explicit bundled-FRP engine enrollment isolated safety regression."""
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -70,9 +72,141 @@ class EnrollmentTests(unittest.TestCase):
                 with self.assertRaises(ctl.Hold):
                     ctl.verify_file(ctl.state())
 
+    def test_signed_owner_valid_runtime_contract_is_sanitized(self):
+        raw=json.dumps({
+            'status':'success',
+            'owners':[{'tunnel_id':'FRP-IR-Grandoptical-20182',
+                       'control_port':7000,
+                       'proxy_ports':[20182,45121,45122]}],
+        })
+        result=ctl.signed_owner_payload(raw)
+        self.assertEqual(len(result),64)
+        self.assertRegex(result,r'^[0-9a-f]{64}$')
+        self.assertNotIn('Grandoptical',result)
+
+    def test_signed_owner_rejects_missing_duplicate_spoofed_or_invalid_data(self):
+        good={'status':'success','owners':[{
+            'tunnel_id':'FRP-IR-Grandoptical-20182',
+            'control_port':7000,'proxy_ports':[20182,45121,45122]}]}
+        bad_cases=[
+            {},
+            {'status':'success','owners':[]},
+            {'status':'success','owners':[good['owners'][0],good['owners'][0]]},
+            {'status':'ok','owners':good['owners']},
+            {'status':'success','owners':'SECRET'},
+            {'status':'success','owners':[{
+                **good['owners'][0],'tunnel_id':'../../etc/passwd'}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'control_port':True}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'control_port':7001}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':[20182,20182]}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':[45121,20182]}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':[0]}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':[7000]}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':[True]}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'proxy_ports':list(range(1,131))}]},
+            {'status':'success','owners':[{
+                **good['owners'][0],'token':'DO_NOT_PRINT_ME'}]},
+            {**good,'debug':'SECRET'},
+        ]
+        for case in bad_cases:
+            with self.subTest(case=str(case)[:45]):
+                with self.assertRaises(ctl.Hold):
+                    ctl.signed_owner_payload(json.dumps(case))
+        for raw in (
+            '{"status":"success","status":"success","owners":[]}',
+            '{"status":"success","owners":[{"tunnel_id":"id",'
+            '"control_port":7000,"proxy_ports":[],"control_port":7000}]}',
+            '{garbled', 'A'*8193, '', 'null',
+        ):
+            with self.subTest(raw=raw[:35]):
+                with self.assertRaises(ctl.Hold):
+                    ctl.signed_owner_payload(raw)
+
+    def test_signed_owner_request_uses_fixed_signed_agent_endpoint(self):
+        script=ctl.SIGNED_OWNER_REQUEST
+        self.assertIn("target='/api/agent/frp/owners'",script)
+        self.assertIn('method=\'GET\'',script)
+        self.assertIn('nonce=secrets.token_hex(16)',script)
+        self.assertIn('ProxyHandler({})',script)
+        self.assertIn('class NoRedirect',script)
+        self.assertIn('raw=response.read(8193)',script)
+        self.assertNotIn('/tunnels/apply',script)
+        self.assertNotIn('/tunnels/remove',script)
+        compile(script,'<signed-owner-check>','exec')
+
+    def test_verify_owner_on_ir_calls_signed_api_after_existing_rc7_guards(self):
+        record={'role':'ir','state':'COMMITTED'}
+        invocations=[]
+        def guarded_verify(entry):
+            invocations.append('file')
+        def guarded_hmac():
+            invocations.append('hmac')
+        def guarded_inventory():
+            invocations.append('engine')
+        def guarded_owner():
+            invocations.append('owner')
+            return 'a'*64
+        output=io.StringIO()
+        with patch('sys.argv',['enroll','verify-owner','--role','ir']), \
+             patch.object(ctl.os,'geteuid',return_value=0), \
+             patch.object(ctl.rt,'locked',return_value=contextlib.nullcontext()), \
+             patch.object(ctl,'state',return_value=record), \
+             patch.object(ctl,'verify_file',side_effect=guarded_verify), \
+             patch.object(ctl.rt,'signed_probe',side_effect=guarded_hmac), \
+             patch.object(ctl,'enrolled_status',side_effect=guarded_inventory), \
+             patch.object(ctl,'signed_owner_inventory',side_effect=guarded_owner), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(ctl.main(),0)
+        self.assertEqual(invocations,['file','hmac','engine','owner'])
+        self.assertIn('RC7_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER',output.getvalue())
+        self.assertIn('FRPS_CHILD_FORWARDING=NOT_PROVEN',output.getvalue())
+        self.assertIn('LIVE_CONFIG_CHANGES=NONE',output.getvalue())
+        self.assertNotIn('Grandoptical',output.getvalue())
+
+    def test_verify_owner_blocks_wrong_role_journal_and_refused_owner(self):
+        for record,role,expected in [
+            ({'role':'foreign','state':'COMMITTED'},'foreign','IR_FRPS_OWNER_ONLY'),
+            ({'role':'ir','state':'HOLD'},'ir','ENROLLMENT_NOT_COMMITTED'),
+            ({'role':'foreign','state':'COMMITTED'},'ir','ROLE_MISMATCH'),
+        ]:
+            with self.subTest(role=role,state=record['state']):
+                stderr=io.StringIO()
+                with patch('sys.argv',['enroll','verify-owner','--role',role]), \
+                     patch.object(ctl.os,'geteuid',return_value=0), \
+                     patch.object(ctl.rt,'locked',return_value=contextlib.nullcontext()), \
+                     patch.object(ctl,'state',return_value=record), \
+                     patch.object(ctl,'verify_file') as verify_file, \
+                     patch.object(ctl,'signed_owner_inventory') as owner, \
+                     contextlib.redirect_stderr(stderr):
+                    self.assertEqual(ctl.main(),2)
+                self.assertIn('HOLD: '+expected,stderr.getvalue())
+                verify_file.assert_not_called()
+                owner.assert_not_called()
+        stderr=io.StringIO()
+        with patch('sys.argv',['enroll','verify-owner','--role','ir']), \
+             patch.object(ctl.os,'geteuid',return_value=0), \
+             patch.object(ctl.rt,'locked',return_value=contextlib.nullcontext()), \
+             patch.object(ctl,'state',return_value={'role':'ir','state':'COMMITTED'}), \
+             patch.object(ctl,'verify_file'), \
+             patch.object(ctl.rt,'signed_probe'), \
+             patch.object(ctl,'enrolled_status'), \
+             patch.object(ctl,'signed_owner_inventory',
+                          side_effect=ctl.Hold('SIGNED_FRPS_OWNER_RESPONSE_INVALID')), \
+             contextlib.redirect_stderr(stderr):
+            self.assertEqual(ctl.main(),2)
+        self.assertIn('HOLD: SIGNED_FRPS_OWNER_RESPONSE_INVALID',stderr.getvalue())
+
     def test_no_host_binaries_or_network_listener_side_effects(self):
         src=PATH.read_text()
-        self.assertIn("choices=('plan','apply','verify','rollback','recover')",src)
+        self.assertIn("choices=('plan','apply','verify','verify-owner','rollback','recover')",src)
         self.assertIn("SNAPSHOTS-CONSOLES-VERIFIED",src)
         self.assertIn("SIGNED_INVENTORY",src)
         self.assertIn("FRP_BINARY_EXTERNAL_MOUNT",src)
