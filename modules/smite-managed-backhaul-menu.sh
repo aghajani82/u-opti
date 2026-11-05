@@ -79,6 +79,21 @@ smite_managed_bh_menu() {
                 else
                     echo "HOLD: Common host admission helper missing."
                 fi
+                echo "===== RC7 BUNDLED BACKHAUL + SIGNED INVENTORY (REVIEW ONLY) ====="
+                if [ -s "$SMITE_MANAGED_BACKHAUL_CONTROL" ]; then
+                    # No role prompt, extra menu item or caller-controlled
+                    # identity. The Python helper validates the actual
+                    # /opt/smite-node root and checks its RC7 committed role.
+                    # Signed GETs consume a replay nonce; NO tunnel Apply,
+                    # Docker recreate, FRPS stop or manifest edit occurs.
+                    python3 -B "$SMITE_MANAGED_BACKHAUL_CONTROL" \
+                        verify-rc7-bundle --auto-role \
+                        --node-dir "$SMITE_MANAGED_NODE_DIR" || :
+                else
+                    echo "HOLD: RC7 bundled engine checker missing."
+                fi
+                echo "INSTALL_ALLOWED=NO"
+                echo "ACTIVATION_GATE=HOLD"
                 ;;
             4)
                 echo "===== SAFE HOST REPORT (NO SECRETS) ====="
