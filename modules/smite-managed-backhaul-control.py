@@ -501,19 +501,41 @@ def exercise(root: Path, *, action: str, stage: Path | None = None) -> dict[str,
                 "next": "NO_LIVE_SERVICES_TOUCHED"}
 
 
+def _rc7_operator_review_role(node_dir: Path) -> str:
+    """Resolve only the real managed Node's role; never source .env as shell.
+
+    This is NOT installation authorization. The existing RC7 checker still
+    separately verifies the committed WSS runtime role and signed inventory.
+    Fail closed for alternate paths so a caller cannot label a lab directory
+    as proof of the actual IR or Grandoptical Node.
+    """
+    if node_dir != NODE_DEFAULT or node_dir.is_symlink() or not node_dir.is_dir():
+        raise Hold("RC7_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED")
+    role, _ = _trusted_env(node_dir)
+    if role not in ("IR", "KH"):
+        raise Hold("RC7_BUNDLED_ROLE_UNTRUSTED")
+    return "ir" if role == "IR" else "foreign"
+
+
 def main() -> int:
     arg = argparse.ArgumentParser(description="Managed Backhaul: safe review, CI-only activation")
     arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback", "verify-rc7-bundle"))
     arg.add_argument("--node-dir", type=Path, default=NODE_DEFAULT)
     arg.add_argument("--role", choices=("ir", "foreign"))
+    arg.add_argument("--auto-role", action="store_true",
+                     help="Review actual /opt/smite-node role without sourcing .env")
     arg.add_argument("--stage", type=Path)
     arg.add_argument("--lab-root", type=Path)
     args = arg.parse_args()
     try:
         if args.action == "verify-rc7-bundle":
-            if not args.role:
+            if args.auto_role and args.role:
+                raise Hold("RC7_BUNDLED_CONFLICTING_ROLE_SELECTION")
+            role = (_rc7_operator_review_role(args.node_dir)
+                    if args.auto_role else args.role)
+            if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
-            _format(verify_rc7_bundled_backhaul(args.role))
+            _format(verify_rc7_bundled_backhaul(role))
         elif args.action in ("install", "rollback"):
             if args.lab_root is None:
                 raise Hold("Real host engine activation is NOT enabled; no server changed")
