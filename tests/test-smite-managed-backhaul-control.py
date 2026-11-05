@@ -3,6 +3,8 @@
 from __future__ import annotations
 import importlib.util
 import json
+import contextlib
+from types import SimpleNamespace
 import os
 from pathlib import Path
 import subprocess
@@ -119,6 +121,154 @@ class OperatorControl(unittest.TestCase):
                 control.exercise(self.root, action="rollback")
         self.assertFalse((self.root / ".backhaul-control.lock").exists())
         self.assertFalse((self.node / "config/engine-state").exists())
+
+    def _rc7_bundle_fake(self, *, role="foreign", inventory=None,
+                         binary=None, mounts=None, probe_error=None):
+        engines = {name: "not-installed" for name in control.ENGINES}
+        engines["frp"] = "ready"
+        if inventory is None:
+            inventory = {"mode": "managed", "engines": engines}
+        if binary is None:
+            binary = {"sha256": "a" * 64}
+        calls = []
+        def node_details():
+            calls.append("runtime")
+            return {"role": role}
+        def inspect(_name):
+            calls.append("mounts")
+            return {"Mounts": mounts if mounts is not None else [
+                {"Destination": "/etc/smite-node", "Type": "bind"},
+                {"Destination": "/var/lib/smite-node", "Type": "volume"},
+            ]}
+        def hmac():
+            calls.append("replay")
+            if probe_error:
+                raise FakeHold(probe_error)
+        def run(argv, *, timeout):
+            self.assertEqual(argv[:5], ["docker","exec","smite-node","python3","-B"])
+            self.assertEqual(timeout, 30)
+            if "os.lstat(path)" in argv[-1]:
+                calls.append("binary")
+                return binary if isinstance(binary,str) else json.dumps(binary)
+            self.assertIn("target='/api/agent/engines'",argv[-1])
+            calls.append("signed-inventory")
+            return inventory if isinstance(inventory,str) else json.dumps(inventory)
+        class FakeHold(Exception):
+            pass
+        rt = SimpleNamespace(
+            Hold=FakeHold, locked=lambda:contextlib.nullcontext(),
+            inspect_container=inspect, signed_probe=hmac, run=run,
+        )
+        fake = SimpleNamespace(Hold=FakeHold, rt=rt, node_details=node_details)
+        return fake,calls
+
+    def test_rc7_bundled_signed_inventory_no_recreate_and_not_ready_yet(self):
+        fake,calls = self._rc7_bundle_fake()
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            status=control.verify_rc7_bundled_backhaul("foreign")
+        self.assertEqual(calls,["runtime","mounts","replay","binary","signed-inventory"])
+        self.assertEqual(status["RC7_BACKHAUL_IMAGE_BINARY"],
+                         "OBSERVED_PINNED_IMAGE_NO_MOUNT")
+        self.assertEqual(status["RC7_BACKHAUL_ENGINE"],
+                         "NOT_INSTALLED_SIGNED_INVENTORY")
+        self.assertEqual(status["RC7_FRP_ENGINE"],"READY_SIGNED_INVENTORY")
+        self.assertEqual(status["NODE_RECREATED"],"NO")
+        self.assertEqual(status["INSTALL_ALLOWED"],"NO")
+        self.assertEqual(status["ACTIVATION_GATE"],"HOLD")
+        self.assertEqual(status["SIGNED_OWNER_CHILD_CONTINUITY"],"NOT_PROVEN")
+        self.assertNotIn("a"*64,str(status))
+        self.assertNotIn("Docker",str(status))
+
+    def test_rc7_bundle_unsafe_mount_role_and_root_are_hold_before_probe(self):
+        for kwargs,reason in (
+            ({"role":"ir"}, "RC7_BUNDLED_RUNTIME_ROLE_MISMATCH"),
+            ({"mounts":[{"Destination":"/usr/local/bin/backhaul"}]},
+             "RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT"),
+            ({"mounts":[{"Destination":"/usr/local"}]},
+             "RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT"),
+            ({"mounts":[{"Destination":None}]},
+             "RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                fake,calls = self._rc7_bundle_fake(**kwargs)
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaisesRegex(control.Hold,reason):
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertNotIn("replay",calls)
+                self.assertNotIn("binary",calls)
+        fake,calls=self._rc7_bundle_fake()
+        with patch.object(control.os,"geteuid",return_value=123), \
+             patch.object(control,"_load",return_value=fake):
+            with self.assertRaisesRegex(control.Hold,"RC7_BUNDLED_ROOT_REQUIRED"):
+                control.verify_rc7_bundled_backhaul("foreign")
+        self.assertEqual(calls,[])
+
+    def test_rc7_bundle_wrong_signed_inventory_fails_closed(self):
+        ready = {name:"not-installed" for name in control.ENGINES}
+        ready["frp"]="ready"
+        cases = [
+            {"mode":"legacy","engines":ready},
+            {"mode":"managed","engines":{**ready,"frp":"unavailable"}},
+            {"mode":"managed","engines":{**ready,"backhaul":"ready"}},
+            {"mode":"managed","engines":{**ready,"backhaul":"unavailable"}},
+            {"mode":"managed","engines":{**ready,"frp":True}},
+            {"mode":"managed","engines":{**ready,"frp":"ready","unknown":"ready"}},
+            {"mode":"managed","engines":{"backhaul":"not-installed"}},
+            {"engines":ready},
+            '{"mode":"managed","mode":"managed","engines":{}}',
+            '{"mode":"managed","engines":{"backhaul":"not-installed","backhaul":"ready"}}',
+            "SECRET_USERNAME_TOKEN_NOT_JSON",
+        ]
+        for state in cases:
+            with self.subTest(state=str(state)[:40]):
+                fake,calls = self._rc7_bundle_fake(inventory=state)
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaises(control.Hold):
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertEqual(calls,["runtime","mounts","replay",
+                                        "binary","signed-inventory"])
+        fake,calls=self._rc7_bundle_fake(probe_error="PRIVATE_SECRET")
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            with self.assertRaisesRegex(control.Hold,
+                                        "RC7_BUNDLED_RUNTIME_UNVERIFIED") as held:
+                control.verify_rc7_bundled_backhaul("foreign")
+        self.assertNotIn("PRIVATE_SECRET",str(held.exception))
+        self.assertEqual(calls,["runtime","mounts","replay"])
+
+    def test_rc7_bundle_binary_hash_invalid_or_unsafe_payload_refused(self):
+        for blob in (
+            {}, {"sha256":""}, {"sha256":"G"*64}, {"sha256":1},
+            {"sha256":"a"*64, "token":"DONT_LOG_THIS"},
+            '{"sha256":"'+("a"*64)+'","sha256":"'+("b"*64)+'"}',
+            "{garbled", "",
+        ):
+            with self.subTest(blob=str(blob)[:30]):
+                fake,_=self._rc7_bundle_fake(binary=blob)
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaises(control.Hold):
+                        control.verify_rc7_bundled_backhaul("foreign")
+        self.assertNotIn("DONT_LOG_THIS",str(control._strict_rc7_response.__doc__))
+
+    def test_rc7_preflight_actions_have_fixed_signed_and_no_mutation_contract(self):
+        compile(control.RC7_BUNDLED_BACKHAUL_AUDIT,"<image-audit>","exec")
+        compile(control.RC7_BUNDLED_SIGNED_INVENTORY,"<signed-agent-get>","exec")
+        self.assertIn("nonce=secrets.token_hex(16)",
+                      control.RC7_BUNDLED_SIGNED_INVENTORY)
+        self.assertIn("ProxyHandler({})",control.RC7_BUNDLED_SIGNED_INVENTORY)
+        self.assertIn("NoRedirect",control.RC7_BUNDLED_SIGNED_INVENTORY)
+        self.assertIn("os.O_NOFOLLOW",control.RC7_BUNDLED_BACKHAUL_AUDIT)
+        self.assertNotIn("docker compose",control.RC7_BUNDLED_BACKHAUL_AUDIT)
+        self.assertNotIn("/api/agent/tunnels/apply",
+                         control.RC7_BUNDLED_SIGNED_INVENTORY)
+        out=self.run_control("verify-rc7-bundle")
+        self.assertEqual(out.returncode,2)
+        self.assertIn("HOLD: RC7_BUNDLED_ROLE_REQUIRED",out.stderr)
+        self.assertFalse((self.node/"config/engine-state").exists())
 
     def test_menu_is_clear_and_inert(self):
         result = subprocess.run(
