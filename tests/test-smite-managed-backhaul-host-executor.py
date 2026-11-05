@@ -320,6 +320,129 @@ class HostExecutor(unittest.TestCase):
                     exe._assert_no_frp_before_recreate(
                         self.paths, previous_manifest=malformed)
 
+
+    def _retained_review_fixture(self):
+        """FRP enrolled with saved tunnels; no Compose or container changes."""
+        manifest=self.config/"engine-state"/"engines.json"
+        manifest.parent.mkdir(mode=0o700)
+        manifest.write_text(json.dumps({"schema":1,"engines":{"frp":{
+            "sha256":"b"*64,"server_sha256":"c"*64
+        }}},sort_keys=True)+"\n")
+        manifest.chmod(0o600)
+        (self.data/"tunnels.json").write_text(json.dumps({
+            "owner":{"core":"frp","spec":{"mode":"server"}},
+            "child":{"core":"frp","spec":{"mode":"client"}},
+        }))
+        self.runtime["Id"]="1"*64
+        self.runtime["Image"]="sha256:"+"2"*64
+        self.runtime["State"]["StartedAt"]="2026-11-05T18:00:00Z"
+        audit={"NODE_CONTAINER":"RUNNING_REVIEWED_IMAGE",
+               "CORE_PROFILE":"MANAGED_STRICT",
+               "SAVED_TUNNELS":"EXISTING_DO_NOT_RESTART",
+               "TARGET_ENGINE":"NOT_INSTALLED",
+               "OTHER_ENGINE":"ENROLLED_UNVERIFIED",
+               "OTHER_ENGINE_ACTION":"NEVER_MODIFY",
+               "SIGNED_REGISTRY_PAIR_PROOF":"NOT_SUPPLIED",
+               "INSTALL_ALLOWED":"NO",
+               "ACTIVATION_GATE":"HOLD",
+               "SAVED_TUNNEL_REGISTRY_SHA256":"d"*64,
+               "BROKER_SOCKET_ID_SHA256":"e"*64,
+               "WSS_EDGE_JOURNAL_SHA256":"f"*64,
+               "FRPC_INSTANCE_SHA256":"a"*64,
+               "FRPS_INSTANCE_SHA256":"b"*64}
+        class RetainedRunner:
+            def __init__(self,doc):
+                self.doc=doc
+                self.calls=[]
+                self.binary_ok=True
+                self.replace=False
+            def __call__(self,args,**kwargs):
+                self.calls.append(tuple(args))
+                class Result:
+                    returncode=0
+                    stdout=""
+                    stderr=""
+                result=Result()
+                if args[:3]==["docker","inspect","--type=container"]:
+                    doc=dict(self.doc)
+                    if self.replace and len(self.calls)>2:
+                        doc["Id"]="3"*64
+                    result.stdout=json.dumps([doc])
+                elif args[:3]==["docker","exec","-i"]:
+                    result.stdout=("OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS\n"
+                                   if self.binary_ok else "")
+                    if not self.binary_ok: result.returncode=2
+                    self.assert_probe_args=args
+                else:
+                    raise AssertionError("Unexpected command")
+                return result
+        runner=RetainedRunner(self.runtime)
+        return runner,audit
+
+    def test_retained_frp_node_official_binary_preview_is_never_install(self):
+        runner,audit=self._retained_review_fixture()
+        original=(self.node/".env").read_bytes(),(self.node/"docker-compose.yml").read_bytes(),\
+                 (self.config/"engine-state/engines.json").read_bytes(),\
+                 (self.data/"tunnels.json").read_bytes()
+        with patch.object(exe.admission,"report",return_value=audit):
+            result=exe.review_in_place_binary(
+                expected_node_image=IMAGE,arch="amd64",
+                paths=self.paths,runner=runner)
+        self.assertEqual(result["RETAINED_NODE_BACKHAUL_BINARY"],
+                         "OFFICIAL_EXECUTABLE_SHA256_MATCH")
+        self.assertEqual(result["REASON"],
+                         "SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
+        self.assertEqual(result["INSTALL_ALLOWED"],"NO")
+        self.assertEqual(result["ACTIVATION_GATE"],"HOLD")
+        self.assertEqual(result["NODE_RECREATE"],"FORBIDDEN")
+        self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"],"NOT_IMPLEMENTED")
+        self.assertEqual(len(runner.calls),3)
+        self.assertEqual([x[:2] for x in runner.calls],
+                         [("docker","inspect"),("docker","exec"),("docker","inspect")])
+        self.assertNotIn("compose",str(runner.calls))
+        self.assertIn("UOPTI_EXPECTED_BACKHAUL_SHA256="+
+                      exe.package.OFFICIAL_BINARY_SHA256["amd64"],runner.assert_probe_args)
+        self.assertEqual(original,(
+            (self.node/".env").read_bytes(),
+            (self.node/"docker-compose.yml").read_bytes(),
+            (self.config/"engine-state/engines.json").read_bytes(),
+            (self.data/"tunnels.json").read_bytes()))
+        self.assertFalse(exe._journal(self.paths).exists())
+
+    def test_retained_frp_binary_missing_or_replaced_fails_closed(self):
+        runner,audit=self._retained_review_fixture()
+        for attr in ("binary_ok","replace"):
+            with self.subTest(attr=attr):
+                runner.calls.clear()
+                setattr(runner,attr,False if attr=="binary_ok" else True)
+                with patch.object(exe.admission,"report",return_value=audit):
+                    result=exe.review_in_place_binary(
+                        expected_node_image=IMAGE,arch="amd64",
+                        paths=self.paths,runner=runner)
+                self.assertEqual(result["INSTALL_ALLOWED"],"NO")
+                self.assertNotEqual(result["RETAINED_NODE_BACKHAUL_BINARY"],
+                                    "OFFICIAL_EXECUTABLE_SHA256_MATCH")
+                self.assertFalse(exe._journal(self.paths).exists())
+                setattr(runner,attr,True if attr=="binary_ok" else False)
+
+    def test_retained_frp_unsigned_image_or_bad_host_never_authorizes(self):
+        runner,audit=self._retained_review_fixture()
+        for expected in ("latest","ghcr.io/aghajani82/smite-node:latest"):
+            with self.subTest(image=expected):
+                result=exe.review_in_place_binary(
+                    expected_node_image=expected,arch="amd64",
+                    paths=self.paths,runner=runner)
+                self.assertEqual(result["REASON"],"EXTERNAL_NODE_IMAGE_PIN_REQUIRED")
+                self.assertFalse(runner.calls)
+        with patch.object(exe.admission,"report",return_value={
+            **audit,"OTHER_ENGINE":"UNAVAILABLE",
+        }):
+            result=exe.review_in_place_binary(
+                expected_node_image=IMAGE,arch="amd64",paths=self.paths,runner=runner)
+        self.assertEqual(result["REASON"],"RETAINED_FRP_HOST_ADMISSION_HOLD")
+        self.assertEqual(result["INSTALL_ALLOWED"],"NO")
+        self.assertFalse(exe._journal(self.paths).exists())
+
     def test_executor_has_no_nginx_firewall_xray_or_tunnel_apply_actions(self):
         source=SRC.read_text()
         for forbidden in ("nginx -s","iptables ","nft ","ufw ","xray","3x-ui",
