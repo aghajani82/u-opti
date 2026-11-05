@@ -10,7 +10,7 @@ signed health preflight and operator confirmation will still be necessary.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import fcntl
 import hashlib
 import importlib.util
@@ -712,6 +712,139 @@ def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
         raise Hold("RC7_PAIR_INJECTED_CLEANUP_CRASH_RESUME_REQUIRED")
     return _rc7_pair_finish_cleanup_locked(
         root, manifest, frp_receipt, journal, inject=inject)
+
+
+
+def _rc7_two_host_guards(root: Path, *, role: str) -> tuple[str, ...]:
+    """Synthetic protected WSS/FRP/identity/replay snapshots, NOT live probes.
+
+    PR-lab-only files stand in for externally observed runtime identities.
+    Their exact bytes are immutable through the two-file rehearsal. Nothing
+    here signs a Node request, runs a container or proves forwarding.
+    """
+    node_data = root / "node-data"
+    ensure_in_lab(root, node_data)
+    private_dir(node_data)
+    paths = (
+        root / "node/docker-compose.yml",
+        root / "node/.env",
+        node_data / "frp-owner-child.fixture.json",
+        node_data / "broker-replay.fixture.json",
+    )
+    values = tuple(checked(path, 131072) for path in paths)
+    for doc in values[2:]:
+        _pair_read_private(paths[values.index(doc)], limit=8192)
+    session = _pair_load_json(values[2])
+    replay = _pair_load_json(values[3])
+    if (set(session) != {"role", "frp", "tunnels"}
+            or session["role"] != role or session["frp"] != "0.71.0"
+            or session["tunnels"] != ["20182", "optical", "nahavi"]
+            or set(replay) != {"role", "identity", "broker", "replay"}
+            or replay["role"] != role or replay["broker"] != "up"
+            or replay["replay"] != "durable"
+            or not isinstance(replay["identity"], str)
+            or not replay["identity"]):
+        raise Hold("RC7_TWO_HOST_SYNTHETIC_GUARDS_INVALID")
+    return tuple(digest(v) for v in values)
+
+
+def rc7_two_host_rehearsal_lab(ir_root: Path, foreign_root: Path,
+                              backhaul_sha256: str, *,
+                              observe, inject: str = "") -> dict[str, str]:
+    """Coordinate TWO already-enrolled, disposable RC7 role fixtures.
+
+    Never called by CLI or installer. Both role locks stay held, with strict
+    *two-host preflight before either write*. Always compensates by exact
+    recovery of BOTH resource pairs; no Docker, network, tunnel recreation,
+    or signed production runtime observation takes place here.
+    """
+    if (ir_root == foreign_root or ir_root in foreign_root.parents
+            or foreign_root in ir_root.parents or not callable(observe)):
+        raise Hold("RC7_TWO_HOST_DISTINCT_OBSERVER_REQUIRED")
+    roles = (("ir", ir_root), ("foreign", foreign_root))
+    with ExitStack() as locks:
+        for role, root in roles:
+            locks.enter_context(_rc7_pair_shared_lock(root))
+
+        originals = {}
+        guards = {}
+        for role, root in roles:
+            manifest, receipt, journal = _pair_paths(root)
+            _reject_competing_recovery(root, pair_operation=True)
+            seal = root / PAIR_CLEANUP_SEAL
+            if (journal.exists() or journal.is_symlink()
+                    or seal.exists() or seal.is_symlink()):
+                raise Hold("RC7_TWO_HOST_PENDING_RECOVERY")
+            prior_manifest = _pair_read_private(manifest)
+            prior_receipt = _pair_read_private(receipt)
+            # Reuses exact COMMITTED FRP journal + Manifest semantics.
+            _pair_expected_transition(
+                prior_manifest, prior_receipt, backhaul_sha256, role=role)
+            originals[role] = (prior_manifest, prior_receipt)
+            guards[role] = _rc7_two_host_guards(root, role=role)
+
+        def unchanged():
+            return all(_rc7_two_host_guards(root, role=role) == guards[role]
+                       for role, root in roles)
+
+        def observed(phase):
+            # True is a **synthetic callback result**, NOT signed runtime
+            # attestation. Re-read all byte-pins immediately afterwards.
+            try:
+                accepted = observe(phase, ir_root, foreign_root) is True
+            except Exception:
+                accepted = False
+            return accepted and unchanged()
+
+        if not observed("before"):
+            raise Hold("RC7_TWO_HOST_PRIOR_SYNTHETIC_PROOF_FAILED")
+
+        failed = False
+        try:
+            _rc7_pair_apply_locked(
+                ir_root, backhaul_sha256, role="ir")
+            if not observed("after-ir") or inject == "after-ir":
+                raise Hold("RC7_TWO_HOST_IR_REHEARSAL_INTERRUPTED")
+            _rc7_pair_apply_locked(
+                foreign_root, backhaul_sha256, role="foreign",
+                inject="after-manifest" if inject == "foreign-after-manifest" else "")
+            if not observed("after-both") or inject == "after-both":
+                raise Hold("RC7_TWO_HOST_FOREIGN_REHEARSAL_INTERRUPTED")
+        except Exception:
+            failed = True
+
+        # If independent protected synthetic evidence drifted, retain
+        # journals for manual review rather than overwriting unrelated data.
+        try:
+            if not unchanged():
+                raise Hold("RC7_TWO_HOST_SYNTHETIC_GUARD_DRIFT")
+            for role, root in reversed(roles):
+                journal = root / PAIR_JOURNAL
+                seal = root / PAIR_CLEANUP_SEAL
+                if (journal.exists() or journal.is_symlink()
+                        or seal.exists() or seal.is_symlink()):
+                    _rc7_pair_recover_locked(root)
+            for role, root in roles:
+                manifest, receipt, _ = _pair_paths(root)
+                if ((_pair_read_private(manifest),
+                     _pair_read_private(receipt)) != originals[role]
+                        or not unchanged()):
+                    raise Hold("RC7_TWO_HOST_EXACT_RESTORE_FAILED")
+            if not observed("after-rollback"):
+                raise Hold("RC7_TWO_HOST_FINAL_SYNTHETIC_PROOF_FAILED")
+        except Exception:
+            raise Hold("RC7_TWO_HOST_ROLLBACK_MANUAL_REVIEW_REQUIRED") from None
+
+        if failed:
+            raise Hold("RC7_TWO_HOST_ABORTED_EXACT_ROLLBACK_PROVED")
+        return {
+            "RC7_TWO_HOST_PAIR": "DISPOSABLE_ROLE_PAIRED_EXACT_ROLLBACK",
+            "RC7_TWO_HOST_PROTECTED_BYTES": "SYNTHETIC_IMMUTABLE_BEFORE_DURING_AFTER",
+            "SIGNED_OWNER_CHILD_CONTINUITY": "NOT_PROVEN",
+            "NODE_RECREATED": "NO_DOCKER_EXECUTED_IN_LAB",
+            "INSTALL_ALLOWED": "NO",
+            "ACTIVATION_GATE": "HOLD",
+        }
 
 
 def main() -> int:
