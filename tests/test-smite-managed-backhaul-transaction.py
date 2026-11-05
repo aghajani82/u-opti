@@ -433,6 +433,90 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(receipt.read_bytes(), old_receipt)
         self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
 
+    def _rewrite_pair_journal_piece_with_matching_checksum(self, name, raw):
+        journal = self.root / lab.PAIR_JOURNAL
+        (journal / name).write_bytes(raw)
+        keys = {
+            "manifest.before": "manifest_before",
+            "frp.before": "frp_before",
+            "manifest.next": "manifest_next",
+            "frp.next": "frp_next",
+        }
+        record_file = journal / "record.json"
+        record = json.loads(record_file.read_bytes())
+        record[keys[name]] = hashlib.sha256(raw).hexdigest()
+        record_file.write_text(json.dumps(record, sort_keys=True) + "\n")
+
+    def test_rc7_pair_recovery_rejects_hash_consistent_wrong_prior_binding(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-manifest")
+        actual_manifest, actual_receipt = manifest.read_bytes(), receipt.read_bytes()
+        journal = self.root / lab.PAIR_JOURNAL
+        original = json.loads((journal / "manifest.before").read_bytes())
+        original["engines"]["gost"]["sha256"] = "e" * 64
+        altered = (json.dumps(original, sort_keys=True, indent=2) + "\n").encode()
+        self._rewrite_pair_journal_piece_with_matching_checksum(
+            "manifest.before", altered)
+        with self.assertRaisesRegex(lab.Hold, "RECOVERY_SEMANTIC_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), actual_manifest)
+        self.assertEqual(receipt.read_bytes(), actual_receipt)
+        self.assertTrue(journal.exists())
+
+    def test_rc7_pair_recovery_rejects_hash_consistent_wrong_next_receipt(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-receipt")
+        actual_manifest, actual_receipt = manifest.read_bytes(), receipt.read_bytes()
+        journal = self.root / lab.PAIR_JOURNAL
+        changed = json.loads((journal / "frp.next").read_bytes())
+        changed["new"] = "f" * 64
+        self._rewrite_pair_journal_piece_with_matching_checksum(
+            "frp.next", (json.dumps(changed, sort_keys=True) + "\n").encode())
+        with self.assertRaisesRegex(lab.Hold, "RECOVERY_SEMANTIC_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), actual_manifest)
+        self.assertEqual(receipt.read_bytes(), actual_receipt)
+        self.assertTrue(journal.exists())
+
+    def test_rc7_pair_recovery_rejects_hash_consistent_wrong_next_manifest(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-receipt")
+        actual_manifest, actual_receipt = manifest.read_bytes(), receipt.read_bytes()
+        journal = self.root / lab.PAIR_JOURNAL
+        changed = json.loads((journal / "manifest.next").read_bytes())
+        changed["engines"]["backhaul"]["sha256"] = "e" * 64
+        self._rewrite_pair_journal_piece_with_matching_checksum(
+            "manifest.next",
+            (json.dumps(changed, sort_keys=True, indent=2) + "\n").encode())
+        with self.assertRaisesRegex(lab.Hold, "RECOVERY_SEMANTIC_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), actual_manifest)
+        self.assertEqual(receipt.read_bytes(), actual_receipt)
+        self.assertTrue(journal.exists())
+
+    def test_rc7_pair_recovery_rejects_wrong_role_in_intact_journal(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-manifest")
+        actual_manifest, actual_receipt = manifest.read_bytes(), receipt.read_bytes()
+        journal = self.root / lab.PAIR_JOURNAL
+        record_file = journal / "record.json"
+        record = json.loads(record_file.read_bytes())
+        record["role"] = "foreign"
+        record_file.write_text(json.dumps(record, sort_keys=True) + "\n")
+        with self.assertRaisesRegex(lab.Hold, "RECOVERY_SEMANTIC_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), actual_manifest)
+        self.assertEqual(receipt.read_bytes(), actual_receipt)
+        self.assertTrue(journal.exists())
+
     def test_no_shell_docker_or_network_execution_available(self):
         src = (ROOT / "smite-managed-backhaul-transaction.py").read_text()
         for dangerous in ("subprocess", "os.system(", "socket.", "requests.", "httpx.",
