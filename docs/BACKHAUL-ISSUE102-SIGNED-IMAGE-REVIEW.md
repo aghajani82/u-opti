@@ -723,6 +723,51 @@ no real-host attestation or production-safe receipt migration**.
 Passing this test cannot change `INSTALL_ALLOWED=NO` or
 `ACTIVATION_GATE=HOLD`. Do not deploy Backhaul on IR/Grandoptical.
 
+## Signed managed Foreign Child over real CI WSS — existing Agent apply
+
+The existing two-Node private WSS/TLS/443 trial previously launched
+the foreign `frpc` with `docker exec -d`; this checked live packet
+forwarding, but **never exercised Smite's real signed FRP child
+creation/restore tracking or saved tunnel state**. It could not prove
+the existing Node's actual signed FRP Child management route.
+
+The existing official-artifact PR job now reuses its already checked-out
+immutable Smite `115f032761564a069d0aa2ca891e55d53a1c6ea0`
+(which implements strict shared-FRPS WSS preflight) **for the foreign
+Node only**, without changing the signed IR or image digest. The
+ephemeral Nginx gateway retains its private port 443 and obtains an
+additional private dotted DNS alias `ci-uopti-wss.local`; its temporary
+CA cert explicitly covers both names. That CA is mounted read-only
+as the disposable foreign Node's system trust bundle. The existing
+foreign echo service stays on loopback.
+
+Instead of starting `frpc` outside Smite, the test makes one **actual
+strict HMAC-signed POST** to the foreign Node's existing
+`/api/agent/tunnels/apply` for one disposable
+`mode=client` / `shared_frps_owner=ci-owner` child. Smite's
+real `AdapterManager` invokes its real `FrpAdapter.apply`,
+validates WSS/443 and starts FRPC 0.71.0 with a private token.
+During every stage of the RC7 Manifest + FRP receipt pair apply and
+rollback, the test now requires a **real signed GET** on the
+existing `/api/agent/tunnels/status` to report active FRP; an
+unsigned GET, cross-node signed identity and reused nonce must 401.
+It independently proves a unique FRPC process with the exact reviewed
+command-line has an **ESTABLISHED TCP connection to the private TLS
+gateway on 443**, its PID and create-time remain unchanged, the
+durable `tunnels.json` remains byte-identical and an actual TCP
+payload still traverses `FRPC -> private Nginx WSS/443 -> FRPS`.
+
+This replaces the previous **untracked foreign client** proof, not
+production deployment. The IR `frps` remains externally launched
+within the disposable container; the separately verified #128
+signed-tracked Owner endpoint uses an isolated live loopback FRPS,
+**not** a simultaneous shared real two-host tracked owner.
+It does not prove an actual public 443 gateway, XHTTP/Broker inode
+health, foreign Sanaei client service, live saved tunnels or a safe
+production transaction. `INSTALL_ALLOWED=NO` and
+`ACTIVATION_GATE=HOLD` remain required. No real IR/Grandoptical,
+user proxy or FRP configuration is modified.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
