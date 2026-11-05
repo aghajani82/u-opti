@@ -598,6 +598,44 @@ remains required, followed by real-host transaction design and independent
 operator approval. The existing force-recreate disposable host executor
 is not reused for active FRP environments.
 
+## Two live, disposable Smite Nodes + FRP TCP — private GitHub CI ONLY
+
+The existing `managed-backhaul-official-artifact` PR job now additionally
+exercises a **real pinned Smite Node API in two Docker containers** with
+distinct persistent private signed identities and Replay DBs. The containers
+share a *Docker internal-only bridge*, with no published host ports, host
+networking, external Panel, live IR or Grandoptical connection. Official
+SHA-256 pinned FRP 0.71.0 `frpc`/`frps` and Backhaul v0.7.2 binaries
+are mounted read-only from validated archives. The foreign container runs
+an isolated local TCP echo service, FRPC connects to FRPS on the IR
+container, and a fresh challenge must travel end-to-end over TCP port
+20182 **inside the private network** at each review boundary. This is
+not the production tunnel identified by that port number.
+
+The paired lab's observation callback makes real signed HMAC GET requests
+to both running Node API services, requires `frp=ready` and the expected
+Backhaul `not-installed` / `ready` inventory states, checks unauthorized
+and replayed requests fail with 401, verifies Node status, confirms the TCP
+forwarding still passes, and independently compares both Docker IDs and
+`StartedAt` fields to prove **no Node container recreation or restart**
+during the filesystem transition. The same checks occur before, after the
+IR receipt transition, after both transitions, and after exact rollback;
+another pass injects a crash during foreign manifest replacement and
+requires compensated recovery while the existing real FRP forwarding and
+both Node API processes persist.
+
+The **actual FRPS processes are launched inside disposable Docker containers**,
+and the genuine signed Node API and durable Replay data are used. This
+narrows the gap left by #124's synthetic callback: HMAC, Replay, real
+FRP 0.71.0 control and private TCP forwarding are observed in CI. Still,
+the artificial `node-data` Owner/Child/Broker fixtures consumed by the
+internal lab coordinator are not signed; **the CI tests do not prove
+production WSS-over-443, external Owner/Child API claims, Nginx/Sanaei
+coexistence, XHTTP Bridge, Broker socket continuity, real stored tunnels,
+provider snapshots/console recovery, or a deployment-ready transaction**.
+The original `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain
+mandatory and no live installation entry is enabled.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
