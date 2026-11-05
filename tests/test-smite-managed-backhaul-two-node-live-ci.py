@@ -315,8 +315,15 @@ http {
         "--entrypoint", "nginx", image, "-c", "/ci/nginx.conf",
         "-g", "daemon off;", timeout=150)
     doc = json.loads(run("docker", "inspect", "ci-uopti-wss"))[0]
-    check(doc["HostConfig"]["NetworkMode"] == "container:ci-uopti-ir"
-          and doc["HostConfig"]["ReadonlyRootfs"] is True
+    # Docker may normalize a "container:name" network mode to the owner's
+    # immutable full/short container ID. Match only the exact active IR
+    # container, never any arbitrary shared namespace.
+    ir_doc = json.loads(run("docker", "inspect", "ci-uopti-ir"))[0]
+    mode = doc["HostConfig"]["NetworkMode"]
+    check(mode in ("container:ci-uopti-ir", "container:" + ir_doc["Id"],
+                   "container:" + ir_doc["Id"][:12]),
+          "CI_NGINX_NETWORK_NAMESPACE_MISMATCH")
+    check(doc["HostConfig"]["ReadonlyRootfs"] is True
           and doc["HostConfig"]["CapDrop"] == ["ALL"]
           and not doc["HostConfig"]["PortBindings"]
           and doc["HostConfig"]["PublishAllPorts"] is False
@@ -542,6 +549,17 @@ print('CI_CHILD_FRPC_WSS_ESTABLISHED_COUNT='+str(len(found)))
 assert matched_commands==1 and len(found)==1,'REAL_FRPC_WSS_CONTROL_PID_NOT_UNIQUE'
 print(json.dumps(found[0],sort_keys=True))
 """
+
+
+def signed_owner_ready():
+    for attempt in range(35):
+        try:
+            signed_probe("ci-uopti-ir", "absent")
+            return
+        except Hold:
+            if attempt == 34:
+                raise Hold("CI_IR_SIGNED_API_NOT_READY") from None
+            time.sleep(0.3)
 
 
 def signed_child_ready():
@@ -856,6 +874,8 @@ def main():
             "python", "-B", "-c", ECHO)
         # The IR Node must itself create and track its sole FRPS owner via
         # strict HMAC and durable replay, rather than docker-exec orphan FRPS.
+        print("CI_WSS_STAGE=SIGNED_IR_OWNER_API_PREFLIGHT", flush=True)
+        signed_owner_ready()
         print("CI_WSS_STAGE=SIGNED_IR_OWNER_APPLY", flush=True)
         signed_owner_action("apply", token)
         wait_frps_loopback()
