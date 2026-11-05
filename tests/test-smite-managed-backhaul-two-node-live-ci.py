@@ -433,14 +433,21 @@ def broker_start(root: Path):
         "/usr/local/lib/u-opti/modules/smite-rc5-xhttp-root-broker.py",
         "--serve", timeout=150)
     doc = json.loads(run("docker", "inspect", name))[0]
-    check(doc["HostConfig"]["NetworkMode"] == "none"
-          and doc["HostConfig"]["ReadonlyRootfs"] is True
-          and doc["HostConfig"]["CapDrop"] == ["ALL"]
-          and doc["HostConfig"]["CapAdd"] == ["CHOWN"]
-          and not doc["HostConfig"]["PortBindings"]
-          and doc["HostConfig"]["PublishAllPorts"] is False
-          and doc["State"]["Running"] is True,
-          "CI_BROKER_DOCKER_ISOLATION_FAILED")
+    assertions = {
+        "network_none": doc["HostConfig"]["NetworkMode"] == "none",
+        "readonly_root": doc["HostConfig"]["ReadonlyRootfs"] is True,
+        "drop_all": doc["HostConfig"]["CapDrop"] == ["ALL"],
+        "only_chown": doc["HostConfig"]["CapAdd"] in (["CHOWN"], ["CAP_CHOWN"]),
+        "no_ports": not doc["HostConfig"]["PortBindings"]
+                    and doc["HostConfig"]["PublishAllPorts"] is False,
+        "running": doc["State"]["Running"] is True,
+    }
+    # Emit only the failed safe assertion name, never container logs,
+    # config, passwords, HTTP headers or private paths.
+    for label, passed in assertions.items():
+        if not passed:
+            print("CI_BROKER_ISOLATION_" + label.upper() + "=HOLD", flush=True)
+    check(all(assertions.values()), "CI_BROKER_DOCKER_ISOLATION_FAILED")
     return doc["Id"], doc["State"]["StartedAt"]
 
 
