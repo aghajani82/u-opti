@@ -486,6 +486,27 @@ checksums of altered backup parts to ensure this is not merely a hash test.
 This consistency proof does **not** authenticate the lab journal against an
 attacker with write access, nor prove signed real-host FRP provenance.
 
+### Rollback can also be interrupted — resumable CI rehearsal
+
+A crash during **recovery itself** is independent of the three existing
+Apply interruption points. The same internal, CI-only
+`rc7_pair_recover_lab` now has synthetic fault injection after restoring
+the original Manifest, after restoring the original FRP receipt, and after
+both are byte-for-byte verified but **before** journal cleanup. Each
+subsequent invocation reopens and validates the complete private four-part
+journal, recomputes the exact permitted FRP/Backhaul transition and checks
+the current sources belong to the old/next allowlist **before another
+restore**. Tests cover both `ir` and `foreign` receipt roles, repeated
+interruption, an out-of-band edit between attempts, exact unchanged
+Compose/.env, and restoration of both original FRP and unrelated engine
+entries. Unknown drift retains the journal and refuses further writes.
+
+This closes a **pre-cleanup Rollback crash** test gap only. It does not
+claim crash-safe partial **journal deletion**, live two-host signed proof,
+uninterrupted owner/child forwarding, or a production-capable recover CLI.
+All fault-injection arguments are Python-internal and require the existing
+PR lab admission; the beginner menu and production activation remain HOLD.
+
 The legacy disposable Backhaul file transaction and this RC7 pair
 rehearsal use distinct recovery journals but share the same test-root
 Manifest. They now **fail closed in both directions** whenever the opposite
