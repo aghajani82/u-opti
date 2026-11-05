@@ -412,6 +412,138 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(manifest.read_bytes(), old_manifest)
         self.assertEqual(receipt.read_bytes(), old_receipt)
 
+    def test_rc7_pair_cleanup_crashes_are_resumable_for_both_roles(self):
+        # Crash at every *destructive* cleanup boundary, including after
+        # rmdir; neither CI lab flow may bypass a pending terminal seal.
+        for role in ("ir", "foreign"):
+            for cut in ("after-completion-seal",
+                        *(f"after-cleanup-{n}" for n in range(1, 6)),
+                        "after-cleanup-rmdir"):
+                with self.subTest(role=role, cut=cut):
+                    manifest, receipt, original, old_receipt = (
+                        self._rc7_pair_lab_fixture())
+                    if role == "foreign":
+                        doc = json.loads(old_receipt)
+                        doc["role"] = "foreign"
+                        old_receipt = (
+                            json.dumps(doc, sort_keys=True) + "\n").encode()
+                        receipt.write_bytes(old_receipt)
+                    compose_before = self.compose.read_bytes()
+                    env_before = (self.node / ".env").read_bytes()
+                    self.assertEqual(
+                        lab.rc7_pair_apply_lab(self.root, "a" * 64, role=role),
+                        "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED")
+                    with self.assertRaisesRegex(
+                            lab.Hold, "CLEANUP_CRASH_RESUME_REQUIRED"):
+                        lab.rc7_pair_recover_lab(self.root, inject=cut)
+                    seal = self.root / lab.PAIR_CLEANUP_SEAL
+                    self.assertTrue(seal.is_file())
+                    self.assertEqual(seal.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(manifest.read_bytes(), original)
+                    self.assertEqual(receipt.read_bytes(), old_receipt)
+                    with self.assertRaisesRegex(
+                            lab.Hold, "REQUIRES_RECOVERY"):
+                        lab.rc7_pair_apply_lab(self.root, "a" * 64, role=role)
+                    with self.assertRaisesRegex(
+                            lab.Hold, "OTHER_ENGINE_RECOVERY_JOURNAL_PENDING"):
+                        lab.rollback(self.root)
+                    journal = self.root / lab.PAIR_JOURNAL
+                    if cut == "after-cleanup-rmdir":
+                        self.assertFalse(journal.exists())
+                    else:
+                        self.assertTrue(journal.is_dir())
+                    self.assertEqual(
+                        lab.rc7_pair_recover_lab(self.root),
+                        "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+                    self.assertFalse(journal.exists())
+                    self.assertFalse(seal.exists())
+                    self.assertEqual(manifest.read_bytes(), original)
+                    self.assertEqual(receipt.read_bytes(), old_receipt)
+                    self.assertEqual(self.compose.read_bytes(), compose_before)
+                    self.assertEqual((self.node / ".env").read_bytes(), env_before)
+                    self.assertFalse((self.root / "installed").exists())
+                    manifest.unlink()
+                    manifest.parent.rmdir()
+                    receipt.unlink()
+                    receipt.parent.rmdir()
+
+    def test_rc7_pair_cleanup_hold_on_changed_source_or_remaining_piece(self):
+        manifest, receipt, original, old_receipt = self._rc7_pair_lab_fixture()
+        self.assertEqual(
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir"),
+            "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED")
+        with self.assertRaisesRegex(lab.Hold, "CLEANUP_CRASH_RESUME_REQUIRED"):
+            lab.rc7_pair_recover_lab(self.root, inject="after-cleanup-1")
+        journal = self.root / lab.PAIR_JOURNAL
+        seal = self.root / lab.PAIR_CLEANUP_SEAL
+        remain_before = set(p.name for p in journal.iterdir())
+        receipt.write_bytes(old_receipt + b"OUT_OF_BAND")
+        with self.assertRaisesRegex(lab.Hold, "CLEANUP_BASELINE_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(set(p.name for p in journal.iterdir()), remain_before)
+        receipt.write_bytes(old_receipt)
+        (journal / "frp.before").write_bytes(b"CORRUPTED")
+        with self.assertRaisesRegex(lab.Hold, "CLEANUP_JOURNAL_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(set(p.name for p in journal.iterdir()), remain_before)
+        (journal / "frp.before").write_bytes(old_receipt)
+        (journal / "unexpected").write_bytes(b"UNREVIEWED")
+        with self.assertRaisesRegex(lab.Hold, "CLEANUP_JOURNAL_UNTRUSTED"):
+            lab.rc7_pair_recover_lab(self.root)
+        (journal / "unexpected").unlink()
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertFalse(seal.exists())
+        self.assertFalse(journal.exists())
+        self.assertEqual(manifest.read_bytes(), original)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+
+    def test_rc7_pair_cleanup_seal_must_be_private_semantically_valid(self):
+        for change in ("symlink", "world-readable", "wrong-role",
+                       "wrong-candidate-sha"):
+            with self.subTest(change=change):
+                manifest, receipt, old_manifest, old_receipt = (
+                    self._rc7_pair_lab_fixture())
+                self.assertEqual(
+                    lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir"),
+                    "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED")
+                with self.assertRaisesRegex(
+                        lab.Hold, "CLEANUP_CRASH_RESUME_REQUIRED"):
+                    lab.rc7_pair_recover_lab(
+                        self.root, inject="after-completion-seal")
+                seal = self.root / lab.PAIR_CLEANUP_SEAL
+                original_seal = seal.read_bytes()
+                if change == "symlink":
+                    seal.unlink()
+                    seal.symlink_to(self.root / "EXPERIMENTAL-LAB")
+                elif change == "world-readable":
+                    seal.chmod(0o644)
+                else:
+                    data = json.loads(original_seal)
+                    if change == "wrong-role":
+                        data["role"] = "foreign"
+                    else:
+                        data["manifest_next"] = "f" * 64
+                    seal.write_text(json.dumps(data, sort_keys=True) + "\n")
+                with self.assertRaises(lab.Hold):
+                    lab.rc7_pair_recover_lab(self.root)
+                self.assertTrue((self.root / lab.PAIR_JOURNAL).is_dir())
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertEqual(receipt.read_bytes(), old_receipt)
+                if seal.is_symlink():
+                    seal.unlink()
+                    seal.write_bytes(original_seal)
+                else:
+                    seal.write_bytes(original_seal)
+                    seal.chmod(0o600)
+                self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                                 "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+                self.assertFalse(seal.exists())
+                manifest.unlink()
+                manifest.parent.rmdir()
+                receipt.unlink()
+                receipt.parent.rmdir()
+
     def test_rc7_pair_recovery_detects_external_edits_before_any_restore(self):
         manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
         with self.assertRaises(lab.Hold):
