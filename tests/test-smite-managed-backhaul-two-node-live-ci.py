@@ -365,6 +365,9 @@ try:
 except urllib.error.HTTPError as exc:
  print('CI_FOREIGN_SIGNED_APPLY_STATUS='+str(exc.code),flush=True)
  raise
+except urllib.error.URLError:
+ print('CI_FOREIGN_SIGNED_APPLY_STATUS=API_UNAVAILABLE',flush=True)
+ raise
 print('CI_FOREIGN_SIGNED_APPLY=PASS')
 """
 
@@ -418,11 +421,36 @@ print(json.dumps(found[0],sort_keys=True))
 """
 
 
+def signed_child_ready():
+    # Require the actual signed Node API to be ready *before* requesting
+    # a new child. A Docker Running flag alone does not prove FastAPI boot.
+    for i in range(35):
+        try:
+            signed_probe("ci-uopti-foreign", "absent")
+            return
+        except Hold:
+            if i == 34:
+                raise Hold("CI_FOREIGN_SIGNED_API_NOT_READY") from None
+            time.sleep(0.3)
+
+
 def signed_child_apply(token: str):
-    status = run(
-        "docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
-        SIGNED_CHILD_APPLY, token, timeout=35)
-    check("CI_FOREIGN_SIGNED_APPLY=PASS" in status,
+    try:
+        result = subprocess.run(
+            ["docker", "exec", "ci-uopti-foreign", "python", "-B", "-c",
+             SIGNED_CHILD_APPLY, token],
+            capture_output=True, text=True, timeout=35, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("CI_SIGNED_FOREIGN_CHILD_APPLY_PROCESS_FAILED") from exc
+    # Only fixed proof labels and the numeric HTTP status may reach CI logs.
+    # Never print raw subprocess stdout/stderr: the signed body has a token.
+    for line in result.stdout.splitlines():
+        if line.startswith("CI_FOREIGN_SIGNED_APPLY_STATUS="):
+            code = line.removeprefix("CI_FOREIGN_SIGNED_APPLY_STATUS=")
+            if code == "API_UNAVAILABLE" or (code.isdecimal() and len(code) == 3):
+                print("CI_FOREIGN_SIGNED_APPLY_STATUS=" + code, flush=True)
+    check(result.returncode == 0
+          and "CI_FOREIGN_SIGNED_APPLY=PASS" in result.stdout,
           "CI_SIGNED_FOREIGN_CHILD_APPLY_UNPROVEN")
 
 
@@ -670,6 +698,8 @@ def main():
         wait_frps_loopback()
         # The actual foreign Smite Node (not a docker-exec orphan) must
         # receive the signed apply, create and track its own FRPC child.
+        print("CI_WSS_STAGE=FOREIGN_SIGNED_API_PREFLIGHT", flush=True)
+        signed_child_ready()
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY", flush=True)
         signed_child_apply(token)
         forward_probe("initial")
