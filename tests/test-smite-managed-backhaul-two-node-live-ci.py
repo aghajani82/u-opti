@@ -398,8 +398,14 @@ print('CI_CANONICAL_HMAC_INTENT_MISSING_BRIDGE_FAIL_CLOSED=PASS')
 
 def fresh_unapproved_intent(root: Path) -> str:
     """Private, canonical Broker HMAC wire; synthetic evidence is NEVER a grant."""
-    contract = load("ci_broker_intent_contract",
-                    REPO / "modules/smite-rc5-xhttp-signed-intent.py")
+    spec = importlib.util.spec_from_file_location(
+        "ci_broker_intent_contract",
+        REPO / "modules/smite-rc5-xhttp-signed-intent.py")
+    check(spec is not None and spec.loader is not None,
+          "CI_BROKER_SIGNED_CONTRACT_MISSING")
+    contract = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = contract
+    spec.loader.exec_module(contract)
     key = (root / "broker-conf/route-broker.key").read_bytes()
     now = int(time.time())
     body = {
