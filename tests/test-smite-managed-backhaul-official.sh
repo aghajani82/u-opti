@@ -66,8 +66,12 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 for arch, archive in (("amd64", amd64), ("arm64", arm64)):
     binary = module._verified_binary(archive, module.OFFICIAL_TAR_SHA256[arch])
+    digest = hashlib.sha256(binary).hexdigest()
+    assert digest == module.OFFICIAL_BINARY_SHA256[arch], (
+        "OFFICIAL_BACKHAUL_ARCH_BINARY_PIN_MISMATCH")
     print("REVIEWED_OFFICIAL_BACKHAUL_BINARY_SHA256_" + arch.upper()
-          + "=" + hashlib.sha256(binary).hexdigest())
+          + "=" + digest)
+    print("REVIEWED_OFFICIAL_BACKHAUL_BINARY_PIN_" + arch.upper() + "=PASS")
 PY_BINARY_PINS
 sudo docker compose -f "$lab/node/docker-compose.yml" \
   -f "$stage/compose.override.candidate.yml" config --format json > "$lab/merged.json"
