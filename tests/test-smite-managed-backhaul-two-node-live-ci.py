@@ -223,20 +223,21 @@ with socket.socket() as srv:
 # inside the internal-only bridge. Existing repository WSS control-stall
 # Dockerfile is reused, not a separate production gateway/installer.
 HTTPS_PROBE = r"""
-import ssl,sys,urllib.error,urllib.request
+import socket,ssl,sys,urllib.request
 ca='/etc/smite-node/ci-ca.crt'
 ctx=ssl.create_default_context(cafile=ca)
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                   urllib.request.HTTPSHandler(context=ctx))
 with opener.open('https://ci-uopti-wss:443/ci-health',timeout=5) as response:
- assert response.status==200 and response.read()==b'ci-wss-gateway-ok\n'
-# Same TLS server, invalid hostname: cert checking must refuse it.
-try:
- opener.open('https://ci-uopti-ir:443/ci-health',timeout=3)
-except (ssl.SSLError,urllib.error.URLError,ConnectionError,OSError):
- pass
-else:
- raise AssertionError('invalid WSS hostname unexpectedly accepted')
+ assert response.status==200 and response.read()==b'ci-wss-gateway-ok'
+# Connect to the SAME Nginx address while requiring the WRONG hostname.
+# This must fail actual X.509 hostname verification, not network routing.
+with socket.create_connection(('ci-uopti-wss',443),timeout=4) as conn:
+ try:
+  with ctx.wrap_socket(conn,server_hostname='wrong.invalid'):
+   raise AssertionError('invalid WSS hostname unexpectedly accepted')
+ except ssl.SSLCertVerificationError:
+  pass
 print('CI_REAL_NGINX_TLS_CA_AND_HOSTNAME=PASS')
 """
 
@@ -270,7 +271,7 @@ http {
     server_name ci-uopti-wss;
     ssl_certificate /ci/cert.pem;
     ssl_certificate_key /ci/key.pem;
-    location = /ci-health { return 200 "ci-wss-gateway-ok\\n"; }
+    location = /ci-health { return 200 "ci-wss-gateway-ok"; }
     location = /~!frp {
       proxy_pass http://ci-uopti-ir:7000;
       proxy_http_version 1.1;
@@ -427,13 +428,12 @@ def main():
             enrollment(root)
         run("docker", "network", "create", "--internal", "--driver",
             "bridge", network)
-        # Build and run the Nginx TLS sidecar with the same Docker
-        # internal-only network. Nodes and WSS gateway are never restarted
-        # during any RC7 transaction or rollback.
-        started["ci-uopti-wss"] = wss_gateway(
-            network, root_ir, root_foreign)
+        # Docker DNS must resolve the IR upstream before Nginx starts.
+        # All three containers then remain untouched by the transaction.
         for role, root, name in roots:
             started[name] = docker_node(name, network, root)
+        started["ci-uopti-wss"] = wss_gateway(
+            network, root_ir, root_foreign)
         https_probe()
         # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
         run("docker", "exec", "-d", "ci-uopti-foreign",
