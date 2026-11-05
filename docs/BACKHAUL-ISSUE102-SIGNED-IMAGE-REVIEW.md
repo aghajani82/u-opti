@@ -670,6 +670,24 @@ signed Owner/Child route state, saved tunnel availability through every
 instant or deployment safety. The existing host authorization remains
 `INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD`; keep Issue #102 open.
 
+### Cross-Node signed identity negative proof during real WSS/FRP test
+
+The real two-Node PR-only WSS/TLS 443 and FRP 0.71.0 forwarding lane now
+also issues a **valid HMAC request signed with this Node's own ephemeral
+key but claiming the other CI Node's ID**. The actual signed Node endpoint
+must return HTTP 401 before accepting the correct own-identity signed
+request. This is enforced in every before/after-IR/after-both/rollback
+probe, including the injected foreign transaction failure and recovery.
+The persistent actual Node identity/replay binding cannot be mistaken
+for interchangeable two-host credentials. Failed cross-role identity
+does not authorize an engine operation or restart any Node.
+
+A signed `/api/agent/engines` result is **not** a signed FRPS Owner/Child
+runtime proof: the isolated FRPS/FRPC processes are started outside
+Smite's production tracked-owner workflow. Broker/XHTTP signed runtime
+continuity and true Owner/Child proof remain separate mandatory gates.
+This test does not unlock real-host installation.
+
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
