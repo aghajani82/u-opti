@@ -156,7 +156,7 @@ class OperatorControl(unittest.TestCase):
         class FakeHold(Exception):
             pass
         rt = SimpleNamespace(
-            locked=lambda:contextlib.nullcontext(),
+            Hold=FakeHold, locked=lambda:contextlib.nullcontext(),
             inspect_container=inspect, signed_probe=hmac, run=run,
         )
         fake = SimpleNamespace(Hold=FakeHold, rt=rt, node_details=node_details)
