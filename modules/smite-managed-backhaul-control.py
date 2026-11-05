@@ -444,14 +444,14 @@ def exercise(root: Path, *, action: str, stage: Path | None = None) -> dict[str,
             before = inspect(node, lab_binary=bin_file)
             if before["state"] != "NOT_INSTALLED":
                 raise Hold("Backhaul not cleanly absent; repair is separate")
-            transaction.activate(root, stage)
+            transaction._activate_locked(root, stage)
             result = inspect(node, lab_binary=bin_file)
             if result["state"] != "ENROLLED_UNVERIFIED":
                 raise Hold("Post-transaction evidence mismatch: recovery journal retained")
             return {"state": "LAB_INSTALLED_UNVERIFIED",
                     "next": "SIGNED_NODE_RUNTIME_PROOF_REQUIRED"}
         # Never erase another engine if the backup record is untrusted.
-        transaction.rollback(root)
+        transaction._rollback_locked(root)
         result = inspect(node, lab_binary=bin_file)
         if result["state"] != "NOT_INSTALLED":
             raise Hold("Rollback evidence incomplete")

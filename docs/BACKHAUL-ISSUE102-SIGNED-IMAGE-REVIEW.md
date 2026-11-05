@@ -447,6 +447,18 @@ checksums of altered backup parts to ensure this is not merely a hash test.
 This consistency proof does **not** authenticate the lab journal against an
 attacker with write access, nor prove signed real-host FRP provenance.
 
+The legacy disposable Backhaul file transaction and this RC7 pair
+rehearsal use distinct recovery journals but share the same test-root
+Manifest. They now **fail closed in both directions** whenever the opposite
+journal exists (including unfinished/corrupt journals or symlinks), even
+when no operation is currently holding the shared flock. Direct legacy
+lab `activate`/`rollback` entries now also acquire that same lock;
+`control.exercise` retains its outer lock and calls the internal
+already-locked functions. The tests cover lock contention, both interrupted
+journal directions, unchanged data on refusal, and clean recovery. No
+automatic deletion of a competing journal is allowed. This is entirely
+**disposable-PR-lab coordination** and does not qualify live RC7 migration.
+
 **Critical limitation:** two independent file replacements are NOT one
 atomic transaction. Between writes, RC7 FRP's existing verify may properly
 report an inconsistency. Successful byte restoration does NOT prove

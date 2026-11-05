@@ -517,6 +517,71 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(receipt.read_bytes(), actual_receipt)
         self.assertTrue(journal.exists())
 
+    def test_pending_legacy_recovery_blocks_rc7_pair_apply_and_recovery(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        pending = self.root / "recovery-journal"
+        pending.mkdir(mode=0o700)
+        (pending / "record.json").write_text('{"state":"INCOMPLETE"}')
+        with self.assertRaisesRegex(lab.Hold, "OTHER_ENGINE_RECOVERY_JOURNAL_PENDING"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        with self.assertRaisesRegex(lab.Hold, "OTHER_ENGINE_RECOVERY_JOURNAL_PENDING"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+        self.assertTrue(pending.is_dir())
+        (pending / "record.json").unlink()
+        pending.rmdir()
+        # Removing the independent interrupted-state marker is sufficient
+        # ONLY in this disposable test, never a production recovery policy.
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-journal")
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+
+    def test_pending_rc7_pair_blocks_direct_legacy_apply_and_rollback(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-manifest")
+        pending = self.root / lab.PAIR_JOURNAL
+        manifest_after = manifest.read_bytes()
+        receipt_after = receipt.read_bytes()
+        stage = self.stages / "intentionally-absent-stage"
+        with self.assertRaisesRegex(lab.Hold, "OTHER_ENGINE_RECOVERY_JOURNAL_PENDING"):
+            lab.activate(self.root, stage, fixture=True)
+        with self.assertRaisesRegex(lab.Hold, "OTHER_ENGINE_RECOVERY_JOURNAL_PENDING"):
+            lab.rollback(self.root)
+        self.assertEqual(manifest.read_bytes(), manifest_after)
+        self.assertEqual(receipt.read_bytes(), receipt_after)
+        self.assertTrue(pending.is_dir())
+        self.assertFalse((self.root / "recovery-journal").exists())
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+
+    def test_direct_legacy_entrypoints_respect_existing_shared_control_lock(self):
+        control = load("bh_control_existing_lock_for_legacy_entrypoints",
+                       ROOT / "smite-managed-backhaul-control.py")
+        stage = self.prepare()
+        before_compose = self.compose.read_bytes()
+        with control._lab_lock(self.root):
+            with self.assertRaisesRegex(lab.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                lab.activate(self.root, stage, fixture=True)
+            with self.assertRaisesRegex(lab.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                lab.rollback(self.root)
+        self.assertEqual(self.compose.read_bytes(), before_compose)
+        self.assertFalse((self.root / "recovery-journal").exists())
+        self.assertFalse((self.root / "installed/backhaul").exists())
+        # Both direct and managed-control paths share the lock inode.
+        self.assertEqual(lab.activate(self.root, stage, fixture=True),
+                         "LAB_FILES_APPLIED_NO_DOCKER_NO_LIVE_ENGINE")
+        self.assertEqual(lab.rollback(self.root), "LAB_EXACT_ROLLBACK_CONFIRMED")
+
     def test_no_shell_docker_or_network_execution_available(self):
         src = (ROOT / "smite-managed-backhaul-transaction.py").read_text()
         for dangerous in ("subprocess", "os.system(", "socket.", "requests.", "httpx.",
