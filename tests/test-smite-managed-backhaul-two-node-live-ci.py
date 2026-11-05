@@ -1531,12 +1531,20 @@ def main():
         print("CI_WSS_STAGE=START_SIGNED_FOREIGN_CHILD_NODE", flush=True)
         started["ci-uopti-foreign"] = docker_node(
             "ci-uopti-foreign", network, root_foreign)
+        print("CI_WSS_STAGE=START_FOREIGN_BACKHAUL_TLS_BRIDGE", flush=True)
+        started["ci-uopti-bh-bridge"] = foreign_backhaul_bridge(root_foreign)
+        isolation = run("docker","exec","ci-uopti-ir","python","-B","-c",
+                        BRIDGE_LOOPBACK_ONLY, timeout=10)
+        check("CI_FOREIGN_BRIDGE_LOOPBACK_ONLY=PASS" in isolation,
+              "CI_FOREIGN_BACKHAUL_BRIDGE_PUBLIC_EXPOSURE")
         print("CI_WSS_STAGE=PROBE_TLS_CA_HOSTNAME", flush=True)
         https_probe()
         # Genuine FRP 0.71.0 via real WSS/443 Upgrade + verified CA.
         print("CI_WSS_STAGE=START_REAL_FRP_WSS_CONTROL", flush=True)
         run("docker", "exec", "-d", "ci-uopti-foreign",
             "python", "-B", "-c", ECHO)
+        run("docker", "exec", "-d", "ci-uopti-foreign",
+            "python", "-B", "-c", BACKHAUL_FOREIGN_ECHO)
         # The IR Node must itself create and track its sole FRPS owner via
         # strict HMAC and durable replay, rather than docker-exec orphan FRPS.
         print("CI_WSS_STAGE=SIGNED_IR_OWNER_API_PREFLIGHT", flush=True)
@@ -1574,10 +1582,11 @@ def main():
         seen = []
         broker_restarted = False
         backhaul_active = False
+        backhaul_client_active = False
         backhaul_token = secrets.token_hex(24)
 
         def observe(phase, ir, foreign):
-            nonlocal broker_restarted, backhaul_active
+            nonlocal broker_restarted, backhaul_active, backhaul_client_active
             if phase == "after-ir" and not broker_restarted:
                 started["ci-uopti-broker"] = broker_restart(root_ir)
                 broker_restarted = True
@@ -1589,18 +1598,29 @@ def main():
             signed_probe("ci-uopti-foreign", foreign_state)
             if phase == "before":
                 signed_backhaul_action("deny", backhaul_token)
+                signed_backhaul_client("deny", backhaul_token)
             elif phase == "after-ir":
                 signed_backhaul_action("apply", backhaul_token)
                 backhaul_active = True
                 signed_backhaul_action("status", backhaul_token)
+                signed_backhaul_client("absent", backhaul_token)
             elif phase == "after-both":
                 check(backhaul_active, "CI_BACKHAUL_RUNTIME_MISSING_AT_BOTH")
                 signed_backhaul_action("status", backhaul_token)
+                signed_backhaul_client("apply", backhaul_token)
+                backhaul_client_active = True
+                signed_backhaul_client("status", backhaul_token)
+                backhaul_data_probe("active")
             elif phase == "after-rollback":
+                if backhaul_client_active:
+                    signed_backhaul_client("remove", backhaul_token)
+                    backhaul_client_active = False
                 if backhaul_active:
                     signed_backhaul_action("remove", backhaul_token)
                     backhaul_active = False
+                signed_backhaul_client("absent", backhaul_token)
                 signed_backhaul_action("absent", backhaul_token)
+                backhaul_data_probe("absent")
             signed_child_probe()
             official_retained_binary_probe("ci-uopti-ir")
             official_retained_binary_probe("ci-uopti-foreign")
@@ -1615,8 +1635,12 @@ def main():
                       "CI_IR_OWNER_SAVED_TUNNEL_DRIFT")
             check(tracked_child_process_identity() == child_process_identity,
                   "CI_FOREIGN_CHILD_FRPC_RESTARTED_OR_REPLACED")
-            check((root_foreign / "node-data/tunnels.json").read_bytes() == saved_child_state,
-                  "CI_FOREIGN_CHILD_SAVED_TUNNEL_DRIFT")
+            if backhaul_client_active:
+                verify_foreign_frp_registry_with_backhaul(
+                    root_foreign, saved_child_state)
+            else:
+                check((root_foreign / "node-data/tunnels.json").read_bytes() ==
+                      saved_child_state, "CI_FOREIGN_CHILD_SAVED_TUNNEL_DRIFT")
             forward_probe(phase)
             https_probe()
             for name in DOCKER_NAMES:
@@ -1625,13 +1649,20 @@ def main():
                       and doc["State"]["Running"] is True,
                       "CI_NODE_RECREATED_OR_RESTARTED")
             if phase == "after-both":
-                # Remove ONLY this CI Backhaul server before the shared
-                # transaction's manifest/receipt rollback. Never stop FRP.
+                # No Backhaul runtime may survive the paired receipt rollback.
+                # Remove ONLY each engine's ephemeral signed CI tunnel.
+                signed_backhaul_client("remove", backhaul_token)
+                backhaul_client_active = False
+                signed_backhaul_client("absent", backhaul_token)
+                check((root_foreign / "node-data/tunnels.json").read_bytes() ==
+                      saved_child_state,
+                      "CI_SIGNED_BACKHAUL_CLIENT_REMOVE_FRP_REGISTRY_DRIFT")
                 signed_backhaul_action("remove", backhaul_token)
                 backhaul_active = False
+                signed_backhaul_action("absent", backhaul_token)
+                backhaul_data_probe("absent")
                 check((root_ir / "node-data/tunnels.json").read_bytes() ==
                       saved_owner_state, "CI_SIGNED_BACKHAUL_REMOVE_FRP_REGISTRY_DRIFT")
-                signed_backhaul_action("absent", backhaul_token)
             seen.append(phase)
             return True
 
@@ -1670,10 +1701,14 @@ def main():
         print("RC7_REAL_ROOT_BROKER_UDS_SIGNED_DENIAL=PASS")
         print("RC7_REAL_BROKER_RESTART_NO_NODE_RECREATE=PASS")
         print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
-        check(not backhaul_active, "CI_BACKHAUL_LEFT_RUNNING_AFTER_RECOVERY")
+        check(not backhaul_active and not backhaul_client_active,
+              "CI_BACKHAUL_LEFT_RUNNING_AFTER_RECOVERY")
+        print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_TLS_443_WS_DATA_ROUNDTRIP=PASS")
+        print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_EXACT_ROLLBACK=PASS")
         print("RC7_SIGNED_BACKHAUL_SERVER_WITH_LIVE_FRP_OWNER_CHILD=PASS")
         print("RC7_SIGNED_BACKHAUL_REMOVE_AND_FRP_REGISTRY_EXACT_RESTORE=PASS")
-        print("RC7_BACKHAUL_CROSS_HOST_DATA_TUNNEL=NOT_PROVEN")
+        print("RC7_BACKHAUL_CROSS_HOST_DATA_TUNNEL=PASS_ISOLATED_REAL_WS_TLS_443")
+        print("RC7_BACKHAUL_PUBLIC_HOST_DEPLOYMENT=NOT_PROVEN")
         print("RC7_RETAINED_FRP_NODE_OFFICIAL_BACKHAUL_BYTES_WITHOUT_RECREATE=PASS")
         print("RC7_LIVE_HOST_IN_PLACE_TRANSACTION=NOT_IMPLEMENTED")
         print("RC7_SIGNED_MANAGED_IR_OWNER_AND_FOREIGN_CHILD=PASS")
