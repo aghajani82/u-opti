@@ -532,10 +532,10 @@ class TransactionLab(unittest.TestCase):
                 self.assertEqual(receipt.read_bytes(), old_receipt)
                 if seal.is_symlink():
                     seal.unlink()
-                    seal.write_bytes(original_seal)
-                else:
-                    seal.write_bytes(original_seal)
-                    seal.chmod(0o600)
+                seal.write_bytes(original_seal)
+                # A newly-created test file inherits umask and is not
+                # implicitly 0600; restore the exact private mode as well.
+                seal.chmod(0o600)
                 self.assertEqual(lab.rc7_pair_recover_lab(self.root),
                                  "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
                 self.assertFalse(seal.exists())
