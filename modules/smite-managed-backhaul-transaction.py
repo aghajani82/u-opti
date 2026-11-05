@@ -194,7 +194,17 @@ def new_file(path: Path, data: bytes, mode: int) -> None:
 
 
 def activate(root: Path, stage: Path, *, fixture: bool = False, inject: str = "") -> str:
+    # Public CI-lab entry must coordinate with the existing control path
+    # and the RC7 pair rehearsal even when invoked directly through CLI.
+    with _rc7_pair_shared_lock(root):
+        return _activate_locked(root, stage, fixture=fixture, inject=inject)
+
+
+def _activate_locked(root: Path, stage: Path, *,
+                     fixture: bool = False, inject: str = "") -> str:
+    """Internal entry: caller must already hold the shared lab lock."""
     compose, manifest, binary, _ = admission(root)
+    _reject_competing_recovery(root, pair_operation=False)
     raw_compose, new_compose, new_manifest, new_bin = candidate(root, stage, fixture=fixture)
     journal = root / "recovery-journal"
     if journal.exists() or journal.is_symlink():
@@ -248,7 +258,14 @@ def activate(root: Path, stage: Path, *, fixture: bool = False, inject: str = ""
 
 
 def rollback(root: Path) -> str:
+    with _rc7_pair_shared_lock(root):
+        return _rollback_locked(root)
+
+
+def _rollback_locked(root: Path) -> str:
+    """Internal entry: caller must already hold the shared lab lock."""
     compose, manifest, binary, _ = admission(root)
+    _reject_competing_recovery(root, pair_operation=False)
     journal = root / "recovery-journal"
     private_dir(journal)
     record = json.loads(checked(journal / "record.json", 4096))
@@ -311,6 +328,18 @@ def rollback(root: Path) -> str:
 # to reject/restore intermediate states, not to claim zero live interruption.
 PAIR_JOURNAL = "rc7-pair-recovery"
 PAIR_RECEIPT_DIR = "rc7-frp-enrollment"
+
+
+def _reject_competing_recovery(root: Path, *, pair_operation: bool) -> None:
+    """Never cross one unfinished journal into the other trial workflow.
+
+    This is deliberately a presence check, not an automatic cleanup: a
+    corrupt or symlinked record also requires review. Called with the SAME
+    shared engine flock held and after strict disposable-lab admission.
+    """
+    competing = root / ("recovery-journal" if pair_operation else PAIR_JOURNAL)
+    if competing.exists() or competing.is_symlink():
+        raise Hold("OTHER_ENGINE_RECOVERY_JOURNAL_PENDING")
 
 
 def _pair_fsync_dir(folder: Path) -> None:
@@ -441,6 +470,7 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
     No signed runtime attestation and NO live server activation are possible.
     """
     manifest, frp_receipt, journal = _pair_paths(root)
+    _reject_competing_recovery(root, pair_operation=True)
     if journal.exists() or journal.is_symlink():
         raise Hold("RC7_PAIR_INTERRUPTED_TRANSACTION_REQUIRES_RECOVERY")
     old_manifest = _pair_read_private(manifest)
@@ -497,6 +527,7 @@ def rc7_pair_recover_lab(root: Path) -> str:
 def _rc7_pair_recover_locked(root: Path) -> str:
     """Fail-closed exact dual-file rollback after any rehearsed crash point."""
     manifest, frp_receipt, journal = _pair_paths(root)
+    _reject_competing_recovery(root, pair_operation=True)
     private_dir(journal)
     record = _pair_load_json(_pair_read_private(journal / "record.json", limit=4096))
     required = {
