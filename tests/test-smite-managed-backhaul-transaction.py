@@ -266,6 +266,132 @@ class TransactionLab(unittest.TestCase):
                 lab.activate(self.root, stage, fixture=True)
         self.assertFalse((self.root / "recovery-journal").exists())
 
+
+    def _rc7_pair_lab_fixture(self):
+        """Synthetic, private RC7 bytes: never a real host or signed attestation."""
+        state = self.config / "engine-state"
+        state.mkdir(mode=0o700, exist_ok=True)
+        manifest = state / "engines.json"
+        pins = {"frpc": "b" * 64, "frps": "c" * 64}
+        before = (json.dumps({
+            "schema": 1, "engines": {
+                "frp": {"sha256": pins["frpc"],
+                        "server_sha256": pins["frps"]},
+                "gost": {"sha256": "d" * 64},
+            },
+        }, sort_keys=True, indent=2) + "\n").encode()
+        manifest.write_bytes(before)
+        manifest.chmod(0o600)
+        frpdir = self.root / lab.PAIR_RECEIPT_DIR
+        frpdir.mkdir(mode=0o700)
+        receipt = frpdir / "record.json"
+        frp = (json.dumps({
+            "schema": 1, "role": "ir", "state": "COMMITTED",
+            "old": None, "new": hashlib.sha256(before).hexdigest(),
+            "binaries": pins,
+        }, sort_keys=True) + "\n").encode()
+        receipt.write_bytes(frp)
+        receipt.chmod(0o600)
+        return manifest, receipt, before, frp
+
+    def test_rc7_pair_rehearsal_preserves_frp_pins_and_rollback_exact_bytes(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        before_compose = self.compose.read_bytes()
+        result = lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        self.assertEqual(result, "LAB_PAIR_BYTES_APPLIED_UNATTESTATED_RECOVERY_REQUIRED")
+        self.assertNotEqual(manifest.read_bytes(), old_manifest)
+        self.assertNotEqual(receipt.read_bytes(), old_receipt)
+        candidate = json.loads(manifest.read_bytes())
+        updated = json.loads(receipt.read_bytes())
+        self.assertEqual(candidate["engines"]["frp"],
+                         json.loads(old_manifest)["engines"]["frp"])
+        self.assertEqual(candidate["engines"]["gost"],
+                         json.loads(old_manifest)["engines"]["gost"])
+        self.assertEqual(candidate["engines"]["backhaul"]["sha256"], "a" * 64)
+        self.assertEqual(updated["binaries"], json.loads(old_receipt)["binaries"])
+        self.assertEqual(updated["new"], hashlib.sha256(manifest.read_bytes()).hexdigest())
+        self.assertTrue((self.root / lab.PAIR_JOURNAL).is_dir())
+        self.assertEqual(before_compose, self.compose.read_bytes())
+        self.assertFalse((self.root / "installed").exists())
+        self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                         "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+        self.assertEqual(manifest.read_bytes(), old_manifest)
+        self.assertEqual(receipt.read_bytes(), old_receipt)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+        self.assertEqual(before_compose, self.compose.read_bytes())
+
+    def test_rc7_pair_recovery_all_crash_boundaries_and_idempotent_resume(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        for cut in ("after-journal", "after-manifest", "after-receipt"):
+            with self.subTest(cut=cut):
+                with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+                    lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                           role="ir", inject=cut)
+                with self.assertRaisesRegex(lab.Hold, "REQUIRES_RECOVERY"):
+                    lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+                self.assertEqual(lab.rc7_pair_recover_lab(self.root),
+                                 "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertEqual(receipt.read_bytes(), old_receipt)
+                self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
+    def test_rc7_pair_recovery_detects_external_edits_before_any_restore(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaises(lab.Hold):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-manifest")
+        changed_manifest = manifest.read_bytes()
+        receipt.write_bytes(receipt.read_bytes() + b"EXTERNAL_TAMPER")
+        changed_receipt = receipt.read_bytes()
+        with self.assertRaisesRegex(lab.Hold, "EXTERNAL_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), changed_manifest)
+        self.assertEqual(receipt.read_bytes(), changed_receipt)
+        self.assertTrue((self.root / lab.PAIR_JOURNAL).exists())
+
+    def test_rc7_pair_recovery_requires_all_exact_secure_backups(self):
+        manifest, receipt, _, _ = self._rc7_pair_lab_fixture()
+        with self.assertRaises(lab.Hold):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64,
+                                   role="ir", inject="after-receipt")
+        altered_manifest = manifest.read_bytes()
+        altered_receipt = receipt.read_bytes()
+        backup = self.root / lab.PAIR_JOURNAL / "frp.before"
+        backup.write_bytes(backup.read_bytes() + b"altered")
+        with self.assertRaisesRegex(lab.Hold, "BACKUP_DRIFT"):
+            lab.rc7_pair_recover_lab(self.root)
+        self.assertEqual(manifest.read_bytes(), altered_manifest)
+        self.assertEqual(receipt.read_bytes(), altered_receipt)
+        self.assertTrue((self.root / lab.PAIR_JOURNAL).exists())
+
+    def test_rc7_pair_missing_or_wrong_role_receipt_never_creates_journal(self):
+        manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
+        for role, sha in (("foreign", "a" * 64), ("ir", "INVALID_SHA"),
+                          ("other", "a" * 64)):
+            with self.subTest(role=role, sha=sha[:8]):
+                with self.assertRaises(lab.Hold):
+                    lab.rc7_pair_apply_lab(self.root, sha, role=role)
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertEqual(receipt.read_bytes(), old_receipt)
+                self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+        receipt.write_bytes(b'{"schema":1,"schema":1}')
+        with self.assertRaises(lab.Hold):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
+    def test_rc7_pair_untrusted_file_modes_and_non_ci_always_hold(self):
+        manifest, receipt, before, receipt_before = self._rc7_pair_lab_fixture()
+        receipt.chmod(0o644)
+        with self.assertRaisesRegex(lab.Hold, "PRIVATE_FILE_UNTRUSTED"):
+            lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        receipt.chmod(0o600)
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+            with self.assertRaisesRegex(lab.Hold, "CI ONLY"):
+                lab.rc7_pair_apply_lab(self.root, "a" * 64, role="ir")
+        self.assertEqual(manifest.read_bytes(), before)
+        self.assertEqual(receipt.read_bytes(), receipt_before)
+        self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
     def test_no_shell_docker_or_network_execution_available(self):
         src = (ROOT / "smite-managed-backhaul-transaction.py").read_text()
         for dangerous in ("subprocess", "os.system(", "socket.", "requests.", "httpx.",
