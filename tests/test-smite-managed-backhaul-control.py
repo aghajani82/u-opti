@@ -164,7 +164,7 @@ class OperatorControl(unittest.TestCase):
 
     def test_rc7_bundled_signed_inventory_no_recreate_and_not_ready_yet(self):
         fake,calls = self._rc7_bundle_fake()
-        with patch.object(control.os,"geteuid",return_value=0), \\
+        with patch.object(control.os,"geteuid",return_value=0), \
              patch.object(control,"_load",return_value=fake):
             status=control.verify_rc7_bundled_backhaul("foreign")
         self.assertEqual(calls,["runtime","mounts","replay","binary","signed-inventory"])
@@ -192,14 +192,14 @@ class OperatorControl(unittest.TestCase):
         ):
             with self.subTest(kwargs=kwargs):
                 fake,calls = self._rc7_bundle_fake(**kwargs)
-                with patch.object(control.os,"geteuid",return_value=0), \\
+                with patch.object(control.os,"geteuid",return_value=0), \
                      patch.object(control,"_load",return_value=fake):
                     with self.assertRaisesRegex(control.Hold,reason):
                         control.verify_rc7_bundled_backhaul("foreign")
                 self.assertNotIn("replay",calls)
                 self.assertNotIn("binary",calls)
         fake,calls=self._rc7_bundle_fake()
-        with patch.object(control.os,"geteuid",return_value=123), \\
+        with patch.object(control.os,"geteuid",return_value=123), \
              patch.object(control,"_load",return_value=fake):
             with self.assertRaisesRegex(control.Hold,"RC7_BUNDLED_ROOT_REQUIRED"):
                 control.verify_rc7_bundled_backhaul("foreign")
@@ -224,14 +224,14 @@ class OperatorControl(unittest.TestCase):
         for state in cases:
             with self.subTest(state=str(state)[:40]):
                 fake,calls = self._rc7_bundle_fake(inventory=state)
-                with patch.object(control.os,"geteuid",return_value=0), \\
+                with patch.object(control.os,"geteuid",return_value=0), \
                      patch.object(control,"_load",return_value=fake):
                     with self.assertRaises(control.Hold):
                         control.verify_rc7_bundled_backhaul("foreign")
                 self.assertEqual(calls,["runtime","mounts","replay",
                                         "binary","signed-inventory"])
         fake,calls=self._rc7_bundle_fake(probe_error="PRIVATE_SECRET")
-        with patch.object(control.os,"geteuid",return_value=0), \\
+        with patch.object(control.os,"geteuid",return_value=0), \
              patch.object(control,"_load",return_value=fake):
             with self.assertRaisesRegex(control.Hold,
                                         "RC7_BUNDLED_RUNTIME_UNVERIFIED") as held:
@@ -248,7 +248,7 @@ class OperatorControl(unittest.TestCase):
         ):
             with self.subTest(blob=str(blob)[:30]):
                 fake,_=self._rc7_bundle_fake(binary=blob)
-                with patch.object(control.os,"geteuid",return_value=0), \\
+                with patch.object(control.os,"geteuid",return_value=0), \
                      patch.object(control,"_load",return_value=fake):
                     with self.assertRaises(control.Hold):
                         control.verify_rc7_bundled_backhaul("foreign")
