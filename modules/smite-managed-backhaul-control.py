@@ -208,7 +208,9 @@ def _strict_rc7_response(raw: str, *, kind: str) -> dict:
 def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
 
-    No install, no manifest write, no output of hashes/Node identities.
+    No install, no manifest/FRP receipt write or output of hashes/Node
+    identities. Validate original RC7 FRP receipt-to-Manifest binding and
+    stage an in-memory Backhaul-only candidate under the existing host lock.
     The authenticated Agent read consumes a durable replay nonce, but no
     service/process/configuration is changed. A PASS is not permission.
     """
@@ -251,6 +253,31 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
             if not RC7_SHA256.fullmatch(binary["sha256"]):
                 raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
+
+            # Production paths, READ ONLY. Existing RC7 FRP verification
+            # binds the *whole* engines.json to the committed receipt.
+            # The same shared runtime lock spans both reads and the pure
+            # candidate plan; neither resource may drift during review.
+            old_manifest = frp.read_private(frp.MANIFEST)
+            old_receipt = frp.read_private(frp.JOURNAL / "record.json")
+            try:
+                receipt = transaction._pair_load_json(old_receipt)
+            except transaction.Hold as exc:
+                raise Hold("RC7_BUNDLED_RECEIPT_UNTRUSTED") from exc
+            if receipt != frp.state() or receipt.get("state") != "COMMITTED":
+                raise Hold("RC7_BUNDLED_RECEIPT_UNTRUSTED")
+            frp.verify_file(receipt)  # Exact RC7 digest and FRP binary pins.
+            candidate, review = plan_rc7_backhaul_manifest_pair(
+                old_manifest, receipt, binary["sha256"], role=role)
+            if (review.get("RC7_FRP_RECEIPT_BINDING")
+                    != "EXACT_PRIOR_MANIFEST_MATCH"
+                    or review.get("INSTALL_ALLOWED") != "NO"
+                    or review.get("ACTIVATION_GATE") != "HOLD"
+                    or not candidate):
+                raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
+            if (frp.read_private(frp.MANIFEST) != old_manifest
+                    or frp.read_private(frp.JOURNAL / "record.json") != old_receipt):
+                raise Hold("RC7_BUNDLED_REVIEW_CONCURRENT_DRIFT")
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.
@@ -262,6 +289,8 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
         # Never leak Docker stdout, secrets, process IDs or image metadata.
         raise Hold("RC7_BUNDLED_READONLY_PROBE_FAILED") from exc
     return {
+        "RC7_FRP_RECEIPT_BINDING": "COMMITTED_EXACT_MANIFEST_REVIEWED",
+        "RC7_BACKHAUL_MANIFEST_PLAN": "CANDIDATE_ONLY_NO_WRITE",
         "RC7_BACKHAUL_IMAGE_BINARY": "OBSERVED_PINNED_IMAGE_NO_MOUNT",
         "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
         "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",

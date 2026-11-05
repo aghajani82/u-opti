@@ -336,6 +336,20 @@ preflight; it is not a new installer or menu item. It:
    secrets, Node ID, process ID, tunnel specs or ingress address is printed.
    Invalid/mismatched evidence is a fixed HOLD.
 
+As an additional **read-only gate**, this same opt-in preflight now,
+under the existing RC7 host engine lock, reads the *actual private*
+`engines.json` and FRP enrollment `record.json` paths, checks duplicate-key
+rejection and requires the existing RC7 verifier to accept the committed
+receipt, binary digests and exact manifest binding. It runs the already
+reviewed pure in-memory Backhaul-only pair planner with the observed bundled
+binary digest, rejects any manifest/receipt drift on re-read, and outputs
+only `RC7_FRP_RECEIPT_BINDING=COMMITTED_EXACT_MANIFEST_REVIEWED` and
+`RC7_BACKHAUL_MANIFEST_PLAN=CANDIDATE_ONLY_NO_WRITE` on success. No new
+menu action, network destination or live write is enabled. The private
+candidate bytes and digest values are never printed. Corrupt/partial,
+wrong-role, duplicate-field, mismatched FRP pin or out-of-band changed
+receipts fail closed.
+
 This does **not** independently verify the Cosign registry signature in
 this action, prove the live image's build provenance, guarantee that
 the API responses are signed back to the caller, establish uninterrupted

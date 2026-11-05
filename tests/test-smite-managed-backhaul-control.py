@@ -160,7 +160,29 @@ class OperatorControl(unittest.TestCase):
             Hold=FakeHold, locked=lambda:contextlib.nullcontext(),
             inspect_container=inspect, signed_probe=hmac, run=run,
         )
-        fake = SimpleNamespace(Hold=FakeHold, rt=rt, node_details=node_details)
+        manifest, receipt = self.rc7_manifest_pair_fixture()
+        manifest_path = Path("/opt/smite-node/config/engine-state/engines.json")
+        journal_dir = Path("/var/lib/u-opti/smite-rc7-frp-enrollment")
+        receipt_bytes = (json.dumps(receipt, sort_keys=True) + "\n").encode()
+        def private(path):
+            if path == manifest_path:
+                calls.append("manifest-read")
+                return manifest
+            if path == journal_dir / "record.json":
+                calls.append("receipt-read")
+                return receipt_bytes
+            raise AssertionError("Unexpected private file access")
+        def state():
+            calls.append("receipt-state")
+            return dict(receipt)
+        def verify_file(parsed):
+            calls.append("frp-verify")
+            self.assertEqual(parsed, receipt)
+        fake = SimpleNamespace(
+            Hold=FakeHold, rt=rt, node_details=node_details,
+            MANIFEST=manifest_path, JOURNAL=journal_dir,
+            read_private=private, state=state, verify_file=verify_file,
+        )
         return fake,calls
 
     def test_rc7_bundled_signed_inventory_no_recreate_and_not_ready_yet(self):
@@ -168,7 +190,13 @@ class OperatorControl(unittest.TestCase):
         with patch.object(control.os,"geteuid",return_value=0), \
              patch.object(control,"_load",return_value=fake):
             status=control.verify_rc7_bundled_backhaul("foreign")
-        self.assertEqual(calls,["runtime","mounts","replay","binary","signed-inventory"])
+        self.assertEqual(calls,["runtime","mounts","replay","binary",
+                                "signed-inventory","manifest-read","receipt-read",
+                                "receipt-state","frp-verify","manifest-read","receipt-read"])
+        self.assertEqual(status["RC7_FRP_RECEIPT_BINDING"],
+                         "COMMITTED_EXACT_MANIFEST_REVIEWED")
+        self.assertEqual(status["RC7_BACKHAUL_MANIFEST_PLAN"],
+                         "CANDIDATE_ONLY_NO_WRITE")
         self.assertEqual(status["RC7_BACKHAUL_IMAGE_BINARY"],
                          "OBSERVED_PINNED_IMAGE_NO_MOUNT")
         self.assertEqual(status["RC7_BACKHAUL_ENGINE"],
@@ -239,6 +267,82 @@ class OperatorControl(unittest.TestCase):
                 control.verify_rc7_bundled_backhaul("foreign")
         self.assertNotIn("PRIVATE_SECRET",str(held.exception))
         self.assertEqual(calls,["runtime","mounts","replay"])
+
+    def test_rc7_bundle_refuses_unbound_real_receipt_and_partial_state(self):
+        # This is an opt-in, read-only *real path* preflight. A hash claim
+        # alone must never bless an FRP receipt unrelated to the Manifest.
+        for mutation in ("wrong-hash", "wrong-role", "not-committed",
+                         "wrong-frp-pin", "duplicate-json"):
+            with self.subTest(mutation=mutation):
+                fake,calls = self._rc7_bundle_fake()
+                original_read = fake.read_private
+                original_state = fake.state
+                if mutation == "duplicate-json":
+                    def duplicate(path, original_read=original_read):
+                        value = original_read(path)
+                        if path == fake.JOURNAL / "record.json":
+                            return b'{"schema":1,"schema":1}'
+                        return value
+                    fake.read_private = duplicate
+                else:
+                    original = original_state()
+                    if mutation == "wrong-hash":
+                        original["new"] = "e" * 64
+                    elif mutation == "wrong-role":
+                        original["role"] = "ir"
+                    elif mutation == "not-committed":
+                        original["state"] = "PREPARED"
+                    else:
+                        original["binaries"]["frpc"] = "e" * 64
+                    raw = (json.dumps(original, sort_keys=True) + "\n").encode()
+                    def altered(path, original_read=original_read, raw=raw):
+                        if path == fake.JOURNAL / "record.json":
+                            return raw
+                        return original_read(path)
+                    fake.read_private = altered
+                    fake.state = lambda original=original: original
+                    # The stricter pure planner is the final guard, even
+                    # if existing FRP file verification is mocked positive.
+                    fake.verify_file = lambda _: None
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaises(control.Hold):
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertNotIn("RC7_BACKHAUL_MANIFEST_PLAN",str(calls))
+
+    def test_rc7_bundle_refuses_out_of_band_receipt_drift_during_review(self):
+        fake,calls = self._rc7_bundle_fake()
+        original_read = fake.read_private
+        count = {"receipt":0}
+        def changed(path):
+            value = original_read(path)
+            if path == fake.JOURNAL / "record.json":
+                count["receipt"] += 1
+                if count["receipt"] == 2:
+                    return value + b"DRIFT"
+            return value
+        fake.read_private = changed
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            with self.assertRaisesRegex(
+                    control.Hold,"RC7_BUNDLED_REVIEW_CONCURRENT_DRIFT"):
+                control.verify_rc7_bundled_backhaul("foreign")
+        self.assertEqual(count["receipt"],2)
+        self.assertNotIn("CANDIDATE_ONLY_NO_WRITE",str(calls))
+
+    def test_rc7_bundle_refuses_frp_verifier_failure_without_secret_leak(self):
+        fake,calls = self._rc7_bundle_fake()
+        def failed(_):
+            calls.append("frp-verify")
+            raise fake.Hold("PRIVATE_FRP_TOKEN_NOT_FOR_LOGS")
+        fake.verify_file = failed
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            with self.assertRaisesRegex(
+                    control.Hold,"RC7_BUNDLED_RUNTIME_UNVERIFIED") as held:
+                control.verify_rc7_bundled_backhaul("foreign")
+        self.assertNotIn("PRIVATE_FRP_TOKEN_NOT_FOR_LOGS",str(held.exception))
+        self.assertIn("frp-verify", calls)
 
     def test_rc7_bundle_binary_hash_invalid_or_unsafe_payload_refused(self):
         for blob in (
