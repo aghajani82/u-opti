@@ -436,6 +436,17 @@ incomplete/tampered journal fails closed **before any restore**. Only then
 does recovery restore both source files byte-for-byte, verify them, and
 remove the lab journal.
 
+Recovery now reuses the original pure RC7 pair planner to recompute the
+*exact* permitted candidate Manifest and derived FRP receipt from the saved
+pre-change bytes, before restoring anything. Four individually correct
+SHA-256 checksums are insufficient if the saved receipt binds a different
+Manifest, role, FRP binary digest or unrelated engine entry. A mismatch
+leaves both current files and the private recovery journal untouched with
+`RC7_PAIR_RECOVERY_SEMANTIC_DRIFT`. Regression tests also recompute the
+checksums of altered backup parts to ensure this is not merely a hash test.
+This consistency proof does **not** authenticate the lab journal against an
+attacker with write access, nor prove signed real-host FRP provenance.
+
 **Critical limitation:** two independent file replacements are NOT one
 atomic transaction. Between writes, RC7 FRP's existing verify may properly
 report an inconsistency. Successful byte restoration does NOT prove
