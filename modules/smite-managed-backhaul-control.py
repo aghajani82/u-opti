@@ -232,8 +232,8 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 destination = mount.get("Destination")
                 if not isinstance(destination, str):
                     raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
-                if (destination == "/usr/local/bin"
-                        or destination == "/usr/local/bin/backhaul"
+                if (destination in ("/usr", "/usr/local",
+                                    "/usr/local/bin", "/usr/local/bin/backhaul")
                         or destination.startswith("/usr/local/bin/backhaul/")):
                     raise Hold("RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT")
             frp.rt.signed_probe()
@@ -251,6 +251,9 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
             if not RC7_SHA256.fullmatch(binary["sha256"]):
                 raise Hold("RC7_BUNDLED_BINARY_UNTRUSTED")
+    except frp.Hold as exc:
+        # Preserve only a fixed local HOLD, never an untrusted verifier body.
+        raise Hold("RC7_BUNDLED_RUNTIME_UNVERIFIED") from exc
     except (OSError, RuntimeError, TypeError, KeyError, AttributeError,
             ValueError) as exc:
         if isinstance(exc, Hold):
