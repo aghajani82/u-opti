@@ -407,5 +407,113 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertNotIn("DO_NOT_PRINT_ME", p.stdout + p.stderr)
 
 
+    @staticmethod
+    def ir_local_preservation_fixture():
+        """Synthetic sanitized gate outputs, NOT authenticated server data."""
+        fake_hashes = {
+            "SAVED_TUNNEL_REGISTRY_SHA256": "a" * 64,
+            "NODE_CONTAINER_ID_SHA256": "b" * 64,
+            "FRPC_INSTANCE_SHA256": "c" * 64,
+            "FRPS_INSTANCE_SHA256": "d" * 64,
+            "BROKER_SOCKET_ID_SHA256": "e" * 64,
+            "WSS_EDGE_JOURNAL_SHA256": "f" * 64,
+        }
+        return {
+            **gate.LOCAL_PRESERVATION_STATIC,
+            **gate.LOCAL_PRESERVATION_STATUS,
+            "FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+            **fake_hashes,
+            "SECRET_MUST_NOT_LEAK": "DONT_PRINT_ME",
+            "LOCAL_PEER": "DONT_PRINT_ME",
+        }
+
+    def test_ir_local_preservation_equal_hashes_are_never_install_permission(self):
+        before = self.ir_local_preservation_fixture()
+        after = dict(before)
+        result = gate.compare_ir_local_preservation(before, after)
+        self.assertEqual(result["PRESERVATION_LOCAL"], "MATCH_UNATTESTED")
+        self.assertEqual(result["PRESERVATION_REASON"], "LOCAL_HASHES_MATCH_NOT_SIGNED_HEALTH")
+        self.assertEqual(result["SIGNED_RUNTIME_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(result["BACKHAUL_HOST_TRANSACTION"], "NOT_AUTHORIZED")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DONT_PRINT_ME", str(result))
+        self.assertNotIn("c" * 64, str(result))
+
+    def test_ir_local_preservation_any_modified_digest_fails_closed(self):
+        baseline = self.ir_local_preservation_fixture()
+        for key, expected in gate.LOCAL_PRESERVATION_DIGEST_REASON.items():
+            with self.subTest(key=key):
+                changed = dict(baseline)
+                changed[key] = "0" * 64
+                result = gate.compare_ir_local_preservation(baseline, changed)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["PRESERVATION_REASON"], expected)
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertNotIn("DONT_PRINT_ME", str(result))
+
+    def test_ir_local_preservation_missing_corrupt_or_forged_receipt_is_hold(self):
+        baseline = self.ir_local_preservation_fixture()
+        for key in list(gate.LOCAL_PRESERVATION_DIGEST_REASON) + list(
+            gate.LOCAL_PRESERVATION_STATIC) + list(gate.LOCAL_PRESERVATION_STATUS):
+            with self.subTest(key=key):
+                changed = dict(baseline)
+                changed.pop(key)
+                result = gate.compare_ir_local_preservation(baseline, changed)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["PRESERVATION_REASON"], "INCOMPLETE_LOCAL_EVIDENCE")
+        for wrong in ("UNVERIFIED", "ABSENT", "", "a" * 63, "G" * 64, 42, None, [], {}):
+            with self.subTest(wrong=repr(wrong)):
+                changed = dict(baseline)
+                changed["NODE_CONTAINER_ID_SHA256"] = wrong
+                result = gate.compare_ir_local_preservation(baseline, changed)
+                self.assertEqual(result["PRESERVATION_REASON"], "INCOMPLETE_LOCAL_EVIDENCE")
+        for wrong in (None, False, "DONT_PRINT_ME", [], {}):
+            self.assertEqual(gate.compare_ir_local_preservation(baseline, wrong)[
+                "PRESERVATION_LOCAL"], "HOLD")
+
+    def test_ir_local_preservation_frpc_absent_is_distinct_and_role_is_pinned(self):
+        before = self.ir_local_preservation_fixture()
+        after = dict(before)
+        before["FRPC_PROCESS_LOCAL"] = after["FRPC_PROCESS_LOCAL"] = "NOT_OBSERVED"
+        before["FRPC_INSTANCE_SHA256"] = after["FRPC_INSTANCE_SHA256"] = "ABSENT"
+        result = gate.compare_ir_local_preservation(before, after)
+        self.assertEqual(result["PRESERVATION_LOCAL"], "MATCH_UNATTESTED")
+        changed = dict(after)
+        changed["FRPC_PROCESS_LOCAL"] = "OBSERVED_UNATTESTED"
+        changed["FRPC_INSTANCE_SHA256"] = "c" * 64
+        self.assertEqual(gate.compare_ir_local_preservation(before, changed)[
+            "PRESERVATION_REASON"], "FRPC_PROCESS_CHANGED")
+        changed = dict(after)
+        changed["NODE_ROLE"] = "KH"
+        self.assertEqual(gate.compare_ir_local_preservation(before, changed)[
+            "PRESERVATION_REASON"], "INCOMPLETE_LOCAL_EVIDENCE")
+        changed = dict(after)
+        changed["SAVED_TUNNELS"] = "ZERO"
+        self.assertEqual(gate.compare_ir_local_preservation(before, changed)[
+            "PRESERVATION_REASON"], "INCOMPLETE_LOCAL_EVIDENCE")
+
+    def test_ir_local_preservation_cannot_substitute_signed_image_or_owner(self):
+        before = self.ir_local_preservation_fixture()
+        after = dict(before)
+        for key, val in (
+            ("SIGNED_REGISTRY_PAIR_PROOF", "NOT_SUPPLIED"),
+            ("OTHER_ENGINE", "UNAVAILABLE"),
+            ("FRPS_PROCESS_LOCAL", "NOT_OBSERVED"),
+            ("BROKER_SOCKET_LOCAL", "ABSENT"),
+            ("WSS_EDGE_JOURNAL_LOCAL", "UNVERIFIED"),
+            ("INSTALL_ALLOWED", "YES"),
+            ("ACTIVATION_GATE", "READY"),
+            ("HOST_TRANSACTION_AND_ROLLBACK", "IMPLEMENTED"),
+        ):
+            with self.subTest(key=key):
+                changed = dict(after)
+                changed[key] = val
+                result = gate.compare_ir_local_preservation(before, changed)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
