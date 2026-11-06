@@ -462,6 +462,28 @@ class HostExecutor(unittest.TestCase):
                                       witness=witness)
         return step, manifest, receipt
 
+    def test_signed_read_only_plan_for_actual_host_role_names(self):
+        from dataclasses import replace
+        runner, audit = self._retained_review_fixture()
+        manifest = self.config / "engine-state/engines.json"
+        frp = self.root / "frp"
+        frp.mkdir(mode=0o700)
+        paths = replace(self.paths, frp_state=frp)
+        for label, role in (("IR", "ir"), ("KH", "foreign")):
+            record = {"schema": 1, "state": "COMMITTED", "role": role,
+                      "old": None, "new": exe._sha(manifest.read_bytes()),
+                      "binaries": {"frpc": "b"*64, "frps": "c"*64}}
+            receipt = frp / "record.json"
+            receipt.write_text(json.dumps(record))
+            receipt.chmod(0o600)
+            evidence = {**audit, "NODE_ROLE": label, "SIGNED_REGISTRY_PAIR_PROOF": "COSIGN_VERIFIED"}
+            with patch.object(exe.admission, "report", return_value=evidence):
+                result = exe.review_in_place_binary(expected_node_image=IMAGE,
+                    arch="amd64", paths=paths, runner=runner)
+            self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"], "PAIR_PLAN_VERIFIED_READ_ONLY")
+            self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+            self.assertFalse(self.state.exists())
+
     def test_retained_commit_retry_rollback_and_drift(self):
         step, manifest, receipt = self.retained_fixture()
         before = manifest.read_bytes(), receipt.read_bytes()

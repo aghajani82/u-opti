@@ -210,11 +210,20 @@ def _retained_step(paths, *, action, role, arch, witness):
         raise Hold("RETAINED_OPERATION_INVALID")
     if arch not in package.OFFICIAL_BINARY_SHA256:
         raise Hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
+    # Keep fixed production resources closed even to an accidental internal
+    # invocation with a test witness until separate rollout approval exists.
+    live = Paths()
+    resources = (live.node, live.frp_state, live.state)
+    for resource in (paths.node, paths.frp_state, paths.state):
+        resolved = resource.resolve()
+        if any(resolved == path or path in resolved.parents for path in resources):
+            raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
         manifest, receipt, journal = _retained_files(paths)
         for conflict in (_journal(paths), receipt.with_name("record.next"),
+                         manifest.with_name("engines.json.rc7-next"),
                          manifest.with_name("engines.json.rc7-rollback-next")):
             if os.path.lexists(conflict):
                 raise Hold("COMPETING_RECOVERY_REQUIRED")
@@ -224,14 +233,20 @@ def _retained_step(paths, *, action, role, arch, witness):
 
         def record_phase(phase):
             record["phase"] = phase
-            _atomic(journal, (json.dumps(record, sort_keys=True) + "\n").encode(), 0o600)
+            payload = json.dumps(record, sort_keys=True).encode()
+            envelope = {"record": record, "sha256": _sha(payload)}
+            _atomic(journal, (json.dumps(envelope, sort_keys=True) + "\n").encode(), 0o600)
 
         fingerprint = witness()
         if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
             raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
 
         if os.path.lexists(journal):
-            record = pair._pair_load_json(pair._pair_read_private(journal, limit=40000))
+            envelope = pair._pair_load_json(pair._pair_read_private(journal, limit=40000))
+            record = envelope.get("record")
+            if (set(envelope) != {"record", "sha256"} or not isinstance(record, dict)
+                    or _sha(json.dumps(record, sort_keys=True).encode()) != envelope["sha256"]):
+                raise Hold("RETAINED_JOURNAL_CHECKSUM_INVALID")
             if (set(record) != {"schema", "role", "binary", "witness", "manifest",
                                 "receipt", "phase"} or type(record["schema"]) is not int
                     or record["schema"] != 1 or record["role"] != role
@@ -447,6 +462,8 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
     if arch not in package.OFFICIAL_BINARY_SHA256:
         return hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
     try:
+        if os.path.lexists(paths.state / "retained-rc7.json"):
+            return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
         before = admission.host.read_only_docker_inspect(runner=runner)
         identity = _retained_container_fingerprint(before)
         review = admission.report(
@@ -477,11 +494,6 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
         compose_before = _sha(_read(paths.node/"docker-compose.yml",131072))
         manifest_before = _sha(_read(
             paths.node/"config/engine-state/engines.json",8192))
-        protected_before = (review.get("SAVED_TUNNEL_REGISTRY_SHA256"),
-                            review.get("BROKER_SOCKET_ID_SHA256"),
-                            review.get("WSS_EDGE_JOURNAL_SHA256"),
-                            review.get("FRPC_INSTANCE_SHA256"),
-                            review.get("FRPS_INSTANCE_SHA256"))
         digest = package.OFFICIAL_BINARY_SHA256[arch]
         argv = ["docker","exec","-i","--env",
                 "UOPTI_EXPECTED_BACKHAUL_SHA256="+digest,
@@ -508,12 +520,6 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
         )
         if review != verify:
             return hold("RETAINED_ADMISSION_CHANGED_DURING_REVIEW")
-        if (verify.get("SAVED_TUNNEL_REGISTRY_SHA256"),
-            verify.get("BROKER_SOCKET_ID_SHA256"),
-            verify.get("WSS_EDGE_JOURNAL_SHA256"),
-            verify.get("FRPC_INSTANCE_SHA256"),
-            verify.get("FRPS_INSTANCE_SHA256"))!=protected_before:
-            return hold("FRP_OR_BROKER_LOCAL_EVIDENCE_CHANGED")
         if (_sha(_read(paths.node/".env",16384))!=env_before
                 or _sha(_read(paths.node/"docker-compose.yml",131072))!=compose_before
                 or _sha(_read(paths.node/"config/engine-state/engines.json",8192))
@@ -522,9 +528,6 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
         report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
         if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
             return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
-        journal = paths.state / "retained-rc7.json"
-        if os.path.lexists(journal):
-            return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
         manifest = paths.node / "config/engine-state/engines.json"
         for directory in (manifest.parent, paths.frp_state):
             if directory.resolve(strict=True) != directory:
@@ -535,9 +538,10 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
         baseline = pair._pair_read_private(manifest)
         if _sha(baseline) != manifest_before:
             return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+        role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
         pair._pair_expected_transition(baseline,
             pair._pair_read_private(paths.frp_state / "record.json"),
-            digest, role=review["NODE_ROLE"])
+            digest, role=role)
         report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
         return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,

@@ -42,6 +42,19 @@ class EnrollmentTests(unittest.TestCase):
                 with self.assertRaises(ctl.Hold):
                     ctl.proposal()
 
+    def test_retained_backhaul_journal_blocks_standalone_frp_rollback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal=Path(tmp)/"retained-rc7.json"
+            journal.write_bytes(b"{}")
+            journal.chmod(0o600)
+            with patch.object(ctl,"RETAINED_BACKHAUL",journal), \
+                 patch.object(ctl,"safe_dir"), \
+                 patch.object(ctl,"read_private",return_value=b"{}"), \
+                 patch.object(ctl,"node_details") as probe:
+                with self.assertRaises(ctl.Hold):
+                    ctl.restore({"state":"COMMITTED","role":"ir"})
+                probe.assert_not_called()
+
     def test_unreviewed_image_blocks_plan(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.object(ctl,'JOURNAL',Path(temporary)/'absent'), \

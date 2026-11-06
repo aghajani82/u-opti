@@ -71,6 +71,15 @@ smite_managed_bh_menu() {
                         --signed-pair-source-sha "$SMITE_BH_PAIR_SOURCE_SHA")
                     [ -z "${SMITE_BH_PAIR_PUBLISH_REF:-}" ] || signed_pair_args+=(
                         --signed-pair-publish-ref "$SMITE_BH_PAIR_PUBLISH_REF")
+                    # Use the selected RC7 release pins on an ordinary menu
+                    # run. A partial explicit override must still fail closed.
+                    if [ "${#signed_pair_args[@]}" -eq 0 ]; then
+                        signed_pair_args=(
+                            --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json"
+                            --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
+                            --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12
+                            --signed-pair-publish-ref refs/tags/v2.0.0-rc.7)
+                    fi
                     [ -z "${SMITE_BH_PAIR_TRUSTED_ROOT:-}" ] || signed_pair_args+=(
                         --signed-pair-trusted-root "$SMITE_BH_PAIR_TRUSTED_ROOT")
                     python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \

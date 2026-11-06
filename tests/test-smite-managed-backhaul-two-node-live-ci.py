@@ -1573,6 +1573,7 @@ def main():
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_PID_PASS", flush=True)
         print("CI_WSS_STAGE=RUN_PAIRED_MANIFEST_RECEIPT_TEST", flush=True)
         seen = []
+        rehearse_broker_restart = False
         broker_restarted = False
         backhaul_active = False
         backhaul_client_active = False
@@ -1580,7 +1581,7 @@ def main():
 
         def observe(phase, ir, foreign):
             nonlocal broker_restarted, backhaul_active, backhaul_client_active
-            if phase == "after-ir" and not broker_restarted:
+            if phase == "after-ir" and rehearse_broker_restart and not broker_restarted:
                 started["ci-uopti-broker"] = broker_restart(root_ir)
                 broker_restarted = True
             check(ir == root_ir and foreign == root_foreign,
@@ -1681,7 +1682,12 @@ def main():
                     identity / "node-identity.json", identity / "replay-enrollment.json",
                     root / "node/docker-compose.yml", root / "node/.env")]
                 values = [immutable, doc["Id"], doc["State"]["StartedAt"],
-                          tracked_owner_process_identity(), tracked_child_process_identity()]
+                          tracked_owner_process_identity(), tracked_child_process_identity(),
+                          sha((root / "node-data/tunnels.json").read_bytes())]
+                for path in (root / "node-data/auth/agent-replay.sqlite3",
+                             root_ir / "broker-runtime/xhttp-broker.sock"):
+                    info = path.stat()
+                    values.extend((info.st_dev, info.st_ino))
                 return sha(json.dumps(values, sort_keys=True).encode())
 
             official_retained_binary_probe(name)
@@ -1703,6 +1709,7 @@ def main():
         print("RC7_RETAINED_HOST_TRANSACTION_REAL_DATA_AND_ROLLBACK=PASS", flush=True)
 
         # A successful complete dual-host file transition is *always* undone.
+        rehearse_broker_restart = True
         report = tx.rc7_two_host_rehearsal_lab(
             root_ir, root_foreign, sha(backhaul_bytes), observe=observe)
         check(seen == ["before", "after-ir", "after-both", "after-rollback"]
