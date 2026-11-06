@@ -1223,6 +1223,83 @@ PY_UPDATER_DECODE_BLOB
             fi
 
 
+            # A running OLD launcher cannot know new module names introduced
+            # by the verified candidate launcher. Before comparing files or
+            # starting the backup/transaction, import its complete fixed
+            # inventory from that same pinned Git tree. The candidate is NOT
+            # sourced or executed. If the launcher bytes already match their
+            # pinned Git blob, the local inventory is authoritative and this
+            # adds no download to the unchanged-version fast path.
+            if ! u_opti_verify_source_blob "u-opti" "$INSTALL_PATH" 2>/dev/null; then
+                echo "  [i] Installed updater differs from the pinned source."
+                echo "  [i] Checking candidate module inventory before updating..."
+                if ! download_repo_file "u-opti" "$TEMP_DIR/u-opti" ||
+                   ! bash -n "$TEMP_DIR/u-opti"; then
+                    echo "HOLD: Could not verify candidate updater source."
+                    cleanup_update_temp
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+                # Parse only a literal, double-quoted Bash array; refuse
+                # commands, expansions, duplicate names, paths or newlines.
+                # This verified text is DATA, never shell-evaluated.
+                if ! python3 -B - "$TEMP_DIR/u-opti" \
+                    "$TEMP_DIR/.uopti-candidate-module-names" <<'PY_UPDATER_CANDIDATE_INVENTORY'
+import pathlib, re, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+    blocks = re.findall(
+        r'(?ms)^            UPDATE_FILE_NAMES=\(\n(.*?)^            \)',
+        text,
+    )
+    assert len(blocks) == 1
+    lines = blocks[0].splitlines()
+    assert 1 <= len(lines) <= 256
+    names = []
+    for line in lines:
+        match = re.fullmatch(
+            r'                "([A-Za-z0-9][A-Za-z0-9_.-]{0,100})"', line
+        )
+        assert match is not None
+        name = match.group(1)
+        assert ".." not in name and name not in (".", "..")
+        names.append(name)
+    assert len(names) == len(set(names))
+    pathlib.Path(sys.argv[2]).write_text(
+        "\n".join(names) + "\n", encoding="utf-8"
+    )
+except (OSError, ValueError, UnicodeError, AssertionError):
+    sys.exit("HOLD: Untrusted candidate module inventory.")
+PY_UPDATER_CANDIDATE_INVENTORY
+                then
+                    echo "HOLD: Candidate module inventory rejected."
+                    cleanup_update_temp
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+                mapfile -t CANDIDATE_UPDATE_FILE_NAMES \
+                    < "$TEMP_DIR/.uopti-candidate-module-names"
+                declare -A CANDIDATE_MODULE_SET=()
+                for FILE in "${CANDIDATE_UPDATE_FILE_NAMES[@]}"; do
+                    CANDIDATE_MODULE_SET["$FILE"]=1
+                done
+                INVENTORY_COMPATIBLE=true
+                for FILE in "${UPDATE_FILE_NAMES[@]}"; do
+                    if [ -z "${CANDIDATE_MODULE_SET[$FILE]:-}" ]; then
+                        INVENTORY_COMPATIBLE=false
+                        break
+                    fi
+                done
+                if [ "$INVENTORY_COMPATIBLE" != true ]; then
+                    echo "HOLD: Candidate removes a previously managed module."
+                    cleanup_update_temp
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
+                UPDATE_FILE_NAMES=("${CANDIDATE_UPDATE_FILE_NAMES[@]}")
+                echo "  [✓] Candidate module inventory verified: ${#UPDATE_FILE_NAMES[@]} files."
+            fi
+
             # UPDATE_FILE_NAMES is the one authoritative inventory for download,
             # installed-file comparison, backup and transaction admission.
             declare -A UPDATE_MODULE_MATCH=()
@@ -1296,12 +1373,18 @@ UOPTI_UPDATER_CURRENT
             MODULES_STAGED=0
 
 
-            if ! download_repo_file "u-opti" "$TEMP_DIR/u-opti" 2>>"$UPDATE_DOWNLOAD_LOG"; then
-                echo "HOLD: Could not download U-OPTI launcher."
-                tail -n 8 "$UPDATE_DOWNLOAD_LOG" >&2
-                cleanup_update_temp
-                read -rp "Press Enter to return..."
-                continue
+            # The candidate launcher may already be staged and verified when
+            # its newer module inventory was imported above. Never download
+            # a second revision or discard that first pinned verification.
+            if [ ! -f "$TEMP_DIR/u-opti" ] ||
+               ! u_opti_verify_source_blob "u-opti" "$TEMP_DIR/u-opti"; then
+                if ! download_repo_file "u-opti" "$TEMP_DIR/u-opti" 2>>"$UPDATE_DOWNLOAD_LOG"; then
+                    echo "HOLD: Could not download U-OPTI launcher."
+                    tail -n 8 "$UPDATE_DOWNLOAD_LOG" >&2
+                    cleanup_update_temp
+                    read -rp "Press Enter to return..."
+                    continue
+                fi
             fi
             if ! download_repo_file "lib/common.sh" "$TEMP_DIR/common.sh" 2>>"$UPDATE_DOWNLOAD_LOG"; then
                 echo "HOLD: Could not download U-OPTI common library."
