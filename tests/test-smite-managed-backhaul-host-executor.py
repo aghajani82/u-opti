@@ -484,6 +484,29 @@ class HostExecutor(unittest.TestCase):
             self.assertEqual(result["INSTALL_ALLOWED"], "NO")
             self.assertFalse(self.state.exists())
 
+    def test_retained_readonly_review_detects_cleanup_seal_without_docker(self):
+        runner, audit = self._retained_review_fixture()
+        self.state.mkdir(mode=0o700, parents=True)
+        seal = self.state/"retained-rc7-cleanup.json"
+        for kind in ("file", "dangling-symlink"):
+            with self.subTest(kind=kind):
+                if kind == "file":
+                    seal.write_text("unresolved recovery seal")
+                else:
+                    seal.symlink_to(self.root/"nonexistent-target")
+                result = exe.review_in_place_binary(
+                    expected_node_image=IMAGE, arch="amd64",
+                    paths=self.paths, runner=runner)
+                self.assertEqual(result["REASON"],
+                                 "RETAINED_CLEANUP_RECOVERY_REQUIRED")
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+                self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"],
+                                 "NOT_IMPLEMENTED")
+                self.assertEqual(runner.calls, [])
+                seal.unlink()
+        self.assertFalse(seal.exists())
+
     def test_retained_commit_retry_rollback_and_drift(self):
         step, manifest, receipt = self.retained_fixture()
         before = manifest.read_bytes(), receipt.read_bytes()
