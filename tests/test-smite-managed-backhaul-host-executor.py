@@ -323,6 +323,8 @@ class HostExecutor(unittest.TestCase):
 
     def _retained_review_fixture(self):
         """FRP enrolled with saved tunnels; no Compose or container changes."""
+        self.lock.touch(mode=0o600)
+        self.lock.chmod(0o600)
         manifest=self.config/"engine-state"/"engines.json"
         manifest.parent.mkdir(mode=0o700)
         manifest.write_text(json.dumps({"schema":1,"engines":{"frp":{
@@ -378,6 +380,57 @@ class HostExecutor(unittest.TestCase):
                 return result
         runner=RetainedRunner(self.runtime)
         return runner,audit
+
+    def test_retained_read_only_review_holds_existing_engine_lock(self):
+        # Read-only admission must neither create a lock nor race with FRP
+        # enrollment or a retained Backhaul paired-receipt transaction.
+        import fcntl
+        runner, audit = self._retained_review_fixture()
+        for kind in ("missing", "symlink", "loose-mode", "busy"):
+            with self.subTest(kind=kind):
+                self.lock.unlink(missing_ok=True)
+                fd = None
+                if kind == "symlink":
+                    self.lock.symlink_to(self.root / "missing-external-lock")
+                elif kind in ("loose-mode", "busy"):
+                    self.lock.touch(mode=0o600)
+                    self.lock.chmod(0o644 if kind == "loose-mode" else 0o600)
+                    if kind == "busy":
+                        fd = os.open(self.lock, os.O_RDONLY)
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    with patch.object(exe.admission, "report", return_value=audit):
+                        result = exe.review_in_place_binary(
+                            expected_node_image=IMAGE, arch="amd64",
+                            paths=self.paths, runner=runner)
+                    self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                    self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+                    self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"],
+                                     "NOT_IMPLEMENTED")
+                    self.assertNotIn("REASON", audit)
+                    self.assertEqual(runner.calls, [])
+                    self.assertFalse(self.state.exists())
+                    if kind == "missing":
+                        self.assertFalse(self.lock.exists(),
+                                         "read-only review created a lock file")
+                finally:
+                    if fd is not None:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                        os.close(fd)
+        self.lock.unlink(missing_ok=True)
+        self.lock.touch(mode=0o600)
+        self.lock.chmod(0o600)
+        before = self.lock.stat()
+        with patch.object(exe.admission, "report", return_value=audit):
+            clean = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=self.paths, runner=runner)
+        self.assertEqual(clean["RETAINED_NODE_BACKHAUL_BINARY"],
+                         "OFFICIAL_EXECUTABLE_SHA256_MATCH")
+        self.assertEqual(clean["INSTALL_ALLOWED"], "NO")
+        self.assertEqual((self.lock.stat().st_ino, self.lock.stat().st_mtime_ns),
+                         (before.st_ino, before.st_mtime_ns))
+        self.assertEqual(len(runner.calls), 3)
 
     def test_retained_frp_node_official_binary_preview_is_never_install(self):
         runner,audit=self._retained_review_fixture()
