@@ -562,20 +562,35 @@ def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
                         witness(role, root))
                 if outcome != "RESTORED":
                     raise Hold("RETAINED_TWO_HOST_EXACT_ROLLBACK_NOT_PROVEN")
+        # Both original pairs must be restored and the final external
+        # observer must accept them BEFORE removing either host's durable
+        # rollback journal. A failed after-rollback observation previously
+        # left neither journal available for independent manual review.
         for role, paths in hosts:
             manifest, receipt, journal = _retained_files(paths)
             if ((pair._pair_read_private(manifest),
                  pair._pair_read_private(receipt)) != snapshots[role]
                     or not unchanged()):
                 raise Hold("RETAINED_TWO_HOST_RESTORE_MISMATCH")
+        if not observed("after-rollback"):
+            raise Hold("RETAINED_TWO_HOST_FINAL_SYNTHETIC_PROOF_FAILED")
+        # Only now can the existing fsynced terminal cleanup finish. Never
+        # mistake a missing journal after a written transaction for proof of
+        # completed cleanup. On interruption keep the other journal intact.
+        for role, paths in hosts:
+            manifest, receipt, journal = _retained_files(paths)
             if os.path.lexists(journal):
                 if _retained_step(
                     paths, action="cleanup", role=role, arch=arch,
                     witness=lambda role=role, root=paths.node.parent:
                         witness(role, root)) != "CLEANED":
                     raise Hold("RETAINED_TWO_HOST_CLEANUP_NOT_PROVEN")
-        if not observed("after-rollback"):
-            raise Hold("RETAINED_TWO_HOST_FINAL_SYNTHETIC_PROOF_FAILED")
+            if ((pair._pair_read_private(manifest),
+                 pair._pair_read_private(receipt)) != snapshots[role]
+                    or not unchanged()
+                    or os.path.lexists(journal)
+                    or os.path.lexists(paths.state / "retained-rc7-cleanup.json")):
+                raise Hold("RETAINED_TWO_HOST_CLEANUP_POSTCHECK_FAILED")
     except Exception:
         raise Hold("RETAINED_TWO_HOST_MANUAL_RECOVERY_REQUIRED") from None
 
