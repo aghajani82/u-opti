@@ -279,6 +279,17 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
             if receipt != frp.state() or receipt.get("state") != "COMMITTED":
                 raise Hold("RC7_BUNDLED_RECEIPT_UNTRUSTED")
             frp.verify_file(receipt)  # Exact RC7 digest and FRP binary pins.
+            # On IR, the existing signed Agent /api/agent/frp/owners endpoint
+            # independently inspects the active single FRPS Owner and loopback
+            # listener. Preserve its hashed identity across this whole
+            # read-only preflight. This is NOT proof of a Foreign FRPC Child,
+            # actual forwarding, or a remotely signed cross-host response.
+            owner_before = None
+            if role == "ir":
+                owner_before = frp.signed_owner_inventory()
+                if (type(owner_before) is not str
+                        or RC7_SHA256.fullmatch(owner_before) is None):
+                    raise Hold("RC7_BUNDLED_OWNER_PROOF_INVALID")
             candidate, review = plan_rc7_backhaul_manifest_pair(
                 old_manifest, receipt, binary["sha256"], role=role)
             if (review.get("RC7_FRP_RECEIPT_BINDING")
@@ -290,6 +301,12 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
             if (frp.read_private(frp.MANIFEST) != old_manifest
                     or frp.read_private(frp.JOURNAL / "record.json") != old_receipt):
                 raise Hold("RC7_BUNDLED_REVIEW_CONCURRENT_DRIFT")
+            if role == "ir":
+                owner_after = frp.signed_owner_inventory()
+                if (type(owner_after) is not str
+                        or RC7_SHA256.fullmatch(owner_after) is None
+                        or owner_after != owner_before):
+                    raise Hold("RC7_BUNDLED_SIGNED_OWNER_CHANGED_DURING_REVIEW")
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.
@@ -307,6 +324,10 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
         "RC7_BACKHAUL_IMAGE_BINARY": "OBSERVED_PINNED_IMAGE_NO_MOUNT",
         "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
         "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+        "RC7_IR_SIGNED_FRPS_OWNER": (
+            "PASS_SIGNED_AGENT_LISTENER_STABLE" if role == "ir"
+            else "NOT_APPLICABLE_FOREIGN"),
+        "RC7_FOREIGN_FRPC_CHILD_FORWARDING": "NOT_PROVEN",
         "RC7_SIGNED_REPLAY": "PASS",
         "NODE_RECREATED": "NO",
         "FRP_OR_TUNNELS_CHANGED": "NOT_REQUESTED",
