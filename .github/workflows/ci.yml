@@ -981,7 +981,8 @@ jobs:
             --manifest modules/smite-selected-candidate.json \
             --manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
             --source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
-            --publish-ref refs/tags/v2.0.0-rc.7
+            --publish-ref refs/tags/v2.0.0-rc.7 \
+            --trusted-root modules/smite-rc7-sigstore-trusted-root.json
       - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
         shell: bash
         run: |
