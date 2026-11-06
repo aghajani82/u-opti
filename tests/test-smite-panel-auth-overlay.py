@@ -107,9 +107,9 @@ class OverlayAuthTests(unittest.TestCase):
         name = "smite-panel-auth-overlay.py"
         self.assertTrue(HELPER.is_file())
         self.assertEqual(installer.count('    "' + name + '"'), 1)
-        self.assertEqual(updater.count('                "' + name + '"'), 2)
-        self.assertEqual(updater.count('["' + name + '"]="$BASE_URL/modules/' + name + '"'), 1)
-        self.assertEqual(updater.count('["' + name + '"]="$TEMP_DIR/' + name + '"'), 1)
+        self.assertEqual(updater.count('                "' + name + '"'), 1)
+        self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")', updater)
+        self.assertIn('u_opti_stage_verified_module "$FILE"', updater)
 
 
 if __name__ == "__main__":
