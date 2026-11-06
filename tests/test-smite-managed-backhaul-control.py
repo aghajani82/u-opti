@@ -124,7 +124,8 @@ class OperatorControl(unittest.TestCase):
         self.assertFalse((self.node / "config/engine-state").exists())
 
     def _rc7_bundle_fake(self, *, role="foreign", inventory=None,
-                         binary=None, mounts=None, probe_error=None):
+                         binary=None, mounts=None, probe_error=None,
+                         owner_hashes=None, owner_error=None):
         engines = {name: "not-installed" for name in control.ENGINES}
         engines["frp"] = "ready"
         if inventory is None:
@@ -162,6 +163,7 @@ class OperatorControl(unittest.TestCase):
             inspect_container=inspect, signed_probe=hmac, run=run,
         )
         manifest, receipt = self.rc7_manifest_pair_fixture()
+        receipt["role"] = role
         manifest_path = Path("/opt/smite-node/config/engine-state/engines.json")
         journal_dir = Path("/var/lib/u-opti/smite-rc7-frp-enrollment")
         receipt_bytes = (json.dumps(receipt, sort_keys=True) + "\n").encode()
@@ -179,10 +181,19 @@ class OperatorControl(unittest.TestCase):
         def verify_file(parsed):
             calls.append("frp-verify")
             self.assertEqual(parsed, receipt)
+        signed_owner_values = (["d" * 64, "d" * 64]
+                               if owner_hashes is None else owner_hashes)
+        def signed_owner_inventory():
+            calls.append("signed-owner")
+            if owner_error is not None:
+                raise FakeHold(owner_error)
+            index = calls.count("signed-owner") - 1
+            return signed_owner_values[min(index, len(signed_owner_values) - 1)]
         fake = SimpleNamespace(
             Hold=FakeHold, rt=rt, node_details=node_details,
             MANIFEST=manifest_path, JOURNAL=journal_dir,
             read_private=private, state=state, verify_file=verify_file,
+            signed_owner_inventory=signed_owner_inventory,
         )
         return fake,calls
 
@@ -211,6 +222,50 @@ class OperatorControl(unittest.TestCase):
         self.assertEqual(status["SIGNED_OWNER_CHILD_CONTINUITY"],"NOT_PROVEN")
         self.assertNotIn("a"*64,str(status))
         self.assertNotIn("Docker",str(status))
+
+    def test_rc7_ir_owner_is_checked_twice_by_existing_signed_endpoint(self):
+        fake,calls = self._rc7_bundle_fake(role="ir")
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake):
+            status = control.verify_rc7_bundled_backhaul("ir")
+        self.assertEqual(calls.count("signed-owner"), 2)
+        self.assertLess(calls.index("frp-verify"), calls.index("signed-owner"))
+        self.assertEqual(calls[-1], "signed-owner")
+        self.assertEqual(status["RC7_IR_SIGNED_FRPS_OWNER"],
+                         "PASS_SIGNED_AGENT_LISTENER_STABLE")
+        self.assertEqual(status["RC7_FOREIGN_FRPC_CHILD_FORWARDING"], "NOT_PROVEN")
+        self.assertEqual(status["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(status["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(status["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("d" * 64, str(status))
+        fake_foreign,foreign_calls = self._rc7_bundle_fake(role="foreign")
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake_foreign):
+            foreign_status = control.verify_rc7_bundled_backhaul("foreign")
+        self.assertEqual(foreign_calls.count("signed-owner"), 0)
+        self.assertEqual(foreign_status["RC7_IR_SIGNED_FRPS_OWNER"],
+                         "NOT_APPLICABLE_FOREIGN")
+        self.assertEqual(foreign_status["RC7_FOREIGN_FRPC_CHILD_FORWARDING"],
+                         "NOT_PROVEN")
+
+    def test_rc7_ir_signed_owner_failure_and_identity_drift_fail_closed(self):
+        for settings,expected in (
+            ({"owner_error": "PRIVATE_FRPS_OWNER_TOKEN"}, "RC7_BUNDLED_RUNTIME_UNVERIFIED"),
+            ({"owner_hashes": ["invalid"]}, "RC7_BUNDLED_OWNER_PROOF_INVALID"),
+            ({"owner_hashes": ["a" * 64, "b" * 64]},
+             "RC7_BUNDLED_SIGNED_OWNER_CHANGED_DURING_REVIEW"),
+            ({"owner_hashes": ["a" * 64, None]},
+             "RC7_BUNDLED_SIGNED_OWNER_CHANGED_DURING_REVIEW"),
+        ):
+            with self.subTest(settings=settings):
+                fake,calls = self._rc7_bundle_fake(role="ir", **settings)
+                with patch.object(control.os, "geteuid", return_value=0), \
+                     patch.object(control, "_load", return_value=fake):
+                    with self.assertRaisesRegex(control.Hold, expected) as held:
+                        control.verify_rc7_bundled_backhaul("ir")
+                self.assertNotIn("PRIVATE_FRPS_OWNER_TOKEN", str(held.exception))
+                self.assertIn("signed-owner", calls)
+                self.assertNotIn("INSTALL_ALLOWED=YES", str(held.exception))
 
     def test_rc7_bundle_unsafe_mount_role_and_root_are_hold_before_probe(self):
         for kwargs,reason in (
