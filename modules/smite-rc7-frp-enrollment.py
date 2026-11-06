@@ -23,6 +23,7 @@ HERE=Path(__file__).resolve().parent
 ROOT=Path('/opt/smite-node/config')
 MANIFEST=ROOT/'engine-state/engines.json'
 JOURNAL=Path('/var/lib/u-opti/smite-rc7-frp-enrollment')
+RETAINED_BACKHAUL=Path('/var/lib/u-opti/smite-engine-host/backhaul/retained-rc7.json')
 BIN_LIMIT=48*1024*1024
 ENGINES={'backhaul','frp','gost','rathole','chisel'}
 DIGEST=re.compile('[0-9a-f]{64}\\Z')
@@ -333,6 +334,21 @@ def apply():
 def restore(entry):
     need(entry['state'] in ('COMMITTED','PREPARED','APPLYING','HOLD','ROLLING_BACK'),
          'FRP_ROLLBACK_STATE_INVALID')
+    # The FRP receipt may now bind a manifest jointly owned by a
+    # Backhaul transaction. Under the shared lock, allow this independent
+    # rollback only after Backhaul restored both exact original files.
+    if os.path.lexists(RETAINED_BACKHAUL):
+        safe_dir(RETAINED_BACKHAUL.parent)
+        try:
+            envelope=json.loads(read_private(RETAINED_BACKHAUL,40000))
+            record=envelope['record']
+            restored=(record['phase']=='RESTORED' and record['role']==entry['role']
+                      and sha(json.dumps(record,sort_keys=True).encode())==envelope['sha256']
+                      and record['manifest']==read_private(MANIFEST).hex()
+                      and record['receipt']==read_private(JOURNAL/'record.json').hex())
+        except (KeyError,TypeError,ValueError,UnicodeError):
+            restored=False
+        need(restored,'BACKHAUL_TRANSACTION_REQUIRES_OWN_RECOVERY')
     doc=node_details()
     need(doc['role']==entry['role'],'WSS_ROLE_MISMATCH')
     rt.no_tunnels()

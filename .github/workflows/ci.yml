@@ -972,6 +972,16 @@ jobs:
           ref: 115f032761564a069d0aa2ca891e55d53a1c6ea0
           path: .signed-owner-smite-source
           persist-credentials: false
+      - uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Authenticate both RC7 images before retained-node qualification
+        run: |
+          python3 -B modules/smite-registry-pair-admission.py \
+            --manifest modules/smite-selected-candidate.json \
+            --manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
+            --source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
+            --publish-ref refs/tags/v2.0.0-rc.7
       - name: Verify pinned Backhaul v0.7.2 and candidate Compose offline
         shell: bash
         run: |
