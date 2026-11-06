@@ -606,6 +606,11 @@ class HostExecutor(unittest.TestCase):
                     step("install")
                 self.assertEqual(step("recover"), "RESTORED")
                 self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+                # Every crash round is a separate transaction. Finish its
+                # durable terminal journal cleanup before the next round.
+                self.assertEqual(step("cleanup"), "CLEANED")
+                self.assertFalse((self.state/"retained-rc7.json").exists())
+                self.assertFalse((self.state/"retained-rc7-cleanup.json").exists())
 
     def test_retained_terminal_cleanup_requires_exact_rollback(self):
         step, manifest, receipt = self.retained_fixture()
