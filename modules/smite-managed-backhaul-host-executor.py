@@ -535,6 +535,11 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
     if arch not in package.OFFICIAL_BINARY_SHA256:
         return hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
     try:
+        # A crash after terminal unlink can leave only the durable cleanup
+        # seal. Never present the paired manifest as a clean install candidate
+        # until its independent locked recovery has completed.
+        if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+            return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
         if os.path.lexists(paths.state / "retained-rc7.json"):
             return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
         before = admission.host.read_only_docker_inspect(runner=runner)
