@@ -537,6 +537,100 @@ class HostExecutor(unittest.TestCase):
             self.assertEqual(result["INSTALL_ALLOWED"], "NO")
             self.assertFalse(self.state.exists())
 
+    def test_retained_read_only_preflight_holds_each_competing_recovery_marker(self):
+        runner, audit = self._retained_review_fixture()
+        manifest = self.config / "engine-state/engines.json"
+        for path in (
+            self.state / "journal",
+            self.paths.frp_state / "record.next",
+            manifest.with_name("engines.json.rc7-next"),
+            manifest.with_name("engines.json.rc7-rollback-next"),
+        ):
+            for kind in ("regular", "dangling-symlink"):
+                with self.subTest(path=path.name, kind=kind):
+                    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                    if kind == "regular":
+                        path.write_bytes(b"pending recovery")
+                    else:
+                        path.symlink_to(self.root / "never-present")
+                    with patch.object(exe.admission, "report", return_value=audit):
+                        result = exe.review_in_place_binary(
+                            expected_node_image=IMAGE, arch="amd64",
+                            paths=self.paths, runner=runner)
+                    self.assertEqual(result["REASON"], "COMPETING_RECOVERY_REQUIRED")
+                    self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                    self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+                    self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"], "NOT_IMPLEMENTED")
+                    self.assertEqual(runner.calls, [], "preflight called Docker")
+                    path.unlink()
+
+    def test_retained_read_only_blocks_late_frp_and_manifest_recovery(self):
+        from dataclasses import replace
+        runner, audit = self._retained_review_fixture()
+        frp = self.root / "frp"
+        frp.mkdir(mode=0o700)
+        manifest = self.config / "engine-state/engines.json"
+        receipt = frp / "record.json"
+        receipt.write_text(json.dumps({"schema": 1, "state": "COMMITTED",
+            "role": "ir", "old": None, "new": exe._sha(manifest.read_bytes()),
+            "binaries": {"frpc": "b"*64, "frps": "c"*64}}))
+        receipt.chmod(0o600)
+        paths = replace(self.paths, frp_state=frp)
+        signed = {**audit, "NODE_ROLE": "IR",
+                  "SIGNED_REGISTRY_PAIR_PROOF": "COSIGN_VERIFIED"}
+        protected = (manifest.read_bytes(), receipt.read_bytes(),
+                     (self.data / "tunnels.json").read_bytes())
+        targets = (
+            paths.frp_state / "record.next",
+            manifest.with_name("engines.json.rc7-next"),
+            manifest.with_name("engines.json.rc7-rollback-next"),
+            paths.state / "journal",
+        )
+        for target in targets:
+            with self.subTest(target=target.name):
+                runner.calls.clear()
+                target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                def raced(args, **kwargs):
+                    output = runner(args, **kwargs)
+                    if args[:3] == ["docker", "exec", "-i"]:
+                        target.write_bytes(b"unresolved")
+                    return output
+                with patch.object(exe.admission, "report", return_value=signed):
+                    result = exe.review_in_place_binary(
+                        expected_node_image=IMAGE, arch="amd64",
+                        paths=paths, runner=raced)
+                self.assertEqual(result["REASON"], "COMPETING_RECOVERY_REQUIRED")
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"], "NOT_IMPLEMENTED")
+                self.assertEqual(protected, (
+                    manifest.read_bytes(), receipt.read_bytes(),
+                    (self.data / "tunnels.json").read_bytes()))
+                target.unlink()
+        # A competing writer may appear after the paired planner rather than
+        # during binary verification; this must also HOLD.
+        original_plan = exe.pair._pair_expected_transition
+        def during_plan(*args, **kwargs):
+            candidate = original_plan(*args, **kwargs)
+            targets[0].write_bytes(b"unfinished journal")
+            return candidate
+        with patch.object(exe.admission, "report", return_value=signed), \
+                patch.object(exe.pair, "_pair_expected_transition",
+                             side_effect=during_plan):
+            result = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=paths, runner=runner)
+        self.assertEqual(result["REASON"], "COMPETING_RECOVERY_REQUIRED")
+        targets[0].unlink()
+        with patch.object(exe.admission, "report", return_value=signed):
+            clean = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=paths, runner=runner)
+        self.assertEqual(clean["IN_PLACE_MANIFEST_TRANSACTION"],
+                         "PAIR_PLAN_VERIFIED_READ_ONLY")
+        self.assertEqual(clean["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(protected, (manifest.read_bytes(),
+                         receipt.read_bytes(), (self.data / "tunnels.json").read_bytes()))
+
     def test_retained_signed_review_rejects_unlocked_receipt_and_recovery_races(self):
         from dataclasses import replace
         runner, audit = self._retained_review_fixture()
