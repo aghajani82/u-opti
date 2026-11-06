@@ -31,8 +31,8 @@ NODE_SOURCE = REPO / ".managed-smite-source"
 CHILD_SOURCE = REPO / ".signed-owner-smite-source"
 CHILD_SHA = "115f032761564a069d0aa2ca891e55d53a1c6ea0"
 SMITE_SHA = "02d05056d3a4baf577c9d3781d62af61c000f1ac"
-IMAGE = ("ghcr.io/zzedix/smite-node@sha256:"
-         "967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e")
+IMAGE = ("ghcr.io/aghajani82/smite-node@sha256:"
+         "03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263")
 FRP_ARCHIVE_SHA = "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 BACKHAUL_ARCHIVE_SHA = "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
 MARKER = "U-OPTI-BACKHAUL-ISOLATED-LAB-V1\n"
@@ -91,6 +91,7 @@ def load(name: str, source: Path):
     spec = importlib.util.spec_from_file_location(name, source)
     check(spec is not None and spec.loader is not None, "CI_HELPER_UNAVAILABLE")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -1265,7 +1266,6 @@ def tracked_child_process_identity():
 def docker_node(name: str, network: str, root: Path):
     child = name == "ci-uopti-foreign"
     # Both roles use the exact reviewed Smite revision with signed Owner API.
-    source = CHILD_SOURCE
     command = [
         "docker", "run", "-d", "--name", name, "--network", network,
         "--network-alias", name,
@@ -1292,13 +1292,8 @@ def docker_node(name: str, network: str, root: Path):
             "--env", "SMITE_UOPTI_ROUTE_BROKER_SOCKET=/run/u-opti/smite/xhttp-broker.sock",
             "--mount", f"type=bind,src={root}/broker-runtime,dst=/run/u-opti/smite,readonly",
         ]),
-        "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
-        "--mount", f"type=bind,src={source}/node/main.py,dst=/app/main.py,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
         "--mount", f"type=bind,src={root}/node-data,dst=/var/lib/smite-node",
-        "--mount", f"type=bind,src={root}/engines/frpc,dst=/usr/local/bin/frpc,readonly",
-        "--mount", f"type=bind,src={root}/engines/frps,dst=/usr/local/bin/frps,readonly",
-        "--mount", f"type=bind,src={root}/engines/backhaul,dst=/usr/local/bin/backhaul,readonly",
         *([
             "--mount", f"type=bind,src={root}/node/config/ci-ca.crt,dst=/etc/ssl/certs/ca-certificates.crt,readonly",
         ] if child else []),
@@ -1326,11 +1321,9 @@ def enrollment(root: Path, *, role: str):
     # authenticated identity/Replay key-binding marker. Enroll each role
     # with exactly the code that will authenticate its later requests.
     check(role in ("ir", "foreign"), "CI_REPLAY_ROLE_INVALID")
-    source = CHILD_SOURCE
     run("docker", "run", "--rm", "--platform", "linux/amd64",
         "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "0:0",
-        "--mount", f"type=bind,src={source}/node/app,dst=/app/app,readonly",
         "--mount", f"type=bind,src={root}/node/config,dst=/etc/smite-node",
         "--mount", f"type=bind,src={root}/node-data,dst=/var/lib/smite-node",
         "--entrypoint", "python", IMAGE, "-m", "app.replay_enrollment",
@@ -1665,6 +1658,49 @@ def main():
                       saved_owner_state, "CI_SIGNED_BACKHAUL_REMOVE_FRP_REGISTRY_DRIFT")
             seen.append(phase)
             return True
+
+        # Exercise the host executor on the signed image, without application
+        # overlays. Snapshot stable identity, never private credentials in logs.
+        executor = load("ci_host_retained_executor",
+                        REPO / "modules/smite-managed-backhaul-host-executor.py")
+
+        def host_step(role, root, name, action):
+            paths = executor.Paths(node=root / "node", state=root / "host-state",
+                                   frp_state=root / "rc7-frp-enrollment",
+                                   lock=root / ".smite-engine-transaction.lock")
+
+            def witness():
+                doc = json.loads(run("docker", "inspect", name))[0]
+                check(doc["Config"]["Image"] == IMAGE and doc["State"]["Running"]
+                      and (doc["Id"], doc["State"]["StartedAt"]) == started[name],
+                      "CI_RETAINED_SIGNED_NODE_REPLACED")
+                signed_child_probe()
+                signed_owner_action("status", "active")
+                identity = root / "node/config/identity"
+                immutable = [sha(path.read_bytes()) for path in (
+                    identity / "node-identity.json", identity / "replay-enrollment.json",
+                    root / "node/docker-compose.yml", root / "node/.env")]
+                values = [immutable, doc["Id"], doc["State"]["StartedAt"],
+                          tracked_owner_process_identity(), tracked_child_process_identity()]
+                return sha(json.dumps(values, sort_keys=True).encode())
+
+            official_retained_binary_probe(name)
+            return executor._retained_step(paths, action=action, role=role,
+                                           arch="amd64", witness=witness)
+
+        for _, root, _ in roots:
+            directory(root / "host-state")
+        observe("before", root_ir, root_foreign)
+        for role, root, name in roots:
+            check(host_step(role, root, name, "install") == "COMMITTED",
+                  "CI_RETAINED_COMMIT_MISSING")
+            observe("after-ir" if role == "ir" else "after-both", root_ir, root_foreign)
+        for role, root, name in reversed(roots):
+            check(host_step(role, root, name, "rollback") == "RESTORED",
+                  "CI_RETAINED_ROLLBACK_MISSING")
+        observe("after-rollback", root_ir, root_foreign)
+        seen.clear()
+        print("RC7_RETAINED_HOST_TRANSACTION_REAL_DATA_AND_ROLLBACK=PASS", flush=True)
 
         # A successful complete dual-host file transition is *always* undone.
         report = tx.rc7_two_host_rehearsal_lab(

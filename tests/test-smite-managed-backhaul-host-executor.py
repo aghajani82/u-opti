@@ -443,6 +443,72 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual(result["INSTALL_ALLOWED"],"NO")
         self.assertFalse(exe._journal(self.paths).exists())
 
+    def retained_fixture(self):
+        from dataclasses import replace
+        self._retained_review_fixture()
+        self.state.mkdir(mode=0o700, parents=True)
+        frp = self.root / "frp"
+        frp.mkdir(mode=0o700)
+        manifest = self.config / "engine-state/engines.json"
+        receipt = frp / "record.json"
+        receipt.write_text(json.dumps({"schema": 1, "state": "COMMITTED", "role": "ir",
+            "old": None, "new": exe._sha(manifest.read_bytes()),
+            "binaries": {"frpc": "b"*64, "frps": "c"*64}}))
+        receipt.chmod(0o600)
+        paths = replace(self.paths, frp_state=frp)
+
+        def step(action, witness=lambda: "1"*64):
+            return exe._retained_step(paths, action=action, role="ir", arch="amd64",
+                                      witness=witness)
+        return step, manifest, receipt
+
+    def test_retained_commit_retry_rollback_and_drift(self):
+        step, manifest, receipt = self.retained_fixture()
+        before = manifest.read_bytes(), receipt.read_bytes()
+        with exe._lock(self.lock), self.assertRaises(exe.Hold):
+            step("install")
+        self.assertEqual(step("install"), "COMMITTED")
+        self.assertEqual(step("install"), "COMMITTED")
+        self.assertEqual(step("recover"), "COMMITTED")
+        changed = manifest.read_bytes(), receipt.read_bytes()
+        with self.assertRaises(exe.Hold):
+            step("rollback", lambda: "2"*64)
+        manifest.write_bytes(b"drift")
+        with self.assertRaises(exe.Hold):
+            step("recover")
+        self.assertEqual(receipt.read_bytes(), changed[1])
+        self.assertEqual(manifest.read_bytes(), b"drift")
+        manifest.write_bytes(changed[0])
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("recover"), "RESTORED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+
+    def test_retained_process_death_during_apply_and_compensation(self):
+        step, manifest, receipt = self.retained_fixture()
+        before = manifest.read_bytes(), receipt.read_bytes()
+        for action, target in (("install", manifest), ("install", receipt),
+                               ("rollback", receipt), ("rollback", manifest)):
+            with self.subTest(action=action, target=target.name):
+                if action == "rollback":
+                    step("install")
+                pid = os.fork()
+                if pid == 0:
+                    atomic = exe.pair._pair_atomic
+                    def crash(path, content):
+                        atomic(path, content)
+                        if path == target:
+                            os._exit(91)
+                    with patch.object(exe.pair, "_pair_atomic", crash):
+                        try:
+                            step(action)
+                        finally:
+                            os._exit(1)
+                self.assertEqual(os.waitpid(pid, 0)[1], 91 << 8)
+                with self.assertRaises(exe.Hold):
+                    step("install")
+                self.assertEqual(step("recover"), "RESTORED")
+                self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+
     def test_executor_has_no_nginx_firewall_xray_or_tunnel_apply_actions(self):
         source=SRC.read_text()
         for forbidden in ("nginx -s","iptables ","nft ","ufw ","xray","3x-ui",

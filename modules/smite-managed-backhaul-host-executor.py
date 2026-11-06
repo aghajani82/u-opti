@@ -57,6 +57,7 @@ class Paths:
     state: Path = Path("/var/lib/u-opti/smite-engine-host/backhaul")
     lock: Path = Path("/run/lock/u-opti-smite-engine.lock")
     binary: Path = package.INSTALL_BINARY
+    frp_state: Path = Path("/var/lib/u-opti/smite-rc7-frp-enrollment")
 
 class Hold(RuntimeError):
     pass
@@ -174,7 +175,7 @@ def _lock(path: Path):
     try:
         st = os.fstat(fd)
         if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                or stat.S_IMODE(st.st_mode) & 0o077):
+                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600):
             raise Hold("UNSAFE_LOCK_FILE")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -183,6 +184,106 @@ def _lock(path: Path):
         yield
     finally:
         os.close(fd)
+
+# The operator CLI only reviews retained nodes. The write entry below is
+# exercised on isolated nodes until independent deployment admission exists.
+pair = _load("retained_pair", "smite-managed-backhaul-transaction.py")
+
+
+def _retained_files(paths):
+    manifest = paths.node / "config/engine-state/engines.json"
+    receipt = paths.frp_state / "record.json"
+    for directory in (manifest.parent, receipt.parent, paths.state):
+        if not directory.is_absolute() or directory.resolve(strict=True) != directory:
+            raise Hold("RETAINED_DIRECTORY_UNTRUSTED")
+        _dir(directory)
+    return manifest, receipt, paths.state / "retained-rc7.json"
+
+
+def _retained_step(paths, *, action, role, arch, witness):
+    """Apply or compensate under the same lock used by RC7 FRP enrollment.
+
+    witness() re-authenticates this retained node and returns the stable
+    protected-state fingerprint. No mutable host caller is admitted yet.
+    """
+    if action not in ("install", "rollback", "recover") or role not in ("ir", "foreign"):
+        raise Hold("RETAINED_OPERATION_INVALID")
+    if arch not in package.OFFICIAL_BINARY_SHA256:
+        raise Hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
+    binary = package.OFFICIAL_BINARY_SHA256[arch]
+
+    with _lock(paths.lock):
+        manifest, receipt, journal = _retained_files(paths)
+        for conflict in (_journal(paths), receipt.with_name("record.next"),
+                         manifest.with_name("engines.json.rc7-rollback-next")):
+            if os.path.lexists(conflict):
+                raise Hold("COMPETING_RECOVERY_REQUIRED")
+
+        def current():
+            return pair._pair_read_private(manifest), pair._pair_read_private(receipt)
+
+        def record_phase(phase):
+            record["phase"] = phase
+            _atomic(journal, (json.dumps(record, sort_keys=True) + "\n").encode(), 0o600)
+
+        fingerprint = witness()
+        if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
+            raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
+
+        if os.path.lexists(journal):
+            record = pair._pair_load_json(pair._pair_read_private(journal, limit=40000))
+            if (set(record) != {"schema", "role", "binary", "witness", "manifest",
+                                "receipt", "phase"} or type(record["schema"]) is not int
+                    or record["schema"] != 1 or record["role"] != role
+                    or record["binary"] != binary or record["witness"] != fingerprint
+                    or record["phase"] not in ("PREPARED", "COMMITTED", "RESTORING", "RESTORED")):
+                raise Hold("RETAINED_JOURNAL_UNTRUSTED")
+            before = tuple(bytes.fromhex(record[key]) for key in ("manifest", "receipt"))
+        else:
+            if action != "install":
+                raise Hold("RETAINED_JOURNAL_MISSING")
+            before = current()
+            record = {"schema": 1, "role": role, "binary": binary, "witness": fingerprint,
+                      "manifest": before[0].hex(), "receipt": before[1].hex(), "phase": "NEW"}
+
+        after = pair._pair_expected_transition(*before, binary, role=role)
+        observed = current()
+        mixed = (after[0], before[1])
+        allowed = {"NEW": (before,), "PREPARED": (before, mixed, after),
+                   "COMMITTED": (after,), "RESTORING": (before, mixed, after),
+                   "RESTORED": (before,)}
+        phase = record["phase"]
+        if observed not in allowed[phase]:
+            raise Hold("RETAINED_PAIR_DRIFT")
+        if action == "install":
+            if phase == "COMMITTED":
+                return phase
+            if phase not in ("NEW", "RESTORED"):
+                raise Hold("RETAINED_RECOVERY_REQUIRED")
+            record_phase("PREPARED")
+            destination = after
+            order = (0, 1)
+            final = "COMMITTED"
+        else:
+            if phase == "RESTORED" or (action == "recover" and phase == "COMMITTED"):
+                return phase
+            record_phase("RESTORING")
+            destination = before
+            order = (1, 0)
+            final = "RESTORED"
+        for index in order:
+            if current() != observed or witness() != fingerprint:
+                raise Hold("RETAINED_RUNTIME_OR_PAIR_DRIFT")
+            if observed[index] != destination[index]:
+                pair._pair_atomic((manifest, receipt)[index], destination[index])
+                updated = list(observed)
+                updated[index] = destination[index]
+                observed = tuple(updated)
+        if current() != destination or witness() != fingerprint:
+            raise Hold("RETAINED_FINAL_PROOF_FAILED")
+        record_phase(final)
+        return final
+
 
 def _journal(paths: Paths) -> Path:
     return paths.state / "journal"
@@ -405,6 +506,8 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             signed_pair_publish_ref=signed_pair_publish_ref,
             signed_pair_trusted_root=signed_pair_trusted_root,
         )
+        if review != verify:
+            return hold("RETAINED_ADMISSION_CHANGED_DURING_REVIEW")
         if (verify.get("SAVED_TUNNEL_REGISTRY_SHA256"),
             verify.get("BROKER_SOCKET_ID_SHA256"),
             verify.get("WSS_EDGE_JOURNAL_SHA256"),
@@ -417,9 +520,26 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
                     !=manifest_before):
             return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
         report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
-        return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED"
-                    if report["SIGNED_REGISTRY_PAIR_PROOF"]!="COSIGN_VERIFIED"
-                    else "IN_PLACE_SIGNED_TRANSACTION_NOT_IMPLEMENTED")
+        if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
+            return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
+        journal = paths.state / "retained-rc7.json"
+        if os.path.lexists(journal):
+            return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
+        manifest = paths.node / "config/engine-state/engines.json"
+        for directory in (manifest.parent, paths.frp_state):
+            if directory.resolve(strict=True) != directory:
+                return hold("RETAINED_DIRECTORY_UNTRUSTED")
+            _dir(directory)
+        if os.path.lexists(paths.frp_state / "record.next"):
+            return hold("COMPETING_RECOVERY_REQUIRED")
+        baseline = pair._pair_read_private(manifest)
+        if _sha(baseline) != manifest_before:
+            return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+        pair._pair_expected_transition(baseline,
+            pair._pair_read_private(paths.frp_state / "record.json"),
+            digest, role=review["NODE_ROLE"])
+        report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
+        return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
             RuntimeError,TypeError):
         return hold("RETAINED_NODE_PREVIEW_UNVERIFIED")
