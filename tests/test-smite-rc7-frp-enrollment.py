@@ -55,6 +55,21 @@ class EnrollmentTests(unittest.TestCase):
                     ctl.restore({"state":"COMMITTED","role":"ir"})
                 probe.assert_not_called()
 
+    def test_retained_cleanup_seal_blocks_frp_rollback_even_without_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # A crash can leave only this durable terminal seal after the
+            # retained Backhaul journal has been removed. Never race recovery.
+            seal = Path(tmp)/"retained-rc7-cleanup.json"
+            seal.write_bytes(b"pending terminal cleanup")
+            with patch.object(ctl, "RETAINED_BACKHAUL_CLEANUP", seal), \
+                 patch.object(ctl, "RETAINED_BACKHAUL", Path(tmp)/"missing"), \
+                 patch.object(ctl, "node_details") as probe:
+                with self.assertRaisesRegex(
+                    ctl.Hold, "BACKHAUL_CLEANUP_REQUIRES_OWN_RECOVERY"
+                ):
+                    ctl.restore({"state": "COMMITTED", "role": "ir"})
+                probe.assert_not_called()
+
     def test_unreviewed_image_blocks_plan(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.object(ctl,'JOURNAL',Path(temporary)/'absent'), \
