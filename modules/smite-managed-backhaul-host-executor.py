@@ -446,6 +446,151 @@ def _retained_step(paths, *, action, role, arch, witness):
         return final
 
 
+
+def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
+                                     arch: str, observe, inject: str = "") -> dict[str, str]:
+    """Exercise the actual retained host transaction on TWO disposable nodes.
+
+    Unlike the older paired-file lab, this uses _retained_step (the existing
+    Host Executor's fsynced phase journal and terminal cleanup) on each role.
+    It ALWAYS compensates both nodes, even after success. It cannot be
+    invoked by the menu or CLI and requires the GitHub PR disposable marker
+    for each root. Fixture hashes are NOT signed runtime/forwarding proof.
+    """
+    if (arch not in package.OFFICIAL_BINARY_SHA256
+            or inject not in ("", "after-ir", "after-both")
+            or not callable(observe)
+            or not isinstance(ir, Paths) or not isinstance(foreign, Paths)):
+        raise Hold("RETAINED_TWO_HOST_REHEARSAL_INVALID")
+    hosts = (("ir", ir), ("foreign", foreign))
+    roots = []
+    for role, paths in hosts:
+        root = paths.node.parent
+        expected = {
+            "node": root / "node",
+            "staging": root / "stages",
+            "frp_state": root / pair.PAIR_RECEIPT_DIR,
+            "state": root / "state/engine/backhaul",
+            "lock": root / "engine.lock",
+            "binary": root / "installed/backhaul",
+        }
+        if (not root.is_absolute()
+                or any(getattr(paths, key) != value or value.resolve() != value
+                       for key, value in expected.items())):
+            raise Hold("RETAINED_TWO_HOST_LAB_PATH_UNTRUSTED")
+        # Strict GitHub PR-only marker, private root and directory admission.
+        # Never remove/bypass this check in order to touch production hosts.
+        try:
+            pair.admission(root)
+            pair._pair_paths(root)
+            pair._rc7_two_host_guards(root, role=role)
+        except (pair.Hold, OSError, ValueError) as exc:
+            raise Hold("RETAINED_TWO_HOST_LAB_ADMISSION_REQUIRED") from exc
+        roots.append(root)
+    if (roots[0] == roots[1] or roots[0] in roots[1].parents
+            or roots[1] in roots[0].parents):
+        raise Hold("RETAINED_TWO_HOST_DISTINCT_LABS_REQUIRED")
+
+    # The witness is tied to existing FRP Owner/Child and broker/replay
+    # fixtures, not caller-provided fake hex. Nothing here claims real signed
+    # two-host health, TLS/443 continuity, or permission to deploy.
+    def witness(role, root):
+        digests = pair._rc7_two_host_guards(root, role=role)
+        return _sha(json.dumps(digests, separators=(",", ":")).encode())
+
+    snapshots = {}
+    baselines = {}
+    for role, paths in hosts:
+        # Both preflights MUST pass before either manifest is touched.
+        try:
+            with _lock(paths.lock):
+                manifest, receipt, journal = _retained_files(paths)
+                if (os.path.lexists(journal)
+                        or os.path.lexists(paths.state / "retained-rc7-cleanup.json")
+                        or _retained_review_pending_recovery(paths)):
+                    raise Hold("RETAINED_TWO_HOST_PENDING_RECOVERY")
+                old = (pair._pair_read_private(manifest),
+                       pair._pair_read_private(receipt))
+                pair._pair_expected_transition(
+                    *old, package.OFFICIAL_BINARY_SHA256[arch], role=role)
+                snapshots[role] = old
+                baselines[role] = witness(role, paths.node.parent)
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            # A corrupt Foreign receipt must never escape as an unhandled
+            # exception or allow us to begin writing the IR manifest.
+            raise Hold("RETAINED_TWO_HOST_PREFLIGHT_UNVERIFIED") from exc
+
+    def unchanged():
+        return all(witness(role, paths.node.parent) == baselines[role]
+                   for role, paths in hosts)
+
+    def observed(phase):
+        try:
+            ok = observe(phase, roots[0], roots[1]) is True
+        except Exception:
+            ok = False
+        return ok and unchanged()
+
+    if not observed("before"):
+        raise Hold("RETAINED_TWO_HOST_PRIOR_SYNTHETIC_PROOF_FAILED")
+    failed = False
+    try:
+        if _retained_step(ir, action="install", role="ir", arch=arch,
+                          witness=lambda: witness("ir", roots[0])) != "COMMITTED":
+            raise Hold("RETAINED_TWO_HOST_IR_APPLY_NOT_COMMITTED")
+        if not observed("after-ir") or inject == "after-ir":
+            raise Hold("RETAINED_TWO_HOST_AFTER_IR_PROOF_FAILED")
+        if _retained_step(foreign, action="install", role="foreign", arch=arch,
+                          witness=lambda: witness("foreign", roots[1])) != "COMMITTED":
+            raise Hold("RETAINED_TWO_HOST_FOREIGN_APPLY_NOT_COMMITTED")
+        if not observed("after-both") or inject == "after-both":
+            raise Hold("RETAINED_TWO_HOST_AFTER_BOTH_PROOF_FAILED")
+    except Exception:
+        failed = True
+
+    # Reverse-order compensation uses the SAME real host journal implementation.
+    # On drift or interrupted recovery, preserve the journal for manual review.
+    try:
+        if not unchanged():
+            raise Hold("RETAINED_TWO_HOST_PROTECTED_FIXTURE_DRIFT")
+        for role, paths in reversed(hosts):
+            journal = paths.state / "retained-rc7.json"
+            if os.path.lexists(journal):
+                outcome = _retained_step(
+                    paths, action="rollback", role=role, arch=arch,
+                    witness=lambda role=role, root=paths.node.parent:
+                        witness(role, root))
+                if outcome != "RESTORED":
+                    raise Hold("RETAINED_TWO_HOST_EXACT_ROLLBACK_NOT_PROVEN")
+        for role, paths in hosts:
+            manifest, receipt, journal = _retained_files(paths)
+            if ((pair._pair_read_private(manifest),
+                 pair._pair_read_private(receipt)) != snapshots[role]
+                    or not unchanged()):
+                raise Hold("RETAINED_TWO_HOST_RESTORE_MISMATCH")
+            if os.path.lexists(journal):
+                if _retained_step(
+                    paths, action="cleanup", role=role, arch=arch,
+                    witness=lambda role=role, root=paths.node.parent:
+                        witness(role, root)) != "CLEANED":
+                    raise Hold("RETAINED_TWO_HOST_CLEANUP_NOT_PROVEN")
+        if not observed("after-rollback"):
+            raise Hold("RETAINED_TWO_HOST_FINAL_SYNTHETIC_PROOF_FAILED")
+    except Exception:
+        raise Hold("RETAINED_TWO_HOST_MANUAL_RECOVERY_REQUIRED") from None
+
+    if failed:
+        raise Hold("RETAINED_TWO_HOST_ABORTED_EXACT_ROLLBACK_PROVED")
+    return {
+        "RETAINED_TWO_HOST": "DISPOSABLE_HOST_EXECUTOR_EXACT_ROLLBACK",
+        "RETAINED_RECOVERY_JOURNALS": "SEALED_AND_CLEANED",
+        "SIGNED_OWNER_CHILD_CONTINUITY": "NOT_PROVEN",
+        "NODE_RECREATED": "NO_DOCKER_EXECUTED_IN_LAB",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+
+
 def _journal(paths: Paths) -> Path:
     return paths.state / "journal"
 
