@@ -1549,7 +1549,8 @@ PY_UPDATER_DECODE_BLOB
             # before changing any installed bytes. Crash -> startup recovery.
             UPDATE_FAILED=false
             if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
-                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}"; then
+                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}" \
+                    >"$TEMP_DIR/.uopti-transaction-result"; then
                 UPDATE_FAILED=true
             fi
 
@@ -1610,6 +1611,7 @@ PY_UPDATER_DECODE_BLOB
 
 
             # Retain the verified backup for manual recovery after a successful update.
+            echo "  [✓] Transaction committed"
             cleanup_update_temp
 
             echo
@@ -1619,7 +1621,7 @@ PY_UPDATER_DECODE_BLOB
 ║           UPDATE SUCCESSFUL                  ║
 ║                                              ║
 UOPTI_UPDATER_SUCCESS
-            printf '║        U-OPTI v%-31s║\n' "$REMOTE_VERSION"
+            printf '║        U-OPTI v%-30s║\n' "$REMOTE_VERSION"
             cat <<'UOPTI_UPDATER_SUCCESS_END'
 ║                                              ║
 ╚══════════════════════════════════════════════╝
