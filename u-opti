@@ -1251,6 +1251,42 @@ PY_UPDATER_DECODE_BLOB
             printf '  Up to date      : %d\n' "$((MODULES_CHECKED - MODULES_CHANGED))"
             printf '  Need updating   : %d\n' "$MODULES_CHANGED"
             echo
+
+            # Fast path: check ALL managed modules AND core files against the
+            # pinned Git tree. A matching version number alone is not enough:
+            # main may change without a version bump. This path is read-only;
+            # no staging, backup, transaction, or running-service operation.
+            if [ "$SAME_VERSION_UPDATE" = "true" ] &&
+               [ "$MODULES_CHANGED" -eq 0 ] &&
+               [ -f "$INSTALL_PATH" ] && [ ! -L "$INSTALL_PATH" ] &&
+               [ -f "$LIB_PATH/common.sh" ] && [ ! -L "$LIB_PATH/common.sh" ] &&
+               [ -f "$LIB_PATH/VERSION" ] && [ ! -L "$LIB_PATH/VERSION" ] &&
+               [ -f "$LIB_PATH/INSTALL_REF" ] && [ ! -L "$LIB_PATH/INSTALL_REF" ] &&
+               u_opti_verify_source_blob "u-opti" "$INSTALL_PATH" 2>/dev/null &&
+               u_opti_verify_source_blob "lib/common.sh" "$LIB_PATH/common.sh" 2>/dev/null &&
+               cmp -s "$TEMP_DIR/VERSION" "$LIB_PATH/VERSION" &&
+               [ "$(cat "$LIB_PATH/INSTALL_REF")" = "$BRANCH" ]; then
+                cat <<'UOPTI_UPDATER_CURRENT'
+╔══════════════════════════════════════════════╗
+║                                              ║
+║             ALREADY UP TO DATE               ║
+║                                              ║
+╚══════════════════════════════════════════════╝
+UOPTI_UPDATER_CURRENT
+                echo
+                printf '  U-OPTI version  : v%s\n' "$VERSION"
+                printf '  Modules checked : %d\n' "$MODULES_CHECKED"
+                printf '  Up to date      : %d\n' "$MODULES_CHECKED"
+                echo "  Need updating   : 0"
+                echo
+                echo "  [✓] All installed files match the pinned source."
+                echo "  [✓] No installation or restart required."
+                cleanup_update_temp
+                echo
+                read -rp "Press Enter to return..."
+                continue
+            fi
+
             echo "────────────────────────────────────────────────"
             echo "  Downloading changed modules..."
             echo
