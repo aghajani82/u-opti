@@ -383,7 +383,12 @@ def _retained_step(paths, *, action, role, arch, witness):
         if action == "install":
             if phase == "COMMITTED":
                 return phase
-            if phase not in ("NEW", "RESTORED"):
+            # A restored transaction still owns its durable recovery journal.
+            # Re-enrollment must not reuse that journal and overwrite the
+            # terminal RESTORED evidence before its sealed cleanup completes.
+            if phase == "RESTORED":
+                raise Hold("RETAINED_TERMINAL_CLEANUP_REQUIRED")
+            if phase != "NEW":
                 raise Hold("RETAINED_RECOVERY_REQUIRED")
             record_phase("PREPARED")
             destination = after
