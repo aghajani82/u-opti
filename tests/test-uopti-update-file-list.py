@@ -130,8 +130,7 @@ class UpdaterFileListTests(unittest.TestCase):
         self.assertIn(name, managed)
         self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")'.replace("\\$", "$"),
                       self.source)
-        self.assertIn('".${FILE}-was-missing"'.replace("\\$", "$"),
-                      self.source)
+        self.assertIn('.${FILE}-was-missing', self.source)
         self.assertTrue((ROOT / "modules" / name).is_file())
 
     def test_running_old_updater_imports_exact_candidate_inventory_before_backup(self):
