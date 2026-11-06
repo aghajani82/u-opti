@@ -73,21 +73,21 @@ class UpdaterFileListTests(unittest.TestCase):
 
     def test_rc7_wss_read_only_plan_installed_and_updated(self):
         helper = "smite-rc7-wss-preflight.py"
-        for array in ("UPDATE_FILE_NAMES"):
+        for array in ("UPDATE_FILE_NAMES",):
             with self.subTest(array=array):
                 self.assertIn(helper, quoted_names(array_body(self.source, array)))
         self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
     def test_rc7_wss_activation_modules_installed_and_updated(self):
         for helper in ("smite-rc7-wss-runtime.py", "smite-rc7-wss-edge.py"):
-            for array in ("UPDATE_FILE_NAMES"):
+            for array in ("UPDATE_FILE_NAMES",):
                 with self.subTest(helper=helper, array=array):
                     self.assertIn(helper, quoted_names(array_body(self.source, array)))
             self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
     def test_rc7_frp_enrollment_in_installer_and_updater(self):
         helper = "smite-rc7-frp-enrollment.py"
-        for name in ("UPDATE_FILE_NAMES"):
+        for name in ("UPDATE_FILE_NAMES",):
             self.assertIn(helper, quoted_names(array_body(self.source, name)))
         self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
