@@ -208,7 +208,10 @@ def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
     durable seal protects the crash interval between deleting the restored
     journal and syncing its directory. Neither path admits live hosts.
     """
-    envelope = pair._pair_load_json(pair._pair_read_private(seal, limit=4096))
+    try:
+        envelope = pair._pair_load_json(pair._pair_read_private(seal, limit=4096))
+    except (pair.Hold, OSError, ValueError, TypeError) as exc:
+        raise Hold("RETAINED_CLEANUP_SEAL_UNTRUSTED") from exc
     record = envelope.get("record")
     keys = {"schema", "role", "binary", "witness",
             "manifest_sha256", "receipt_sha256", "journal_sha256"}
@@ -227,9 +230,16 @@ def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
             or witness() != fingerprint):
         raise Hold("RETAINED_CLEANUP_BASELINE_DRIFT")
     # Hash equality alone is not the retained FRP receipt's semantic proof.
-    pair._pair_expected_transition(*before, binary, role=role)
+    try:
+        pair._pair_expected_transition(*before, binary, role=role)
+    except pair.Hold as exc:
+        raise Hold("RETAINED_CLEANUP_SEMANTIC_DRIFT") from exc
     if os.path.lexists(journal):
-        if _sha(pair._pair_read_private(journal, limit=40000)) != record["journal_sha256"]:
+        try:
+            journal_digest = _sha(pair._pair_read_private(journal, limit=40000))
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            raise Hold("RETAINED_CLEANUP_JOURNAL_DRIFT") from exc
+        if journal_digest != record["journal_sha256"]:
             raise Hold("RETAINED_CLEANUP_JOURNAL_DRIFT")
         journal.unlink()
         pair._pair_fsync_dir(journal.parent)
