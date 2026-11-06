@@ -368,7 +368,7 @@ jobs:
           for helper in smite-managed-frp.py smite-managed-frp-control.py smite-managed-frp-menu.sh; do
             grep -Fq "\"$helper\"" install.sh
             grep -Fq "\"$helper\"" u-opti
-            grep -Fq "[$(printf '"%s"' "$helper")]" u-opti
+            grep -Fq "                \"$helper\"" u-opti
           done
 
 
