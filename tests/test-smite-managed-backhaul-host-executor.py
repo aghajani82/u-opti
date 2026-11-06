@@ -820,7 +820,8 @@ class HostExecutor(unittest.TestCase):
     def _retained_two_host_real_executor_fixture(self):
         """Two marked temporary CI lab nodes, not live signed hosts."""
         from dataclasses import replace
-        self._retained_review_fixture()
+        if not (self.config / "engine-state/engines.json").exists():
+            self._retained_review_fixture()
         foreign_tmp = tempfile.TemporaryDirectory(
             prefix="backhaul-retained-foreign-", dir=self.root.parent)
         self.addCleanup(foreign_tmp.cleanup)
@@ -845,7 +846,7 @@ class HostExecutor(unittest.TestCase):
                     (self.node / "config/engine-state/engines.json").read_bytes())
                 manifest.chmod(0o600)
             frp = root / exe.pair.PAIR_RECEIPT_DIR
-            frp.mkdir(mode=0o700)
+            frp.mkdir(mode=0o700, exist_ok=True)
             receipt = frp / "record.json"
             receipt.write_text(json.dumps({
                 "schema": 1, "state": "COMMITTED", "role": role,
@@ -854,7 +855,7 @@ class HostExecutor(unittest.TestCase):
             }, sort_keys=True) + "\n")
             receipt.chmod(0o600)
             store = root / "node-data"
-            store.mkdir(mode=0o700)
+            store.mkdir(mode=0o700, exist_ok=True)
             for name, record in (
                 ("frp-owner-child.fixture.json", {
                     "role": role, "frp": "0.71.0",
@@ -869,7 +870,7 @@ class HostExecutor(unittest.TestCase):
                 artifact.write_text(json.dumps(record, sort_keys=True) + "\n")
                 artifact.chmod(0o600)
             host_state = root / "state/engine/backhaul"
-            host_state.mkdir(mode=0o700, parents=True)
+            host_state.mkdir(mode=0o700, parents=True, exist_ok=True)
             host_state.chmod(0o700)
             (root / "state").chmod(0o700)
             (root / "state/engine").chmod(0o700)
@@ -926,9 +927,12 @@ class HostExecutor(unittest.TestCase):
                 hosts = self._retained_two_host_real_executor_fixture()
                 actual_atomic = exe.pair._pair_atomic
                 foreign_manifest = hosts["foreign"]["manifest"]
+                crashed = [False]
                 def interrupted_atomic(path, content):
                     actual_atomic(path, content)
-                    if interrupted == "foreign-after-manifest" and path == foreign_manifest:
+                    if (interrupted == "foreign-after-manifest"
+                            and path == foreign_manifest and not crashed[0]):
+                        crashed[0] = True
                         raise exe.SimulatedCrash("foreign-transaction-interrupted")
                 with patch.dict(os.environ, env), \
                      patch.object(exe.pair, "_pair_atomic",
