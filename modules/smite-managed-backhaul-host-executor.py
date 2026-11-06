@@ -502,18 +502,23 @@ def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
     baselines = {}
     for role, paths in hosts:
         # Both preflights MUST pass before either manifest is touched.
-        with _lock(paths.lock):
-            manifest, receipt, journal = _retained_files(paths)
-            if (os.path.lexists(journal)
-                    or os.path.lexists(paths.state / "retained-rc7-cleanup.json")
-                    or _retained_review_pending_recovery(paths)):
-                raise Hold("RETAINED_TWO_HOST_PENDING_RECOVERY")
-            old = (pair._pair_read_private(manifest),
-                   pair._pair_read_private(receipt))
-            pair._pair_expected_transition(
-                *old, package.OFFICIAL_BINARY_SHA256[arch], role=role)
-            snapshots[role] = old
-            baselines[role] = witness(role, paths.node.parent)
+        try:
+            with _lock(paths.lock):
+                manifest, receipt, journal = _retained_files(paths)
+                if (os.path.lexists(journal)
+                        or os.path.lexists(paths.state / "retained-rc7-cleanup.json")
+                        or _retained_review_pending_recovery(paths)):
+                    raise Hold("RETAINED_TWO_HOST_PENDING_RECOVERY")
+                old = (pair._pair_read_private(manifest),
+                       pair._pair_read_private(receipt))
+                pair._pair_expected_transition(
+                    *old, package.OFFICIAL_BINARY_SHA256[arch], role=role)
+                snapshots[role] = old
+                baselines[role] = witness(role, paths.node.parent)
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            # A corrupt Foreign receipt must never escape as an unhandled
+            # exception or allow us to begin writing the IR manifest.
+            raise Hold("RETAINED_TWO_HOST_PREFLIGHT_UNVERIFIED") from exc
 
     def unchanged():
         return all(witness(role, paths.node.parent) == baselines[role]
