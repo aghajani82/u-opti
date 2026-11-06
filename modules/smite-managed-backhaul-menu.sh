@@ -7,6 +7,7 @@ SMITE_MANAGED_BACKHAUL_CONTROL="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-co
 SMITE_MANAGED_FRP_MENU="$SMITE_ENGINE_MENU_DIR/smite-managed-frp-menu.sh"
 SMITE_MANAGED_BACKHAUL_HOST_GATE="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-host-gate.py"
 SMITE_INDEPENDENT_ENGINE_HOST_GATE="$SMITE_ENGINE_MENU_DIR/smite-managed-engine-host-admission.py"
+SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-host-executor.py"
 SMITE_MANAGED_NODE_DIR="${SMITE_NODE_DIR:-/opt/smite-node}"
 
 smite_managed_bh_check() {
@@ -80,11 +81,46 @@ smite_managed_bh_menu() {
                             --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12
                             --signed-pair-publish-ref refs/tags/v2.0.0-rc.7)
                     fi
+                    # The four independent pins must be complete. A partial
+                    # override must never fall back to the selected RC7 pair.
+                    local signed_pair_complete=yes
+                    if [ "${#signed_pair_args[@]}" -ne 8 ]; then
+                        signed_pair_complete=no
+                    fi
                     [ -z "${SMITE_BH_PAIR_TRUSTED_ROOT:-}" ] || signed_pair_args+=(
                         --signed-pair-trusted-root "$SMITE_BH_PAIR_TRUSTED_ROOT")
                     python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \
                         --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" \
                         "${signed_pair_args[@]}" || :
+                    echo "===== EXISTING RC7 RETAINED-NODE REVIEW (READ ONLY) ====="
+                    # Reuse the already reviewed executor, not the legacy
+                    # Compose-recreating trial install. Never derive the
+                    # expected image from mutable Docker labels or a tag.
+                    # A different externally supplied pair must fail closed
+                    # against this selected RC7 immutable Node image pin.
+                    local review_arch=""
+                    case "$(uname -m)" in
+                        x86_64) review_arch=amd64 ;;
+                        aarch64) review_arch=arm64 ;;
+                    esac
+                    if [ "$signed_pair_complete" != yes ]; then
+                        echo "HOLD: Complete external signed Panel/Node pair pins required."
+                    elif [ "$SMITE_MANAGED_NODE_DIR" != /opt/smite-node ]; then
+                        echo "HOLD: Retained-node review requires the managed Node path."
+                    elif [ -z "$review_arch" ]; then
+                        echo "HOLD: Unsupported Backhaul review architecture."
+                    elif [ ! -f "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" ] ||
+                         [ -L "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" ] ||
+                         [ ! -s "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" ]; then
+                        echo "HOLD: Existing retained-node review executor missing."
+                    else
+                        python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" review-in-place \
+                            --arch "$review_arch" \
+                            --confirm-role REVIEW-BACKHAUL-IN-PLACE \
+                            --expected-node-image \
+                            "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263" \
+                            "${signed_pair_args[@]}" || :
+                    fi
                 else
                     echo "HOLD: Common host admission helper missing."
                 fi
