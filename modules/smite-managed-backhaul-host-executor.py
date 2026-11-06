@@ -328,14 +328,30 @@ def _retained_step(paths, *, action, role, arch, witness):
         raise Hold("RETAINED_OPERATION_INVALID")
     if arch not in package.OFFICIAL_BINARY_SHA256:
         raise Hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
-    # Keep fixed production resources closed even to an accidental internal
-    # invocation with a test witness until separate rollout approval exists.
+    # Never lock or write a protected live resource through an alternate
+    # field, a parent/child alias or a symlink. An earlier boundary checked
+    # only node/frp_state/state, overlooking the real shared FRP lock path.
+    # Keep the entire retained mutation executor CI-only pending independent
+    # signed two-host admission and explicitly authorized production rollout.
+    if not isinstance(paths, Paths):
+        raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED")
     live = Paths()
-    resources = (live.node, live.frp_state, live.state)
-    for resource in (paths.node, paths.frp_state, paths.state):
-        resolved = resource.resolve()
-        if any(resolved == path or path in resolved.parents for path in resources):
-            raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
+    fields = ("node", "staging", "state", "lock", "binary", "frp_state")
+    protected = []
+    try:
+        for name in fields:
+            fixed = getattr(live, name)
+            protected.extend((fixed, fixed.resolve()))
+        for name in fields:
+            resource = getattr(paths, name)
+            if not isinstance(resource, Path) or not resource.is_absolute():
+                raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED")
+            for candidate in (resource, resource.resolve()):
+                if any(candidate == fixed or fixed in candidate.parents
+                       or candidate in fixed.parents for fixed in protected):
+                    raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED") from exc
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
@@ -378,7 +394,21 @@ def _retained_step(paths, *, action, role, arch, witness):
                     or record["binary"] != binary or record["witness"] != fingerprint
                     or record["phase"] not in ("PREPARED", "COMMITTED", "RESTORING", "RESTORED")):
                 raise Hold("RETAINED_JOURNAL_UNTRUSTED")
-            before = tuple(bytes.fromhex(record[key]) for key in ("manifest", "receipt"))
+            # A checksummed journal is not inherently trusted input. Reject
+            # malformed/noncanonical hex snapshots *before* decoding them:
+            # bytes.fromhex would otherwise raise uncaught TypeError/ValueError
+            # and accepts whitespace that is not part of the reviewed format.
+            for key in ("manifest", "receipt"):
+                raw_hex = record[key]
+                if (type(raw_hex) is not str or not 0 < len(raw_hex) <= 16384
+                        or len(raw_hex) % 2
+                        or re.fullmatch(r"(?:[0-9a-f]{2})+", raw_hex) is None):
+                    raise Hold("RETAINED_JOURNAL_UNTRUSTED")
+            try:
+                before = tuple(bytes.fromhex(record[key])
+                               for key in ("manifest", "receipt"))
+            except (TypeError, ValueError) as exc:
+                raise Hold("RETAINED_JOURNAL_UNTRUSTED") from exc
         else:
             if action != "install":
                 raise Hold("RETAINED_JOURNAL_MISSING")
