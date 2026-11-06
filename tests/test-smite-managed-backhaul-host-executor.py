@@ -538,11 +538,13 @@ class HostExecutor(unittest.TestCase):
             self.assertFalse(self.state.exists())
 
     def test_retained_read_only_preflight_holds_each_competing_recovery_marker(self):
+        from dataclasses import replace
         runner, audit = self._retained_review_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
         manifest = self.config / "engine-state/engines.json"
         for path in (
             self.state / "journal",
-            self.paths.frp_state / "record.next",
+            paths.frp_state / "record.next",
             manifest.with_name("engines.json.rc7-next"),
             manifest.with_name("engines.json.rc7-rollback-next"),
         ):
@@ -556,7 +558,7 @@ class HostExecutor(unittest.TestCase):
                     with patch.object(exe.admission, "report", return_value=audit):
                         result = exe.review_in_place_binary(
                             expected_node_image=IMAGE, arch="amd64",
-                            paths=self.paths, runner=runner)
+                            paths=paths, runner=runner)
                     self.assertEqual(result["REASON"], "COMPETING_RECOVERY_REQUIRED")
                     self.assertEqual(result["INSTALL_ALLOWED"], "NO")
                     self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
