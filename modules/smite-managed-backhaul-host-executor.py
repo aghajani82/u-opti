@@ -337,21 +337,24 @@ def _retained_step(paths, *, action, role, arch, witness):
         raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED")
     live = Paths()
     fields = ("node", "staging", "state", "lock", "binary", "frp_state")
+    def resolve_checked(path: Path) -> Path:
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED") from exc
+
     protected = []
-    try:
-        for name in fields:
-            fixed = getattr(live, name)
-            protected.extend((fixed, fixed.resolve()))
-        for name in fields:
-            resource = getattr(paths, name)
-            if not isinstance(resource, Path) or not resource.is_absolute():
-                raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED")
-            for candidate in (resource, resource.resolve()):
-                if any(candidate == fixed or fixed in candidate.parents
-                       or candidate in fixed.parents for fixed in protected):
-                    raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED") from exc
+    for name in fields:
+        fixed = getattr(live, name)
+        protected.extend((fixed, resolve_checked(fixed)))
+    for name in fields:
+        resource = getattr(paths, name)
+        if not isinstance(resource, Path) or not resource.is_absolute():
+            raise Hold("RETAINED_OPERATION_PATH_UNTRUSTED")
+        for candidate in (resource, resolve_checked(resource)):
+            if any(candidate == fixed or fixed in candidate.parents
+                   or candidate in fixed.parents for fixed in protected):
+                raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
