@@ -577,7 +577,7 @@ class HostExecutor(unittest.TestCase):
                             # binding still represents changed exact bytes.
                             receipt.write_bytes(original + b" ")
                         else:
-                            self.state.mkdir(mode=0o700, parents=True)
+                            self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
                             pending.write_text("unresolved competing recovery")
                     return result
 
