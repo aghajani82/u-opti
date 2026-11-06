@@ -6,8 +6,8 @@ for f in "${files[@]}"; do
     test -s "modules/$f"
     grep -Fq "\"$f\"" install.sh
     grep -Fq "\"$f\"" u-opti
-    grep -Fq "[\"$f\"]=\"\$BASE_URL/modules/$f\"" u-opti
-    grep -Fq "[\"$f\"]=\"\$TEMP_DIR/$f\"" u-opti
+    grep -Fq "                \"$f\"" u-opti
+    grep -Fq 'u_opti_stage_verified_module "$FILE"' u-opti
     case "$f" in
         *.py) python3 -m py_compile "modules/$f" ;;
         *) bash -n "modules/$f" ;;
