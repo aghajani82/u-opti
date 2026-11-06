@@ -531,6 +531,75 @@ class HostExecutor(unittest.TestCase):
                 self.assertEqual(step("recover"), "RESTORED")
                 self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
 
+    def test_retained_terminal_cleanup_requires_exact_rollback(self):
+        step, manifest, receipt = self.retained_fixture()
+        before = manifest.read_bytes(), receipt.read_bytes()
+        self.assertEqual(step("install"), "COMMITTED")
+        with self.assertRaises(exe.Hold):
+            step("cleanup")
+        self.assertTrue((self.state/"retained-rc7.json").exists())
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertFalse((self.state/"retained-rc7.json").exists())
+        self.assertFalse((self.state/"retained-rc7-cleanup.json").exists())
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+        with self.assertRaises(exe.Hold):
+            step("cleanup")  # No invented cleanup proof after both records vanish.
+        self.assertEqual(step("install"), "COMMITTED")
+
+    def test_retained_terminal_cleanup_recovers_after_journal_unlink(self):
+        step, manifest, receipt = self.retained_fixture()
+        prior = manifest.read_bytes(), receipt.read_bytes()
+        step("install")
+        step("rollback")
+        journal = self.state/"retained-rc7.json"
+        seal = self.state/"retained-rc7-cleanup.json"
+        fsync = exe.pair._pair_fsync_dir
+        calls = []
+        def interrupt_once(folder):
+            calls.append(folder)
+            raise exe.SimulatedCrash("after cleanup unlink, before fsync")
+        with patch.object(exe.pair, "_pair_fsync_dir", side_effect=interrupt_once):
+            with self.assertRaises(exe.SimulatedCrash):
+                step("cleanup")
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(journal.exists())
+        self.assertTrue(seal.exists())
+        for action in ("install", "recover", "rollback"):
+            with self.subTest(action=action), self.assertRaises(exe.Hold):
+                step(action)
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertFalse(seal.exists())
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), prior)
+
+    def test_retained_terminal_cleanup_blocks_drift_and_tampered_seal(self):
+        step, manifest, receipt = self.retained_fixture()
+        prior = manifest.read_bytes(), receipt.read_bytes()
+        step("install")
+        step("rollback")
+        journal = self.state/"retained-rc7.json"
+        seal = self.state/"retained-rc7-cleanup.json"
+        manifest.write_bytes(b"untrusted drift")
+        with self.assertRaises(exe.Hold):
+            step("cleanup")
+        self.assertFalse(seal.exists())
+        manifest.write_bytes(prior[0])
+        with self.assertRaises(exe.SimulatedCrash):
+            with patch.object(exe, "_retained_finish_cleanup",
+                              side_effect=exe.SimulatedCrash("after seal fsync")):
+                step("cleanup")
+        saved_seal = seal.read_bytes()
+        self.assertTrue(journal.exists())
+        seal.write_bytes(b"corrupted")
+        with self.assertRaises(exe.Hold):
+            step("cleanup")
+        self.assertTrue(journal.exists())
+        seal.write_bytes(saved_seal)
+        with self.assertRaises(exe.Hold):
+            step("cleanup", lambda: "2"*64)
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), prior)
+
     def test_executor_has_no_nginx_firewall_xray_or_tunnel_apply_actions(self):
         source=SRC.read_text()
         for forbidden in ("nginx -s","iptables ","nft ","ufw ","xray","3x-ui",
