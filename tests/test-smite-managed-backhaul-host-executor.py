@@ -615,6 +615,16 @@ class HostExecutor(unittest.TestCase):
             step("cleanup")
         self.assertTrue((self.state/"retained-rc7.json").exists())
         self.assertEqual(step("rollback"), "RESTORED")
+        # RESTORED is terminal until cleanup: no silent re-enrollment may
+        # overwrite the proof journal or skip its crash-resumable seal.
+        journal = self.state/"retained-rc7.json"
+        restored_journal = journal.read_bytes()
+        with self.assertRaisesRegex(exe.Hold, "RETAINED_TERMINAL_CLEANUP_REQUIRED"):
+            step("install")
+        self.assertEqual(journal.read_bytes(), restored_journal)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+        self.assertFalse((self.state/"retained-rc7-cleanup.json").exists())
+        self.assertEqual(step("recover"), "RESTORED")
         self.assertEqual(step("cleanup"), "CLEANED")
         self.assertFalse((self.state/"retained-rc7.json").exists())
         self.assertFalse((self.state/"retained-rc7-cleanup.json").exists())
