@@ -515,5 +515,115 @@ class SharedHostAdmission(unittest.TestCase):
                 self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
 
 
+    @staticmethod
+    def foreign_local_preservation_fixture():
+        """Synthetic local Foreign Child hints, NOT signed or live proof."""
+        return {
+            **gate.FOREIGN_LOCAL_PRESERVATION_STATIC,
+            "SAVED_TUNNEL_REGISTRY_SHA256": "a" * 64,
+            "NODE_CONTAINER_ID_SHA256": "b" * 64,
+            "FRPC_INSTANCE_SHA256": "c" * 64,
+            "SECRET_MUST_NOT_LEAK": "DONT_PRINT_ME",
+        }
+
+    def test_foreign_child_local_preservation_is_never_signed_or_install(self):
+        foreign = self.foreign_local_preservation_fixture()
+        result = gate.compare_foreign_local_preservation(foreign, dict(foreign))
+        self.assertEqual(result["PRESERVATION_LOCAL"], "MATCH_UNATTESTED")
+        self.assertEqual(result["SIGNED_RUNTIME_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(result["BACKHAUL_HOST_TRANSACTION"], "NOT_AUTHORIZED")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DONT_PRINT_ME", str(result))
+        self.assertNotIn("c" * 64, str(result))
+
+    def test_foreign_child_local_drift_and_corruption_fail_closed(self):
+        before = self.foreign_local_preservation_fixture()
+        for key, reason in gate.FOREIGN_LOCAL_PRESERVATION_DIGEST_REASON.items():
+            with self.subTest(drift=key):
+                modified = dict(before)
+                modified[key] = "0" * 64
+                result = gate.compare_foreign_local_preservation(before, modified)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["PRESERVATION_REASON"], reason)
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        for key in gate.FOREIGN_LOCAL_PRESERVATION_STATIC:
+            with self.subTest(missing=key):
+                modified = dict(before)
+                modified.pop(key)
+                result = gate.compare_foreign_local_preservation(before, modified)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["PRESERVATION_REASON"],
+                                 "INCOMPLETE_LOCAL_EVIDENCE")
+        for value in ("ABSENT", "UNVERIFIED", "d" * 63, "X" * 64,
+                      None, [], {}, 0):
+            with self.subTest(digest=repr(value)):
+                modified = dict(before)
+                modified["FRPC_INSTANCE_SHA256"] = value
+                self.assertEqual(
+                    gate.compare_foreign_local_preservation(before, modified)[
+                        "PRESERVATION_LOCAL"], "HOLD")
+
+    def test_foreign_child_never_accepts_ir_owner_or_fabricated_broker(self):
+        before = self.foreign_local_preservation_fixture()
+        for key, wrong in (
+            ("NODE_ROLE", "IR"),
+            ("FRPC_PROCESS_LOCAL", "NOT_OBSERVED"),
+            ("FRPC_INSTANCE_SHA256", "ABSENT"),
+            ("FRPS_PROCESS_LOCAL", "OBSERVED_UNATTESTED"),
+            ("FRPS_INSTANCE_SHA256", "d" * 64),
+            ("BROKER_SOCKET_LOCAL", "PRESENT_UNATTESTED"),
+            ("BROKER_SOCKET_ID_SHA256", "e" * 64),
+            ("WSS_EDGE_JOURNAL_LOCAL", "COMMITTED_LOCAL_UNATTESTED"),
+            ("WSS_EDGE_JOURNAL_SHA256", "f" * 64),
+            ("SIGNED_REGISTRY_PAIR_PROOF", "NOT_SUPPLIED"),
+            ("SAVED_TUNNELS", "ZERO"),
+            ("INSTALL_ALLOWED", "YES"),
+            ("ACTIVATION_GATE", "READY"),
+            ("HOST_TRANSACTION_AND_ROLLBACK", "IMPLEMENTED"),
+        ):
+            with self.subTest(key=key):
+                modified = dict(before)
+                modified[key] = wrong
+                result = gate.compare_foreign_local_preservation(before, modified)
+                self.assertEqual(result["PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        for wrong in (None, False, [], {}, "DONT_PRINT_ME"):
+            self.assertEqual(
+                gate.compare_foreign_local_preservation(before, wrong)[
+                    "PRESERVATION_LOCAL"], "HOLD")
+
+    def test_two_host_local_preservation_requires_both_and_never_authorizes(self):
+        ir = self.ir_local_preservation_fixture()
+        foreign = self.foreign_local_preservation_fixture()
+        result = gate.compare_two_host_local_preservation(
+            ir, dict(ir), foreign, dict(foreign))
+        self.assertEqual(result["TWO_HOST_PRESERVATION_LOCAL"], "MATCH_UNATTESTED")
+        self.assertEqual(result["IR_LOCAL"], "MATCH_UNATTESTED")
+        self.assertEqual(result["FOREIGN_LOCAL"], "MATCH_UNATTESTED")
+        self.assertEqual(result["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(result["BACKHAUL_HOST_TRANSACTION"], "NOT_AUTHORIZED")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("DONT_PRINT_ME", str(result))
+        for role in ("ir", "foreign", "swapped", "missing"):
+            with self.subTest(role=role):
+                changed_ir, changed_foreign = dict(ir), dict(foreign)
+                if role == "ir":
+                    changed_ir["FRPS_INSTANCE_SHA256"] = "0" * 64
+                elif role == "foreign":
+                    changed_foreign["FRPC_INSTANCE_SHA256"] = "0" * 64
+                elif role == "swapped":
+                    changed_ir, changed_foreign = dict(foreign), dict(ir)
+                else:
+                    changed_foreign.pop("SAVED_TUNNEL_REGISTRY_SHA256")
+                rejected = gate.compare_two_host_local_preservation(
+                    ir, changed_ir, foreign, changed_foreign)
+                self.assertEqual(rejected["TWO_HOST_PRESERVATION_LOCAL"], "HOLD")
+                self.assertEqual(rejected["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(rejected["ACTIVATION_GATE"], "HOLD")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

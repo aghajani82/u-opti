@@ -306,6 +306,89 @@ def compare_ir_local_preservation(before: object, after: object) -> dict[str, st
     return result
 
 
+
+# The foreign FRPC Child is a different role from the IR FRPS Owner.
+# The foreign host audit intentionally does not claim Broker/WSS ownership:
+# those fields remain explicitly UNVERIFIED, not forged as IR evidence.
+# This is an offline comparison of *untrusted local observations*, never a
+# signed data-plane or two-host rollout gate.
+FOREIGN_LOCAL_PRESERVATION_STATIC = {
+    **LOCAL_PRESERVATION_STATIC,
+    "NODE_ROLE": "KH",
+    "FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+    "FRPS_PROCESS_LOCAL": "NOT_OBSERVED",
+    "BROKER_SOCKET_LOCAL": "UNVERIFIED",
+    "WSS_EDGE_JOURNAL_LOCAL": "UNVERIFIED",
+    "FRPS_INSTANCE_SHA256": "ABSENT",
+    "BROKER_SOCKET_ID_SHA256": "UNVERIFIED",
+    "WSS_EDGE_JOURNAL_SHA256": "UNVERIFIED",
+}
+FOREIGN_LOCAL_PRESERVATION_DIGEST_REASON = {
+    "SAVED_TUNNEL_REGISTRY_SHA256": "TUNNEL_REGISTRY_CHANGED",
+    "NODE_CONTAINER_ID_SHA256": "NODE_CONTAINER_CHANGED",
+    "FRPC_INSTANCE_SHA256": "FRPC_PROCESS_CHANGED",
+}
+
+
+def compare_foreign_local_preservation(before: object, after: object) -> dict[str, str]:
+    """Compare retained Foreign FRPC Child local hints; no trust promotion.
+
+    Exactly the KH role is accepted: an IR Owner report, absent FRPC Child
+    or purported foreign Broker/WSS proof must HOLD. It does not validate
+    actual Child forwarding, host signatures or any remote TLS connection.
+    """
+    result = {
+        "PRESERVATION_LOCAL": "HOLD",
+        "PRESERVATION_REASON": "INCOMPLETE_LOCAL_EVIDENCE",
+        "PRESERVATION_SCOPE": "UNATTESTED_LOCAL_ONLY",
+        "SIGNED_RUNTIME_CONTINUITY": "NOT_PROVEN",
+        "BACKHAUL_HOST_TRANSACTION": "NOT_AUTHORIZED",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return result
+    for item in (before, after):
+        if any(item.get(key) != expected
+               for key, expected in FOREIGN_LOCAL_PRESERVATION_STATIC.items()):
+            return result
+        for key in FOREIGN_LOCAL_PRESERVATION_DIGEST_REASON:
+            value = item.get(key)
+            if not isinstance(value, str) or not LOCAL_PRESERVATION_SHA.fullmatch(value):
+                return result
+    for key, reason in FOREIGN_LOCAL_PRESERVATION_DIGEST_REASON.items():
+        if before[key] != after[key]:
+            result["PRESERVATION_REASON"] = reason
+            return result
+    result["PRESERVATION_LOCAL"] = "MATCH_UNATTESTED"
+    result["PRESERVATION_REASON"] = "LOCAL_HASHES_MATCH_NOT_SIGNED_HEALTH"
+    return result
+
+
+def compare_two_host_local_preservation(
+        ir_before: object, ir_after: object,
+        foreign_before: object, foreign_after: object) -> dict[str, str]:
+    """Fail closed unless both role-specific *local* comparisons agree.
+
+    The reports come from different machines and are NOT independently
+    authenticated by this helper. Even MATCH_UNATTESTED cannot prove
+    coordinated continuity or permission to operate on either live host.
+    """
+    ir = compare_ir_local_preservation(ir_before, ir_after)
+    foreign = compare_foreign_local_preservation(foreign_before, foreign_after)
+    both_match = (ir["PRESERVATION_LOCAL"] == "MATCH_UNATTESTED"
+                  and foreign["PRESERVATION_LOCAL"] == "MATCH_UNATTESTED")
+    return {
+        "TWO_HOST_PRESERVATION_LOCAL": "MATCH_UNATTESTED" if both_match else "HOLD",
+        "IR_LOCAL": ir["PRESERVATION_LOCAL"],
+        "FOREIGN_LOCAL": foreign["PRESERVATION_LOCAL"],
+        "SIGNED_OWNER_CHILD_CONTINUITY": "NOT_PROVEN",
+        "BACKHAUL_HOST_TRANSACTION": "NOT_AUTHORIZED",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description="Backhaul/FRP standalone host admission, ALWAYS read-only HOLD")
