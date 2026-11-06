@@ -949,6 +949,122 @@ class HostExecutor(unittest.TestCase):
                                       info["receipt"].read_bytes()), info["before"])
                     self.assertFalse((info["paths"].state / "retained-rc7.json").exists())
 
+    def _retained_fixture_witness(self, info, role):
+        digests = exe.pair._rc7_two_host_guards(info["root"], role=role)
+        return exe._sha(json.dumps(digests, separators=(",", ":")).encode())
+
+    def test_two_host_final_observer_failure_keeps_both_restored_journals(self):
+        hosts = self._retained_two_host_real_executor_fixture()
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        phases = []
+        def observer(phase, *_):
+            phases.append(phase)
+            return phase != "after-rollback"
+        with patch.dict(os.environ, env), \
+             patch.object(exe.subprocess, "run",
+                          side_effect=AssertionError("DOCKER_NOT_ALLOWED")):
+            with self.assertRaisesRegex(
+                    exe.Hold, "RETAINED_TWO_HOST_MANUAL_RECOVERY_REQUIRED"):
+                exe._retained_two_host_rehearsal_lab(
+                    hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                    arch="amd64", observe=observer)
+            self.assertEqual(phases, [
+                "before", "after-ir", "after-both", "after-rollback"])
+            for role in ("ir", "foreign"):
+                info = hosts[role]
+                journal = info["paths"].state / "retained-rc7.json"
+                self.assertTrue(journal.is_file())
+                self.assertEqual(
+                    json.loads(journal.read_bytes())["record"]["phase"],
+                    "RESTORED")
+                self.assertEqual(
+                    (info["manifest"].read_bytes(), info["receipt"].read_bytes()),
+                    info["before"])
+                self.assertEqual(
+                    exe._retained_step(
+                        info["paths"], action="cleanup", role=role,
+                        arch="amd64",
+                        witness=lambda role=role, info=info:
+                            self._retained_fixture_witness(info, role)),
+                    "CLEANED")
+                self.assertFalse(journal.exists())
+                self.assertFalse(
+                    (info["paths"].state / "retained-rc7-cleanup.json").exists())
+
+    def test_two_host_process_death_preserves_independent_recovery_evidence(self):
+        # os._exit bypasses exception handlers and any in-process compensation.
+        # The per-host PREPARED/COMMITTED records must remain usable after a
+        # genuine process termination, with NO Docker or Node recreation.
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        for boundary in ("after-ir", "foreign-after-manifest", "after-both"):
+            with self.subTest(boundary=boundary):
+                hosts = self._retained_two_host_real_executor_fixture()
+                original_atomic = exe.pair._pair_atomic
+                foreign_manifest = hosts["foreign"]["manifest"]
+                pid = os.fork()
+                if pid == 0:
+                    def crash_atomic(path, content):
+                        original_atomic(path, content)
+                        if boundary == "foreign-after-manifest" and path == foreign_manifest:
+                            os._exit(91)
+                    def crash_observer(phase, *_):
+                        if phase == boundary:
+                            os._exit(91)
+                        return True
+                    with patch.dict(os.environ, env), \
+                         patch.object(exe.pair, "_pair_atomic", crash_atomic), \
+                         patch.object(exe.subprocess, "run",
+                                      side_effect=AssertionError("DOCKER_NOT_ALLOWED")):
+                        try:
+                            exe._retained_two_host_rehearsal_lab(
+                                hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                                arch="amd64", observe=crash_observer)
+                        finally:
+                            os._exit(1)
+                self.assertEqual(os.waitpid(pid, 0)[1], 91 << 8)
+                self.assertTrue(
+                    (hosts["ir"]["paths"].state / "retained-rc7.json").exists())
+                if boundary != "after-ir":
+                    self.assertTrue(
+                        (hosts["foreign"]["paths"].state /
+                         "retained-rc7.json").exists())
+                with patch.dict(os.environ, env), \
+                     patch.object(exe.subprocess, "run",
+                                  side_effect=AssertionError("DOCKER_NOT_ALLOWED")):
+                    for role in ("foreign", "ir"):
+                        info = hosts[role]
+                        journal = info["paths"].state / "retained-rc7.json"
+                        if journal.exists():
+                            self.assertEqual(
+                                exe._retained_step(
+                                    info["paths"], action="rollback",
+                                    role=role, arch="amd64",
+                                    witness=lambda role=role, info=info:
+                                        self._retained_fixture_witness(info, role)),
+                                "RESTORED")
+                    for role in ("ir", "foreign"):
+                        info = hosts[role]
+                        self.assertEqual(
+                            (info["manifest"].read_bytes(),
+                             info["receipt"].read_bytes()), info["before"])
+                        journal = info["paths"].state / "retained-rc7.json"
+                        if journal.exists():
+                            self.assertEqual(
+                                exe._retained_step(
+                                    info["paths"], action="cleanup",
+                                    role=role, arch="amd64",
+                                    witness=lambda role=role, info=info:
+                                        self._retained_fixture_witness(info, role)),
+                                "CLEANED")
+                        self.assertFalse(journal.exists())
+                        self.assertFalse(
+                            (info["paths"].state /
+                             "retained-rc7-cleanup.json").exists())
+
     def test_two_host_real_retained_executor_requires_ci_labs_and_both_preflights(self):
         from dataclasses import replace
         hosts = self._retained_two_host_real_executor_fixture()
