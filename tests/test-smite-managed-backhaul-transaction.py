@@ -77,6 +77,72 @@ class TransactionLab(unittest.TestCase):
         return pkg.prepare(self.node, self.archive, self.stages,
                            arch="amd64", allowed_sha=self.digest)
 
+    def test_rc7_pair_private_read_rejects_rename_symlink_and_inplace_races(self):
+        # Both FRP receipt and retained rollback bytes use this private reader.
+        path = self.root / "record.json"
+        good = b'{"schema":1,"role":"ir"}'
+        bad = b'{"schema":1,"role":"kh"}'
+        path.write_bytes(good)
+        path.chmod(0o600)
+        secret = self.root / "unrelated.json"
+        secret.write_bytes(b"SECRET_MUST_NOT_LEAK")
+        secret.chmod(0o600)
+        self.assertEqual(lab._pair_read_private(path), good)
+
+        original_open = os.open
+        def swap_to_symlink(name, flags, *args, **kwargs):
+            if Path(name) == path:
+                path.unlink()
+                path.symlink_to(secret)
+            return original_open(name, flags, *args, **kwargs)
+        with patch.object(lab.os, "open", side_effect=swap_to_symlink):
+            with self.assertRaises(lab.Hold):
+                lab._pair_read_private(path)
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(secret.read_bytes(), b"SECRET_MUST_NOT_LEAK")
+        path.unlink()
+        path.write_bytes(good)
+        path.chmod(0o600)
+
+        relocated = self.root / "original.json"
+        def swap_after_open(name, flags, *args, **kwargs):
+            fd = original_open(name, flags, *args, **kwargs)
+            if Path(name) == path:
+                path.rename(relocated)
+                path.write_bytes(bad)
+                path.chmod(0o600)
+            return fd
+        with patch.object(lab.os, "open", side_effect=swap_after_open):
+            with self.assertRaises(lab.Hold):
+                lab._pair_read_private(path)
+        self.assertEqual(relocated.read_bytes(), good)
+        self.assertEqual(path.read_bytes(), bad)
+        relocated.unlink()
+        path.write_bytes(good)
+
+        original_read = os.read
+        def changed_during_read(fd, length):
+            value = original_read(fd, length)
+            if value:
+                path.write_bytes(bad)
+                os.utime(path, ns=(1_700_000_000_000_000_000,
+                                   1_700_000_000_000_000_000))
+            return value
+        with patch.object(lab.os, "read", side_effect=changed_during_read):
+            with self.assertRaises(lab.Hold):
+                lab._pair_read_private(path)
+        self.assertEqual(path.read_bytes(), bad)
+        path.write_bytes(good)
+        path.chmod(0o644)
+        with self.assertRaises(lab.Hold):
+            lab._pair_read_private(path)
+        path.unlink()
+        with self.assertRaises(lab.Hold):
+            lab._pair_read_private(path)
+        path.write_bytes(good)
+        path.chmod(0o600)
+        self.assertEqual(lab._pair_read_private(path), good)
+
     def test_install_and_exact_rollback_do_not_change_other_engines(self):
         state = self.config / "engine-state"
         state.mkdir(mode=0o700)
