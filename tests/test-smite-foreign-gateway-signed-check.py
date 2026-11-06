@@ -127,9 +127,9 @@ class ForeignGatewaySignedTest(unittest.TestCase):
         updater = (ROOT / "u-opti").read_text()
         name = "smite-foreign-gateway-signed-check.py"
         self.assertIn('    "' + name + '"', installer)
-        self.assertEqual(updater.count('                "' + name + '"'), 2)
-        self.assertIn('["' + name + '"]="$BASE_URL/modules/' + name + '"', updater)
-        self.assertIn('["' + name + '"]="$TEMP_DIR/' + name + '"', updater)
+        self.assertEqual(updater.count('                "' + name + '"'), 1)
+        self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")', updater)
+        self.assertIn('u_opti_stage_verified_module "$FILE"', updater)
 
 
 if __name__ == "__main__":

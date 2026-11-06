@@ -709,9 +709,14 @@ while true; do
         8)
             clear
 
-            echo "======================================"
-            echo "            Update U-OPTI"
-            echo "======================================"
+            cat <<'UOPTI_UPDATER_HEADER'
+╔══════════════════════════════════════════════╗
+║                                              ║
+║               U-OPTI UPDATER                 ║
+║             Smart Update System              ║
+║                                              ║
+╚══════════════════════════════════════════════╝
+UOPTI_UPDATER_HEADER
             echo
 
             if ! command -v curl >/dev/null 2>&1; then
@@ -924,6 +929,37 @@ PY_UPDATER_DECODE_BLOB
                 return 1
             }
 
+
+            # Compact progress output (the count is calculated, never hard-coded).
+            u_opti_update_progress() {
+                local position="$1" total="$2" filled index bar="" percent
+                filled=$((position * 20 / total))
+                percent=$((position * 100 / total))
+                for ((index=0; index<20; index++)); do
+                    if [ "$index" -lt "$filled" ]; then bar+="█"; else bar+="░"; fi
+                done
+                printf '\r  [%s] %3d%%' "$bar" "$percent"
+                if [ "$position" -eq "$total" ]; then printf '\n'; fi
+            }
+
+            # A matching local Git blob can be staged without network traffic.
+            # Re-verify the staged copy against the immutable source tree.
+            u_opti_stage_verified_module() {
+                local name="$1" repo_path="modules/$1"
+                if [ "${UPDATE_MODULE_MATCH[$name]:-}" = SAME ]; then
+                    if ! cp -- "$MODULES_PATH/$name" "$TEMP_DIR/$name" ||
+                       ! u_opti_verify_source_blob "$repo_path" "$TEMP_DIR/$name"; then
+                        echo "HOLD: Local verified module changed during staging: $name" >&2
+                        return 1
+                    fi
+                else
+                    if ! download_repo_file "$repo_path" "$TEMP_DIR/$name" 2>>"$UPDATE_DOWNLOAD_LOG"; then
+                        tail -n 8 "$UPDATE_DOWNLOAD_LOG" >&2
+                        return 1
+                    fi
+                fi
+            }
+
             cleanup_update_temp() {
                 rm -rf "$TEMP_DIR"
             }
@@ -1097,7 +1133,7 @@ PY_UPDATER_DECODE_BLOB
 
             UPDATE_DEST_DIR="$MODULES_PATH"
 
-            echo "Preparing update..."
+            echo "  Connecting to GitHub..."
             echo
 
             # Pin every fetched U-OPTI file to ONE reviewed GitHub commit.
@@ -1109,7 +1145,8 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
             UPDATE_RAW_BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
-            echo "Update source revision: $SOURCE_SHA"
+            echo "  [✓] Connected to GitHub"
+            echo "  [✓] Source revision verified"
             echo
 
             if ! u_opti_prepare_source_tree; then
@@ -1119,7 +1156,7 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
 
-            echo "Downloading VERSION..."
+            : # VERSION is fetched and verified before update planning.
 
             if ! download_repo_file "VERSION" "$TEMP_DIR/VERSION"; then
                 echo
@@ -1152,8 +1189,13 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
 
-            echo "Current Version : $VERSION"
-            echo "Remote Version  : $REMOTE_VERSION"
+            printf '  Installed Version : v%s\n' "$VERSION"
+            printf '  Available Version : v%s\n' "$REMOTE_VERSION"
+            printf '  Update Channel    : %s\n' "$BRANCH"
+            echo
+            echo "────────────────────────────────────────────────"
+            echo "  [✓] Update manifest verified"
+            echo "────────────────────────────────────────────────"
             echo
 
             SAME_VERSION_UPDATE=false
@@ -1179,288 +1221,72 @@ PY_UPDATER_DECODE_BLOB
                 echo
             fi
 
-            declare -A UPDATE_URLS=(
-                ["u-opti"]="$BASE_URL/u-opti"
-                ["common.sh"]="$BASE_URL/lib/common.sh"
-                ["system.sh"]="$BASE_URL/modules/system.sh"
-                ["security-monitor.sh"]="$BASE_URL/modules/security-monitor.sh"
-                ["security-monitor.py"]="$BASE_URL/modules/security-monitor.py"
-                ["time.sh"]="$BASE_URL/modules/time.sh"
-                ["swap.sh"]="$BASE_URL/modules/swap.sh"
-                ["bbr.sh"]="$BASE_URL/modules/bbr.sh"
-                ["storage.sh"]="$BASE_URL/modules/storage.sh"
-                ["ssh.sh"]="$BASE_URL/modules/ssh.sh"
-                ["ssh-access.sh"]="$BASE_URL/modules/ssh-access.sh"
-                ["firewall.sh"]="$BASE_URL/modules/firewall.sh"
-                ["fail2ban.sh"]="$BASE_URL/modules/fail2ban.sh"
-                ["xui-pro.sh"]="$BASE_URL/modules/xui-pro.sh"
-                ["certificate.sh"]="$BASE_URL/modules/certificate.sh"
-                ["backup.sh"]="$BASE_URL/modules/backup.sh"
-                ["docker.sh"]="$BASE_URL/modules/docker.sh"
-                ["smite.sh"]="$BASE_URL/modules/smite.sh"
-                ["smite-node-local-bind.py"]="$BASE_URL/modules/smite-node-local-bind.py"
-                ["smite-node-pairing.py"]="$BASE_URL/modules/smite-node-pairing.py"
-                ["smite-node-auth-candidate.py"]="$BASE_URL/modules/smite-node-auth-candidate.py"
-                ["smite-node-replay-mount-admission.py"]="$BASE_URL/modules/smite-node-replay-mount-admission.py"
-                ["smite-auth-image-overlay-audit.py"]="$BASE_URL/modules/smite-auth-image-overlay-audit.py"
-                ["smite-stage11-overlay-review.py"]="$BASE_URL/modules/smite-stage11-overlay-review.py"
-                ["smite-stage12-nginx-hmac-plan.py"]="$BASE_URL/modules/smite-stage12-nginx-hmac-plan.py"
-                ["smite-stage19-pairing-443-plan.py"]="$BASE_URL/modules/smite-stage19-pairing-443-plan.py"
-                ["smite-stage13-preflight.py"]="$BASE_URL/modules/smite-stage13-preflight.py"
-                ["smite-panel-auth-overlay.py"]="$BASE_URL/modules/smite-panel-auth-overlay.py"
-                ["smite-stage15-bundle-verify.py"]="$BASE_URL/modules/smite-stage15-bundle-verify.py"
-                ["smite-clean-image-pair.py"]="$BASE_URL/modules/smite-clean-image-pair.py"
-                ["smite-registry-pair-admission.py"]="$BASE_URL/modules/smite-registry-pair-admission.py"
-                ["smite-field-trial-candidate.json"]="$BASE_URL/modules/smite-field-trial-candidate.json"
-                ["smite-rc6-install-journal.py"]="$BASE_URL/modules/smite-rc6-install-journal.py"
-                ["smite-selected-candidate.json"]="$BASE_URL/modules/smite-selected-candidate.json"
-                ["smite-panel-ui.py"]="$BASE_URL/modules/smite-panel-ui.py"
-                ["smite-panel-ui.json"]="$BASE_URL/modules/smite-panel-ui.json"
-                ["u-opti-update-transaction.py"]="$BASE_URL/modules/u-opti-update-transaction.py"
-                ["smite-foreign-gateway-signed-check.py"]="$BASE_URL/modules/smite-foreign-gateway-signed-check.py"
-                ["smite-node-pairing-wizard.sh"]="$BASE_URL/modules/smite-node-pairing-wizard.sh"
-                ["smite-install.sh"]="$BASE_URL/modules/smite-install.sh"
-                ["smite-clean-rc-preflight.sh"]="$BASE_URL/modules/smite-clean-rc-preflight.sh"
-                ["smite-xhttp-nginx-route"]="$BASE_URL/modules/smite-xhttp-nginx-route"
-                ["smite_xhttp_nginx_plan.py"]="$BASE_URL/modules/smite_xhttp_nginx_plan.py"
-                ["smite-rc5-xhttp-root-broker.py"]="$BASE_URL/modules/smite-rc5-xhttp-root-broker.py"
-                ["smite-rc5-xhttp-broker-provision.py"]="$BASE_URL/modules/smite-rc5-xhttp-broker-provision.py"
-                ["smite-rc5-xhttp-broker-compose.py"]="$BASE_URL/modules/smite-rc5-xhttp-broker-compose.py"
-                ["smite-rc5-xhttp-sanaei-mount.py"]="$BASE_URL/modules/smite-rc5-xhttp-sanaei-mount.py"
-                ["smite-rc5-xhttp-nonce-ledger.py"]="$BASE_URL/modules/smite-rc5-xhttp-nonce-ledger.py"
-                ["smite-rc5-xhttp-signed-intent.py"]="$BASE_URL/modules/smite-rc5-xhttp-signed-intent.py"
-                ["smite-rc5-xhttp-bridge-install.py"]="$BASE_URL/modules/smite-rc5-xhttp-bridge-install.py"
-                ["smite-rc5-xhttp-bridge-admission.py"]="$BASE_URL/modules/smite-rc5-xhttp-bridge-admission.py"
-                ["smite-gateway.sh"]="$BASE_URL/modules/smite-gateway.sh"
-                ["smite-frp-xhttp.sh"]="$BASE_URL/modules/smite-frp-xhttp.sh"
-                ["smite-frp-xhttp-paths.py"]="$BASE_URL/modules/smite-frp-xhttp-paths.py"
-                ["smite-frp-rc2-guided-publish.py"]="$BASE_URL/modules/smite-frp-rc2-guided-publish.py"
-                ["smite-profile-first.py"]="$BASE_URL/modules/smite-profile-first.py"
-                ["smite-profile-first-menu.sh"]="$BASE_URL/modules/smite-profile-first-menu.sh"
-                ["smite-frp-wizard.sh"]="$BASE_URL/modules/smite-frp-wizard.sh"
-                ["smite-backhaul-management.sh"]="$BASE_URL/modules/smite-backhaul-management.sh"
-                ["smite-clean-ir-resume.sh"]="$BASE_URL/modules/smite-clean-ir-resume.sh"
-                ["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"
-                ["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"
-                ["smite-managed-backhaul.py"]="$BASE_URL/modules/smite-managed-backhaul.py"
-                ["smite-managed-frp.py"]="$BASE_URL/modules/smite-managed-frp.py"
-                ["smite-managed-frp-transaction.py"]="$BASE_URL/modules/smite-managed-frp-transaction.py"
-                ["smite-stage15-frp-compose-plan.py"]="$BASE_URL/modules/smite-stage15-frp-compose-plan.py"
-                ["smite-stage15-frp-host-executor.py"]="$BASE_URL/modules/smite-stage15-frp-host-executor.py"
-                ["smite-compose-safe.py"]="$BASE_URL/modules/smite-compose-safe.py"
-                ["smite-stage15-wss.py"]="$BASE_URL/modules/smite-stage15-wss.py"
-                ["smite-rc7-wss-preflight.py"]="$BASE_URL/modules/smite-rc7-wss-preflight.py"
-                ["smite-rc7-wss-runtime.py"]="$BASE_URL/modules/smite-rc7-wss-runtime.py"
-                ["smite-rc7-wss-edge.py"]="$BASE_URL/modules/smite-rc7-wss-edge.py"
-                ["smite-rc7-frp-enrollment.py"]="$BASE_URL/modules/smite-rc7-frp-enrollment.py"
-                ["smite-stage15-kh-inventory.py"]="$BASE_URL/modules/smite-stage15-kh-inventory.py"
-                ["smite-stage15-active-runtime.py"]="$BASE_URL/modules/smite-stage15-active-runtime.py"
-                ["smite-stage15-upgrade.py"]="$BASE_URL/modules/smite-stage15-upgrade.py"
-                ["smite-stage15-wss-edge.py"]="$BASE_URL/modules/smite-stage15-wss-edge.py"
-                ["smite-stage15-root-review.py"]="$BASE_URL/modules/smite-stage15-root-review.py"
-                ["smite-stage15-xhttp-bridge.py"]="$BASE_URL/modules/smite-stage15-xhttp-bridge.py"
-                ["smite-stage15-frp-wizard.sh"]="$BASE_URL/modules/smite-stage15-frp-wizard.sh"
-                ["smite-stage15-fetch-images.sh"]="$BASE_URL/modules/smite-stage15-fetch-images.sh"
-                ["smite-rc2-frp-wss-edge-plan.py"]="$BASE_URL/modules/smite-rc2-frp-wss-edge-plan.py"
-                ["smite-managed-frp-control.py"]="$BASE_URL/modules/smite-managed-frp-control.py"
-                ["smite-managed-frp-menu.sh"]="$BASE_URL/modules/smite-managed-frp-menu.sh"
-                ["smite-managed-backhaul-control.py"]="$BASE_URL/modules/smite-managed-backhaul-control.py"
-                ["smite-managed-backhaul-menu.sh"]="$BASE_URL/modules/smite-managed-backhaul-menu.sh"
-                ["smite-managed-backhaul-host-gate.py"]="$BASE_URL/modules/smite-managed-backhaul-host-gate.py"
-                ["smite-managed-backhaul-host-executor.py"]="$BASE_URL/modules/smite-managed-backhaul-host-executor.py"
-                ["smite-managed-engine-host-admission.py"]="$BASE_URL/modules/smite-managed-engine-host-admission.py"
-                ["smite-managed-engine-host-plan.py"]="$BASE_URL/modules/smite-managed-engine-host-plan.py"
-                ["smite-managed-backhaul-pair-review.py"]="$BASE_URL/modules/smite-managed-backhaul-pair-review.py"
-                ["smite-managed-backhaul-lifecycle.py"]="$BASE_URL/modules/smite-managed-backhaul-lifecycle.py"
-                ["smite-managed-backhaul-transaction.py"]="$BASE_URL/modules/smite-managed-backhaul-transaction.py"
-                ["smite-backhaul-sidecar.py"]="$BASE_URL/modules/smite-backhaul-sidecar.py"
-                ["smite-backhaul-sidecar-readiness.py"]="$BASE_URL/modules/smite-backhaul-sidecar-readiness.py"
-                ["smite-backhaul-sidecar-guided-prep.py"]="$BASE_URL/modules/smite-backhaul-sidecar-guided-prep.py"
-                ["smite-backhaul-sidecar-guided-trial.py"]="$BASE_URL/modules/smite-backhaul-sidecar-guided-trial.py"
-                ["smite-backhaul-sidecar-ssh-pair.py"]="$BASE_URL/modules/smite-backhaul-sidecar-ssh-pair.py"
-                ["smite-backhaul-sidecar-paste-pair.py"]="$BASE_URL/modules/smite-backhaul-sidecar-paste-pair.py"
-                ["smite-backhaul-sidecar-admission.py"]="$BASE_URL/modules/smite-backhaul-sidecar-admission.py"
-                ["smite-backhaul-sidecar-token.py"]="$BASE_URL/modules/smite-backhaul-sidecar-token.py"
-                ["smite-backhaul-sidecar-live-trial.py"]="$BASE_URL/modules/smite-backhaul-sidecar-live-trial.py"
-                ["smite-backhaul-sidecar-reconcile.py"]="$BASE_URL/modules/smite-backhaul-sidecar-reconcile.py"
-                ["smite-backhaul-rebuild-gate.sh"]="$BASE_URL/modules/smite-backhaul-rebuild-gate.sh"
-                ["smite-backhaul-sidecar-nginx-plan.py"]="$BASE_URL/modules/smite-backhaul-sidecar-nginx-plan.py"
-                ["smite-backhaul-standard.sh"]="$BASE_URL/modules/smite-backhaul-standard.sh"
-                ["smite-backhaul-spec.py"]="$BASE_URL/modules/smite-backhaul-spec.py"
-                ["smite-backhaul-node-patch.py"]="$BASE_URL/modules/smite-backhaul-node-patch.py"
-                ["smite-backhaul-panel-patch.py"]="$BASE_URL/modules/smite-backhaul-panel-patch.py"
-                ["smite-foreign-gateway.sh"]="$BASE_URL/modules/smite-foreign-gateway.sh"
-                ["docker-3xui-instance.sh"]="$BASE_URL/modules/docker-3xui-instance.sh"
-                ["docker-3xui-certificate-multi.sh"]="$BASE_URL/modules/docker-3xui-certificate-multi.sh"
-                ["docker-3xui.sh"]="$BASE_URL/modules/docker-3xui.sh"
-                ["docker-3xui-compat.sh"]="$BASE_URL/modules/docker-3xui-compat.sh"
-                ["docker-3xui-nginx.sh"]="$BASE_URL/modules/docker-3xui-nginx.sh"
-                ["docker-3xui-xhttp-guard.py"]="$BASE_URL/modules/docker-3xui-xhttp-guard.py"
-                ["fakesite.sh"]="$BASE_URL/modules/fakesite.sh"
-            )
 
-            declare -A UPDATE_TARGETS=(
-                ["u-opti"]="$TEMP_DIR/u-opti"
-                ["common.sh"]="$TEMP_DIR/common.sh"
-                ["system.sh"]="$TEMP_DIR/system.sh"
-                ["security-monitor.sh"]="$TEMP_DIR/security-monitor.sh"
-                ["security-monitor.py"]="$TEMP_DIR/security-monitor.py"
-                ["time.sh"]="$TEMP_DIR/time.sh"
-                ["swap.sh"]="$TEMP_DIR/swap.sh"
-                ["bbr.sh"]="$TEMP_DIR/bbr.sh"
-                ["storage.sh"]="$TEMP_DIR/storage.sh"
-                ["ssh.sh"]="$TEMP_DIR/ssh.sh"
-                ["ssh-access.sh"]="$TEMP_DIR/ssh-access.sh"
-                ["firewall.sh"]="$TEMP_DIR/firewall.sh"
-                ["fail2ban.sh"]="$TEMP_DIR/fail2ban.sh"
-                ["xui-pro.sh"]="$TEMP_DIR/xui-pro.sh"
-                ["certificate.sh"]="$TEMP_DIR/certificate.sh"
-                ["backup.sh"]="$TEMP_DIR/backup.sh"
-                ["docker.sh"]="$TEMP_DIR/docker.sh"
-                ["smite.sh"]="$TEMP_DIR/smite.sh"
-                ["smite-node-local-bind.py"]="$TEMP_DIR/smite-node-local-bind.py"
-                ["smite-node-pairing.py"]="$TEMP_DIR/smite-node-pairing.py"
-                ["smite-node-auth-candidate.py"]="$TEMP_DIR/smite-node-auth-candidate.py"
-                ["smite-node-replay-mount-admission.py"]="$TEMP_DIR/smite-node-replay-mount-admission.py"
-                ["smite-auth-image-overlay-audit.py"]="$TEMP_DIR/smite-auth-image-overlay-audit.py"
-                ["smite-stage11-overlay-review.py"]="$TEMP_DIR/smite-stage11-overlay-review.py"
-                ["smite-stage12-nginx-hmac-plan.py"]="$TEMP_DIR/smite-stage12-nginx-hmac-plan.py"
-                ["smite-stage19-pairing-443-plan.py"]="$TEMP_DIR/smite-stage19-pairing-443-plan.py"
-                ["smite-stage13-preflight.py"]="$TEMP_DIR/smite-stage13-preflight.py"
-                ["smite-panel-auth-overlay.py"]="$TEMP_DIR/smite-panel-auth-overlay.py"
-                ["smite-stage15-bundle-verify.py"]="$TEMP_DIR/smite-stage15-bundle-verify.py"
-                ["smite-clean-image-pair.py"]="$TEMP_DIR/smite-clean-image-pair.py"
-                ["smite-registry-pair-admission.py"]="$TEMP_DIR/smite-registry-pair-admission.py"
-                ["smite-field-trial-candidate.json"]="$TEMP_DIR/smite-field-trial-candidate.json"
-                ["smite-rc6-install-journal.py"]="$TEMP_DIR/smite-rc6-install-journal.py"
-                ["smite-selected-candidate.json"]="$TEMP_DIR/smite-selected-candidate.json"
-                ["smite-panel-ui.py"]="$TEMP_DIR/smite-panel-ui.py"
-                ["smite-panel-ui.json"]="$TEMP_DIR/smite-panel-ui.json"
-                ["u-opti-update-transaction.py"]="$TEMP_DIR/u-opti-update-transaction.py"
-                ["smite-foreign-gateway-signed-check.py"]="$TEMP_DIR/smite-foreign-gateway-signed-check.py"
-                ["smite-node-pairing-wizard.sh"]="$TEMP_DIR/smite-node-pairing-wizard.sh"
-                ["smite-install.sh"]="$TEMP_DIR/smite-install.sh"
-                ["smite-clean-rc-preflight.sh"]="$TEMP_DIR/smite-clean-rc-preflight.sh"
-                ["smite-xhttp-nginx-route"]="$TEMP_DIR/smite-xhttp-nginx-route"
-                ["smite_xhttp_nginx_plan.py"]="$TEMP_DIR/smite_xhttp_nginx_plan.py"
-                ["smite-rc5-xhttp-root-broker.py"]="$TEMP_DIR/smite-rc5-xhttp-root-broker.py"
-                ["smite-rc5-xhttp-broker-provision.py"]="$TEMP_DIR/smite-rc5-xhttp-broker-provision.py"
-                ["smite-rc5-xhttp-broker-compose.py"]="$TEMP_DIR/smite-rc5-xhttp-broker-compose.py"
-                ["smite-rc5-xhttp-sanaei-mount.py"]="$TEMP_DIR/smite-rc5-xhttp-sanaei-mount.py"
-                ["smite-rc5-xhttp-nonce-ledger.py"]="$TEMP_DIR/smite-rc5-xhttp-nonce-ledger.py"
-                ["smite-rc5-xhttp-signed-intent.py"]="$TEMP_DIR/smite-rc5-xhttp-signed-intent.py"
-                ["smite-rc5-xhttp-bridge-install.py"]="$TEMP_DIR/smite-rc5-xhttp-bridge-install.py"
-                ["smite-rc5-xhttp-bridge-admission.py"]="$TEMP_DIR/smite-rc5-xhttp-bridge-admission.py"
-                ["smite-gateway.sh"]="$TEMP_DIR/smite-gateway.sh"
-                ["smite-frp-xhttp.sh"]="$TEMP_DIR/smite-frp-xhttp.sh"
-                ["smite-frp-xhttp-paths.py"]="$TEMP_DIR/smite-frp-xhttp-paths.py"
-                ["smite-frp-rc2-guided-publish.py"]="$TEMP_DIR/smite-frp-rc2-guided-publish.py"
-                ["smite-profile-first.py"]="$TEMP_DIR/smite-profile-first.py"
-                ["smite-profile-first-menu.sh"]="$TEMP_DIR/smite-profile-first-menu.sh"
-                ["smite-frp-wizard.sh"]="$TEMP_DIR/smite-frp-wizard.sh"
-                ["smite-backhaul-management.sh"]="$TEMP_DIR/smite-backhaul-management.sh"
-                ["smite-clean-ir-resume.sh"]="$TEMP_DIR/smite-clean-ir-resume.sh"
-                ["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"
-                ["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"
-                ["smite-managed-backhaul.py"]="$TEMP_DIR/smite-managed-backhaul.py"
-                ["smite-managed-frp.py"]="$TEMP_DIR/smite-managed-frp.py"
-                ["smite-managed-frp-transaction.py"]="$TEMP_DIR/smite-managed-frp-transaction.py"
-                ["smite-stage15-frp-compose-plan.py"]="$TEMP_DIR/smite-stage15-frp-compose-plan.py"
-                ["smite-stage15-frp-host-executor.py"]="$TEMP_DIR/smite-stage15-frp-host-executor.py"
-                ["smite-compose-safe.py"]="$TEMP_DIR/smite-compose-safe.py"
-                ["smite-stage15-wss.py"]="$TEMP_DIR/smite-stage15-wss.py"
-                ["smite-rc7-wss-preflight.py"]="$TEMP_DIR/smite-rc7-wss-preflight.py"
-                ["smite-rc7-wss-runtime.py"]="$TEMP_DIR/smite-rc7-wss-runtime.py"
-                ["smite-rc7-wss-edge.py"]="$TEMP_DIR/smite-rc7-wss-edge.py"
-                ["smite-rc7-frp-enrollment.py"]="$TEMP_DIR/smite-rc7-frp-enrollment.py"
-                ["smite-stage15-kh-inventory.py"]="$TEMP_DIR/smite-stage15-kh-inventory.py"
-                ["smite-stage15-active-runtime.py"]="$TEMP_DIR/smite-stage15-active-runtime.py"
-                ["smite-stage15-upgrade.py"]="$TEMP_DIR/smite-stage15-upgrade.py"
-                ["smite-stage15-wss-edge.py"]="$TEMP_DIR/smite-stage15-wss-edge.py"
-                ["smite-stage15-root-review.py"]="$TEMP_DIR/smite-stage15-root-review.py"
-                ["smite-stage15-xhttp-bridge.py"]="$TEMP_DIR/smite-stage15-xhttp-bridge.py"
-                ["smite-stage15-frp-wizard.sh"]="$TEMP_DIR/smite-stage15-frp-wizard.sh"
-                ["smite-stage15-fetch-images.sh"]="$TEMP_DIR/smite-stage15-fetch-images.sh"
-                ["smite-rc2-frp-wss-edge-plan.py"]="$TEMP_DIR/smite-rc2-frp-wss-edge-plan.py"
-                ["smite-managed-frp-control.py"]="$TEMP_DIR/smite-managed-frp-control.py"
-                ["smite-managed-frp-menu.sh"]="$TEMP_DIR/smite-managed-frp-menu.sh"
-                ["smite-managed-backhaul-control.py"]="$TEMP_DIR/smite-managed-backhaul-control.py"
-                ["smite-managed-backhaul-menu.sh"]="$TEMP_DIR/smite-managed-backhaul-menu.sh"
-                ["smite-managed-backhaul-host-gate.py"]="$TEMP_DIR/smite-managed-backhaul-host-gate.py"
-                ["smite-managed-backhaul-host-executor.py"]="$TEMP_DIR/smite-managed-backhaul-host-executor.py"
-                ["smite-managed-engine-host-admission.py"]="$TEMP_DIR/smite-managed-engine-host-admission.py"
-                ["smite-managed-engine-host-plan.py"]="$TEMP_DIR/smite-managed-engine-host-plan.py"
-                ["smite-managed-backhaul-pair-review.py"]="$TEMP_DIR/smite-managed-backhaul-pair-review.py"
-                ["smite-managed-backhaul-lifecycle.py"]="$TEMP_DIR/smite-managed-backhaul-lifecycle.py"
-                ["smite-managed-backhaul-transaction.py"]="$TEMP_DIR/smite-managed-backhaul-transaction.py"
-                ["smite-backhaul-sidecar.py"]="$TEMP_DIR/smite-backhaul-sidecar.py"
-                ["smite-backhaul-sidecar-readiness.py"]="$TEMP_DIR/smite-backhaul-sidecar-readiness.py"
-                ["smite-backhaul-sidecar-guided-prep.py"]="$TEMP_DIR/smite-backhaul-sidecar-guided-prep.py"
-                ["smite-backhaul-sidecar-guided-trial.py"]="$TEMP_DIR/smite-backhaul-sidecar-guided-trial.py"
-                ["smite-backhaul-sidecar-ssh-pair.py"]="$TEMP_DIR/smite-backhaul-sidecar-ssh-pair.py"
-                ["smite-backhaul-sidecar-paste-pair.py"]="$TEMP_DIR/smite-backhaul-sidecar-paste-pair.py"
-                ["smite-backhaul-sidecar-admission.py"]="$TEMP_DIR/smite-backhaul-sidecar-admission.py"
-                ["smite-backhaul-sidecar-token.py"]="$TEMP_DIR/smite-backhaul-sidecar-token.py"
-                ["smite-backhaul-sidecar-live-trial.py"]="$TEMP_DIR/smite-backhaul-sidecar-live-trial.py"
-                ["smite-backhaul-sidecar-reconcile.py"]="$TEMP_DIR/smite-backhaul-sidecar-reconcile.py"
-                ["smite-backhaul-rebuild-gate.sh"]="$TEMP_DIR/smite-backhaul-rebuild-gate.sh"
-                ["smite-backhaul-sidecar-nginx-plan.py"]="$TEMP_DIR/smite-backhaul-sidecar-nginx-plan.py"
-                ["smite-backhaul-standard.sh"]="$TEMP_DIR/smite-backhaul-standard.sh"
-                ["smite-backhaul-spec.py"]="$TEMP_DIR/smite-backhaul-spec.py"
-                ["smite-backhaul-node-patch.py"]="$TEMP_DIR/smite-backhaul-node-patch.py"
-                ["smite-backhaul-panel-patch.py"]="$TEMP_DIR/smite-backhaul-panel-patch.py"
-                ["smite-foreign-gateway.sh"]="$TEMP_DIR/smite-foreign-gateway.sh"
-                ["docker-3xui-instance.sh"]="$TEMP_DIR/docker-3xui-instance.sh"
-                ["docker-3xui-certificate-multi.sh"]="$TEMP_DIR/docker-3xui-certificate-multi.sh"
-                ["docker-3xui.sh"]="$TEMP_DIR/docker-3xui.sh"
-                ["docker-3xui-compat.sh"]="$TEMP_DIR/docker-3xui-compat.sh"
-                ["docker-3xui-nginx.sh"]="$TEMP_DIR/docker-3xui-nginx.sh"
-                ["docker-3xui-xhttp-guard.py"]="$TEMP_DIR/docker-3xui-xhttp-guard.py"
-                ["fakesite.sh"]="$TEMP_DIR/fakesite.sh"
-            )
+            # UPDATE_FILE_NAMES is the one authoritative inventory for download,
+            # installed-file comparison, backup and transaction admission.
+            declare -A UPDATE_MODULE_MATCH=()
+            MODULES_CHECKED=0
+            MODULES_CHANGED=0
+            echo "  Checking installed modules..."
+            echo
+            for FILE in "${UPDATE_FILE_NAMES[@]}"; do
+                if [ -L "$MODULES_PATH/$FILE" ]; then
+                    echo "HOLD: Unsafe installed module symlink: $FILE" >&2
+                    cleanup_update_temp
+                    read -rp "Press Enter to return..."
+                    continue 2
+                fi
+                if [ -f "$MODULES_PATH/$FILE" ] &&
+                   u_opti_verify_source_blob "modules/$FILE" "$MODULES_PATH/$FILE" 2>/dev/null; then
+                    UPDATE_MODULE_MATCH["$FILE"]=SAME
+                else
+                    UPDATE_MODULE_MATCH["$FILE"]=CHANGED
+                    MODULES_CHANGED=$((MODULES_CHANGED + 1))
+                fi
+                MODULES_CHECKED=$((MODULES_CHECKED + 1))
+                u_opti_update_progress "$MODULES_CHECKED" "${#UPDATE_FILE_NAMES[@]}"
+            done
+            echo
+            printf '  Modules checked : %d\n' "$MODULES_CHECKED"
+            printf '  Up to date      : %d\n' "$((MODULES_CHECKED - MODULES_CHANGED))"
+            printf '  Need updating   : %d\n' "$MODULES_CHANGED"
+            echo
+            echo "────────────────────────────────────────────────"
+            echo "  Downloading changed modules..."
+            echo
+            UPDATE_DOWNLOAD_LOG="$TEMP_DIR/.uopti-download-errors"
+            : > "$UPDATE_DOWNLOAD_LOG"
+            MODULES_STAGED=0
 
-            echo "Downloading u-opti..."
-            if ! download_repo_file "u-opti" "${UPDATE_TARGETS[u-opti]}"; then
-                echo
-                echo "Failed to download u-opti."
+
+            if ! download_repo_file "u-opti" "$TEMP_DIR/u-opti" 2>>"$UPDATE_DOWNLOAD_LOG"; then
+                echo "HOLD: Could not download U-OPTI launcher."
+                tail -n 8 "$UPDATE_DOWNLOAD_LOG" >&2
                 cleanup_update_temp
-                echo
                 read -rp "Press Enter to return..."
                 continue
             fi
-
-            echo "Downloading common.sh..."
-            if ! download_repo_file "lib/common.sh" "${UPDATE_TARGETS[common.sh]}"; then
-                echo
-                echo "Failed to download common.sh."
+            if ! download_repo_file "lib/common.sh" "$TEMP_DIR/common.sh" 2>>"$UPDATE_DOWNLOAD_LOG"; then
+                echo "HOLD: Could not download U-OPTI common library."
+                tail -n 8 "$UPDATE_DOWNLOAD_LOG" >&2
                 cleanup_update_temp
-                echo
                 read -rp "Press Enter to return..."
                 continue
             fi
 
             for FILE in "${UPDATE_FILE_NAMES[@]}"; do
-                echo "Downloading $FILE..."
-
-                case "$FILE" in
-                    "docker-3xui-compat.sh")
-                        REPO_PATH="modules/docker-3xui-compat.sh"
-                        ;;
-                    *)
-                        REPO_PATH="modules/$FILE"
-                        ;;
-                esac
-
-                if ! download_repo_file "$REPO_PATH" "${UPDATE_TARGETS[$FILE]}"; then
-                    echo
-                    echo "Failed to download $FILE."
+                if ! u_opti_stage_verified_module "$FILE"; then
+                    echo "HOLD: Could not prepare verified module: $FILE"
                     cleanup_update_temp
-                    echo
                     read -rp "Press Enter to return..."
                     continue 2
                 fi
+                MODULES_STAGED=$((MODULES_STAGED + 1))
+                u_opti_update_progress "$MODULES_STAGED" "$MODULES_CHECKED"
             done
-
+            echo
+            echo "  [✓] Downloads completed"
+            echo "  [✓] File integrity verified"
             echo
             echo "Checking downloaded files..."
 
@@ -1525,7 +1351,7 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
 
-            echo "Feature verification passed."
+            echo "  [✓] Feature verification passed."
 
             echo
             echo "Checking Bash syntax..."
@@ -1575,7 +1401,7 @@ PY_UPDATER_DECODE_BLOB
                 esac
             done
 
-            echo "Bash syntax check passed."
+            echo "  [✓] Syntax validation passed."
 
             if [ "$SAME_VERSION_UPDATE" = "true" ]; then
                 echo
@@ -1597,7 +1423,7 @@ PY_UPDATER_DECODE_BLOB
 
                 for FILE in "${UPDATE_FILE_NAMES[@]}"; do
                     if [ ! -f "$MODULES_PATH/$FILE" ] ||
-                       ! cmp -s "${UPDATE_TARGETS[$FILE]}" "$MODULES_PATH/$FILE"; then
+                       ! cmp -s "$TEMP_DIR/$FILE" "$MODULES_PATH/$FILE"; then
                         SAME_VERSION_CHANGED=true
                         break
                     fi
@@ -1618,7 +1444,7 @@ PY_UPDATER_DECODE_BLOB
             fi
 
             echo
-            echo "Creating backup of current installation..."
+            echo "  Creating recovery backup..."
 
             # Durable on-disk backup: /tmp is not reliable across reboots.
             BACKUP_DIR=$(mktemp -d "$LIB_PATH/.uopti-backup-XXXXXXXX") || {
@@ -1628,123 +1454,7 @@ PY_UPDATER_DECODE_BLOB
                 continue
             }
 
-            BACKUP_FILES=(
-                "system.sh"
-                "security-monitor.sh"
-                "security-monitor.py"
-                "time.sh"
-                "swap.sh"
-                "bbr.sh"
-                "storage.sh"
-                "ssh.sh"
-                "ssh-access.sh"
-                "firewall.sh"
-                "fail2ban.sh"
-                "xui-pro.sh"
-                "certificate.sh"
-                "backup.sh"
-                "docker.sh"
-                "smite.sh"
-                "smite-node-local-bind.py"
-                "smite-node-pairing.py"
-                "smite-node-auth-candidate.py"
-                "smite-node-replay-mount-admission.py"
-                "smite-auth-image-overlay-audit.py"
-                "smite-stage11-overlay-review.py"
-                "smite-stage12-nginx-hmac-plan.py"
-                "smite-stage19-pairing-443-plan.py"
-                "smite-stage13-preflight.py"
-                "smite-panel-auth-overlay.py"
-                "smite-stage15-bundle-verify.py"
-                "smite-clean-image-pair.py"
-                "smite-registry-pair-admission.py"
-                "smite-field-trial-candidate.json"
-                "smite-rc6-install-journal.py"
-                "smite-selected-candidate.json"
-                "smite-panel-ui.py"
-                "smite-panel-ui.json"
-                "u-opti-update-transaction.py"
-                "smite-foreign-gateway-signed-check.py"
-                "smite-node-pairing-wizard.sh"
-                "smite-install.sh"
-                "smite-clean-rc-preflight.sh"
-                "smite-xhttp-nginx-route"
-                "smite_xhttp_nginx_plan.py"
-                "smite-rc5-xhttp-root-broker.py"
-                "smite-rc5-xhttp-broker-provision.py"
-                "smite-rc5-xhttp-broker-compose.py"
-                "smite-rc5-xhttp-sanaei-mount.py"
-                "smite-rc5-xhttp-nonce-ledger.py"
-                "smite-rc5-xhttp-signed-intent.py"
-                "smite-rc5-xhttp-bridge-install.py"
-                "smite-rc5-xhttp-bridge-admission.py"
-                "smite-gateway.sh"
-                "smite-frp-xhttp.sh"
-                "smite-frp-xhttp-paths.py"
-                "smite-frp-rc2-guided-publish.py"
-                "smite-profile-first.py"
-                "smite-profile-first-menu.sh"
-                "smite-frp-wizard.sh"
-                "smite-backhaul-management.sh"
-                "smite-clean-ir-resume.sh"
-                "smite-tunnel-wizard.sh"
-                "smite-tunnel-control-center.sh"
-                "smite-managed-backhaul.py"
-                "smite-managed-frp.py"
-                "smite-managed-frp-transaction.py"
-                "smite-stage15-frp-compose-plan.py"
-                "smite-stage15-frp-host-executor.py"
-                "smite-compose-safe.py"
-                "smite-stage15-wss.py"
-                "smite-rc7-wss-preflight.py"
-                "smite-rc7-wss-runtime.py"
-                "smite-rc7-wss-edge.py"
-                "smite-rc7-frp-enrollment.py"
-                "smite-stage15-kh-inventory.py"
-                "smite-stage15-active-runtime.py"
-                "smite-stage15-upgrade.py"
-                "smite-stage15-wss-edge.py"
-                "smite-stage15-root-review.py"
-                "smite-stage15-xhttp-bridge.py"
-                "smite-stage15-frp-wizard.sh"
-                "smite-stage15-fetch-images.sh"
-                "smite-rc2-frp-wss-edge-plan.py"
-                "smite-managed-frp-control.py"
-                "smite-managed-frp-menu.sh"
-                "smite-managed-backhaul-control.py"
-                "smite-managed-backhaul-menu.sh"
-                "smite-managed-backhaul-host-gate.py"
-                "smite-managed-backhaul-host-executor.py"
-                "smite-managed-engine-host-admission.py"
-                "smite-managed-engine-host-plan.py"
-                "smite-managed-backhaul-pair-review.py"
-                "smite-managed-backhaul-lifecycle.py"
-                "smite-managed-backhaul-transaction.py"
-                "smite-backhaul-sidecar.py"
-                "smite-backhaul-sidecar-readiness.py"
-                "smite-backhaul-sidecar-guided-prep.py"
-                "smite-backhaul-sidecar-guided-trial.py"
-                "smite-backhaul-sidecar-ssh-pair.py"
-                "smite-backhaul-sidecar-paste-pair.py"
-                "smite-backhaul-sidecar-admission.py"
-                "smite-backhaul-sidecar-token.py"
-                "smite-backhaul-sidecar-live-trial.py"
-                "smite-backhaul-sidecar-reconcile.py"
-                "smite-backhaul-rebuild-gate.sh"
-                "smite-backhaul-sidecar-nginx-plan.py"
-                "smite-backhaul-standard.sh"
-                "smite-backhaul-spec.py"
-                "smite-backhaul-node-patch.py"
-                "smite-backhaul-panel-patch.py"
-                "smite-foreign-gateway.sh"
-                "docker-3xui-instance.sh"
-                "docker-3xui-certificate-multi.sh"
-                "docker-3xui.sh"
-                "docker-3xui-compat.sh"
-                "docker-3xui-nginx.sh"
-                "docker-3xui-xhttp-guard.py"
-                "fakesite.sh"
-            )
+            BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")
 
             BACKUP_OK=true
 
@@ -1829,17 +1539,18 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
 
-            echo "Backup created successfully."
+            echo "  [✓] Backup completed."
 
             echo
-            echo "Installing update using recoverable, atomic-per-file journal..."
+            echo "  Applying verified update..."
 
             # This helper is part of the downloaded, syntax-checked SAME SHA.
             # It writes a durable journal + private persistent recovery copy
             # before changing any installed bytes. Crash -> startup recovery.
             UPDATE_FAILED=false
             if ! python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply \
-                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}"; then
+                    "$TEMP_DIR" "$BACKUP_DIR" --source-ref "$BRANCH" "${UPDATE_FILE_NAMES[@]}" \
+                    >"$TEMP_DIR/.uopti-transaction-result"; then
                 UPDATE_FAILED=true
             fi
 
@@ -1898,19 +1609,30 @@ PY_UPDATER_DECODE_BLOB
                 continue
             fi
 
-            rm -rf "$BACKUP_DIR"
+
+            # Retain the verified backup for manual recovery after a successful update.
+            echo "  [✓] Transaction committed"
             cleanup_update_temp
 
             echo
-            echo "======================================"
-            echo "          Update completed"
-            echo "======================================"
+            cat <<'UOPTI_UPDATER_SUCCESS'
+╔══════════════════════════════════════════════╗
+║                                              ║
+║           UPDATE SUCCESSFUL                  ║
+║                                              ║
+UOPTI_UPDATER_SUCCESS
+            printf '║        U-OPTI v%-30s║\n' "$REMOTE_VERSION"
+            cat <<'UOPTI_UPDATER_SUCCESS_END'
+║                                              ║
+╚══════════════════════════════════════════════╝
+UOPTI_UPDATER_SUCCESS_END
             echo
-            echo "Installed Version: $REMOTE_VERSION"
+            printf '  Updated modules : %d\n' "$MODULES_CHANGED"
+            printf '  Unchanged       : %d\n' "$((MODULES_CHECKED - MODULES_CHANGED))"
+            echo "  Recovery backup : Available"
+            printf '  Backup location : %s\n' "$BACKUP_DIR"
             echo
-            echo "All U-OPTI modules were updated successfully."
-            echo
-            echo "Restarting U-OPTI with the new version..."
+            echo "  Restarting U-OPTI..."
             sleep 1
             exec "$INSTALL_PATH"
             ;;

@@ -43,9 +43,9 @@ def declared_install(name: str, data: str) -> bool:
 
 def declared_update(name: str, data: str) -> bool:
     list_entries = re.findall(r'^\s*"' + re.escape(name) + r'"\s*$', data, re.M)
-    url = f'["{name}"]="$BASE_URL/modules/{name}"'
-    target = f'["{name}"]="$TEMP_DIR/{name}"'
-    return len(list_entries) == 2 and data.count(url) == 1 and data.count(target) == 1
+    return (len(list_entries) == 1
+            and 'BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")' in data
+            and 'u_opti_stage_verified_module "$FILE"' in data)
 
 
 class PackageClosureTest(unittest.TestCase):

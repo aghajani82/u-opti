@@ -8,8 +8,8 @@ grep -Fq 'UOPTI_STAGE15_SOURCE=6981bd91b43811fad8847da9abd81ef99a921003' "$root/
 grep -Fq 'UOPTI_STAGE15_MANIFEST_SHA=0b34ee3fbd9174e6bf7ef6ddf145f7ebcd606c9bbeae176bb3d6a38b8a2a7840' "$root/modules/smite-stage15-fetch-images.sh"
 grep -Fq 'stage15-frp071-6981bd91' "$root/modules/smite-stage15-fetch-images.sh"
 grep -Fq '"smite-stage15-fetch-images.sh"' "$root/install.sh"
-grep -Fq '["smite-stage15-fetch-images.sh"]="$BASE_URL/modules/smite-stage15-fetch-images.sh"' "$root/u-opti"
-grep -Fq '["smite-stage15-fetch-images.sh"]="$TEMP_DIR/smite-stage15-fetch-images.sh"' "$root/u-opti"
+grep -Fq 'u_opti_stage_verified_module "$FILE"' "$root/u-opti"
+grep -Fq 'u_opti_stage_verified_module "$FILE"' "$root/u-opti"
 grep -Fq 'bash "$image_fetcher"' "$root/u-opti"
 grep -Fq 'archive=/var/lib/u-opti/smite-stage15-frp071-images' "$root/modules/smite-stage15-frp-wizard.sh"
 

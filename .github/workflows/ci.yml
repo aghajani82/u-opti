@@ -345,7 +345,7 @@ jobs:
           python3 -B tests/test-smite-managed-backhaul.py -v
           grep -Fq '"smite-managed-backhaul.py"' install.sh
           grep -Fq '"smite-managed-backhaul.py"' u-opti
-          grep -Fq '["smite-managed-backhaul.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul.py"' u-opti
           python3 -m py_compile modules/smite-managed-frp.py modules/smite-managed-frp-control.py tests/test-smite-managed-frp.py tests/test-smite-managed-frp-control.py
           python3 -B tests/test-smite-managed-frp.py -v
           python3 -B tests/test-smite-managed-frp-control.py -v
@@ -357,18 +357,18 @@ jobs:
           sudo -n python3 -B tests/test-smite-stage15-frp-host-executor.py -v
           python3 -m py_compile tools/build-stage15-review-bundle.py
           grep -Fq '"smite-stage15-frp-host-executor.py"' install.sh
-          grep -Fq '["smite-stage15-frp-host-executor.py"]' u-opti
+          grep -Fq '                "smite-stage15-frp-host-executor.py"' u-opti
           grep -Fq '"smite-stage15-frp-compose-plan.py"' install.sh
-          grep -Fq '["smite-stage15-frp-compose-plan.py"]' u-opti
+          grep -Fq '                "smite-stage15-frp-compose-plan.py"' u-opti
           python3 -m py_compile modules/smite-managed-frp-transaction.py tests/test-smite-managed-frp-transaction.py
           python3 -B tests/test-smite-managed-frp-transaction.py -v
           grep -Fq '"smite-managed-frp-transaction.py"' install.sh
-          grep -Fq '["smite-managed-frp-transaction.py"]' u-opti
+          grep -Fq '                "smite-managed-frp-transaction.py"' u-opti
           bash -n modules/smite-managed-frp-menu.sh
           for helper in smite-managed-frp.py smite-managed-frp-control.py smite-managed-frp-menu.sh; do
             grep -Fq "\"$helper\"" install.sh
             grep -Fq "\"$helper\"" u-opti
-            grep -Fq "[$(printf '"%s"' "$helper")]" u-opti
+            grep -Fq "                \"$helper\"" u-opti
           done
 
 
@@ -382,20 +382,20 @@ jobs:
           python3 -B tests/test-smite-managed-backhaul-transaction.py -v
           grep -Fq '"smite-managed-backhaul-transaction.py"' install.sh
           grep -Fq '"smite-managed-backhaul-transaction.py"' u-opti
-          grep -Fq '["smite-managed-backhaul-transaction.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-transaction.py"' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-control.py tests/test-smite-managed-backhaul-control.py
           python3 -B tests/test-smite-managed-backhaul-control.py -v
           bash -n modules/smite-managed-backhaul-menu.sh
           grep -Fq '"smite-managed-backhaul-control.py"' install.sh
           grep -Fq '"smite-managed-backhaul-menu.sh"' install.sh
-          grep -Fq '["smite-managed-backhaul-control.py"]' u-opti
-          grep -Fq '["smite-managed-backhaul-menu.sh"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-control.py"' u-opti
+          grep -Fq '                "smite-managed-backhaul-menu.sh"' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-host-gate.py tests/test-smite-managed-backhaul-host-gate.py
           python3 -B tests/test-smite-managed-backhaul-host-gate.py -v
           python3 -m py_compile modules/smite-managed-backhaul-host-executor.py tests/test-smite-managed-backhaul-host-executor.py
           python3 -B tests/test-smite-managed-backhaul-host-executor.py -v
           grep -Fq '"smite-managed-backhaul-host-executor.py"' install.sh
-          grep -Fq '["smite-managed-backhaul-host-executor.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-host-executor.py"' u-opti
           python3 -m py_compile modules/smite-managed-engine-host-admission.py tests/test-smite-managed-engine-host-admission.py
           python3 -B tests/test-smite-managed-engine-host-admission.py -v
           python3 -m py_compile modules/smite-managed-engine-host-plan.py tests/test-smite-managed-engine-host-plan.py
@@ -406,19 +406,19 @@ jobs:
           python3 -m py_compile tests/lab/smite_fd_guard.py tests/test-smite-fd-guard.py
           python3 -B tests/test-smite-fd-guard.py -v
           grep -Fq '"smite-managed-engine-host-plan.py"' install.sh
-          grep -Fq '["smite-managed-engine-host-plan.py"]' u-opti
+          grep -Fq '                "smite-managed-engine-host-plan.py"' u-opti
           grep -Fq '"smite-managed-engine-host-admission.py"' install.sh
-          grep -Fq '["smite-managed-engine-host-admission.py"]' u-opti
+          grep -Fq '                "smite-managed-engine-host-admission.py"' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-pair-review.py tests/test-smite-managed-backhaul-pair-review.py
           python3 -B tests/test-smite-managed-backhaul-pair-review.py -v
           grep -Fq '"smite-managed-backhaul-host-gate.py"' install.sh
-          grep -Fq '["smite-managed-backhaul-host-gate.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-host-gate.py"' u-opti
           grep -Fq '"smite-managed-backhaul-pair-review.py"' install.sh
-          grep -Fq '["smite-managed-backhaul-pair-review.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-pair-review.py"' u-opti
           python3 -m py_compile modules/smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle.py tests/test-smite-managed-backhaul-lifecycle-official.py
           python3 -B tests/test-smite-managed-backhaul-lifecycle.py -v
           grep -Fq '"smite-managed-backhaul-lifecycle.py"' install.sh
-          grep -Fq '["smite-managed-backhaul-lifecycle.py"]' u-opti
+          grep -Fq '                "smite-managed-backhaul-lifecycle.py"' u-opti
 
       - name: Verify clean RC IR signed Panel plus paused local Node, Stable unchanged
         shell: bash

@@ -123,7 +123,7 @@ class SourcePinTest(unittest.TestCase):
         self.assertNotIn('"${BASE_URL}/${REPO_PATH}?ref=${BRANCH}', updater)
         self.assertLess(install.index(marker), install.index('echo "Downloading VERSION..."'))
         self.assertLess(
-            updater.index(marker), updater.index('echo "Downloading VERSION..."')
+            updater.index(marker), updater.index('download_repo_file "VERSION" "$TEMP_DIR/VERSION"')
         )
         # The selected ref is now included in the SAME crash-safe journal
         # as the source-locked executable and VERSION, not written later.
