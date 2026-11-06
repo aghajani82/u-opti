@@ -24,6 +24,7 @@ ROOT=Path('/opt/smite-node/config')
 MANIFEST=ROOT/'engine-state/engines.json'
 JOURNAL=Path('/var/lib/u-opti/smite-rc7-frp-enrollment')
 RETAINED_BACKHAUL=Path('/var/lib/u-opti/smite-engine-host/backhaul/retained-rc7.json')
+RETAINED_BACKHAUL_CLEANUP=Path('/var/lib/u-opti/smite-engine-host/backhaul/retained-rc7-cleanup.json')
 BIN_LIMIT=48*1024*1024
 ENGINES={'backhaul','frp','gost','rathole','chisel'}
 DIGEST=re.compile('[0-9a-f]{64}\\Z')
@@ -337,6 +338,10 @@ def restore(entry):
     # The FRP receipt may now bind a manifest jointly owned by a
     # Backhaul transaction. Under the shared lock, allow this independent
     # rollback only after Backhaul restored both exact original files.
+    # Even when its journal has been unlinked, the crash-recovery cleanup
+    # seal forbids another engine transaction until cleanup is complete.
+    need(not os.path.lexists(RETAINED_BACKHAUL_CLEANUP),
+         'BACKHAUL_CLEANUP_REQUIRES_OWN_RECOVERY')
     if os.path.lexists(RETAINED_BACKHAUL):
         safe_dir(RETAINED_BACKHAUL.parent)
         try:

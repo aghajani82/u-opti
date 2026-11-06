@@ -200,13 +200,63 @@ def _retained_files(paths):
     return manifest, receipt, paths.state / "retained-rc7.json"
 
 
+def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
+                             witness, current):
+    """Resume terminal RESTORED cleanup, including after journal unlink.
+
+    This helper is private to the isolated retained-node transaction. A
+    durable seal protects the crash interval between deleting the restored
+    journal and syncing its directory. Neither path admits live hosts.
+    """
+    try:
+        envelope = pair._pair_load_json(pair._pair_read_private(seal, limit=4096))
+    except (pair.Hold, OSError, ValueError, TypeError) as exc:
+        raise Hold("RETAINED_CLEANUP_SEAL_UNTRUSTED") from exc
+    record = envelope.get("record")
+    keys = {"schema", "role", "binary", "witness",
+            "manifest_sha256", "receipt_sha256", "journal_sha256"}
+    if (set(envelope) != {"record", "sha256"} or not isinstance(record, dict)
+            or set(record) != keys or type(record["schema"]) is not int
+            or record["schema"] != 1 or record["role"] != role
+            or record["binary"] != binary or record["witness"] != fingerprint
+            or any(type(record[key]) is not str or SHA.fullmatch(record[key]) is None
+                   for key in ("manifest_sha256", "receipt_sha256", "journal_sha256"))
+            or _sha(json.dumps(record, sort_keys=True).encode()) != envelope["sha256"]):
+        raise Hold("RETAINED_CLEANUP_SEAL_UNTRUSTED")
+
+    before = current()
+    if (_sha(before[0]) != record["manifest_sha256"]
+            or _sha(before[1]) != record["receipt_sha256"]
+            or witness() != fingerprint):
+        raise Hold("RETAINED_CLEANUP_BASELINE_DRIFT")
+    # Hash equality alone is not the retained FRP receipt's semantic proof.
+    try:
+        pair._pair_expected_transition(*before, binary, role=role)
+    except pair.Hold as exc:
+        raise Hold("RETAINED_CLEANUP_SEMANTIC_DRIFT") from exc
+    if os.path.lexists(journal):
+        try:
+            journal_digest = _sha(pair._pair_read_private(journal, limit=40000))
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            raise Hold("RETAINED_CLEANUP_JOURNAL_DRIFT") from exc
+        if journal_digest != record["journal_sha256"]:
+            raise Hold("RETAINED_CLEANUP_JOURNAL_DRIFT")
+        journal.unlink()
+        pair._pair_fsync_dir(journal.parent)
+    if (current() != before or witness() != fingerprint):
+        raise Hold("RETAINED_CLEANUP_POSTCHECK_FAILED")
+    seal.unlink()
+    pair._pair_fsync_dir(seal.parent)
+    return "CLEANED"
+
+
 def _retained_step(paths, *, action, role, arch, witness):
     """Apply or compensate under the same lock used by RC7 FRP enrollment.
 
     witness() re-authenticates this retained node and returns the stable
     protected-state fingerprint. No mutable host caller is admitted yet.
     """
-    if action not in ("install", "rollback", "recover") or role not in ("ir", "foreign"):
+    if action not in ("install", "rollback", "recover", "cleanup") or role not in ("ir", "foreign"):
         raise Hold("RETAINED_OPERATION_INVALID")
     if arch not in package.OFFICIAL_BINARY_SHA256:
         raise Hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
@@ -240,6 +290,13 @@ def _retained_step(paths, *, action, role, arch, witness):
         fingerprint = witness()
         if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
             raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
+        seal = paths.state / "retained-rc7-cleanup.json"
+        if os.path.lexists(seal):
+            if action != "cleanup":
+                raise Hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
+            return _retained_finish_cleanup(
+                seal=seal, journal=journal, role=role, binary=binary,
+                fingerprint=fingerprint, witness=witness, current=current)
 
         if os.path.lexists(journal):
             envelope = pair._pair_load_json(pair._pair_read_private(journal, limit=40000))
@@ -270,6 +327,22 @@ def _retained_step(paths, *, action, role, arch, witness):
         phase = record["phase"]
         if observed not in allowed[phase]:
             raise Hold("RETAINED_PAIR_DRIFT")
+        if action == "cleanup":
+            if phase != "RESTORED":
+                raise Hold("RETAINED_CLEANUP_REQUIRES_RESTORED")
+            raw_journal = pair._pair_read_private(journal, limit=40000)
+            cleanup = {"schema": 1, "role": role, "binary": binary,
+                       "witness": fingerprint,
+                       "manifest_sha256": _sha(before[0]),
+                       "receipt_sha256": _sha(before[1]),
+                       "journal_sha256": _sha(raw_journal)}
+            envelope = {"record": cleanup,
+                        "sha256": _sha(json.dumps(cleanup, sort_keys=True).encode())}
+            # Persist terminal proof before deleting any recovery evidence.
+            _atomic(seal, (json.dumps(envelope, sort_keys=True) + "\n").encode(), 0o600)
+            return _retained_finish_cleanup(
+                seal=seal, journal=journal, role=role, binary=binary,
+                fingerprint=fingerprint, witness=witness, current=current)
         if action == "install":
             if phase == "COMMITTED":
                 return phase
