@@ -1098,6 +1098,94 @@ class HostExecutor(unittest.TestCase):
                     ir, foreign, arch="amd64", observe=lambda *_: False)
             self.assertFalse((ir.state / "retained-rc7.json").exists())
 
+    def test_retained_mutation_refuses_all_live_resource_paths_before_lock(self):
+        from dataclasses import replace
+        step, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        live = exe.Paths()
+        before = (manifest.read_bytes(), receipt.read_bytes())
+        for name in ("node", "staging", "state", "lock", "binary", "frp_state"):
+            with self.subTest(protected=name):
+                unsafe = replace(paths, **{name: getattr(live, name)})
+                with patch.object(
+                        exe, "_lock",
+                        side_effect=AssertionError("LIVE_ENGINE_LOCK_TOUCHED")):
+                    with self.assertRaisesRegex(
+                            exe.Hold, "INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED"):
+                        exe._retained_step(
+                            unsafe, action="install", role="ir",
+                            arch="amd64", witness=lambda: "1" * 64)
+        # The production lock must not be touched through symlinks, a child
+        # alias or a parent path either. The guard runs without creating it.
+        alias = self.root / "alias-to-real-frp-lock"
+        alias.symlink_to(live.lock)
+        for candidate in (alias, live.lock.parent, live.lock / "subpath"):
+            with self.subTest(candidate=str(candidate)):
+                with patch.object(
+                        exe, "_lock",
+                        side_effect=AssertionError("LOCK_TOUCHED")):
+                    with self.assertRaisesRegex(
+                            exe.Hold, "INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED"):
+                        exe._retained_step(
+                            replace(paths, lock=candidate),
+                            action="recover", role="ir", arch="amd64",
+                            witness=lambda: "1" * 64)
+        for name in ("node", "staging", "state", "lock", "binary", "frp_state"):
+            with self.subTest(relative=name):
+                with self.assertRaisesRegex(
+                        exe.Hold, "RETAINED_OPERATION_PATH_UNTRUSTED"):
+                    exe._retained_step(
+                        replace(paths, **{name: Path("relative")}),
+                        action="install", role="ir", arch="amd64",
+                        witness=lambda: "1" * 64)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+        self.assertFalse((paths.state / "retained-rc7-cleanup.json").exists())
+        self.assertEqual(step("install"), "COMMITTED")
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+
+    def test_retained_checksumming_does_not_trust_malformed_recovery_hex(self):
+        step, manifest, receipt = self.retained_fixture()
+        original = (manifest.read_bytes(), receipt.read_bytes())
+        self.assertEqual(step("install"), "COMMITTED")
+        committed = (manifest.read_bytes(), receipt.read_bytes())
+        journal = self.state / "retained-rc7.json"
+        envelope = json.loads(journal.read_bytes())
+        original_journal = journal.read_bytes()
+        malformed = (
+            ("non-string-list", ["0f"]),
+            ("non-string-null", None),
+            ("invalid-alphabet", "zz"),
+            ("uppercase", "AA"),
+            ("embedded-whitespace", "aa bb"),
+            ("odd-length", "a"),
+            ("empty", ""),
+            ("over-limit", "aa" * 8193),
+        )
+        for field in ("manifest", "receipt"):
+            for case, value in malformed:
+                with self.subTest(field=field, case=case):
+                    mutated = json.loads(original_journal)
+                    mutated["record"][field] = value
+                    mutated["sha256"] = exe._sha(
+                        json.dumps(mutated["record"], sort_keys=True).encode())
+                    journal.write_text(json.dumps(mutated, sort_keys=True) + "\n")
+                    journal.chmod(0o600)
+                    with self.assertRaisesRegex(
+                            exe.Hold, "RETAINED_JOURNAL_UNTRUSTED"):
+                        step("recover")
+                    self.assertEqual(
+                        (manifest.read_bytes(), receipt.read_bytes()), committed)
+                    self.assertEqual(
+                        json.loads(journal.read_bytes())["record"][field], value)
+        journal.write_bytes(original_journal)
+        journal.chmod(0o600)
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), original)
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertFalse(journal.exists())
+
     def test_retained_commit_retry_rollback_and_drift(self):
         step, manifest, receipt = self.retained_fixture()
         before = manifest.read_bytes(), receipt.read_bytes()
