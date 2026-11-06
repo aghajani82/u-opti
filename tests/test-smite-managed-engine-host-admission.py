@@ -394,10 +394,10 @@ class SharedHostAdmission(unittest.TestCase):
             out = Path(temp) / "commands"
             script = r"""
 source "$MENU"
-uname() { printf '%s\\n' "${TEST_ARCH:-x86_64}"; }
+uname() { printf '%s\n' "${TEST_ARCH:-x86_64}"; }
 python3() {
     printf '%q ' "$@" >> "$CAPTURE"
-    printf '\\n' >> "$CAPTURE"
+    printf '\n' >> "$CAPTURE"
     return 2
 }
 smite_managed_bh_menu <<'CHOICES'
