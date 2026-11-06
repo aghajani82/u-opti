@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 bash -n modules/smite-tunnel-control-center.sh
 grep -Fq '"smite-tunnel-control-center.sh"' install.sh
 grep -Fq '"smite-tunnel-control-center.sh"' u-opti
-grep -Fq '["smite-tunnel-control-center.sh"]="$BASE_URL/modules/smite-tunnel-control-center.sh"' u-opti
-grep -Fq '["smite-tunnel-control-center.sh"]="$TEMP_DIR/smite-tunnel-control-center.sh"' u-opti
+grep -Fq '                "smite-tunnel-control-center.sh"' u-opti
+grep -Fq 'u_opti_stage_verified_module "$FILE"' u-opti
 grep -Fq "source \"\$SMITE_TW_DIR/smite-tunnel-control-center.sh\"" modules/smite-tunnel-wizard.sh
 grep -Fq "4) Tunnel Control Center" modules/smite-tunnel-wizard.sh
 
