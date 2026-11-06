@@ -815,9 +815,9 @@ class PreviewTests(unittest.TestCase):
         launcher = (ROOT / "u-opti").read_text()
         for name in ("smite-node-pairing.py", "smite-node-pairing-wizard.sh"):
             self.assertIn('    "' + name + '"', install)
-            self.assertEqual(launcher.count('                "' + name + '"'), 2)
-            self.assertEqual(launcher.count('["' + name + '"]="$BASE_URL/modules/' + name + '"'), 1)
-            self.assertEqual(launcher.count('["' + name + '"]="$TEMP_DIR/' + name + '"'), 1)
+            self.assertEqual(launcher.count('                "' + name + '"'), 1)
+            self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")', launcher)
+            self.assertIn('u_opti_stage_verified_module "$FILE"', launcher)
         self.assertIn('if [ "${1:-}" = "--smite-pairing" ]', launcher)
         self.assertIn("smite_node_pairing_menu()", wrapper)
         self.assertIn("Enable secure Panel pairing on HTTPS/443 (IR)", wrapper)
