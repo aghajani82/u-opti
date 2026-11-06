@@ -537,6 +537,91 @@ class HostExecutor(unittest.TestCase):
             self.assertEqual(result["INSTALL_ALLOWED"], "NO")
             self.assertFalse(self.state.exists())
 
+    def test_retained_signed_review_rejects_unlocked_receipt_and_recovery_races(self):
+        from dataclasses import replace
+        runner, audit = self._retained_review_fixture()
+        manifest = self.config / "engine-state/engines.json"
+        frp = self.root / "frp"
+        frp.mkdir(mode=0o700)
+        receipt = frp / "record.json"
+        record = {"schema": 1, "state": "COMMITTED", "role": "ir",
+                  "old": None, "new": exe._sha(manifest.read_bytes()),
+                  "binaries": {"frpc": "b"*64, "frps": "c"*64}}
+        receipt.write_text(json.dumps(record))
+        receipt.chmod(0o600)
+        original = receipt.read_bytes()
+        paths = replace(self.paths, frp_state=frp)
+        evidence = {**audit, "NODE_ROLE": "IR",
+                    "SIGNED_REGISTRY_PAIR_PROOF": "COSIGN_VERIFIED"}
+        saved_manifest = manifest.read_bytes()
+        saved_tunnels = (self.data / "tunnels.json").read_bytes()
+        for race, expected in (
+            ("receipt", "RETAINED_FRP_RECEIPT_CHANGED_DURING_REVIEW"),
+            ("journal", "RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW"),
+            ("cleanup-seal", "RETAINED_CLEANUP_RECOVERY_REQUIRED"),
+        ):
+            with self.subTest(race=race):
+                runner.calls.clear()
+                receipt.write_bytes(original)
+                pending = self.state / (
+                    "retained-rc7.json" if race == "journal"
+                    else "retained-rc7-cleanup.json")
+                if pending.exists():
+                    pending.unlink()
+
+                def raced(args, **kwargs):
+                    result = runner(args, **kwargs)
+                    if args[:3] == ["docker", "exec", "-i"]:
+                        if race == "receipt":
+                            # Valid JSON with identical semantic manifest
+                            # binding still represents changed exact bytes.
+                            receipt.write_bytes(original + b" ")
+                        else:
+                            self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+                            pending.write_text("unresolved competing recovery")
+                    return result
+
+                with patch.object(exe.admission, "report", return_value=evidence):
+                    result = exe.review_in_place_binary(
+                        expected_node_image=IMAGE, arch="amd64",
+                        paths=paths, runner=raced)
+                self.assertEqual(result["REASON"], expected)
+                self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+                self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+                self.assertEqual(result["IN_PLACE_MANIFEST_TRANSACTION"],
+                                 "NOT_IMPLEMENTED")
+                self.assertEqual(manifest.read_bytes(), saved_manifest)
+                self.assertEqual((self.data / "tunnels.json").read_bytes(), saved_tunnels)
+                if pending.exists():
+                    pending.unlink()
+        receipt.write_bytes(original)
+        # A non-cooperating writer may also race the paired planner itself.
+        expected_transition = exe.pair._pair_expected_transition
+
+        def tamper_at_plan(*args, **kwargs):
+            result = expected_transition(*args, **kwargs)
+            receipt.write_bytes(original + b" ")
+            return result
+
+        with patch.object(exe.admission, "report", return_value=evidence), \
+                patch.object(exe.pair, "_pair_expected_transition",
+                             side_effect=tamper_at_plan):
+            result = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=paths, runner=runner)
+        self.assertEqual(result["REASON"], "RETAINED_PAIR_CHANGED_DURING_REVIEW")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        receipt.write_bytes(original)
+        with patch.object(exe.admission, "report", return_value=evidence):
+            clean = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=paths, runner=runner)
+        self.assertEqual(clean["IN_PLACE_MANIFEST_TRANSACTION"],
+                         "PAIR_PLAN_VERIFIED_READ_ONLY")
+        self.assertEqual(clean["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(manifest.read_bytes(), saved_manifest)
+        self.assertEqual((self.data / "tunnels.json").read_bytes(), saved_tunnels)
+
     def test_retained_readonly_review_detects_cleanup_seal_without_docker(self):
         runner, audit = self._retained_review_fixture()
         self.state.mkdir(mode=0o700, parents=True)

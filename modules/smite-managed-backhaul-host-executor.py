@@ -615,6 +615,16 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             compose_before = _sha(_read(paths.node/"docker-compose.yml",131072))
             manifest_before = _sha(_read(
                 paths.node/"config/engine-state/engines.json",8192))
+            # The shared lock serializes trusted writers, but is advisory.
+            # Also pin the exact FRP receipt bytes against out-of-band drift
+            # during the Docker and signed-pair observations. Keep unsigned
+            # feasibility reviews compatible with a missing receipt.
+            receipt_path = paths.frp_state / "record.json"
+            receipt_before = (
+                _sha(pair._pair_read_private(receipt_path))
+                if report["SIGNED_REGISTRY_PAIR_PROOF"] == "COSIGN_VERIFIED"
+                else None
+            )
             digest = package.OFFICIAL_BINARY_SHA256[arch]
             argv = ["docker","exec","-i","--env",
                     "UOPTI_EXPECTED_BACKHAUL_SHA256="+digest,
@@ -646,6 +656,13 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
                     or _sha(_read(paths.node/"config/engine-state/engines.json",8192))
                         !=manifest_before):
                 return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+            # A non-cooperating writer can bypass flock. Never return a
+            # positive paired preview if a journal or cleanup seal appeared
+            # while signed inventory / binary proof was being checked.
+            if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+                return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
+            if os.path.lexists(paths.state / "retained-rc7.json"):
+                return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
             report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
             if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
                 return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
@@ -659,10 +676,20 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             baseline = pair._pair_read_private(manifest)
             if _sha(baseline) != manifest_before:
                 return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+            # A receipt edit that remains syntactically valid and binds the
+            # same manifest is still unauthorized drift for this observation.
+            receipt_now = pair._pair_read_private(receipt_path)
+            if _sha(receipt_now) != receipt_before:
+                return hold("RETAINED_FRP_RECEIPT_CHANGED_DURING_REVIEW")
             role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
-            pair._pair_expected_transition(baseline,
-                pair._pair_read_private(paths.frp_state / "record.json"),
+            pair._pair_expected_transition(baseline, receipt_now,
                 digest, role=role)
+            if (_sha(pair._pair_read_private(receipt_path)) != receipt_before
+                    or _sha(pair._pair_read_private(manifest)) != manifest_before):
+                return hold("RETAINED_PAIR_CHANGED_DURING_REVIEW")
+            if (os.path.lexists(paths.state / "retained-rc7-cleanup.json")
+                    or os.path.lexists(paths.state / "retained-rc7.json")):
+                return hold("RETAINED_RECOVERY_STATE_CHANGED_DURING_REVIEW")
             report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
             return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
