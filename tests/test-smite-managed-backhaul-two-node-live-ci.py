@@ -1666,9 +1666,16 @@ def main():
                         REPO / "modules/smite-managed-backhaul-host-executor.py")
 
         def host_step(role, root, name, action):
-            paths = executor.Paths(node=root / "node", state=root / "host-state",
-                                   frp_state=root / "rc7-frp-enrollment",
-                                   lock=root / ".smite-engine-transaction.lock")
+            # The signed two-container CI rehearsal must keep ALL retained
+            # transaction resources inside its disposable test root. Leaving
+            # default staging/binary fields pointing at real host paths is a
+            # policy breach, even when those fields are not written today.
+            paths = executor.Paths(
+                node=root / "node", staging=root / "stages",
+                state=root / "host-state",
+                lock=root / ".smite-engine-transaction.lock",
+                binary=root / "installed/backhaul",
+                frp_state=root / "rc7-frp-enrollment")
 
             def witness():
                 doc = json.loads(run("docker", "inspect", name))[0]
