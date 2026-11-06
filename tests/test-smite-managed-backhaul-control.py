@@ -711,7 +711,7 @@ class OperatorControl(unittest.TestCase):
         log = self.root / "argv.txt"
         mock_python.write_text(
             '#!/bin/sh\n'
-            'printf "%s\\\n" "$*" >> "$SMITE_TEST_ARGV_LOG"\n'
+            'printf "%s\\n" "$*" >> "$SMITE_TEST_ARGV_LOG"\n'
             'exit 0\n')
         mock_python.chmod(0o700)
         root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
