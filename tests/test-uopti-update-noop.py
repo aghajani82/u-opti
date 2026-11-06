@@ -161,7 +161,17 @@ class VerifiedNoopUpdater(unittest.TestCase):
     def test_noop_occurs_before_any_download_or_backup(self):
         source = SOURCE.read_text()
         guard = source.index("ALREADY UP TO DATE")
-        self.assertLess(guard, source.index('download_repo_file "u-opti" "$TEMP_DIR/u-opti"'))
+        # A CHANGED launcher must be fetched early to discover newly added
+        # modules; an already matching launcher still reaches the no-op gate
+        # without that extra download. The normal staging path remains later.
+        self.assertIn(
+            'if ! u_opti_verify_source_blob "u-opti" "$INSTALL_PATH"',
+            source[:guard],
+        )
+        self.assertLess(
+            guard,
+            source.index('if [ ! -f "$TEMP_DIR/u-opti" ]'),
+        )
         self.assertLess(guard, source.index('BACKUP_DIR=$(mktemp -d "$LIB_PATH/.uopti-backup-'))
         self.assertLess(guard, source.index('python3 -B "$TEMP_DIR/u-opti-update-transaction.py" apply'))
 
