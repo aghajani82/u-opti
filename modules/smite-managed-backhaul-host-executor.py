@@ -547,6 +547,29 @@ def _retained_container_fingerprint(doc: dict) -> tuple:
         raise Hold("RETAINED_NODE_RUNTIME_IDENTITY_UNVERIFIED") from exc
 
 
+def _retained_review_pending_recovery(paths: Paths) -> str | None:
+    """Read only: deny an active FRP/Backhaul writer's durable intent.
+
+    The shared engine lock is advisory; all linked RC7 recovery markers must
+    be absent both before Docker inspection and after the pure paired plan.
+    lexists also refuses dangling symlinks and never follows their target.
+    """
+    if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+        return "RETAINED_CLEANUP_RECOVERY_REQUIRED"
+    if os.path.lexists(paths.state / "retained-rc7.json"):
+        return "RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW"
+    manifest = paths.node / "config/engine-state/engines.json"
+    for pending in (
+        _journal(paths),
+        paths.frp_state / "record.next",
+        manifest.with_name("engines.json.rc7-next"),
+        manifest.with_name("engines.json.rc7-rollback-next"),
+    ):
+        if os.path.lexists(pending):
+            return "COMPETING_RECOVERY_REQUIRED"
+    return None
+
+
 def review_in_place_binary(*, expected_node_image: str, arch: str,
                            paths: Paths = Paths(), runner=subprocess.run,
                            signed_pair_manifest: Path | None = None,
@@ -581,10 +604,9 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             # A crash after terminal unlink can leave only the durable cleanup
             # seal. Never present the paired manifest as a clean install candidate
             # until its independent locked recovery has completed.
-            if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
-                return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
-            if os.path.lexists(paths.state / "retained-rc7.json"):
-                return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
+            pending = _retained_review_pending_recovery(paths)
+            if pending is not None:
+                return hold(pending)
             before = admission.host.read_only_docker_inspect(runner=runner)
             identity = _retained_container_fingerprint(before)
             review = admission.report(
@@ -659,10 +681,9 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             # A non-cooperating writer can bypass flock. Never return a
             # positive paired preview if a journal or cleanup seal appeared
             # while signed inventory / binary proof was being checked.
-            if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
-                return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
-            if os.path.lexists(paths.state / "retained-rc7.json"):
-                return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
+            pending = _retained_review_pending_recovery(paths)
+            if pending is not None:
+                return hold(pending)
             report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
             if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
                 return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
@@ -671,8 +692,6 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
                 if directory.resolve(strict=True) != directory:
                     return hold("RETAINED_DIRECTORY_UNTRUSTED")
                 _dir(directory)
-            if os.path.lexists(paths.frp_state / "record.next"):
-                return hold("COMPETING_RECOVERY_REQUIRED")
             baseline = pair._pair_read_private(manifest)
             if _sha(baseline) != manifest_before:
                 return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
@@ -687,9 +706,9 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             if (_sha(pair._pair_read_private(receipt_path)) != receipt_before
                     or _sha(pair._pair_read_private(manifest)) != manifest_before):
                 return hold("RETAINED_PAIR_CHANGED_DURING_REVIEW")
-            if (os.path.lexists(paths.state / "retained-rc7-cleanup.json")
-                    or os.path.lexists(paths.state / "retained-rc7.json")):
-                return hold("RETAINED_RECOVERY_STATE_CHANGED_DURING_REVIEW")
+            pending = _retained_review_pending_recovery(paths)
+            if pending is not None:
+                return hold(pending)
             report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
             return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
