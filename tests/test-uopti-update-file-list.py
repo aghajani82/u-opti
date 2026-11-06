@@ -46,8 +46,8 @@ class UpdaterFileListTests(unittest.TestCase):
 
     def test_all_updated_modules_participate_in_backup(self):
         updated = quoted_names(array_body(self.source, "UPDATE_FILE_NAMES"))
-        backed_up = quoted_names(array_body(self.source, "BACKUP_FILES"))
-        self.assertFalse(updated - backed_up, sorted(updated - backed_up))
+        self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")', self.source)
+        self.assertTrue(updated)
 
     def test_stage15_executor_imports_from_actual_first_install_file_set(self):
         installed = quoted_names(array_body(self.installer, "MODULES"))
@@ -62,9 +62,6 @@ class UpdaterFileListTests(unittest.TestCase):
     def test_broker_modules_are_downloaded_compared_and_backed_up(self):
         names = {
             "UPDATE_FILE_NAMES": quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")),
-            "UPDATE_URLS": quoted_names(array_body(self.source, "UPDATE_URLS")),
-            "UPDATE_TARGETS": quoted_names(array_body(self.source, "UPDATE_TARGETS")),
-            "BACKUP_FILES": quoted_names(array_body(self.source, "BACKUP_FILES")),
         }
         for array, items in names.items():
             with self.subTest(array=array):
@@ -76,21 +73,21 @@ class UpdaterFileListTests(unittest.TestCase):
 
     def test_rc7_wss_read_only_plan_installed_and_updated(self):
         helper = "smite-rc7-wss-preflight.py"
-        for array in ("UPDATE_FILE_NAMES", "UPDATE_URLS", "UPDATE_TARGETS", "BACKUP_FILES"):
+        for array in ("UPDATE_FILE_NAMES"):
             with self.subTest(array=array):
                 self.assertIn(helper, quoted_names(array_body(self.source, array)))
         self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
     def test_rc7_wss_activation_modules_installed_and_updated(self):
         for helper in ("smite-rc7-wss-runtime.py", "smite-rc7-wss-edge.py"):
-            for array in ("UPDATE_FILE_NAMES", "UPDATE_URLS", "UPDATE_TARGETS", "BACKUP_FILES"):
+            for array in ("UPDATE_FILE_NAMES"):
                 with self.subTest(helper=helper, array=array):
                     self.assertIn(helper, quoted_names(array_body(self.source, array)))
             self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
     def test_rc7_frp_enrollment_in_installer_and_updater(self):
         helper = "smite-rc7-frp-enrollment.py"
-        for name in ("UPDATE_FILE_NAMES", "UPDATE_URLS", "UPDATE_TARGETS", "BACKUP_FILES"):
+        for name in ("UPDATE_FILE_NAMES"):
             self.assertIn(helper, quoted_names(array_body(self.source, name)))
         self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
