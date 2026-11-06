@@ -185,6 +185,43 @@ def _lock(path: Path):
     finally:
         os.close(fd)
 
+@contextmanager
+def _read_only_engine_lock(path: Path):
+    """Hold the existing RC7 engine lock across the full read-only review.
+
+    Never create a lock file: missing, replaced or busy lock means HOLD.
+    An exclusive FRP or retained-Backhaul transaction must not race the
+    journal, Docker identity, signed pair and manifest observations.
+    """
+    if (not path.is_absolute() or path.is_symlink()
+            or path.parent.is_symlink() or not path.parent.is_dir()):
+        raise Hold("RETAINED_ENGINE_LOCK_UNTRUSTED")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError as exc:
+        raise Hold("RETAINED_ENGINE_LOCK_MISSING") from exc
+    except OSError as exc:
+        raise Hold("RETAINED_ENGINE_LOCK_UNTRUSTED") from exc
+    try:
+        st = os.fstat(fd)
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600):
+            raise Hold("RETAINED_ENGINE_LOCK_UNTRUSTED")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Hold("RETAINED_ENGINE_LOCK_BUSY") from exc
+        # Holding a lock on a detached inode does not serialize writers.
+        current = path.lstat()
+        if (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino):
+            raise Hold("RETAINED_ENGINE_LOCK_CHANGED")
+        yield
+    except OSError as exc:
+        raise Hold("RETAINED_ENGINE_LOCK_UNTRUSTED") from exc
+    finally:
+        os.close(fd)
+
 # The operator CLI only reviews retained nodes. The write entry below is
 # exercised on isolated nodes until independent deployment admission exists.
 pair = _load("retained_pair", "smite-managed-backhaul-transaction.py")
@@ -535,93 +572,94 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
     if arch not in package.OFFICIAL_BINARY_SHA256:
         return hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
     try:
-        # A crash after terminal unlink can leave only the durable cleanup
-        # seal. Never present the paired manifest as a clean install candidate
-        # until its independent locked recovery has completed.
-        if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
-            return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
-        if os.path.lexists(paths.state / "retained-rc7.json"):
-            return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
-        before = admission.host.read_only_docker_inspect(runner=runner)
-        identity = _retained_container_fingerprint(before)
-        review = admission.report(
-            "backhaul", paths.node, runtime=before,
-            expected_node_image=expected_node_image,
-            signed_pair_manifest=signed_pair_manifest,
-            signed_pair_manifest_sha256=signed_pair_manifest_sha256,
-            signed_pair_source_sha=signed_pair_source_sha,
-            signed_pair_publish_ref=signed_pair_publish_ref,
-            signed_pair_trusted_root=signed_pair_trusted_root,
-        )
-        report["SIGNED_REGISTRY_PAIR_PROOF"] = review.get(
-            "SIGNED_REGISTRY_PAIR_PROOF","UNVERIFIED")
-        # An *existing* protected FRP registry is the reason we explore
-        # in-place access. Keep original admission's no-recreate HOLD intact.
-        if (review.get("NODE_CONTAINER")!="RUNNING_REVIEWED_IMAGE"
-                or review.get("CORE_PROFILE")!="MANAGED_STRICT"
-                or review.get("SAVED_TUNNELS")!="EXISTING_DO_NOT_RESTART"
-                or review.get("TARGET_ENGINE")!="NOT_INSTALLED"
-                or review.get("OTHER_ENGINE")!="ENROLLED_UNVERIFIED"
-                or review.get("INSTALL_ALLOWED")!="NO"
-                or review.get("ACTIVATION_GATE")!="HOLD"
-                or review.get("OTHER_ENGINE_ACTION")!="NEVER_MODIFY"):
-            return hold("RETAINED_FRP_HOST_ADMISSION_HOLD")
-        # Don't equate a Docker digest with an immutable signed artifact.
-        # This may still classify candidate binary bytes for a later audit.
-        env_before = _sha(_read(paths.node/".env",16384))
-        compose_before = _sha(_read(paths.node/"docker-compose.yml",131072))
-        manifest_before = _sha(_read(
-            paths.node/"config/engine-state/engines.json",8192))
-        digest = package.OFFICIAL_BINARY_SHA256[arch]
-        argv = ["docker","exec","-i","--env",
-                "UOPTI_EXPECTED_BACKHAUL_SHA256="+digest,
-                "smite-node","python","-B","-"]
-        try:
-            result = runner(argv,input=IN_PLACE_BINARY_PROBE,
-                            capture_output=True,text=True,timeout=25,check=False)
-        except (OSError,subprocess.TimeoutExpired):
-            return hold("RETAINED_NODE_BINARY_READ_UNAVAILABLE")
-        if (result.returncode!=0
-                or result.stdout.strip()!="OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS"):
-            return hold("RETAINED_NODE_BINARY_ABSENT_OR_HASH_DRIFT")
-        after = admission.host.read_only_docker_inspect(runner=runner)
-        if _retained_container_fingerprint(after)!=identity:
-            return hold("RETAINED_NODE_RECREATED_DURING_REVIEW")
-        verify = admission.report(
-            "backhaul", paths.node, runtime=after,
-            expected_node_image=expected_node_image,
-            signed_pair_manifest=signed_pair_manifest,
-            signed_pair_manifest_sha256=signed_pair_manifest_sha256,
-            signed_pair_source_sha=signed_pair_source_sha,
-            signed_pair_publish_ref=signed_pair_publish_ref,
-            signed_pair_trusted_root=signed_pair_trusted_root,
-        )
-        if review != verify:
-            return hold("RETAINED_ADMISSION_CHANGED_DURING_REVIEW")
-        if (_sha(_read(paths.node/".env",16384))!=env_before
-                or _sha(_read(paths.node/"docker-compose.yml",131072))!=compose_before
-                or _sha(_read(paths.node/"config/engine-state/engines.json",8192))
-                    !=manifest_before):
-            return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
-        report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
-        if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
-            return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
-        manifest = paths.node / "config/engine-state/engines.json"
-        for directory in (manifest.parent, paths.frp_state):
-            if directory.resolve(strict=True) != directory:
-                return hold("RETAINED_DIRECTORY_UNTRUSTED")
-            _dir(directory)
-        if os.path.lexists(paths.frp_state / "record.next"):
-            return hold("COMPETING_RECOVERY_REQUIRED")
-        baseline = pair._pair_read_private(manifest)
-        if _sha(baseline) != manifest_before:
-            return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
-        role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
-        pair._pair_expected_transition(baseline,
-            pair._pair_read_private(paths.frp_state / "record.json"),
-            digest, role=role)
-        report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
-        return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
+        with _read_only_engine_lock(paths.lock):
+            # A crash after terminal unlink can leave only the durable cleanup
+            # seal. Never present the paired manifest as a clean install candidate
+            # until its independent locked recovery has completed.
+            if os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+                return hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
+            if os.path.lexists(paths.state / "retained-rc7.json"):
+                return hold("RETAINED_JOURNAL_REQUIRES_LOCKED_REVIEW")
+            before = admission.host.read_only_docker_inspect(runner=runner)
+            identity = _retained_container_fingerprint(before)
+            review = admission.report(
+                "backhaul", paths.node, runtime=before,
+                expected_node_image=expected_node_image,
+                signed_pair_manifest=signed_pair_manifest,
+                signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+                signed_pair_source_sha=signed_pair_source_sha,
+                signed_pair_publish_ref=signed_pair_publish_ref,
+                signed_pair_trusted_root=signed_pair_trusted_root,
+            )
+            report["SIGNED_REGISTRY_PAIR_PROOF"] = review.get(
+                "SIGNED_REGISTRY_PAIR_PROOF","UNVERIFIED")
+            # An *existing* protected FRP registry is the reason we explore
+            # in-place access. Keep original admission's no-recreate HOLD intact.
+            if (review.get("NODE_CONTAINER")!="RUNNING_REVIEWED_IMAGE"
+                    or review.get("CORE_PROFILE")!="MANAGED_STRICT"
+                    or review.get("SAVED_TUNNELS")!="EXISTING_DO_NOT_RESTART"
+                    or review.get("TARGET_ENGINE")!="NOT_INSTALLED"
+                    or review.get("OTHER_ENGINE")!="ENROLLED_UNVERIFIED"
+                    or review.get("INSTALL_ALLOWED")!="NO"
+                    or review.get("ACTIVATION_GATE")!="HOLD"
+                    or review.get("OTHER_ENGINE_ACTION")!="NEVER_MODIFY"):
+                return hold("RETAINED_FRP_HOST_ADMISSION_HOLD")
+            # Don't equate a Docker digest with an immutable signed artifact.
+            # This may still classify candidate binary bytes for a later audit.
+            env_before = _sha(_read(paths.node/".env",16384))
+            compose_before = _sha(_read(paths.node/"docker-compose.yml",131072))
+            manifest_before = _sha(_read(
+                paths.node/"config/engine-state/engines.json",8192))
+            digest = package.OFFICIAL_BINARY_SHA256[arch]
+            argv = ["docker","exec","-i","--env",
+                    "UOPTI_EXPECTED_BACKHAUL_SHA256="+digest,
+                    "smite-node","python","-B","-"]
+            try:
+                result = runner(argv,input=IN_PLACE_BINARY_PROBE,
+                                capture_output=True,text=True,timeout=25,check=False)
+            except (OSError,subprocess.TimeoutExpired):
+                return hold("RETAINED_NODE_BINARY_READ_UNAVAILABLE")
+            if (result.returncode!=0
+                    or result.stdout.strip()!="OFFICIAL_BUNDLED_BACKHAUL_BYTES=PASS"):
+                return hold("RETAINED_NODE_BINARY_ABSENT_OR_HASH_DRIFT")
+            after = admission.host.read_only_docker_inspect(runner=runner)
+            if _retained_container_fingerprint(after)!=identity:
+                return hold("RETAINED_NODE_RECREATED_DURING_REVIEW")
+            verify = admission.report(
+                "backhaul", paths.node, runtime=after,
+                expected_node_image=expected_node_image,
+                signed_pair_manifest=signed_pair_manifest,
+                signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+                signed_pair_source_sha=signed_pair_source_sha,
+                signed_pair_publish_ref=signed_pair_publish_ref,
+                signed_pair_trusted_root=signed_pair_trusted_root,
+            )
+            if review != verify:
+                return hold("RETAINED_ADMISSION_CHANGED_DURING_REVIEW")
+            if (_sha(_read(paths.node/".env",16384))!=env_before
+                    or _sha(_read(paths.node/"docker-compose.yml",131072))!=compose_before
+                    or _sha(_read(paths.node/"config/engine-state/engines.json",8192))
+                        !=manifest_before):
+                return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+            report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
+            if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
+                return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
+            manifest = paths.node / "config/engine-state/engines.json"
+            for directory in (manifest.parent, paths.frp_state):
+                if directory.resolve(strict=True) != directory:
+                    return hold("RETAINED_DIRECTORY_UNTRUSTED")
+                _dir(directory)
+            if os.path.lexists(paths.frp_state / "record.next"):
+                return hold("COMPETING_RECOVERY_REQUIRED")
+            baseline = pair._pair_read_private(manifest)
+            if _sha(baseline) != manifest_before:
+                return hold("NODE_CONFIGURATION_CHANGED_DURING_REVIEW")
+            role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
+            pair._pair_expected_transition(baseline,
+                pair._pair_read_private(paths.frp_state / "record.json"),
+                digest, role=role)
+            report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
+            return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
             RuntimeError,TypeError):
         return hold("RETAINED_NODE_PREVIEW_UNVERIFIED")
