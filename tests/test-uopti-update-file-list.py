@@ -122,6 +122,114 @@ class UpdaterFileListTests(unittest.TestCase):
             self.installer.index("Preparing recoverable installation transaction..."),
         )
 
+    def test_signed_rc7_root_is_installed_and_transactionally_updated(self):
+        name = "smite-rc7-sigstore-trusted-root.json"
+        installed = quoted_names(array_body(self.installer, "MODULES"))
+        managed = quoted_names(array_body(self.source, "UPDATE_FILE_NAMES"))
+        self.assertIn(name, installed)
+        self.assertIn(name, managed)
+        self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")'.replace("\\$", "$"),
+                      self.source)
+        self.assertIn('.${FILE}-was-missing', self.source)
+        self.assertTrue((ROOT / "modules" / name).is_file())
+
+    def test_running_old_updater_imports_exact_candidate_inventory_before_backup(self):
+        # Test real updater Bash block, not a separate reimplementation.
+        # The fetched candidate's SHA/Git blob is verified by
+        # download_repo_file before this block consumes the literal array.
+        begin = "            # A running OLD launcher cannot know new module names introduced"
+        end = "            # UPDATE_FILE_NAMES is the one authoritative inventory for download,"
+        segment = self.source[self.source.index(begin):self.source.index(end)]
+        self.assertIn('download_repo_file "u-opti" "$TEMP_DIR/u-opti"', segment)
+        self.assertIn("u_opti_verify_source_blob", segment)
+        self.assertIn("PY_UPDATER_CANDIDATE_INVENTORY", segment)
+        self.assertNotIn("source \"$TEMP_DIR/u-opti\"", segment)
+        self.assertNotIn("eval ", segment)
+
+        fixtures = (
+            ("add-root", ("base.sh", "smite-rc7-sigstore-trusted-root.json"),
+             True),
+            ("same", ("base.sh",), True),
+            ("remove-existing", ("replacement.sh",), False),
+            ("duplicate", ("base.sh", "base.sh"), False),
+            ("malformed-name", ("base.sh", "../injected.sh"), False),
+            ("shell-expansion", ("base.sh", "$(touch /tmp/never-executed)"),
+             False),
+        )
+        for scenario, names, allowed in fixtures:
+            with self.subTest(scenario=scenario):
+                with tempfile.TemporaryDirectory() as temp:
+                    lab = Path(temp)
+                    stage = lab / "stage"; stage.mkdir()
+                    candidate = lab / "candidate"
+                    old = lab / "old-launcher"
+                    old.write_text("old byte-for-byte launcher\n")
+                    inventory = "\n".join(
+                        '                "' + n + '"' for n in names
+                    )
+                    candidate.write_text(
+                        "#!/bin/bash\n"
+                        "            UPDATE_FILE_NAMES=(\n"
+                        + inventory + "\n            )\n",
+                    )
+                    bash = (
+                        "set -u\n"
+                        f"TEMP_DIR={stage}\nINSTALL_PATH={old}\n"
+                        f"CANDIDATE={candidate}\n"
+                        'UPDATE_FILE_NAMES=("base.sh")\n'
+                        'u_opti_verify_source_blob() { cmp -s "$2" "$CANDIDATE"; }\n'
+                        'download_repo_file() { cp -- "$CANDIDATE" "$2"; }\n'
+                        'cleanup_update_temp() { :; }\n'
+                        "for _round in once; do\n"
+                        + segment +
+                        'printf "RESULT=%s\\n" "${UPDATE_FILE_NAMES[@]}"\n'.replace("\\$", "$")
+                        + "done\n"
+                    )
+                    proc = subprocess.run(
+                        ["bash", "-c", bash], capture_output=True, text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    if allowed:
+                        self.assertIn("RESULT=base.sh", proc.stdout)
+                        if scenario == "add-root":
+                            self.assertIn(
+                                "RESULT=smite-rc7-sigstore-trusted-root.json",
+                                proc.stdout,
+                            )
+                    else:
+                        self.assertNotIn("RESULT=", proc.stdout)
+                        self.assertIn("HOLD:", proc.stdout + proc.stderr)
+                    self.assertFalse((lab / "never-executed").exists())
+
+    def test_matching_launcher_does_not_redownload_or_expand_file_list(self):
+        begin = "            # A running OLD launcher cannot know new module names introduced"
+        end = "            # UPDATE_FILE_NAMES is the one authoritative inventory for download,"
+        segment = self.source[self.source.index(begin):self.source.index(end)]
+        with tempfile.TemporaryDirectory() as temp:
+            lab = Path(temp)
+            candidate = lab / "candidate"
+            candidate.write_text("#!/bin/bash\n")
+            stage = lab / "stage"; stage.mkdir()
+            bash = (
+                "set -u\n"
+                f"TEMP_DIR={stage}\nINSTALL_PATH={candidate}\n"
+                f"CANDIDATE={candidate}\n"
+                'UPDATE_FILE_NAMES=("base.sh")\n'
+                'u_opti_verify_source_blob() { cmp -s "$2" "$CANDIDATE"; }\n'
+                'download_repo_file() { echo UNEXPECTED_DOWNLOAD; return 1; }\n'
+                'cleanup_update_temp() { :; }\n'
+                "for _round in once; do\n"
+                + segment +
+                'printf "RESULT=%s\\n" "${UPDATE_FILE_NAMES[@]}"\n'.replace("\\$", "$")
+                + "done\n"
+            )
+            proc = subprocess.run(["bash", "-c", bash],
+                                  capture_output=True, text=True, timeout=10)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("RESULT=base.sh", proc.stdout)
+            self.assertNotIn("UNEXPECTED_DOWNLOAD", proc.stdout)
+
     def test_fresh_installer_checks_python_json_and_shell_separately(self):
         """Avoid repeating the older updater bug during fresh installation."""
         import json
