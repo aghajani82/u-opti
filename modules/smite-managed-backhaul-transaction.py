@@ -357,14 +357,56 @@ def _pair_fsync_dir(folder: Path) -> None:
 
 
 def _pair_read_private(path: Path, *, limit: int = 8192) -> bytes:
-    if path.is_symlink():
-        raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
-    st = path.lstat()
-    if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
-            or not 0 < st.st_size <= limit):
-        raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
-    return checked(path, limit)
+    """Read the checked inode, not a newly resolved path after lstat.
+
+    Recovery consumes private FRP/manifest/journal bytes. A caller outside
+    the advisory engine lock may rename/symlink-swap the filename between
+    the old lstat and Path.read_bytes, or edit it during reading. Reject
+    both races before any of those bytes can become rollback evidence.
+    """
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = None
+    try:
+        if path.is_symlink():
+            raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+        prior = path.lstat()
+        if (not stat.S_ISREG(prior.st_mode) or prior.st_uid != os.geteuid()
+                or prior.st_nlink != 1 or stat.S_IMODE(prior.st_mode) != 0o600
+                or not 0 < prior.st_size <= limit):
+            raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+        fd = os.open(path, flags)
+        opened = os.fstat(fd)
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600
+                or (opened.st_dev, opened.st_ino) != (prior.st_dev, prior.st_ino)
+                or not 0 < opened.st_size <= limit):
+            raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+        chunks = []
+        count = 0
+        while True:
+            part = os.read(fd, min(65536, limit + 1 - count))
+            if not part:
+                break
+            count += len(part)
+            if count > limit:
+                raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED")
+            chunks.append(part)
+        after = os.fstat(fd)
+        named = path.lstat()
+        if (count != opened.st_size
+                or (after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns) !=
+                   (opened.st_dev, opened.st_ino, opened.st_size,
+                    opened.st_mtime_ns, opened.st_ctime_ns)
+                or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise Hold("RC7_PAIR_PRIVATE_FILE_CHANGED_DURING_READ")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise Hold("RC7_PAIR_PRIVATE_FILE_UNTRUSTED") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def _pair_load_json(raw: bytes) -> dict:
