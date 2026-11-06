@@ -47,8 +47,8 @@ grep -Fq 'smite_tw_backhaul_nginx_plan()' modules/smite-tunnel-wizard.sh
 grep -Fq '"smite-backhaul-sidecar-readiness.py"' u-opti
 grep -Fq 'IR HTTPS domain (required)' modules/smite-tunnel-wizard.sh
 grep -Fq 'KH upstream/Xray Host domain (required)' modules/smite-tunnel-wizard.sh
-grep -Fq '["smite-tunnel-wizard.sh"]="$BASE_URL/modules/smite-tunnel-wizard.sh"' u-opti
-grep -Fq '["smite-tunnel-wizard.sh"]="$TEMP_DIR/smite-tunnel-wizard.sh"' u-opti
+grep -Fq '                "smite-tunnel-wizard.sh"' u-opti
+grep -Fq 'u_opti_stage_verified_module "$FILE"' u-opti
 grep -Fq 'smite_tw_menu()' modules/smite-tunnel-wizard.sh
 grep -Fq 'twcc_menu()' modules/smite-tunnel-control-center.sh
 grep -Fq 'source "$SMITE_BH_DIR/smite-tunnel-wizard.sh"' modules/smite-backhaul-management.sh
