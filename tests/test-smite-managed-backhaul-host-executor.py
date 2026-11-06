@@ -200,11 +200,13 @@ class HostExecutor(unittest.TestCase):
                              "--expected-plan-sha256", self.plan,
                              "--confirm-snapshot-and-console", exe.SNAPSHOT_CONFIRM]
                 stderr = io.StringIO()
-                with patch.object(exe.sys, "argv", argv), \
-                     patch.object(exe.os, "geteuid", return_value=0), \\
-                     patch.object(exe.sys, "stderr", stderr), \\
-                     patch.object(exe, "_lock",
-                                  side_effect=AssertionError("LOCK_CALLED")):
+                with (
+                    patch.object(exe.sys, "argv", argv),
+                    patch.object(exe.os, "geteuid", return_value=0),
+                    patch.object(exe.sys, "stderr", stderr),
+                    patch.object(exe, "_lock",
+                                 side_effect=AssertionError("LOCK_CALLED")),
+                ):
                     self.assertEqual(exe.main(), 2)
                 self.assertIn("LIVE_NODE_RECREATING_TRIAL_FORBIDDEN",
                               stderr.getvalue())
