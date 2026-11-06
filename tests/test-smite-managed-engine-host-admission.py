@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -384,6 +385,72 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertIn("HOLD: Backhaul installation on real IR/KH is disabled.", menu)
         self.assertIn("HOLD: Host installation disabled. No changes made.", menu)
         self.assertNotIn("docker compose up", menu)
+
+    def test_backhaul_existing_option2_invokes_only_pinned_read_only_review(self):
+        # End-to-end actual Bash menu dispatch; intercept every Python call
+        # before it can reach Docker, Cosign or host filesystem operations.
+        selected = json.loads((ROOT / "modules/smite-selected-candidate.json").read_text())
+        with tempfile.TemporaryDirectory(prefix="bh-menu-readonly-") as temp:
+            out = Path(temp) / "commands"
+            script = r"""
+source "$MENU"
+uname() { printf '%s\\n' "${TEST_ARCH:-x86_64}"; }
+python3() {
+    printf '%q ' "$@" >> "$CAPTURE"
+    printf '\\n' >> "$CAPTURE"
+    return 2
+}
+smite_managed_bh_menu <<'CHOICES'
+2
+0
+CHOICES
+"""
+            base_env = {**os.environ, "MENU": str(ROOT / "modules/smite-managed-backhaul-menu.sh"),
+                        "CAPTURE": str(out), "SMITE_NODE_DIR": "/opt/smite-node"}
+            # Don't let a developer's existing external pins or trust path
+            # accidentally change this deterministic CI exercise.
+            for key in ("SMITE_BH_PAIR_MANIFEST", "SMITE_BH_PAIR_SHA256",
+                        "SMITE_BH_PAIR_SOURCE_SHA", "SMITE_BH_PAIR_PUBLISH_REF",
+                        "SMITE_BH_PAIR_TRUSTED_ROOT"):
+                base_env.pop(key, None)
+            for label, overrides, expected_call in (
+                ("selected-default", {}, True),
+                ("partial-override", {"SMITE_BH_PAIR_MANIFEST": "/tmp/custom.json"}, False),
+                ("unexpected-node-dir", {"SMITE_NODE_DIR": "/tmp/not-live"}, False),
+                ("unknown-architecture", {"TEST_ARCH": "mips64"}, False),
+            ):
+                with self.subTest(label=label):
+                    out.unlink(missing_ok=True)
+                    result = subprocess.run(["bash", "-c", script],
+                                            env={**base_env, **overrides},
+                                            capture_output=True, text=True, timeout=15)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    calls = out.read_text() if out.exists() else ""
+                    self.assertIn("smite-managed-engine-host-admission.py", calls)
+                    self.assertIn("verify-rc7-bundle", calls)
+                    if expected_call:
+                        self.assertEqual(calls.count("review-in-place"), 1)
+                        self.assertIn("--confirm-role REVIEW-BACKHAUL-IN-PLACE", calls)
+                        self.assertIn("--arch amd64", calls)
+                        self.assertIn("--expected-node-image " + selected["images"]["node"], calls)
+                        self.assertIn("--signed-pair-manifest-sha256 " +
+                                      "58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e", calls)
+                        self.assertIn("--signed-pair-source-sha " + selected["source_commit"], calls)
+                        self.assertIn("--signed-pair-publish-ref " + selected["publish_ref"], calls)
+                    else:
+                        self.assertNotIn("review-in-place", calls)
+                        self.assertIn("HOLD:", result.stdout)
+                    self.assertNotIn(" --install", calls)
+                    self.assertNotIn(" --force-recreate", calls)
+                    self.assertIn("INSTALL_ALLOWED=NO", result.stdout)
+                    self.assertIn("ACTIVATION_GATE=HOLD", result.stdout)
+
+    def test_backhaul_option3_remains_hard_hold(self):
+        menu = ROOT / "modules/smite-managed-backhaul-menu.sh"
+        result = subprocess.run(["bash", str(menu), "--install"], capture_output=True,
+                                text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("HOLD: Host installation disabled", result.stderr)
 
     def test_no_external_executor_or_snapshot_proof(self):
         body = SCRIPT.read_text()
