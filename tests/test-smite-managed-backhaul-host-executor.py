@@ -136,6 +136,80 @@ class HostExecutor(unittest.TestCase):
         values.update(kwargs)
         return exe.install(**values)
 
+    def test_legacy_trial_recreator_refuses_all_live_paths_before_any_action(self):
+        from dataclasses import replace
+        live = exe.Paths()
+        original = ((self.node / "docker-compose.yml").read_bytes(),
+                    (self.node / ".env").read_bytes())
+        names = ("node", "staging", "state", "lock", "binary")
+        for action in ("install", "rollback", "recover"):
+            for name in names:
+                with self.subTest(action=action, resource=name):
+                    blocked = replace(self.paths, **{name: getattr(live, name)})
+                    with patch.object(exe, "_lock",
+                                      side_effect=AssertionError("LIVE_ENGINE_LOCK_CALLED")):
+                        with self.assertRaisesRegex(
+                                exe.Hold, "LIVE_NODE_RECREATING_TRIAL_FORBIDDEN"):
+                            if action == "install":
+                                self.install(paths=blocked)
+                            elif action == "rollback":
+                                exe.rollback(expected_node_image=IMAGE,
+                                    role_confirm="ROLLBACK-BACKHAUL-KH-TRIAL",
+                                    paths=blocked, runner=self.runner)
+                            else:
+                                exe.recover(expected_node_image=IMAGE,
+                                    role_confirm="RECOVER-BACKHAUL-KH-TRIAL",
+                                    paths=blocked, runner=self.runner)
+                    self.assertEqual(self.runner.calls, [])
+                    self.assertFalse(exe._journal(self.paths).exists())
+        # A manually supplied alias, a symlink and even an ancestor of the
+        # canonical live Node must not bypass the same production refusal.
+        for candidate in (live.node / "config", live.node.parent):
+            with self.subTest(alias=str(candidate)):
+                with self.assertRaisesRegex(
+                        exe.Hold, "LIVE_NODE_RECREATING_TRIAL_FORBIDDEN"):
+                    exe._deny_live_recreating_trial_paths(
+                        replace(self.paths, node=candidate))
+        alias = self.root / "aliased-live-node"
+        alias.symlink_to(live.node)
+        with self.assertRaisesRegex(
+                exe.Hold, "LIVE_NODE_RECREATING_TRIAL_FORBIDDEN"):
+            exe._deny_live_recreating_trial_paths(
+                replace(self.paths, node=alias))
+        with self.assertRaisesRegex(
+                exe.Hold, "LEGACY_TRIAL_PATHS_UNTRUSTED"):
+            exe._deny_live_recreating_trial_paths(
+                replace(self.paths, lock=Path("relative-lock")))
+        self.assertEqual(original,
+                         ((self.node / "docker-compose.yml").read_bytes(),
+                          (self.node / ".env").read_bytes()))
+
+    def test_legacy_trial_cli_default_paths_refuses_even_valid_acknowledgements(self):
+        import io
+        for action in ("install", "rollback", "recover"):
+            with self.subTest(action=action):
+                argv = ["host-executor", action,
+                        "--expected-node-image", IMAGE,
+                        "--confirm-role", {
+                            "install": "APPLY-BACKHAUL-KH-TRIAL",
+                            "rollback": "ROLLBACK-BACKHAUL-KH-TRIAL",
+                            "recover": "RECOVER-BACKHAUL-KH-TRIAL",
+                        }[action]]
+                if action == "install":
+                    argv += ["--stage", str(self.stage),
+                             "--expected-plan-sha256", self.plan,
+                             "--confirm-snapshot-and-console", exe.SNAPSHOT_CONFIRM]
+                stderr = io.StringIO()
+                with patch.object(exe.sys, "argv", argv), \
+                     patch.object(exe.os, "geteuid", return_value=0), \\
+                     patch.object(exe.sys, "stderr", stderr), \\
+                     patch.object(exe, "_lock",
+                                  side_effect=AssertionError("LOCK_CALLED")):
+                    self.assertEqual(exe.main(), 2)
+                self.assertIn("LIVE_NODE_RECREATING_TRIAL_FORBIDDEN",
+                              stderr.getvalue())
+                self.assertEqual(self.runner.calls, [])
+
     def test_commit_then_explicit_rollback_restores_exact_bytes(self):
         result=self.install()
         self.assertEqual(result["TRIAL_INSTALL"],"COMMITTED_SIGNED_RUNTIME_VERIFIED")
