@@ -65,6 +65,37 @@ class Hold(RuntimeError):
 class SimulatedCrash(RuntimeError):
     pass
 
+
+def _deny_live_recreating_trial_paths(paths: Paths) -> None:
+    """Refuse production paths for the legacy Node-recreating trial executor.
+
+    The legacy transaction uses --force-recreate. A textual acknowledgement
+    is not independent snapshot/restore or console proof. Never acquire even
+    the production engine lock, probe Docker or write a journal via its
+    install/rollback/recover path. Separately approved in-place enrollment
+    is deliberately NOT implemented by this guard.
+    """
+    if not isinstance(paths, Paths):
+        raise Hold("LEGACY_TRIAL_PATHS_UNTRUSTED")
+    live = Paths()
+    protected = []
+    for name in ("node", "staging", "state", "lock", "binary", "frp_state"):
+        fixed = getattr(live, name)
+        protected.extend((fixed, fixed.resolve()))
+    for name in ("node", "staging", "state", "lock", "binary"):
+        path = getattr(paths, name)
+        if not isinstance(path, Path) or not path.is_absolute():
+            raise Hold("LEGACY_TRIAL_PATHS_UNTRUSTED")
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise Hold("LEGACY_TRIAL_PATHS_UNTRUSTED") from exc
+        for candidate in (path, resolved):
+            if any(candidate == fixed or candidate in fixed.parents
+                   or fixed in candidate.parents for fixed in protected):
+                raise Hold("LIVE_NODE_RECREATING_TRIAL_FORBIDDEN")
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -969,6 +1000,7 @@ def install(*, stage: Path, expected_node_image: str, expected_plan_sha256: str,
             snapshot_confirm: str, role_confirm: str, paths: Paths = Paths(),
             runtime: dict | None = None, runner=subprocess.run,
             inject: str = "") -> dict[str, str]:
+    _deny_live_recreating_trial_paths(paths)
     if snapshot_confirm != SNAPSHOT_CONFIRM:
         raise Hold("SNAPSHOT_AND_CONSOLE_CONFIRMATION_REQUIRED")
     if os.geteuid() != 0 and paths == Paths():
@@ -1038,6 +1070,7 @@ def install(*, stage: Path, expected_node_image: str, expected_plan_sha256: str,
 
 def rollback(*, expected_node_image: str, role_confirm: str,
              paths: Paths = Paths(), runner=subprocess.run) -> dict[str, str]:
+    _deny_live_recreating_trial_paths(paths)
     if os.geteuid() != 0 and paths == Paths():
         raise Hold("ROOT_REQUIRED")
     with _lock(paths.lock):
@@ -1054,6 +1087,7 @@ def rollback(*, expected_node_image: str, role_confirm: str,
 
 def recover(*, expected_node_image: str, role_confirm: str,
             paths: Paths = Paths(), runner=subprocess.run) -> dict[str, str]:
+    _deny_live_recreating_trial_paths(paths)
     if os.geteuid() != 0 and paths == Paths():
         raise Hold("ROOT_REQUIRED")
     with _lock(paths.lock):
