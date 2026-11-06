@@ -817,6 +817,167 @@ class HostExecutor(unittest.TestCase):
                 seal.unlink()
         self.assertFalse(seal.exists())
 
+    def _retained_two_host_real_executor_fixture(self):
+        """Two marked temporary CI lab nodes, not live signed hosts."""
+        from dataclasses import replace
+        self._retained_review_fixture()
+        foreign_tmp = tempfile.TemporaryDirectory(
+            prefix="backhaul-retained-foreign-", dir=self.root.parent)
+        self.addCleanup(foreign_tmp.cleanup)
+        foreign_root = Path(foreign_tmp.name)
+        foreign_root.chmod(0o700)
+        nodes = {}
+        for role, root in (("ir", self.root), ("foreign", foreign_root)):
+            (root / "EXPERIMENTAL-LAB").write_text(exe.pair.MARKER)
+            node = root / "node"
+            if role == "foreign":
+                node.mkdir(mode=0o700)
+                (node / "config").mkdir(mode=0o700)
+                (root / "stages").mkdir(mode=0o700)
+                (node / ".env").write_bytes((self.node / ".env").read_bytes())
+                (node / "docker-compose.yml").write_bytes(
+                    (self.node / "docker-compose.yml").read_bytes())
+            state = node / "config/engine-state"
+            state.mkdir(mode=0o700, parents=True, exist_ok=True)
+            manifest = state / "engines.json"
+            if role == "foreign":
+                manifest.write_bytes(
+                    (self.node / "config/engine-state/engines.json").read_bytes())
+                manifest.chmod(0o600)
+            frp = root / exe.pair.PAIR_RECEIPT_DIR
+            frp.mkdir(mode=0o700)
+            receipt = frp / "record.json"
+            receipt.write_text(json.dumps({
+                "schema": 1, "state": "COMMITTED", "role": role,
+                "old": None, "new": exe._sha(manifest.read_bytes()),
+                "binaries": {"frpc": "b" * 64, "frps": "c" * 64},
+            }, sort_keys=True) + "\n")
+            receipt.chmod(0o600)
+            store = root / "node-data"
+            store.mkdir(mode=0o700)
+            for name, record in (
+                ("frp-owner-child.fixture.json", {
+                    "role": role, "frp": "0.71.0",
+                    "tunnels": ["20182", "optical", "nahavi"],
+                }),
+                ("broker-replay.fixture.json", {
+                    "role": role, "identity": role + "-ci",
+                    "broker": "up", "replay": "durable",
+                }),
+            ):
+                artifact = store / name
+                artifact.write_text(json.dumps(record, sort_keys=True) + "\n")
+                artifact.chmod(0o600)
+            host_state = root / "state/engine/backhaul"
+            host_state.mkdir(mode=0o700, parents=True)
+            host_state.chmod(0o700)
+            (root / "state").chmod(0o700)
+            (root / "state/engine").chmod(0o700)
+            paths = replace(self.paths, node=node, staging=root / "stages",
+                            frp_state=frp, state=host_state,
+                            lock=root / "engine.lock",
+                            binary=root / "installed/backhaul")
+            nodes[role] = {
+                "root": root, "paths": paths, "manifest": manifest,
+                "receipt": receipt, "before": (manifest.read_bytes(),
+                                               receipt.read_bytes()),
+            }
+        return nodes
+
+    def test_two_host_real_retained_executor_exact_rollback_and_no_node_recreate(self):
+        hosts = self._retained_two_host_real_executor_fixture()
+        phases = []
+        def observe(phase, ir, foreign):
+            self.assertEqual(ir, hosts["ir"]["root"])
+            self.assertEqual(foreign, hosts["foreign"]["root"])
+            phases.append(phase)
+            return True
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        with patch.dict(os.environ, env), \
+             patch.object(exe.subprocess, "run",
+                          side_effect=AssertionError("DOCKER_OR_NETWORK_CALLED")):
+            result = exe._retained_two_host_rehearsal_lab(
+                hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                arch="amd64", observe=observe)
+        self.assertEqual(phases,
+                         ["before", "after-ir", "after-both", "after-rollback"])
+        self.assertEqual(result["RETAINED_TWO_HOST"],
+                         "DISPOSABLE_HOST_EXECUTOR_EXACT_ROLLBACK")
+        self.assertEqual(result["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
+        self.assertEqual(result["NODE_RECREATED"], "NO_DOCKER_EXECUTED_IN_LAB")
+        self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+        for role in ("ir", "foreign"):
+            info = hosts[role]
+            self.assertEqual((info["manifest"].read_bytes(),
+                              info["receipt"].read_bytes()), info["before"])
+            self.assertFalse((info["paths"].state / "retained-rc7.json").exists())
+            self.assertFalse((info["paths"].state /
+                              "retained-rc7-cleanup.json").exists())
+
+    def test_two_host_real_retained_executor_compensates_after_ir_and_foreign_crash(self):
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        for interrupted in ("after-ir", "after-both", "foreign-after-manifest"):
+            with self.subTest(interrupted=interrupted):
+                hosts = self._retained_two_host_real_executor_fixture()
+                actual_atomic = exe.pair._pair_atomic
+                foreign_manifest = hosts["foreign"]["manifest"]
+                def interrupted_atomic(path, content):
+                    actual_atomic(path, content)
+                    if interrupted == "foreign-after-manifest" and path == foreign_manifest:
+                        raise exe.SimulatedCrash("foreign-transaction-interrupted")
+                with patch.dict(os.environ, env), \
+                     patch.object(exe.pair, "_pair_atomic",
+                                  side_effect=interrupted_atomic), \
+                     self.assertRaisesRegex(
+                         exe.Hold, "RETAINED_TWO_HOST_ABORTED_EXACT_ROLLBACK_PROVED"):
+                    exe._retained_two_host_rehearsal_lab(
+                        hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                        arch="amd64", observe=lambda *_: True,
+                        inject=interrupted if interrupted != "foreign-after-manifest" else "")
+                for role in ("ir", "foreign"):
+                    info = hosts[role]
+                    self.assertEqual((info["manifest"].read_bytes(),
+                                      info["receipt"].read_bytes()), info["before"])
+                    self.assertFalse((info["paths"].state / "retained-rc7.json").exists())
+
+    def test_two_host_real_retained_executor_requires_ci_labs_and_both_preflights(self):
+        from dataclasses import replace
+        hosts = self._retained_two_host_real_executor_fixture()
+        ir = hosts["ir"]["paths"]
+        foreign = hosts["foreign"]["paths"]
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        with self.assertRaises(exe.Hold):
+            exe._retained_two_host_rehearsal_lab(
+                ir, foreign, arch="amd64", observe=lambda *_: True)
+        with patch.dict(os.environ, env):
+            for bad_paths in (ir, replace(foreign, node=ir.node),
+                              replace(foreign, lock=exe.Paths().lock)):
+                with self.subTest(paths=bad_paths):
+                    with self.assertRaises(exe.Hold):
+                        exe._retained_two_host_rehearsal_lab(
+                            ir, bad_paths, arch="amd64", observe=lambda *_: True)
+            foreign_receipt = hosts["foreign"]["receipt"]
+            original = foreign_receipt.read_bytes()
+            foreign_receipt.write_bytes(b"bad external journal")
+            with self.assertRaises(exe.Hold):
+                exe._retained_two_host_rehearsal_lab(
+                    ir, foreign, arch="amd64", observe=lambda *_: True)
+            self.assertEqual(hosts["ir"]["manifest"].read_bytes(),
+                             hosts["ir"]["before"][0])
+            self.assertFalse((ir.state / "retained-rc7.json").exists())
+            foreign_receipt.write_bytes(original)
+            with self.assertRaises(exe.Hold):
+                exe._retained_two_host_rehearsal_lab(
+                    ir, foreign, arch="amd64", observe=lambda *_: False)
+            self.assertFalse((ir.state / "retained-rc7.json").exists())
+
     def test_retained_commit_retry_rollback_and_drift(self):
         step, manifest, receipt = self.retained_fixture()
         before = manifest.read_bytes(), receipt.read_bytes()
