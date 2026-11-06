@@ -93,9 +93,9 @@ class SecureNodeBindTests(unittest.TestCase):
         node_install = (ROOT / "modules/smite-install.sh").read_text()
         name = "smite-node-local-bind.py"
         self.assertEqual(install.count('    "' + name + '"'), 1)
-        self.assertEqual(update.count('                "' + name + '"'), 2)
-        self.assertEqual(update.count('["' + name + '"]="$BASE_URL/modules/' + name + '"'), 1)
-        self.assertEqual(update.count('["' + name + '"]="$TEMP_DIR/' + name + '"'), 1)
+        self.assertEqual(update.count('                "' + name + '"'), 1)
+        self.assertIn('BACKUP_FILES=("${UPDATE_FILE_NAMES[@]}")', update)
+        self.assertIn('u_opti_stage_verified_module "$FILE"', update)
         self.assertIn("smite-node-local-bind.py", smite)
         self.assertIn("smite-node-local-bind.py", node_install)
         self.assertIn('"$connection_mode"; then', node_install)
