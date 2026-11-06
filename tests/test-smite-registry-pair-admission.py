@@ -187,6 +187,44 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
         for prohibited in ("docker load", "docker pull", "subprocess.Popen", "shell=True"):
             self.assertNotIn(prohibited, code)
 
+    def test_bundled_rc7_offline_root_is_exact_public_sigstore_snapshot(self):
+        # From sigstore/root-signing at immutable commit
+        # c9aa2600c1492365922f1b3f351a208aa17d0e64:
+        # targets/trusted_root.json. The expected hash already belongs to
+        # the existing independent release admission gate, not this test.
+        root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
+        raw = root.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         gate.TRUSTED_ROOT_SHA256)
+        doc = json.loads(raw)
+        self.assertEqual(
+            doc["mediaType"],
+            "application/vnd.dev.sigstore.trustedroot+json;version=0.1")
+        for name in ("tlogs", "certificateAuthorities", "ctlogs"):
+            self.assertTrue(doc[name])
+        with patch.dict(os.environ, self.fake_env):
+            self.check(trusted_root=root)
+        calls = [json.loads(x) for x in self.logs.read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual(call[0:3], ["verify", "--trusted-root", str(root)])
+            self.assertIn("--certificate-oidc-issuer=" + gate.ISSUER, call)
+            self.assertNotIn("--insecure-ignore-tlog", call)
+            self.assertNotIn("--check-claims=false", call)
+        self.logs.unlink()
+        forged = self.folder / "replacement-root.json"
+        forged.write_bytes(raw + b"\\n")
+        with patch.dict(os.environ, self.fake_env):
+            with self.assertRaises(gate.AdmissionHold):
+                self.check(trusted_root=forged)
+        self.assertFalse(self.logs.exists())
+        link = self.folder / "root-link.json"
+        link.symlink_to(root)
+        with patch.dict(os.environ, self.fake_env):
+            with self.assertRaises(gate.AdmissionHold):
+                self.check(trusted_root=link)
+        self.assertFalse(self.logs.exists())
+
     def test_selected_trusted_root_is_pinned_and_never_weakens_verification(self):
         root = self.folder / "trusted_root.json"
         root.write_text(json.dumps({

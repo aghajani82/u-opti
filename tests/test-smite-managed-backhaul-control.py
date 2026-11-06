@@ -702,6 +702,57 @@ class OperatorControl(unittest.TestCase):
                     with control._lab_lock(self.root):
                         self.fail("A second concurrent transaction acquired the lock")
 
+    def test_rc7_backhaul_review_supplies_pinned_root_to_both_existing_verifiers(self):
+        # Intercept ONLY the Python verifier calls, not the menu logic. No
+        # Docker or real host connection; test actual bash argument plumbing.
+        stub_dir = self.root / "fake-bin"
+        stub_dir.mkdir()
+        mock_python = stub_dir / "python3"
+        log = self.root / "argv.txt"
+        mock_python.write_text(
+            '#!/bin/sh\n'
+            'printf "%s\\n" "$*" >> "$SMITE_TEST_ARGV_LOG"\n'
+            'exit 0\n')
+        mock_python.chmod(0o700)
+        root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
+        for override in (None, str(root), str(self.root / "bad-root.json")):
+            with self.subTest(override=override):
+                if log.exists():
+                    log.unlink()
+                env = {
+                    **os.environ,
+                    "PATH": str(stub_dir) + os.pathsep + os.environ["PATH"],
+                    "SMITE_TEST_ARGV_LOG": str(log),
+                    "SMITE_NODE_DIR": "/opt/smite-node",
+                    "TERM": "dumb",
+                }
+                for key in ("SMITE_BH_PAIR_TRUSTED_ROOT", "SMITE_BH_PAIR_MANIFEST",
+                            "SMITE_BH_PAIR_SHA256", "SMITE_BH_PAIR_SOURCE_SHA",
+                            "SMITE_BH_PAIR_PUBLISH_REF"):
+                    env.pop(key, None)
+                if override is not None:
+                    env["SMITE_BH_PAIR_TRUSTED_ROOT"] = override
+                out = subprocess.run(
+                    ["bash", str(MENU), "--menu"],
+                    input="2\n0\n", capture_output=True, text=True,
+                    timeout=15, env=env)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn("INSTALL_ALLOWED=NO", out.stdout)
+                self.assertIn("ACTIVATION_GATE=HOLD", out.stdout)
+                calls = log.read_text().splitlines()
+                admission = [call for call in calls
+                             if "smite-managed-engine-host-admission.py" in call]
+                retained = [call for call in calls
+                            if "smite-managed-backhaul-host-executor.py" in call]
+                self.assertEqual(len(admission), 1)
+                self.assertEqual(len(retained), 1)
+                expected = override if override is not None else str(root)
+                for call in (*admission, *retained):
+                    self.assertIn("--signed-pair-trusted-root " + expected, call)
+                    self.assertIn("--signed-pair-source-sha "
+                                  "9a1270b31e8d44f13d09b71ab6b9798410b09c12", call)
+                self.assertFalse((self.node / "config/engine-state").exists())
+
     def test_no_network_or_live_service_actions_in_menu_or_controller(self):
         script = MENU.read_text()
         controller = FILE.read_text()

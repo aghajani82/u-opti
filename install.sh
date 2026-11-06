@@ -92,6 +92,7 @@ MODULES=(
     "smite-field-trial-candidate.json"
     "smite-rc6-install-journal.py"
     "smite-selected-candidate.json"
+    "smite-rc7-sigstore-trusted-root.json"
     "smite-panel-ui.py"
     "smite-panel-ui.json"
     "u-opti-update-transaction.py"

@@ -87,8 +87,18 @@ smite_managed_bh_menu() {
                     if [ "${#signed_pair_args[@]}" -ne 8 ]; then
                         signed_pair_complete=no
                     fi
-                    [ -z "${SMITE_BH_PAIR_TRUSTED_ROOT:-}" ] || signed_pair_args+=(
-                        --signed-pair-trusted-root "$SMITE_BH_PAIR_TRUSTED_ROOT")
+                    # The RC7 release uses the upstream Sigstore public-good
+                    # root at one independently SHA-pinned historical commit.
+                    # It is checked by smite-registry-pair-admission.py before
+                    # cosign is invoked. This avoids an IR-host TUF CDN 403;
+                    # it NEVER skips signature, certificate, tlog or claims.
+                    # Explicit operator override remains hash-validated and
+                    # does not fall back if the supplied file is invalid.
+                    local root_file="$SMITE_ENGINE_MENU_DIR/smite-rc7-sigstore-trusted-root.json"
+                    if [ -n "${SMITE_BH_PAIR_TRUSTED_ROOT:-}" ]; then
+                        root_file="$SMITE_BH_PAIR_TRUSTED_ROOT"
+                    fi
+                    signed_pair_args+=(--signed-pair-trusted-root "$root_file")
                     python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \
                         --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" \
                         "${signed_pair_args[@]}" || :
