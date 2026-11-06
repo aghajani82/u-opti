@@ -710,9 +710,9 @@ class OperatorControl(unittest.TestCase):
         mock_python = stub_dir / "python3"
         log = self.root / "argv.txt"
         mock_python.write_text(
-            '#!/bin/sh\\n'
-            'printf "%s\\\\n" "$*" >> "$SMITE_TEST_ARGV_LOG"\\n'
-            'exit 0\\n')
+            '#!/bin/sh\n'
+            'printf "%s\\\n" "$*" >> "$SMITE_TEST_ARGV_LOG"\n'
+            'exit 0\n')
         mock_python.chmod(0o700)
         root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
         for override in (None, str(root), str(self.root / "bad-root.json")):
@@ -734,7 +734,7 @@ class OperatorControl(unittest.TestCase):
                     env["SMITE_BH_PAIR_TRUSTED_ROOT"] = override
                 out = subprocess.run(
                     ["bash", str(MENU), "--menu"],
-                    input="2\\n0\\n", capture_output=True, text=True,
+                    input="2\n0\n", capture_output=True, text=True,
                     timeout=15, env=env)
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertIn("INSTALL_ALLOWED=NO", out.stdout)
