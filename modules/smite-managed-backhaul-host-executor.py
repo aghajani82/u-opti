@@ -398,6 +398,23 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
             pair.ensure_in_lab(root, getattr(paths, name))
     except (pair.Hold, OSError, ValueError, TypeError) as exc:
         raise Hold("RETAINED_CI_LAB_ONLY") from exc
+    # The isolated PR admission above is intentional. Live production
+    # enrollment MUST use its separately authenticated two-host entry,
+    # never these CI lab paths and never a bypassing caller boolean.
+    return _retained_step_core(
+        paths, action=action, role=role, arch=arch, witness=witness,
+        expected_before=expected_before, expected_witness=expected_witness)
+
+
+def _retained_step_core(paths, *, action, role, arch, witness,
+                        expected_before=None, expected_witness=None):
+    """Common fsynced exact-pair mutation and recovery after entry admission.
+
+    Internal mutation primitive shared by strictly separate admission paths.
+    Not a user-facing API: callers must validate their host, signed proof,
+    preflight bytes and protected runtime BEFORE invoking this function.
+    A production caller is deliberately not yet exposed by CLI or menu.
+    """
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
