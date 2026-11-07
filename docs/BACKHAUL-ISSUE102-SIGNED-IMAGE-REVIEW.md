@@ -827,6 +827,31 @@ context; the journal and original FRP/Manifest remain byte-exact.
 
 This is **not** a production switch or signed live-host attestation.
 `INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD` are unchanged.
+## RC7 signed bundle review — Node container identity continuity
+
+The existing `verify-rc7-bundle` already reads the official bundled
+Backhaul v0.7.2 binary, the signed Node engine inventory, the exact
+FRP-enrollment receipt/Manifest and role-specific signed FRPS Owner or
+Foreign FRPC Child identities. The active Node could nevertheless be
+restarted or replaced **between** those individually successful probes:
+the reviewed helper reported `NODE_RECREATED=NO` without pinning its
+own Docker container identity across the entire operation.
+
+The review now captures the **same running** `smite-node` container's
+Docker ID, immutable image ID, `State.StartedAt` and complete Mounts
+fingerprint before the first signed API call and checks them **again**
+after the final signed Owner/Child comparison, inside the existing
+shared engine lock. A missing/invalid baseline yields
+`RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED`; a changed ID/image/start
+time/mount list yields `RC7_BUNDLED_NODE_CHANGED_DURING_REVIEW` —
+**neither** result prints private identity or mounts. This only proves
+local read-only continuity within a single preflight; Docker identity
+alone does not attest the signed image or prove remote FRP forwarding.
+
+This is an essential prerequisite for a future **no-recreate**
+production writer, not a host installation or authorization.
+`INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain unchanged.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
