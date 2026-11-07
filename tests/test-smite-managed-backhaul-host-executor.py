@@ -1009,7 +1009,8 @@ class HostExecutor(unittest.TestCase):
         with self.assertRaisesRegex(exe.Hold, "RETAINED_PREFLIGHT_PAIR_CHANGED"):
             exe._retained_step(paths, action="install", role="ir",
                                arch="amd64", witness=lambda: "1"*64,
-                               expected_before=expected)
+                               expected_before=expected,
+                               expected_witness="1"*64)
         self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), changed)
         self.assertFalse((paths.state / "retained-rc7.json").exists())
         self.assertFalse((paths.state / "retained-rc7-cleanup.json").exists())
@@ -1018,13 +1019,79 @@ class HostExecutor(unittest.TestCase):
                     exe.Hold, "RETAINED_EXPECTED_BASELINE_INVALID"):
                 exe._retained_step(paths, action="install", role="ir",
                                    arch="amd64", witness=lambda: "1"*64,
-                                   expected_before=invalid)
+                                   expected_before=invalid,
+                                   expected_witness="1"*64)
         receipt.write_bytes(expected[1])
         self.assertEqual(
             exe._retained_step(paths, action="install", role="ir",
                                arch="amd64", witness=lambda: "1"*64,
-                               expected_before=expected),
+                               expected_before=expected,
+                               expected_witness="1"*64),
             "COMMITTED")
+
+    def test_retained_writer_binds_exact_preflight_witness_before_journal(self):
+        # A cooperating IR/Foreign coordinator has already pinned BOTH
+        # manifest+receipt bytes AND its independently collected running
+        # Node/FRP witness. A new PID/image/FRP process in the handoff gap
+        # must not become the writer's accepted baseline.
+        from dataclasses import replace
+        step, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        baseline = (manifest.read_bytes(), receipt.read_bytes())
+        journal = paths.state / "retained-rc7.json"
+        seal = paths.state / "retained-rc7-cleanup.json"
+        for bad in (None, "", "bad", "g"*64, True, 123, "1"*65):
+            with self.subTest(invalid_witness=str(bad)[:20]), \
+                 self.assertRaisesRegex(
+                     exe.Hold, "RETAINED_EXPECTED_WITNESS_REQUIRED"):
+                exe._retained_step(
+                    paths, action="install", role="ir", arch="amd64",
+                    witness=lambda: "1"*64, expected_before=baseline,
+                    expected_witness=bad)
+            self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                             baseline)
+            self.assertFalse(journal.exists())
+            self.assertFalse(seal.exists())
+        with self.assertRaisesRegex(
+                exe.Hold, "RETAINED_EXPECTED_WITNESS_UNEXPECTED"):
+            exe._retained_step(paths, action="install", role="ir",
+                               arch="amd64", witness=lambda: "1"*64,
+                               expected_witness="1"*64)
+        with self.assertRaisesRegex(
+                exe.Hold, "RETAINED_PREFLIGHT_WITNESS_CHANGED"):
+            exe._retained_step(
+                paths, action="install", role="ir", arch="amd64",
+                witness=lambda: "2"*64, expected_before=baseline,
+                expected_witness="1"*64)
+        self.assertFalse(journal.exists())
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), baseline)
+
+        # Second race: fingerprint was good on entering the lock, changed
+        # between the file+receipt plan and first fsynced PREPARED phase.
+        calls = []
+        def drift_after_first_witness():
+            calls.append(1)
+            return ("1" if len(calls) == 1 else "2")*64
+        with self.assertRaisesRegex(
+                exe.Hold, "RETAINED_PREFLIGHT_WITNESS_CHANGED"):
+            exe._retained_step(
+                paths, action="install", role="ir", arch="amd64",
+                witness=drift_after_first_witness, expected_before=baseline,
+                expected_witness="1"*64)
+        self.assertEqual(len(calls),2)
+        self.assertFalse(journal.exists())
+        self.assertFalse(seal.exists())
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), baseline)
+
+        # The legitimate stable coordinator path is unchanged and still
+        # requires exact compensation and terminal cleanup.
+        self.assertEqual(exe._retained_step(
+            paths, action="install", role="ir", arch="amd64",
+            witness=lambda: "1"*64, expected_before=baseline,
+            expected_witness="1"*64), "COMMITTED")
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), baseline)
 
     def test_retained_two_host_writer_rejects_new_journal_after_preflight(self):
         # A previous COMMITTED transaction must never be adopted as a fresh
@@ -1040,7 +1107,8 @@ class HostExecutor(unittest.TestCase):
         with self.assertRaisesRegex(exe.Hold, "RETAINED_PREFLIGHT_JOURNAL_APPEARED"):
             exe._retained_step(paths, action="install", role="ir",
                                arch="amd64", witness=lambda: "1"*64,
-                               expected_before=original)
+                               expected_before=original,
+                               expected_witness="1"*64)
         self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), committed)
         self.assertEqual(journal.read_bytes(), durable)
         self.assertEqual(step("rollback"), "RESTORED")
