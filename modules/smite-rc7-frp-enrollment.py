@@ -218,67 +218,89 @@ def signed_owner_inventory():
 # a host psutil snapshot alone is NOT an authenticated managed child.
 # Require BOTH on the reviewed pinned Node; never print credentials/config.
 SIGNED_CHILD_REQUEST=r"""
+# This script executes *inside* the reviewed RC7 Node. Fail closed and
+# return only a bounded, fixed failure phase, never exception text, secret,
+# raw API response, process argv, destination, token or traceback.
 import hashlib,json,os,psutil,re,secrets,urllib.error,urllib.request
 from app.agent_auth import read_identity
 from app.node_auth import sign_request
 
-tunnel_id=os.environ["UOPTI_FRP_CHILD_ID"]
-assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}",tunnel_id)
-node_id,secret=read_identity('/run/smite-node-identity/node-identity.json')
-target='/api/agent/tunnels/status?tunnel_id='+tunnel_id
-url='http://127.0.0.1:8888'+target
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self,req,fp,code,msg,headers,newurl):
-        return None
-opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
-headers=sign_request(secret=secret,node_id=node_id,method='GET',target=target,
-                     body=b'',nonce=secrets.token_hex(16))
-req=urllib.request.Request(url,headers=headers,method='GET')
-with opener.open(req,timeout=6) as response:
-    assert response.status==200 and response.geturl()==url
-    raw=response.read(4097)
-    assert 0<len(raw)<=4096
-def no_duplicates(pairs):
-    result={}
-    for key,value in pairs:
-        if key in result: raise ValueError("duplicate")
-        result[key]=value
-body=json.loads(raw,object_pairs_hook=no_duplicates)
-assert body=={"status":"success",
-              "data":{"active":True,"type":"frp","process_running":True}}
-# Replaying the identical signed request must be denied by durable Agent auth.
+_stage='INPUT'
 try:
-    opener.open(req,timeout=6)
-except urllib.error.HTTPError as error:
-    assert error.code==401
-else:
-    raise AssertionError("replay accepted")
-expected=['/usr/local/bin/frpc','-c',
-          '/etc/smite-node/frp/frpc_'+tunnel_id+'.yaml']
-matching=[]
-for proc in psutil.process_iter(['pid','cmdline','create_time','status']):
+    tunnel_id=os.environ["UOPTI_FRP_CHILD_ID"]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}",tunnel_id)
+    _stage='IDENTITY'
+    node_id,secret=read_identity('/run/smite-node-identity/node-identity.json')
+    target='/api/agent/tunnels/status?tunnel_id='+tunnel_id
+    url='http://127.0.0.1:8888'+target
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,req,fp,code,msg,headers,newurl):
+            return None
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+    headers=sign_request(secret=secret,node_id=node_id,method='GET',target=target,
+                         body=b'',nonce=secrets.token_hex(16))
+    req=urllib.request.Request(url,headers=headers,method='GET')
+    _stage='SIGNED_STATUS'
+    with opener.open(req,timeout=6) as response:
+        assert response.status==200 and response.geturl()==url
+        raw=response.read(4097)
+        assert 0<len(raw)<=4096
+    _stage='SIGNED_PAYLOAD'
+    def no_duplicates(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result: raise ValueError("duplicate")
+            result[key]=value
+        return result
+    body=json.loads(raw,object_pairs_hook=no_duplicates)
+    assert body=={"status":"success",
+                  "data":{"active":True,"type":"frp","process_running":True}}
+    # Replaying identical signed request MUST be denied by durable Agent auth.
+    _stage='REPLAY'
     try:
-        info=proc.info
-        if info.get('cmdline')!=expected or info.get('status')==psutil.STATUS_ZOMBIE:
+        opener.open(req,timeout=6)
+    except urllib.error.HTTPError as error:
+        assert error.code==401
+    else:
+        raise AssertionError("replay accepted")
+    _stage='PROCESS'
+    expected=['/usr/local/bin/frpc','-c',
+              '/etc/smite-node/frp/frpc_'+tunnel_id+'.yaml']
+    matching=[]
+    for proc in psutil.process_iter(['pid','cmdline','create_time','status']):
+        try:
+            info=proc.info
+            if info.get('cmdline')!=expected or info.get('status')==psutil.STATUS_ZOMBIE:
+                continue
+            connected=(proc.net_connections if hasattr(proc,'net_connections')
+                       else proc.connections)(kind='tcp')
+            established=sum(
+                entry.status==psutil.CONN_ESTABLISHED
+                and getattr(entry.raddr,'port',None)==443 for entry in connected)
+            matching.append((info['pid'],info['create_time'],established))
+        except (psutil.Error,OSError,ValueError,TypeError,KeyError):
             continue
-        connected=(proc.net_connections if hasattr(proc,'net_connections')
-                   else proc.connections)(kind='tcp')
-        established=sum(
-            entry.status==psutil.CONN_ESTABLISHED
-            and getattr(entry.raddr,'port',None)==443 for entry in connected)
-        matching.append((info['pid'],info['create_time'],established))
-    except (psutil.Error,OSError,ValueError,TypeError,KeyError):
-        continue
-assert len(matching)==1 and matching[0][2]>=1
-pid,started,_=matching[0]
-identifier=hashlib.sha256(
-    json.dumps([tunnel_id,pid,started],separators=(',',':')).encode()
-).hexdigest()
-print(json.dumps({"schema":1,"child_id_sha256":hashlib.sha256(
-    tunnel_id.encode('ascii')).hexdigest(),
-    "instance_sha256":identifier,"signed_status":"PASS",
-    "wss_443_socket":"ESTABLISHED"},sort_keys=True))
+    assert len(matching)==1
+    _stage='TCP443'
+    assert matching[0][2]>=1
+    _stage='OUTPUT'
+    pid,started,_=matching[0]
+    identifier=hashlib.sha256(
+        json.dumps([tunnel_id,pid,started],separators=(',',':')).encode()
+    ).hexdigest()
+    print(json.dumps({"schema":1,"child_id_sha256":hashlib.sha256(
+        tunnel_id.encode('ascii')).hexdigest(),
+        "instance_sha256":identifier,"signed_status":"PASS",
+        "wss_443_socket":"ESTABLISHED"},sort_keys=True))
+except Exception:
+    # The only permitted failure payload is a fixed stage (never attacker-
+    # controlled exception text). Exit 0 so the existing bounded docker
+    # capture forwards the sanitized HOLD; caller MUST reject this schema.
+    print(json.dumps({"schema":1,"hold_stage":_stage},sort_keys=True))
 """
+
+CHILD_HOLD_STAGES=frozenset(('INPUT','IDENTITY','SIGNED_STATUS',
+                             'SIGNED_PAYLOAD','REPLAY','PROCESS','TCP443','OUTPUT'))
 
 def signed_child_payload(raw):
     """Sanitize signed status AND inspected one-instance WSS socket proof."""
@@ -293,6 +315,13 @@ def signed_child_payload(raw):
     try: doc=json.loads(raw,object_pairs_hook=no_duplicates)
     except (ValueError,UnicodeError,TypeError) as exc:
         raise Hold('SIGNED_FRPC_CHILD_RESPONSE_INVALID') from exc
+    # A child failure is NEVER authorization. Return only reviewed
+    # categorical names, no stderr, URLs, IDs, secrets or raw exception.
+    if (isinstance(doc,dict) and set(doc)=={'schema','hold_stage'}
+            and type(doc['schema']) is int and doc['schema']==1
+            and type(doc['hold_stage']) is str
+            and doc['hold_stage'] in CHILD_HOLD_STAGES):
+        raise Hold('SIGNED_FRPC_CHILD_'+doc['hold_stage']+'_HOLD')
     need(isinstance(doc,dict)
          and set(doc)=={'schema','child_id_sha256','instance_sha256',
                         'signed_status','wss_443_socket'}

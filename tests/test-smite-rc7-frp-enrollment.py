@@ -4,6 +4,10 @@ import importlib.util
 import contextlib
 import io
 import json
+import os
+import sys
+import types
+import urllib.error
 from pathlib import Path
 import tempfile
 import unittest
@@ -317,6 +321,114 @@ class EnrollmentTests(unittest.TestCase):
             with self.assertRaisesRegex(ctl.Hold,"SIGNED_FRPC_CHILD_ID_MISMATCH"):
                 ctl.signed_child_inventory("child-20182")
             run.assert_called_once()
+
+    def test_child_failure_stages_are_bounded_never_trusted_as_pass(self):
+        expected={"INPUT","IDENTITY","SIGNED_STATUS","SIGNED_PAYLOAD",
+                  "REPLAY","PROCESS","TCP443","OUTPUT"}
+        self.assertEqual(set(ctl.CHILD_HOLD_STAGES), expected)
+        for stage in sorted(expected):
+            with self.subTest(stage=stage):
+                with self.assertRaisesRegex(
+                        ctl.Hold, "^SIGNED_FRPC_CHILD_"+stage+"_HOLD$"):
+                    ctl.signed_child_payload(json.dumps(
+                        {"schema":1,"hold_stage":stage}))
+        for invalid in (
+                {"schema":1,"hold_stage":"TOKEN=secret"},
+                {"schema":1,"hold_stage":"SIGNED_STATUS","pass":True},
+                {"schema":True,"hold_stage":"REPLAY"},
+                {"schema":1,"hold_stage":False},
+                {"schema":1,"hold_stage":"OUTSIDE"},
+                {"schema":1,"hold_stage":"a"*1000},
+                {"schema":1,"hold_stage":"SIGNED_STATUS","child_id_sha256":"a"*64},
+        ):
+            with self.subTest(invalid=str(invalid)[:40]),self.assertRaisesRegex(
+                    ctl.Hold,"^SIGNED_FRPC_CHILD_RESPONSE_INVALID$"):
+                ctl.signed_child_payload(json.dumps(invalid))
+
+    def test_embedded_child_script_real_execution_reports_only_sanitized_holds(self):
+        # Execute the EXACT script offline, with fake signed Agent, fake
+        # process table and local socket. No Docker, Node, network or files.
+        # These cases were missing in the original only-static tests.
+        child="existing-managed-child-20182"
+        def run_case(case):
+            fake_app=types.ModuleType("app")
+            fake_app.__path__=[]
+            agent=types.ModuleType("app.agent_auth")
+            agent.read_identity=lambda _: ("nodeid123",b"z"*32)
+            if case=="identity":
+                def fail_identity(_):
+                    raise RuntimeError("private-key-and-identity-MUST-NOT-PRINT")
+                agent.read_identity=fail_identity
+            auth=types.ModuleType("app.node_auth")
+            auth.sign_request=lambda **_:{"X-Smite-Signature":"redacted"}
+            psutil=types.ModuleType("psutil")
+            psutil.Error=RuntimeError
+            psutil.STATUS_ZOMBIE="zombie"
+            psutil.CONN_ESTABLISHED="ESTABLISHED"
+            fake_proc=types.SimpleNamespace(
+                info={"pid":54,"create_time":123.5,"status":"sleeping",
+                      "cmdline":["/usr/local/bin/frpc","-c",
+                                 "/etc/smite-node/frp/frpc_"+child+".yaml"]},
+                net_connections=lambda kind:[
+                    types.SimpleNamespace(status="ESTABLISHED",
+                                          raddr=types.SimpleNamespace(
+                                              port=80 if case=="tcp443" else 443))
+                ])
+            psutil.process_iter=lambda fields: ([] if case=="process"
+                                                else [fake_proc])
+            result={"status":"success",
+                    "data":{"active":True,"type":"frp","process_running":True}}
+            if case=="payload": result["data"]["active"]=False
+            calls=[]
+            class Response:
+                status=200
+                def __init__(self,raw,url):
+                    self.raw=raw
+                    self.url=url
+                def geturl(self): return self.url
+                def read(self,_): return self.raw
+                def __enter__(self): return self
+                def __exit__(self,*_): return False
+            class Opener:
+                def open(self,req,timeout):
+                    calls.append(req)
+                    if case=="signed_status":
+                        raise urllib.error.HTTPError(
+                            req.full_url,503,"untrusted-secret",{},None)
+                    if len(calls)>1 and case!="replay":
+                        raise urllib.error.HTTPError(
+                            req.full_url,401,"nonce-used",{},None)
+                    return Response(json.dumps(result).encode(),req.full_url)
+            out=io.StringIO()
+            with patch.dict(sys.modules,
+                            {"app":fake_app,"app.agent_auth":agent,
+                             "app.node_auth":auth,"psutil":psutil}), \
+                 patch.dict(os.environ,{"UOPTI_FRP_CHILD_ID":child}), \
+                 patch("urllib.request.build_opener",return_value=Opener()), \
+                 contextlib.redirect_stdout(out), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                exec(compile(ctl.SIGNED_CHILD_REQUEST,"<rc7-child>","exec"),{})
+            return out.getvalue().strip()
+
+        good=run_case("pass")
+        doc=ctl.signed_child_payload(good)
+        self.assertEqual(doc["child_id_sha256"],ctl.sha(child.encode()))
+        self.assertEqual(doc["wss_443_socket"],"ESTABLISHED")
+        self.assertNotIn("redacted",good)
+        for case,expected in (
+                ("identity","IDENTITY"),("signed_status","SIGNED_STATUS"),
+                ("payload","SIGNED_PAYLOAD"),("replay","REPLAY"),
+                ("process","PROCESS"),("tcp443","TCP443")):
+            with self.subTest(case=case):
+                raw=run_case(case)
+                self.assertEqual(json.loads(raw),
+                                 {"schema":1,"hold_stage":expected})
+                self.assertNotIn("untrusted",raw)
+                self.assertNotIn("private-key",raw)
+                self.assertNotIn(child,raw)
+                with self.assertRaisesRegex(
+                        ctl.Hold,"^SIGNED_FRPC_CHILD_"+expected+"_HOLD$"):
+                    ctl.signed_child_payload(raw)
 
     def test_foreign_child_cli_remains_read_only_and_non_authorizing(self):
         cid="FRP-IR-Grandoptical-20182"
