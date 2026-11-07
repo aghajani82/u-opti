@@ -398,6 +398,13 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
         if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
             raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
         seal = paths.state / "retained-rc7-cleanup.json"
+        # A coordinator's fresh install must start with an empty journal.
+        # An independently appearing COMMITTED receipt/journal between the
+        # two-host preflight and this locked writer is NOT our transaction;
+        # never adopt it as an idempotent success or as rollback evidence.
+        if expected_before is not None and (os.path.lexists(journal)
+                                            or os.path.lexists(seal)):
+            raise Hold("RETAINED_PREFLIGHT_JOURNAL_APPEARED")
         if os.path.lexists(seal):
             if action != "cleanup":
                 raise Hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
