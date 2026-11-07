@@ -1269,6 +1269,51 @@ class HostExecutor(unittest.TestCase):
         rollback.assert_called_once_with(
             arch="amd64", expected_node_image=IMAGE)
 
+    def test_ir_recovery_resumes_terminal_seal_without_recreating_journal(self):
+        from dataclasses import replace
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        paths = replace(self.paths, state=self.root / "ir-retained-sealed")
+        paths.state.mkdir(mode=0o700)
+        seal = paths.state / "retained-rc7-cleanup.json"
+        seal.write_text("private sealed cleanup fixture\n")
+        seal.chmod(0o600)
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+        prior = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "NODE_RECREATED": "NO",
+        }
+        control = SimpleNamespace(
+            verify_rc7_bundled_backhaul=mock.Mock(return_value=prior))
+        def read_pair(path, **kwargs):
+            if path.name == "engines.json":
+                return b'{"schema":1,"engines":{"frp":{}}}'
+            if path.name == "record.json":
+                return b'{"state":"COMMITTED","role":"ir"}'
+            raise AssertionError("UNEXPECTED_READ")
+        with patch.object(exe, "Paths", return_value=paths), \
+             patch.object(exe, "_retained_live_root_required",
+                          return_value=True), \
+             patch.object(exe, "_retained_live_signed_witness",
+                          return_value="f" * 64), \
+             patch.object(exe.pair, "_pair_read_private",
+                          side_effect=read_pair), \
+             patch.object(exe.pair, "_pair_expected_transition",
+                          return_value=(b"next-manifest", b"next-receipt")), \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_retained_step_core",
+                          return_value="CLEANED") as core:
+            result = exe._retained_live_ir_rollback(
+                arch="amd64", expected_node_image=IMAGE)
+        self.assertEqual(
+            result["RETAINED_IR_BACKHAUL_ROLLBACK"],
+            "PASS_SIGNED_SEALED_CLEANUP_RECOVERED")
+        self.assertEqual(core.call_count, 1)
+        self.assertEqual(core.call_args.kwargs["action"], "cleanup")
+        self.assertEqual(core.call_args.kwargs["role"], "ir")
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+
     def test_live_ir_core_rejects_foreign_even_with_imported_prepared_record(self):
         prepared = exe.RetainedLivePrepared(
             paths=exe.Paths(), role="foreign", arch="amd64",
