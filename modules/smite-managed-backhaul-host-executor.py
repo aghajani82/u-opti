@@ -1043,6 +1043,19 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
                     or review.get("ACTIVATION_GATE")!="HOLD"
                     or review.get("OTHER_ENGINE_ACTION")!="NEVER_MODIFY"):
                 return hold("RETAINED_FRP_HOST_ADMISSION_HOLD")
+            # For the *real* active managed Node only, extend the existing
+            # signed release proof to a stable local FRP Owner/Child,
+            # Node container, saved tunnel registry and broker/process
+            # witness. This remains local-only, not live peer attestation.
+            local_witness_before = None
+            live_role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
+            if (paths == Paths()
+                    and report["SIGNED_REGISTRY_PAIR_PROOF"] == "COSIGN_VERIFIED"):
+                if live_role is None:
+                    return hold("RETAINED_LIVE_ROLE_UNVERIFIED")
+                local_witness_before = _retained_live_signed_witness(
+                    role=live_role, expected_node_image=expected_node_image,
+                    paths=paths)
             # Don't equate a Docker digest with an immutable signed artifact.
             # This may still classify candidate binary bytes for a later audit.
             env_before = _sha(_read(paths.node/".env",16384))
@@ -1121,6 +1134,13 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             pending = _retained_review_pending_recovery(paths)
             if pending is not None:
                 return hold(pending)
+            if local_witness_before is not None:
+                if _retained_live_signed_witness(
+                        role=live_role, expected_node_image=expected_node_image,
+                        paths=paths) != local_witness_before:
+                    return hold("RETAINED_LIVE_SIGNED_RUNTIME_CHANGED")
+                report["RETAINED_LOCAL_SIGNED_RUNTIME_WITNESS"] = (
+                    "PASS_STABLE_LOCAL_ONLY")
             report["IN_PLACE_MANIFEST_TRANSACTION"] = "PAIR_PLAN_VERIFIED_READ_ONLY"
             return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
