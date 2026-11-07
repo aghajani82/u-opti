@@ -1333,6 +1333,68 @@ def _retained_live_root_required() -> bool:
     return os.geteuid() == 0
 
 
+def _retained_saved_tunnel_registry_snapshot(path: Path) -> bytes:
+    """Read the existing *host-audited* FRP registry without a 0600 rewrite.
+
+    An older Smite node can retain a root-owned tunnels.json with 0644
+    access, which the read-only host audit accepts but the generic 0600
+    transaction/secret reader rejects. This is NOT an authorization to
+    modify the registry. Require a root-owned, non-symlink, single-link,
+    owner-readable, non-group/world-writable regular file; pin the opened
+    inode and metadata before/after reading to reject out-of-band writes.
+    The stricter 0600 reader for Manifest, receipt and rollback journal
+    remains unchanged.
+    """
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
+    fd = None
+    limit = admission.host.MAX_TUNNELS_BYTES
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        if path.is_symlink():
+            raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
+        before = path.lstat()
+        mode = stat.S_IMODE(before.st_mode)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                or before.st_nlink != 1 or not (mode & stat.S_IRUSR)
+                or mode & 0o022 or not 0 < before.st_size <= limit):
+            raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
+        fd = os.open(path, flags)
+        opened = os.fstat(fd)
+        if (not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != 0 or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != mode
+                or (opened.st_dev, opened.st_ino, opened.st_size)
+                    != (before.st_dev, before.st_ino, before.st_size)):
+            raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
+        chunks, total = [], 0
+        while True:
+            block = os.read(fd, min(65536, limit + 1 - total))
+            if not block:
+                break
+            chunks.append(block)
+            total += len(block)
+            if total > limit:
+                raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
+        after = os.fstat(fd)
+        named = path.lstat()
+        if (total != opened.st_size
+                or (after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns)
+                    != (opened.st_dev, opened.st_ino, opened.st_size,
+                        opened.st_mtime_ns, opened.st_ctime_ns)
+                or (named.st_dev, named.st_ino, named.st_size)
+                    != (opened.st_dev, opened.st_ino, opened.st_size)):
+            raise Hold("RETAINED_REGISTRY_CHANGED_DURING_READ")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def _retained_live_signed_witness(*, role: str, expected_node_image: str,
                                   paths: Paths = Paths()) -> str:
     """Stable, role-scoped LIVE Node/FRP witness for future retained writer.
@@ -1375,7 +1437,7 @@ def _retained_live_signed_witness(*, role: str, expected_node_image: str,
         # without printing any tunnel IDs, tokens, proxy ports or hosts.
         # A corrupt or concurrently written registry must fail closed.
         registry = data / "tunnels.json"
-        saved = pair._pair_read_private(registry, limit=262144)
+        saved = _retained_saved_tunnel_registry_snapshot(registry)
         frp.rt.signed_probe()
         footprint = admission.host.frp_process_footprint()
         if role == "ir":
@@ -1415,7 +1477,7 @@ def _retained_live_signed_witness(*, role: str, expected_node_image: str,
         if (_retained_container_fingerprint(after) != identity
                 or after.get("Config", {}).get("Image") != expected_node_image
                 or admission.host.frp_process_footprint() != footprint
-                or pair._pair_read_private(registry, limit=262144) != saved):
+                or _retained_saved_tunnel_registry_snapshot(registry) != saved):
             raise Hold("RETAINED_LIVE_NODE_OR_FRP_DRIFT")
         if role == "ir" and admission.host.broker_socket_footprint() != broker:
             raise Hold("RETAINED_LIVE_BROKER_DRIFT")
@@ -1457,6 +1519,9 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
         return hold("EXTERNAL_NODE_IMAGE_PIN_REQUIRED")
     if arch not in package.OFFICIAL_BINARY_SHA256:
         return hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
+    # Bounded stage labels only: never surface signed Agent exception text,
+    # Docker output, registry paths or anything containing credentials.
+    stage = "INITIAL"
     try:
         with _read_only_engine_lock(paths.lock):
             # A crash after terminal unlink can leave only the durable cleanup
@@ -1493,6 +1558,7 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             # signed release proof to a stable local FRP Owner/Child,
             # Node container, saved tunnel registry and broker/process
             # witness. This remains local-only, not live peer attestation.
+            stage = "LOCAL_SIGNED_WITNESS"
             local_witness_before = None
             live_role = {"IR": "ir", "KH": "foreign"}.get(review.get("NODE_ROLE"))
             if (paths == Paths()
@@ -1502,6 +1568,7 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
                 local_witness_before = _retained_live_signed_witness(
                     role=live_role, expected_node_image=expected_node_image,
                     paths=paths)
+            stage = "BINARY_AND_NODE"
             # Don't equate a Docker digest with an immutable signed artifact.
             # This may still classify candidate binary bytes for a later audit.
             env_before = _sha(_read(paths.node/".env",16384))
@@ -1556,6 +1623,7 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             if pending is not None:
                 return hold(pending)
             report["RETAINED_NODE_BACKHAUL_BINARY"] = "OFFICIAL_EXECUTABLE_SHA256_MATCH"
+            stage = "EXACT_PAIR_AND_RUNTIME"
             if report["SIGNED_REGISTRY_PAIR_PROOF"] != "COSIGN_VERIFIED":
                 return hold("SIGNED_IMAGE_AND_IN_PLACE_ROLLBACK_STILL_REQUIRED")
             manifest = paths.node / "config/engine-state/engines.json"
@@ -1591,7 +1659,7 @@ def review_in_place_binary(*, expected_node_image: str, arch: str,
             return hold("INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
     except (Hold,admission.host.GateHold,OSError,UnicodeError,ValueError,
             RuntimeError,TypeError):
-        return hold("RETAINED_NODE_PREVIEW_UNVERIFIED")
+        return hold("RETAINED_PREVIEW_" + stage + "_UNVERIFIED")
 
 
 PROBE = r'''
