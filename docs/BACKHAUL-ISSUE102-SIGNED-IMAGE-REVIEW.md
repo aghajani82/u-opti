@@ -1097,6 +1097,64 @@ a narrow fix in main. The existing IR-only metadata canary and exact
 Journal rollback remain the sole live write path and no foreign node,
 FRP route, WSS/443 or Backhaul tunnel is activated by this repair.
 
+## Foreign retained Backhaul metadata canary — same exact writer and recovery
+
+After the signed IR-only retained enrollment and independent IR ready
+verification, the live Foreign host independently returned:
+`RC7_BACKHAUL_BINARY_PIN=OFFICIAL_V0_7_2_ARCH_EXACT_MATCH`,
+`RC7_FRP_ENGINE=READY_SIGNED_INVENTORY`,
+`RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN=PASS_STABLE_LOCAL_ONLY`,
+`RC7_BACKHAUL_ENGINE=NOT_INSTALLED_SIGNED_INVENTORY`,
+`NODE_RECREATED=NO`. Both `SIGNED_OWNER_CHILD_CONTINUITY` and
+`RC7_FOREIGN_FRPC_CHILD_FORWARDING` were still **NOT_PROVEN**.
+These are independent local signed prerequisites, NOT a remote data-plane.
+
+The already-existing Backhaul option **3** now includes role-scoped
+`F` (Foreign metadata enrollment) and `B` (Foreign exact rollback)
+alongside the previously approved IR `I`/`R`. No new top-level menu,
+separate installer or service has been added. No running Node, FRPC,
+Sanaei/Xray, Nginx, FRPS, tunnel route or port is changed. The canonical
+Foreign production Paths and immutable signed RC7 image are mandatory.
+
+Unlike the IR canary, the Foreign user path **requires both**
+`SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED` and the exact interactive
+Foreign-specific `INSTALL-RETAINED-BACKHAUL-FOREIGN` or
+`ROLLBACK-RETAINED-BACKHAUL-FOREIGN` challenge. This is a human
+attestation; the code cannot access or verify a provider backup.
+**Snapshot merely created is insufficient**: a previously tested isolated
+restore for all production disks/persistent Node+Sanaei/Replay data, a
+working provider console/rescue path independent of SSH/FRP and an
+authorized recovery decision are prerequisites to truthfully typing
+the phrase. Refuse/enter 0 otherwise. Never test restore by booting a
+duplicate Foreign identity on a routable network.
+
+Foreign writes reuse the **same fsynced, exact-byte** Manifest/FRP
+receipt two-file writer with PREPARED/COMMITTED/RESTORING/RESTORED
+journal and sealed cleanup as the successful IR canary, but only
+after authenticating the actual Foreign FRPC Child set, signed replay,
+official bundled binary, node ID/image/mounts, process identity, persisted
+FRP registry, Cosign release, exact original paired receipts and
+unchanged private host config. The exclusive writer lock independently
+revalidates those inputs before PREPARED. After writing it requires a
+separately signed local `backhaul=READY`, `frp=READY`,
+`RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN=PASS_STABLE_LOCAL_ONLY`,
+unchanged Node and the exact COMMITTED retained Journal.
+An interrupted write or failed signed postcommit attempts exact
+journal-based compensation, signed `not-installed`/FRP-ready
+re-verification, and terminal sealed cleanup; unverifiable recovery
+leaves the durable journal intact and reports HOLD. A Foreign-only
+manual rollback validates role/sha/witness/binary/journal and handles
+an orphaned cleanup seal without reconstructing a missing journal.
+
+**IMPORTANT**: Success is `RETAINED_FOREIGN_BACKHAUL_ENROLLMENT=
+PASS_SIGNED_METADATA_ONLY`, `BACKHAUL_TUNNEL_ACTIVATED=NO`,
+`TWO_HOST_BACKHAUL_ACTIVATION_GATE=HOLD`. This does **not** start
+Backhaul clients/servers or test Foreign forwarding to IR. The existing
+IR COMMITTED Backhaul Journal and all original FRP tunnels remain
+unchanged by a Foreign metadata enrollment. Issue #102 is not closed
+until a reviewed two-host Backhaul data-plane activation and actual
+signed remote peer/data-plane tests also succeed.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
