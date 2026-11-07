@@ -197,6 +197,68 @@ class OperatorControl(unittest.TestCase):
         )
         return fake,calls
 
+    def test_foreign_wss_dns_legacy_recovery_unblocks_only_signed_bundle_review(self):
+        # Reproduce the precise Foreign RC7 incident with the *real*
+        # strict WSS runtime signature predicate (not a mocked PASS).
+        spec = importlib.util.spec_from_file_location(
+            "uopti_foreign_dns_review", ROOT / "modules/smite-rc7-wss-runtime.py")
+        wss = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wss)
+        original = {
+            "Config": {"Image": "ghcr.io/aghajani82/smite-node@sha256:" + "a" * 64,
+                       "Env": ["SMITE_FRP_STANDARD_WSS=1"],
+                       "Cmd": ["uvicorn"], "Entrypoint": None},
+            "HostConfig": {"NetworkMode": "host", "Privileged": False,
+                           "Dns": None, "DnsOptions": None, "DnsSearch": None},
+            "Mounts": [{"Type": "bind", "Source": "/trusted",
+                        "Destination": "/trusted", "RW": False}],
+        }
+        baseline = {"signature": wss.runtime_signature(original)}
+        live = json.loads(json.dumps(original))
+        live["HostConfig"]["Dns"] = []
+        fake, calls = self._rc7_bundle_fake(role="foreign")
+        node_details = fake.node_details
+
+        def checked_runtime():
+            try:
+                wss.check_runtime_signature(live, baseline)
+            except wss.Hold as exc:
+                # The existing FRP wrapper propagates WSS admission failures
+                # through its own imported runtime Hold class.
+                raise fake.rt.Hold(str(exc)) from exc
+            return node_details()
+
+        fake.node_details = checked_runtime
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake):
+            # The old Foreign WSS journal must HOLD rather than skip proof.
+            with self.assertRaisesRegex(
+                    control.Hold, "RC7_BUNDLED_RUNTIME_UNVERIFIED"):
+                control.verify_rc7_bundled_backhaul("foreign")
+            self.assertEqual(calls, [])
+            # The signed, operator-gated WSS recovery preserves the original
+            # digest and ONLY opts into nil/empty DNS representation.
+            original_signature = baseline["signature"]
+            baseline["signature_policy"] = wss.DNS_EMPTY_POLICY
+            result = control.verify_rc7_bundled_backhaul("foreign")
+            self.assertEqual(baseline["signature"], original_signature)
+            self.assertEqual(result["RC7_SIGNED_REPLAY"], "PASS")
+            self.assertEqual(result["RC7_FRP_ENGINE"], "READY_SIGNED_INVENTORY")
+            self.assertEqual(result["RC7_BACKHAUL_ENGINE"],
+                             "NOT_INSTALLED_SIGNED_INVENTORY")
+            self.assertEqual(result["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+            self.assertEqual(result["RC7_FOREIGN_FRPC_CHILD_FORWARDING"],
+                             "NOT_PROVEN")
+            self.assertEqual(result["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
+            # Even with policy recovery, any non-DNS image/host/network
+            # difference fails closed BEFORE invoking the signed Node probe.
+            calls.clear()
+            live["HostConfig"]["Privileged"] = True
+            with self.assertRaises(control.Hold):
+                control.verify_rc7_bundled_backhaul("foreign")
+            self.assertEqual(calls, [])
+
     def test_rc7_bundled_signed_inventory_no_recreate_and_not_ready_yet(self):
         fake,calls = self._rc7_bundle_fake()
         with patch.object(control.os,"geteuid",return_value=0), \
