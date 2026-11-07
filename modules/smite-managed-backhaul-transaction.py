@@ -461,6 +461,15 @@ def _rc7_pair_shared_lock(root: Path):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Hold("RC7_PAIR_ANOTHER_ENGINE_TRANSACTION_ACTIVE") from exc
+        # Both independent pair and legacy writers must lock the SAME
+        # currently named inode; a detached fd would permit split writers.
+        try:
+            current = lock.lstat()
+        except OSError as exc:
+            raise Hold("RC7_PAIR_SHARED_LOCK_CHANGED") from exc
+        if (not stat.S_ISREG(current.st_mode)
+                or (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino)):
+            raise Hold("RC7_PAIR_SHARED_LOCK_CHANGED")
         yield
     finally:
         os.close(fd)
