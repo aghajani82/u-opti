@@ -1333,6 +1333,11 @@ def _retained_live_root_required() -> bool:
     return os.geteuid() == 0
 
 
+def _retained_registry_root_owned(metadata) -> bool:
+    """Separate a root-owned production inode check from non-root CI stubs."""
+    return metadata.st_uid == 0
+
+
 def _retained_saved_tunnel_registry_snapshot(path: Path) -> bytes:
     """Read the existing *host-audited* FRP registry without a 0600 rewrite.
 
@@ -1356,14 +1361,14 @@ def _retained_saved_tunnel_registry_snapshot(path: Path) -> bytes:
             raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
         before = path.lstat()
         mode = stat.S_IMODE(before.st_mode)
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+        if (not stat.S_ISREG(before.st_mode) or not _retained_registry_root_owned(before)
                 or before.st_nlink != 1 or not (mode & stat.S_IRUSR)
                 or mode & 0o022 or not 0 < before.st_size <= limit):
             raise Hold("RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED")
         fd = os.open(path, flags)
         opened = os.fstat(fd)
         if (not stat.S_ISREG(opened.st_mode)
-                or opened.st_uid != 0 or opened.st_nlink != 1
+                or not _retained_registry_root_owned(opened) or opened.st_nlink != 1
                 or stat.S_IMODE(opened.st_mode) != mode
                 or (opened.st_dev, opened.st_ino, opened.st_size)
                     != (before.st_dev, before.st_ino, before.st_size)):
