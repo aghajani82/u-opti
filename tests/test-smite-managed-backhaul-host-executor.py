@@ -1569,7 +1569,7 @@ class HostExecutor(unittest.TestCase):
         for scenario in ("bad-checksum", "wrong-role", "wrong-witness"):
             candidate = dict(record)
             if scenario == "wrong-role":
-                candidate["role"] = "foreign"
+                candidate["role"] = "ir"
             if scenario == "wrong-witness":
                 candidate["witness"] = "e" * 64
             envelope = {
@@ -1701,6 +1701,58 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual(core.call_args.kwargs["action"], "cleanup")
         self.assertEqual(core.call_args.kwargs["role"], "foreign")
         self.assertFalse((paths.state / "retained-rc7.json").exists())
+
+    def test_foreign_cli_denies_snapshot_only_without_writer_or_agent(self):
+        import io
+        from unittest import mock
+        argv = [
+            "retained-host-executor", "install-retained-foreign",
+            "--arch", "amd64", "--expected-node-image", IMAGE,
+            "--confirm-role", "INSTALL-RETAINED-BACKHAUL-FOREIGN",
+            "--signed-pair-manifest", "/proof.json",
+            "--signed-pair-manifest-sha256", "a" * 64,
+            "--signed-pair-source-sha", "b" * 40,
+            "--signed-pair-publish-ref", "refs/tags/v2.0.0-rc.7",
+            "--signed-pair-trusted-root", "/trusted.json",
+        ]
+        with patch.object(exe.sys, "argv", argv), \
+             patch.object(exe.os, "geteuid", return_value=0), \
+             patch.object(exe, "_retained_live_foreign_canary",
+                          side_effect=AssertionError("FOREIGN_WRITER_STARTED")), \
+             mock.patch("builtins.input",
+                        side_effect=AssertionError("PROMPT_WITHOUT_SNAPSHOT")), \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(exe.main(), 2)
+        self.assertIn("RETAINED_LIVE_FOREIGN_RECOVERY_APPROVAL_REQUIRED",
+                      stderr.getvalue())
+        self.assertFalse(self.state.exists())
+
+    def test_foreign_cli_requires_interactive_exact_recovery_challenge(self):
+        import io
+        from unittest import mock
+        argv = [
+            "retained-host-executor", "install-retained-foreign",
+            "--arch", "amd64", "--expected-node-image", IMAGE,
+            "--confirm-role", "INSTALL-RETAINED-BACKHAUL-FOREIGN",
+            "--confirm-snapshot-and-console", exe.SNAPSHOT_CONFIRM,
+        ]
+        for interactive, response in (
+                (False, "INSTALL-RETAINED-BACKHAUL-FOREIGN"),
+                (True, "INSTALL-RETAINED-BACKHAUL-IR"),
+                (True, "")):
+            with self.subTest(interactive=interactive, response=response), \
+                 patch.object(exe.sys, "argv", argv), \
+                 patch.object(exe.os, "geteuid", return_value=0), \
+                 patch.object(exe.sys.stdin, "isatty",
+                              return_value=interactive), \
+                 mock.patch("builtins.input", return_value=response), \
+                 patch.object(exe, "_retained_live_foreign_canary",
+                              side_effect=AssertionError("FOREIGN_WRITER_STARTED")), \
+                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(exe.main(), 2)
+                self.assertIn(
+                    "RETAINED_LIVE_FOREIGN_RECOVERY_APPROVAL_REQUIRED",
+                    stderr.getvalue())
 
     def test_signed_read_only_plan_for_actual_host_role_names(self):
         from dataclasses import replace
