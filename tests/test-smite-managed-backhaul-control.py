@@ -158,7 +158,7 @@ class OperatorControl(unittest.TestCase):
             if 'path="/var/lib/smite-node/tunnels.json"' in argv[-1]:
                 calls.append("saved-children")
                 children = (["existing-frpc-one"] if child_ids is None
-                            else child_ids)
+                            else sorted(child_ids))
                 snapshots = ([{"schema":1,"child_ids":children}] * 2
                              if child_lists is None else child_lists)
                 index = calls.count("saved-children") - 1
