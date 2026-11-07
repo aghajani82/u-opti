@@ -282,9 +282,14 @@ try:
     with os.fdopen(fd,'rb') as stream:
         before=os.fstat(stream.fileno())
         assert (stat.S_ISREG(before.st_mode)
-                and (before.st_dev,before.st_ino)==
-                    (previous.st_dev,previous.st_ino)
-                and before.st_size==previous.st_size)
+                and before.st_uid==os.geteuid() and before.st_nlink==1
+                and stat.S_IMODE(before.st_mode)==0o600
+                and (before.st_dev,before.st_ino,before.st_mode,
+                     before.st_uid,before.st_nlink,before.st_size,
+                     before.st_mtime_ns,before.st_ctime_ns)==
+                    (previous.st_dev,previous.st_ino,previous.st_mode,
+                     previous.st_uid,previous.st_nlink,previous.st_size,
+                     previous.st_mtime_ns,previous.st_ctime_ns))
         raw_config=stream.read(131073)
         after=os.fstat(stream.fileno())
     named=os.lstat(config_path)
@@ -293,7 +298,11 @@ try:
                  before.st_mtime_ns,before.st_ctime_ns)==
                 (after.st_dev,after.st_ino,after.st_size,
                  after.st_mtime_ns,after.st_ctime_ns)
-            and (named.st_dev,named.st_ino)==(before.st_dev,before.st_ino))
+            and (named.st_dev,named.st_ino,named.st_mode,named.st_uid,
+                 named.st_nlink,named.st_size,named.st_mtime_ns,named.st_ctime_ns)==
+                (before.st_dev,before.st_ino,before.st_mode,before.st_uid,
+                 before.st_nlink,before.st_size,before.st_mtime_ns,
+                 before.st_ctime_ns))
     config=raw_config.decode('utf-8')
     def unique_exact(pattern,expected):
         match=re.findall(pattern,config,re.MULTILINE)
@@ -309,7 +318,9 @@ try:
     unique_exact(r'^    serverName: "([^"\r\n]+)"$',expected_host)
     # A second protocol/transport or untrusted TLS declaration must
     # not be silently accepted by the read-only verifier.
-    assert (len(re.findall(r'^  protocol:',config,re.MULTILINE))==1
+    assert (len(re.findall(r'^serverAddr:',config,re.MULTILINE))==1
+            and len(re.findall(r'^serverPort:',config,re.MULTILINE))==1
+            and len(re.findall(r'^  protocol:',config,re.MULTILINE))==1
             and len(re.findall(r'^transport:',config,re.MULTILINE))==1
             and len(re.findall(r'^  tls:',config,re.MULTILINE))==1
             and len(re.findall(r'^    (?:enable|trustedCaFile|serverName):',
