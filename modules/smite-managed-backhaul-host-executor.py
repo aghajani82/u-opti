@@ -1209,6 +1209,54 @@ def _retained_live_ir_rollback(*, arch: str,
     witness = _retained_live_signed_witness(
         role="ir", expected_node_image=expected_node_image, paths=paths)
     journal = paths.state / "retained-rc7.json"
+    cleanup_seal = paths.state / "retained-rc7-cleanup.json"
+    if not os.path.lexists(journal) and os.path.lexists(cleanup_seal):
+        # A crash after journal unlink but before seal unlink is an
+        # intentional recovery state, not an excuse to reconstruct an
+        # untrusted journal. The existing core's sealed cleanup verifies
+        # the original two byte hashes, role, witness, receipt semantics
+        # and durable seal while holding the exclusive lock.
+        try:
+            originals = (
+                pair._pair_read_private(
+                    paths.node / "config/engine-state/engines.json"),
+                pair._pair_read_private(paths.frp_state / "record.json"))
+            pair._pair_expected_transition(
+                *originals, package.OFFICIAL_BINARY_SHA256[arch],
+                role="ir")
+            control = _load("uopti_retained_sealed_recovery",
+                            "smite-managed-backhaul-control.py")
+            prior = control.verify_rc7_bundled_backhaul("ir")
+            if (prior.get("RC7_BACKHAUL_ENGINE")
+                    != "NOT_INSTALLED_SIGNED_INVENTORY"
+                    or prior.get("RC7_FRP_ENGINE")
+                    != "READY_SIGNED_INVENTORY"
+                    or prior.get("NODE_RECREATED") != "NO"):
+                raise Hold("RETAINED_LIVE_IR_SEALED_SIGNED_HOLD")
+            prepared = RetainedLivePrepared(
+                paths=paths, role="ir", arch=arch,
+                node_image=expected_node_image, old_pair=originals,
+                runtime_witness=witness,
+                node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+                node_compose_sha256=_sha(_read(
+                    paths.node / "docker-compose.yml", 131072)))
+            result = _retained_step_core(
+                paths, action="cleanup", role="ir", arch=arch,
+                witness=lambda: _retained_live_signed_witness(
+                    role="ir", expected_node_image=expected_node_image,
+                    paths=paths),
+                _admission=prepared)
+            if result != "CLEANED":
+                raise Hold("RETAINED_LIVE_IR_SEALED_CLEANUP_UNVERIFIED")
+            return {
+                "RETAINED_IR_BACKHAUL_ROLLBACK":
+                    "PASS_SIGNED_SEALED_CLEANUP_RECOVERED",
+                "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+                "NODE_RESTARTED": "NO",
+                "FOREIGN_NODE_CHANGED": "NO",
+            }
+        except Exception as exc:
+            raise Hold("RETAINED_LIVE_IR_SEALED_RECOVERY_HOLD") from exc
     try:
         envelope = pair._pair_load_json(
             pair._pair_read_private(journal, limit=40000))
