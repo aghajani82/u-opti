@@ -75,7 +75,7 @@ Approval retains signature, request-matching, expiry, and replay checks. Passkey
 
 ### Other networking modes
 
-Private Network/EasyTier, advanced tools, and legacy recovery remain separate menu paths. Backhaul Sidecar remains experimental. The [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) describes the older private-network deployment; it is not the selected fresh-install guide.
+Private Network/EasyTier, advanced tools, and legacy recovery remain separate menu paths. Backhaul Sidecar remains experimental. For the **active IR + Grandoptical** pair, Backhaul remains on **HOLD**; see the [Issue #102 recovery and signed-peer evidence gates](docs/BACKHAUL-ISSUE102-SIGNED-IMAGE-REVIEW.md#production-recovery-evidence--live-ir--grandoptical-operator-only-hold) before any host action. The [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) describes the older private-network deployment; it is not the selected fresh-install guide.
 
 ## Sanaei & certificates
 
