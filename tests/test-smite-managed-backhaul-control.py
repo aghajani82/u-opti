@@ -1068,7 +1068,12 @@ class OperatorControl(unittest.TestCase):
         # canary, but the walkthrough explicitly selects 0=cancel. A
         # noninteractive/dummy-node walkthrough must never mutate anything.
         self.assertIn("IR Backhaul retained install / rollback", result.stdout)
-        self.assertIn("No changes made.", result.stdout)
+        # The test deliberately points SMITE_NODE_DIR at a disposable
+        # noncanonical directory: option 3 must HOLD before even asking
+        # for an IR confirmation, rather than using the test's next "0".
+        self.assertIn(
+            "HOLD: Reviewed canonical retained-node executor required.",
+            result.stdout)
         self.assertFalse((self.node / "config/engine-state").exists())
 
     def test_concurrent_engine_operations_are_rejected_before_mutation(self):
