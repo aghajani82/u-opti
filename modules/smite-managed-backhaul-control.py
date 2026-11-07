@@ -322,7 +322,74 @@ def _rc7_node_runtime_fingerprint(doc: object) -> tuple[str, str, str, str]:
         raise Hold("RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED") from exc
 
 
-def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
+RC7_RETAINED_JOURNAL = Path(
+    "/var/lib/u-opti/smite-engine-host/backhaul/retained-rc7.json")
+
+
+def _review_rc7_retained_committed_pair(
+        current_manifest: bytes, current_receipt: bytes,
+        retained_journal: bytes, bundled_sha256: str, *, role: str) -> dict[str, str]:
+    """Prove an already-COMMITTED two-file retained transaction, read-only.
+
+    The signed Node still independently authenticates its FRP Owner/Child and
+    the live engine inventory. This sealed journal check ensures its Backhaul
+    ready state is derived ONLY from the reviewed exact before-image and the
+    allowed FRP receipt rebind, not an unrelated manifest edit. Never trusts
+    the caller's journal digest as external authorization.
+    """
+    try:
+        envelope = transaction._pair_load_json(retained_journal)
+        if set(envelope) != {"record", "sha256"}:
+            raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED")
+        record = envelope["record"]
+        if (not isinstance(record, dict)
+                or set(record) != {
+                    "schema", "role", "binary", "witness", "manifest",
+                    "receipt", "phase"
+                }
+                or type(record["schema"]) is not int
+                or record["schema"] != 1
+                or record["role"] != role
+                or record["binary"] != bundled_sha256
+                or record["phase"] != "COMMITTED"
+                or type(record["witness"]) is not str
+                or RC7_ENGINE_SHA.fullmatch(record["witness"]) is None
+                or type(envelope["sha256"]) is not str
+                or RC7_ENGINE_SHA.fullmatch(envelope["sha256"]) is None
+                or hashlib.sha256(json.dumps(
+                    record, sort_keys=True).encode()).hexdigest()
+                        != envelope["sha256"]):
+            raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED")
+        originals = []
+        for field in ("manifest", "receipt"):
+            value = record[field]
+            if (type(value) is not str
+                    or not 0 < len(value) <= 16384
+                    or len(value) % 2
+                    or re.fullmatch(r"(?:[0-9a-f]{2})+", value) is None):
+                raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED")
+            originals.append(bytes.fromhex(value))
+        if any(not 0 < len(raw) <= 8192 for raw in originals):
+            raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED")
+        after = transaction._pair_expected_transition(
+            *originals, bundled_sha256, role=role)
+        if (current_manifest, current_receipt) != after:
+            raise Hold("RC7_RETAINED_COMMITTED_PAIR_DRIFT")
+    except (transaction.Hold, KeyError, TypeError, ValueError,
+            UnicodeError, AttributeError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED") from exc
+    return {
+        "RC7_BACKHAUL_MANIFEST_PLAN": "COMMITTED_PAIR_VERIFIED_READ_ONLY",
+        "RC7_FRP_RECEIPT_BINDING": "EXACT_COMMITTED_REBIND_REVIEWED",
+        "INSTALL_ALLOWED": "NO",
+        "ACTIVATION_GATE": "HOLD",
+    }
+
+
+def verify_rc7_bundled_backhaul(
+        role: str, *, expected_backhaul_state: str = "not-installed") -> dict[str, str]:
     """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
 
     No install, no manifest/FRP receipt write or output of hashes/Node
@@ -334,6 +401,8 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     """
     if role not in ("ir", "foreign"):
         raise Hold("RC7_BUNDLED_ROLE_INVALID")
+    if expected_backhaul_state not in ("not-installed", "ready"):
+        raise Hold("RC7_BUNDLED_EXPECTED_ENGINE_STATE_INVALID")
     if os.geteuid() != 0:
         raise Hold("RC7_BUNDLED_ROOT_REQUIRED")
     frp = _load("uopti_bh_rc7_runtime_probe", "smite-rc7-frp-enrollment.py")
@@ -368,8 +437,8 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 kind="inventory")
             if inventory["engines"]["frp"] != "ready":
                 raise Hold("RC7_BUNDLED_EXISTING_FRP_NOT_READY")
-            if inventory["engines"]["backhaul"] != "not-installed":
-                raise Hold("RC7_BUNDLED_BACKHAUL_ALREADY_ENROLLED_OR_UNAVAILABLE")
+            if inventory["engines"]["backhaul"] != expected_backhaul_state:
+                raise Hold("RC7_BUNDLED_BACKHAUL_UNEXPECTED_SIGNED_STATE")
             # A well-formed hash is not provenance: demand the exact
             # architecture-bound official executable digest independently
             # extracted from the archive already pinned in this project.
@@ -410,13 +479,41 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 foreign_child_ids_before = _rc7_foreign_saved_child_ids(frp)
                 foreign_instances_before = _rc7_foreign_signed_instances(
                     frp, foreign_child_ids_before)
-            candidate, review = plan_rc7_backhaul_manifest_pair(
-                old_manifest, receipt, binary["sha256"], role=role)
-            if (review.get("RC7_FRP_RECEIPT_BINDING")
-                    != "EXACT_PRIOR_MANIFEST_MATCH"
+            retained_journal = None
+            if expected_backhaul_state == "ready":
+                # Do not accept a COMMITTED journal when an independent
+                # recovery or a cleanup seal is active on this host.
+                for pending in (
+                        RC7_RETAINED_JOURNAL.with_name(
+                            "retained-rc7-cleanup.json"),
+                        frp.JOURNAL / "record.next",
+                        frp.MANIFEST.with_name("engines.json.rc7-next"),
+                        frp.MANIFEST.with_name(
+                            "engines.json.rc7-rollback-next")):
+                    if os.path.lexists(pending):
+                        raise Hold("RC7_RETAINED_COMPETING_RECOVERY")
+                # A valid signed inventory alone cannot prove that the
+                # Backhaul entry belongs to our crash-recoverable two-file
+                # transaction. Require its exact durable COMMITTED journal
+                # under the SAME engine lock, before calling it installed.
+                try:
+                    retained_journal = transaction._pair_read_private(
+                        RC7_RETAINED_JOURNAL, limit=40000)
+                except (transaction.Hold, OSError, ValueError, TypeError) as exc:
+                    raise Hold("RC7_RETAINED_COMMIT_UNVERIFIED") from exc
+                review = _review_rc7_retained_committed_pair(
+                    old_manifest, old_receipt, retained_journal,
+                    binary["sha256"], role=role)
+                required_binding = "EXACT_COMMITTED_REBIND_REVIEWED"
+            else:
+                candidate, review = plan_rc7_backhaul_manifest_pair(
+                    old_manifest, receipt, binary["sha256"], role=role)
+                required_binding = "EXACT_PRIOR_MANIFEST_MATCH"
+                if not candidate:
+                    raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
+            if (review.get("RC7_FRP_RECEIPT_BINDING") != required_binding
                     or review.get("INSTALL_ALLOWED") != "NO"
-                    or review.get("ACTIVATION_GATE") != "HOLD"
-                    or not candidate):
+                    or review.get("ACTIVATION_GATE") != "HOLD"):
                 raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
             if (frp.read_private(frp.MANIFEST) != old_manifest
                     or frp.read_private(frp.JOURNAL / "record.json") != old_receipt):
@@ -444,6 +541,18 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                 frp.rt.inspect_container("smite-node"))
             if node_after != node_before:
                 raise Hold("RC7_BUNDLED_NODE_CHANGED_DURING_REVIEW")
+            if retained_journal is not None:
+                # An uncooperative writer may bypass the advisory lock.
+                # A journal replacement during signed proof invalidates
+                # the completed-transaction claim even if signed FRP
+                # inventory and current Manifest remain unchanged.
+                try:
+                    journal_after = transaction._pair_read_private(
+                        RC7_RETAINED_JOURNAL, limit=40000)
+                except (transaction.Hold, OSError, ValueError, TypeError) as exc:
+                    raise Hold("RC7_RETAINED_COMMIT_CHANGED_DURING_REVIEW") from exc
+                if journal_after != retained_journal:
+                    raise Hold("RC7_RETAINED_COMMIT_CHANGED_DURING_REVIEW")
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.
@@ -457,9 +566,15 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     return {
         "RC7_BACKHAUL_BINARY_PIN": "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH",
         "RC7_FRP_RECEIPT_BINDING": "COMMITTED_EXACT_MANIFEST_REVIEWED",
-        "RC7_BACKHAUL_MANIFEST_PLAN": "CANDIDATE_ONLY_NO_WRITE",
+        "RC7_BACKHAUL_MANIFEST_PLAN": (
+            "COMMITTED_PAIR_VERIFIED_READ_ONLY"
+            if expected_backhaul_state == "ready"
+            else "CANDIDATE_ONLY_NO_WRITE"),
         "RC7_BACKHAUL_IMAGE_BINARY": "OBSERVED_PINNED_IMAGE_NO_MOUNT",
-        "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+        "RC7_BACKHAUL_ENGINE": (
+            "READY_SIGNED_INVENTORY"
+            if expected_backhaul_state == "ready"
+            else "NOT_INSTALLED_SIGNED_INVENTORY"),
         "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
         "RC7_IR_SIGNED_FRPS_OWNER": (
             "PASS_SIGNED_AGENT_LISTENER_STABLE" if role == "ir"
@@ -694,10 +809,14 @@ def main() -> int:
     arg.add_argument("--role", choices=("ir", "foreign"))
     arg.add_argument("--auto-role", action="store_true",
                      help="Review actual /opt/smite-node role without sourcing .env")
+    arg.add_argument("--expect-backhaul-ready", action="store_true",
+                     help="Verify already committed retained Backhaul, read-only; never install")
     arg.add_argument("--stage", type=Path)
     arg.add_argument("--lab-root", type=Path)
     args = arg.parse_args()
     try:
+        if args.expect_backhaul_ready and args.action != "verify-rc7-bundle":
+            raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
         if args.action == "verify-rc7-bundle":
             if args.auto_role and args.role:
                 raise Hold("RC7_BUNDLED_CONFLICTING_ROLE_SELECTION")
@@ -705,7 +824,9 @@ def main() -> int:
                     if args.auto_role else args.role)
             if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
-            _format(verify_rc7_bundled_backhaul(role))
+            _format(verify_rc7_bundled_backhaul(
+                role, expected_backhaul_state=(
+                    "ready" if args.expect_backhaul_ready else "not-installed")))
         elif args.action in ("install", "rollback"):
             if args.lab_root is None:
                 raise Hold("Real host engine activation is NOT enabled; no server changed")

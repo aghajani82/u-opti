@@ -852,6 +852,48 @@ This is an essential prerequisite for a future **no-recreate**
 production writer, not a host installation or authorization.
 `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain unchanged.
 
+## RC7 postcommit signed Backhaul acceptance — existing review path
+
+Issue #102's retained two-file Manifest+FRP receipt transaction can be
+rehearsed in GitHub PR CI, but the previous `verify-rc7-bundle` code
+only accepted signed `backhaul=not-installed` and generated an in-memory
+candidate. It could not independently verify the **committed** state after
+the same planned transition. A future no-recreate production installer
+must not declare completion solely because a file write succeeded.
+
+The existing read-only review action now additionally supports
+`--expect-backhaul-ready`. It does **not** install, restart, repair,
+rollback, create routes, change a manifest, or authorize a live operation.
+With this flag it requires all of the existing signed RC7 invariants:
+the official image-bundled binary SHA, the running Node's unchanged
+ID/image/start/mounts, signed HMAC/replay and signed engine inventory
+(`frp=ready`, `backhaul=ready`), independently observed IR FRPS
+Owner or local Foreign managed FRPC Children, and a COMMITTED FRP
+receipt bound to the entire current Manifest.
+
+It then reads the strict private 0600 original-image
+`retained-rc7.json` journal under the existing shared engine lock,
+validates its complete checksum, exact journal field schema, role,
+official binary SHA and canonical prior Manifest/receipt byte pairs,
+recomputes the **only** permissible paired transition using the same
+transaction planner, and compares **both exact current files** to the
+expected postcommit bytes. It refuses a missing/non-COMMITTED journal,
+an unexpected signed inventory, malformed/tampered/cross-role receipt,
+untrusted cleanup seal or competing FRP/Manifest recovery file. The
+journal is read a second time after the signed runtime checks to fail
+closed on a concurrent replacement. No secrets, exact hashes or
+identity bytes appear in its status output.
+
+For a **verified committed** retained transaction only, it reports
+`RC7_BACKHAUL_ENGINE=READY_SIGNED_INVENTORY` and
+`RC7_BACKHAUL_MANIFEST_PLAN=COMMITTED_PAIR_VERIFIED_READ_ONLY`.
+It still reports `INSTALL_ALLOWED=NO`,
+`ACTIVATION_GATE=HOLD`, and does not prove remote traffic,
+the provider recovery console, or an approved live writer.
+The normal existing no-flag menu review remains strictly preinstall
+(`not-installed`). This is a **post-install acceptance prerequisite**,
+not an authorization for executing the install.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,

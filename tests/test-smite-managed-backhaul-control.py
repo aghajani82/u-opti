@@ -128,7 +128,7 @@ class OperatorControl(unittest.TestCase):
                          owner_hashes=None, owner_error=None,
                          child_ids=None, child_lists=None,
                          child_hashes=None, child_error=None,
-                         runtime_snapshots=None):
+                         runtime_snapshots=None, pair_after=None):
         engines = {name: "not-installed" for name in control.ENGINES}
         engines["frp"] = "ready"
         if inventory is None:
@@ -183,7 +183,10 @@ class OperatorControl(unittest.TestCase):
             Hold=FakeHold, locked=lambda:contextlib.nullcontext(),
             inspect_container=inspect, signed_probe=hmac, run=run,
         )
-        manifest, receipt = self.rc7_manifest_pair_fixture()
+        manifest, receipt = (
+            self.rc7_manifest_pair_fixture() if pair_after is None
+            else pair_after)
+        receipt = dict(receipt)
         receipt["role"] = role
         manifest_path = Path("/opt/smite-node/config/engine-state/engines.json")
         journal_dir = Path("/var/lib/u-opti/smite-rc7-frp-enrollment")
@@ -319,6 +322,142 @@ class OperatorControl(unittest.TestCase):
         self.assertNotIn("existing-frpc-one",str(status))
         self.assertNotIn("a"*64,str(status))
         self.assertNotIn("Docker",str(status))
+
+    def _rc7_committed_pair_fixture(self, role):
+        original_manifest, original_receipt = self.rc7_manifest_pair_fixture(
+            extra=True)
+        original_receipt = dict(original_receipt, role=role)
+        prior_receipt_bytes = (json.dumps(original_receipt, sort_keys=True)
+                               + "\n").encode()
+        digest = control.package.OFFICIAL_BINARY_SHA256["amd64"]
+        next_manifest, next_receipt = (
+            control.transaction._pair_expected_transition(
+                original_manifest, prior_receipt_bytes, digest, role=role))
+        record = {
+            "schema": 1, "role": role, "binary": digest,
+            "witness": "5" * 64, "phase": "COMMITTED",
+            "manifest": original_manifest.hex(),
+            "receipt": prior_receipt_bytes.hex(),
+        }
+        envelope = {
+            "record": record,
+            "sha256": hashlib.sha256(json.dumps(
+                record, sort_keys=True).encode()).hexdigest(),
+        }
+        journal = (json.dumps(envelope, sort_keys=True) + "\n").encode()
+        return next_manifest, json.loads(next_receipt), journal
+
+    def test_rc7_retained_postcommit_signed_inventory_and_exact_pair_both_roles(self):
+        # Postcommit evidence must bind the full original and updated
+        # Manifest/FRP receipt, alongside the actual signed ready inventory.
+        for role in ("ir", "foreign"):
+            manifest, receipt, journal = self._rc7_committed_pair_fixture(role)
+            engines = {name: "not-installed" for name in control.ENGINES}
+            engines.update(frp="ready", backhaul="ready")
+            fake, calls = self._rc7_bundle_fake(
+                role=role, pair_after=(manifest, receipt),
+                inventory={"mode": "managed", "engines": engines})
+            reads = []
+            def read_journal(path, *, limit=8192):
+                self.assertEqual(path, control.RC7_RETAINED_JOURNAL)
+                self.assertEqual(limit, 40000)
+                reads.append(1)
+                return journal
+            with self.subTest(role=role), \
+                 patch.object(control.os, "geteuid", return_value=0), \
+                 patch.object(control, "_load", return_value=fake), \
+                 patch.object(control.transaction, "_pair_read_private",
+                              side_effect=read_journal):
+                report = control.verify_rc7_bundled_backhaul(
+                    role, expected_backhaul_state="ready")
+            self.assertEqual(len(reads), 2)
+            self.assertEqual(calls.count("mounts"), 2)
+            self.assertEqual(calls.count("signed-inventory"), 1)
+            self.assertEqual(report["RC7_BACKHAUL_ENGINE"],
+                             "READY_SIGNED_INVENTORY")
+            self.assertEqual(report["RC7_BACKHAUL_MANIFEST_PLAN"],
+                             "COMMITTED_PAIR_VERIFIED_READ_ONLY")
+            self.assertEqual(report["RC7_FRP_ENGINE"],
+                             "READY_SIGNED_INVENTORY")
+            self.assertEqual(report["NODE_RECREATED"], "NO")
+            self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+            self.assertEqual(report["ACTIVATION_GATE"], "HOLD")
+            self.assertNotIn("5" * 64, str(report))
+            self.assertNotIn(receipt["new"], str(report))
+
+    def test_rc7_retained_postcommit_rejects_corrupt_or_mismatched_journal(self):
+        manifest, receipt, valid = self._rc7_committed_pair_fixture("foreign")
+        baseline = json.loads(valid)
+        for case in ("corrupt", "bad-checksum", "wrong-role",
+                     "pending", "changed-before", "missing",
+                     "stale-receipt", "duplicate-json-key"):
+            with self.subTest(case=case):
+                payload = json.loads(json.dumps(baseline))
+                if case == "bad-checksum":
+                    payload["sha256"] = "a" * 64
+                elif case == "wrong-role":
+                    payload["record"]["role"] = "ir"
+                elif case == "pending":
+                    payload["record"]["phase"] = "PREPARED"
+                elif case == "changed-before":
+                    payload["record"]["manifest"] = "aa" * 6
+                if case in ("wrong-role", "pending", "changed-before"):
+                    payload["sha256"] = hashlib.sha256(
+                        json.dumps(payload["record"], sort_keys=True).encode()
+                    ).hexdigest()
+                journal = (
+                    b"INVALID" if case == "corrupt" else
+                    b'{"record":{},"record":{}}' if case == "duplicate-json-key"
+                    else (json.dumps(payload, sort_keys=True) + "\n").encode()
+                )
+                observed = dict(receipt)
+                if case == "stale-receipt":
+                    observed["new"] = "f" * 64
+                engines = {name: "not-installed" for name in control.ENGINES}
+                engines.update(frp="ready", backhaul="ready")
+                fake, calls = self._rc7_bundle_fake(
+                    role="foreign", pair_after=(manifest, observed),
+                    inventory={"mode": "managed", "engines": engines})
+                def read_journal(path, *, limit=8192):
+                    if case == "missing":
+                        raise control.transaction.Hold("NO_JOURNAL")
+                    return journal
+                with patch.object(control.os, "geteuid", return_value=0), \
+                     patch.object(control, "_load", return_value=fake), \
+                     patch.object(control.transaction, "_pair_read_private",
+                                  side_effect=read_journal), \
+                     self.assertRaises(control.Hold):
+                    control.verify_rc7_bundled_backhaul(
+                        "foreign", expected_backhaul_state="ready")
+                self.assertEqual(calls.count("signed-inventory"), 1)
+                self.assertIn("frp-verify", calls)
+
+    def test_rc7_retained_postcommit_rejects_journal_switch_after_signed_proof(self):
+        manifest, receipt, journal = self._rc7_committed_pair_fixture("ir")
+        engines = {name: "not-installed" for name in control.ENGINES}
+        engines.update(frp="ready", backhaul="ready")
+        fake, calls = self._rc7_bundle_fake(
+            role="ir", pair_after=(manifest, receipt),
+            inventory={"mode": "managed", "engines": engines})
+        sequence = iter((journal, journal + b"\n"))
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake), \
+             patch.object(control.transaction, "_pair_read_private",
+                          side_effect=lambda *a, **k: next(sequence)), \
+             self.assertRaisesRegex(
+                 control.Hold, "RC7_RETAINED_COMMIT_CHANGED_DURING_REVIEW"):
+            control.verify_rc7_bundled_backhaul(
+                "ir", expected_backhaul_state="ready")
+        self.assertEqual(calls.count("signed-owner"), 2)
+        self.assertEqual(calls.count("mounts"), 2)
+        fake, calls = self._rc7_bundle_fake(role="ir")
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake), \
+             self.assertRaisesRegex(
+                 control.Hold, "RC7_BUNDLED_BACKHAUL_UNEXPECTED_SIGNED_STATE"):
+            control.verify_rc7_bundled_backhaul(
+                "ir", expected_backhaul_state="ready")
+        self.assertNotIn("manifest-read", calls)
 
     def test_rc7_ir_owner_is_checked_twice_by_existing_signed_endpoint(self):
         fake,calls = self._rc7_bundle_fake(role="ir")
