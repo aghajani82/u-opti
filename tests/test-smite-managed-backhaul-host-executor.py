@@ -1026,6 +1026,27 @@ class HostExecutor(unittest.TestCase):
                                expected_before=expected),
             "COMMITTED")
 
+    def test_retained_two_host_writer_rejects_new_journal_after_preflight(self):
+        # A previous COMMITTED transaction must never be adopted as a fresh
+        # coordinator install success, even with identical FRP baseline.
+        from dataclasses import replace
+        step, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        original = (manifest.read_bytes(), receipt.read_bytes())
+        self.assertEqual(step("install"), "COMMITTED")
+        committed = (manifest.read_bytes(), receipt.read_bytes())
+        journal = paths.state / "retained-rc7.json"
+        durable = journal.read_bytes()
+        with self.assertRaisesRegex(exe.Hold, "RETAINED_PREFLIGHT_JOURNAL_APPEARED"):
+            exe._retained_step(paths, action="install", role="ir",
+                               arch="amd64", witness=lambda: "1"*64,
+                               expected_before=original)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), committed)
+        self.assertEqual(journal.read_bytes(), durable)
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), original)
+
     def test_two_host_real_retained_executor_compensates_after_ir_and_foreign_crash(self):
         env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
                "GITHUB_REPOSITORY": "aghajani82/u-opti",
