@@ -779,6 +779,31 @@ production transaction. `INSTALL_ALLOWED=NO` and
 `ACTIVATION_GATE=HOLD` remain required. No real IR/Grandoptical,
 user proxy or FRP configuration is modified.
 
+## Signed two-node retained Host Executor: final cleanup evidence (CI only)
+
+The previous real Docker/strict-HMAC/WSS/443 integration case exercised
+retained Host Executor `install` and `rollback` on both signed running Nodes,
+but stopped while each private journal remained `RESTORED`. This was an
+incomplete **test assertion** of the transaction's documented terminal
+cleanup and did not prove that a next enrollment starts from no pending
+recovery record. Its direct Host Executor calls also did not pass the
+original two-host preflight witness and exact receipt/Manifest before-image
+that the CI-only coordinator already requires.
+
+The existing two-signed-Node test now pins both role-specific protected
+Node/FRP/replay witnesses and exact original Manifest/FRP receipt bytes under
+their own engine locks before either write; passes those immutable baselines
+to each retained install; rejects a deliberately stale IR witness before
+any durable journal or protected pair modification; then performs both
+existing `rollback` **and** `cleanup` actions. It asserts byte-exact
+restoration and absence of both `retained-rc7.json` and
+`retained-rc7-cleanup.json` on **each** host. Signed Owner/Child status
+and real FRP forwarding remain checked after cleanup, without container
+recreation or public ports. This only closes a missing real-CI terminal
+evidence check; it neither implements a production writer nor authenticates
+the actual live IR/Grandoptical peer/source and provider recovery state.
+
+`INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain mandatory.
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
