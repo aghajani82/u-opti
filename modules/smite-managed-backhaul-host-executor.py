@@ -200,7 +200,8 @@ def _new(path: Path, data: bytes, mode: int) -> None:
 
 @contextmanager
 def _lock(path: Path):
-    if path.is_symlink() or not path.parent.is_dir():
+    if (not path.is_absolute() or path.is_symlink()
+            or path.parent.is_symlink() or not path.parent.is_dir()):
         raise Hold("UNSAFE_LOCK_PATH")
     fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
@@ -212,6 +213,16 @@ def _lock(path: Path):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Hold("ANOTHER_ENGINE_TRANSACTION_ACTIVE") from exc
+        # A file replaced between open() and flock() is a detached lock
+        # inode. No second writer would be serialized by that old inode.
+        # Fail before the first transactional journal or engine write.
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            raise Hold("ENGINE_LOCK_CHANGED") from exc
+        if (not stat.S_ISREG(current.st_mode) or
+                (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino)):
+            raise Hold("ENGINE_LOCK_CHANGED")
         yield
     finally:
         os.close(fd)
