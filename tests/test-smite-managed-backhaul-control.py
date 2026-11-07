@@ -1064,7 +1064,11 @@ class OperatorControl(unittest.TestCase):
         self.assertIn("RC7 BUNDLED BACKHAUL + SIGNED INVENTORY", result.stdout)
         self.assertIn("HOLD: RC7_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED", result.stderr)
         self.assertIn("ACTIVATION_GATE=HOLD",result.stdout)
-        self.assertIn("installation on real IR/KH is disabled", result.stdout)
+        # The existing option 3 now offers an IR-only retained metadata
+        # canary, but the walkthrough explicitly selects 0=cancel. A
+        # noninteractive/dummy-node walkthrough must never mutate anything.
+        self.assertIn("IR Backhaul retained install / rollback", result.stdout)
+        self.assertIn("No changes made.", result.stdout)
         self.assertFalse((self.node / "config/engine-state").exists())
 
     def test_concurrent_engine_operations_are_rejected_before_mutation(self):
