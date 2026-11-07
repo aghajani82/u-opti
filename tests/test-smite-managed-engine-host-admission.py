@@ -382,7 +382,13 @@ class SharedHostAdmission(unittest.TestCase):
                      "--signed-pair-manifest", "--signed-pair-manifest-sha256",
                      "--signed-pair-source-sha", "--signed-pair-publish-ref"):
             self.assertIn(name, menu)
-        self.assertIn("HOLD: Backhaul installation on real IR/KH is disabled.", menu)
+        # The only newly admitted live action is an IR-only metadata
+        # transaction via the existing option 3. Foreign and two-host
+        # Backhaul traffic activation stay disabled.
+        self.assertIn("smite_managed_bh_ir_retained_canary", menu)
+        self.assertIn("install-retained-ir", menu)
+        self.assertIn("rollback-retained-ir", menu)
+        self.assertNotIn("install-retained-foreign", menu)
         self.assertIn("HOLD: Host installation disabled. No changes made.", menu)
         self.assertNotIn("docker compose up", menu)
 
