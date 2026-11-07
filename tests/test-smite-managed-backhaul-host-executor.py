@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Managed Backhaul disposable-host executor: real filesystem, fake Docker only."""
 from __future__ import annotations
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import io
@@ -996,6 +997,56 @@ class HostExecutor(unittest.TestCase):
                     self.assertFalse((info["paths"].state / "retained-rc7.json").exists())
                     self.assertFalse((info["paths"].state /
                                       "retained-rc7-cleanup.json").exists())
+
+    def test_two_host_final_prewrite_rejects_peer_identity_drift_without_ir_write(self):
+        # The initial observer has already accepted BOTH roles. A process/
+        # replay identity rotation on either role immediately before its
+        # final locked prewrite check must block the first IR PREPARED journal.
+        # In particular, Foreign cannot silently drift while IR is enrolled.
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        for drift_role in ("foreign", "ir"):
+            with self.subTest(drift_role=drift_role):
+                hosts = self._retained_two_host_real_executor_fixture()
+                target_lock = hosts[drift_role]["paths"].lock
+                fixture = (hosts[drift_role]["root"] / "node-data" /
+                           "broker-replay.fixture.json")
+                original = fixture.read_bytes()
+                lock_calls = []
+                real_lock = exe._lock
+
+                @contextmanager
+                def rotate_at_final_prewrite(path):
+                    if path == target_lock:
+                        lock_calls.append(path)
+                        if len(lock_calls) == 2:
+                            doc = json.loads(fixture.read_bytes())
+                            doc["identity"] += "-rotated"
+                            fixture.write_text(json.dumps(doc, sort_keys=True) + "\n")
+                            fixture.chmod(0o600)
+                    with real_lock(path):
+                        yield
+
+                with patch.dict(os.environ, env), \
+                     patch.object(exe, "_lock", rotate_at_final_prewrite), \
+                     patch.object(exe.subprocess, "run",
+                                  side_effect=AssertionError("DOCKER_OR_NETWORK_CALLED")), \
+                     self.assertRaisesRegex(
+                         exe.Hold, "RETAINED_TWO_HOST_PREFLIGHT_WITNESS_CHANGED"):
+                    exe._retained_two_host_rehearsal_lab(
+                        hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                        arch="amd64", observe=lambda *_: True)
+                self.assertEqual(len(lock_calls), 2)
+                self.assertNotEqual(fixture.read_bytes(), original)
+                for info in hosts.values():
+                    self.assertEqual(
+                        (info["manifest"].read_bytes(),
+                         info["receipt"].read_bytes()), info["before"])
+                    self.assertFalse(
+                        (info["paths"].state / "retained-rc7.json").exists())
+                    self.assertFalse(
+                        (info["paths"].state / "retained-rc7-cleanup.json").exists())
 
     def test_retained_step_requires_exact_preflight_bytes_under_writer_lock(self):
         # A writer racing after the coordinator's second preflight check

@@ -624,6 +624,12 @@ def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
                     or (pair._pair_read_private(manifest),
                         pair._pair_read_private(receipt)) != snapshots[role]):
                 raise Hold("RETAINED_TWO_HOST_PREFLIGHT_PAIR_CHANGED")
+            # A peer's FRP/Node identity can drift after the initial
+            # two-host observer but before IR's first manifest write.
+            # Catch this under the final role-specific engine lock so an
+            # IR journal is not begun on stale Foreign protected state.
+            if witness(role, paths.node.parent) != baselines[role]:
+                raise Hold("RETAINED_TWO_HOST_PREFLIGHT_WITNESS_CHANGED")
     failed = False
     try:
         if _retained_step(ir, action="install", role="ir", arch=arch,
