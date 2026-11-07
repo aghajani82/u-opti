@@ -804,6 +804,92 @@ evidence check; it neither implements a production writer nor authenticates
 the actual live IR/Grandoptical peer/source and provider recovery state.
 
 `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain mandatory.
+## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
+
+**Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
+servers. IR hosts the Smite Panel/Node and tracked FRPS Owner; Grandoptical
+is the foreign Node, tracked FRPC Children and Sanaei/Xray. Persisted FRP
+tunnels `20182`, `optical`, `nahavi` and all unrelated Grandoptical services
+are **protected production state**. This section supersedes the
+disposable-`SAVED_TUNNELS=ZERO` assumptions of
+`smite-backhaul-two-host-vps-trial-admission.md` **for this specific pair**.
+It is **not** permission to install, update, reboot, clone into the
+production network, restore, or change either live server.
+
+### Gate A — independent provider recovery evidence, one host at a time
+
+Gather the following from the **provider control plane**, not from
+U-OPTI, Docker, a screenshot of a server's local filesystem, or the
+other host's FRP tunnel. Every item is `UNVERIFIED` until an operator
+independently witnesses it; recording an intention is not proof.
+
+| Independent observation | IR | Grandoptical | Sufficient evidence / stop condition |
+| --- | --- | --- | --- |
+| Provider snapshot or full-volume backup exists | UNVERIFIED | UNVERIFIED | Provider-side record, exact matching machine and **every** required disk/volume, creation UTC, success/completion state; missing volume => HOLD |
+| Restore tested in isolation | UNVERIFIED | UNVERIFIED | Separate throwaway clone from that exact backup, network isolated **before boot** so duplicate FRPS/FRPC/Node identities cannot contact Panel/peers; independently verify recoverability of OS, persistent Docker data, private FRP receipt, engine manifest, broker/replay and Sanaei DB where applicable; no production DNS/IP assignment => HOLD if absent |
+| Console/rescue path independent of SSH, FRP and Backhaul | UNVERIFIED | UNVERIFIED | Successful authorized provider console login to the **actual host** or equivalently proved independent rescue path; merely seeing a console button is insufficient => HOLD |
+| Provider exclusions recorded | UNVERIFIED | UNVERIFIED | Determine whether provider firewall rules, public IPs, DNS, detached volumes, backup retention and image metadata lie **outside** snapshot restore; unresolved dependencies => HOLD |
+| Recovery plan reviewed | UNVERIFIED | UNVERIFIED | Restoration order, return-to-service plan, preservation checks and authorized human rollback decision recorded privately for each role; no automatic rollback of a running VPS => HOLD |
+
+**Isolation requirement:** Never boot a restored clone on a routable
+network with copied Node identities, replay databases, FRPS Owner/FRPC
+Child credentials, 3x-ui accounts or client tunnels enabled. A clone can
+duplicate live credentials and disrupt the original deployment. A
+provider-approved isolated restore may require separate resources or
+costs; obtain explicit operator approval **before** creating them.
+Do not use a full-server restore on IR/Grandoptical as the test.
+Rebooting, switching to rescue mode, taking a new snapshot, creating a
+clone, altering firewall rules or pausing production services are
+**state-changing actions** and are not authorized by this document.
+
+### Gate B — signed two-host service continuity (separate from backup)
+
+- Capture independent read-only **role-specific** before/after signed
+  Node/Owner/Child inventory at its already reviewed identity and replay
+  boundary. Compare the exact expected running image digest, FRPS Owner
+  process identity (IR), each managed FRPC Child process identity
+  (Grandoptical), saved-tunnel registry bytes/hash, Node container identity,
+  broker socket/replay on IR, WSS Edge journal and TLS/443 guard.
+- The current IR custom `20182` route yielded TLS-verified HTTPS
+  `OPTIONS` status `200` with `X-Padding`. This proves only that the
+  **existing HTTP XHTTP handler** was reached on that request. It does
+  **not** authenticate a specific foreign FRPC Child, signed remote
+  Owner/Child continuity, VLESS handshake or an end-to-end data-plane.
+- An acceptable external peer/data-plane proof must attribute the **same**
+  bounded client request to the pinned, signed IR Owner **and** the signed
+  Grandoptical Child via their existing authenticated management evidence
+  and the actual client VLESS/XHTTP connection, while showing saved FRP
+  tunnels remain healthy and stable. No secret token, UUID, profile, key,
+  private config, raw request body or unredacted client log may be copied
+  into GitHub/CI/chat. Client-reported connectivity alone is insufficient.
+- Do not generate a new tunnel, modify Nginx/Sanaei, re-register FRP,
+  restart/recreate either Node or perform a test reboot to collect this
+  evidence. A proposed probe requiring such an action must receive its
+  **own** separate review and operator authorization.
+
+### Gate C — release decision and operator handoff
+
+Only sanitized metadata may be reported back under Issue #102:
+`ROLE` (`IR` / `FOREIGN`), `PROVIDER_SNAPSHOT_RECORD`
+(`UNVERIFIED` / `RECORDED_PRIVATE`), `ISOLATED_RESTORE`
+(`UNVERIFIED` / `OPERATOR_VERIFIED_PRIVATE`), `CONSOLE_ACCESS`
+(`UNVERIFIED` / `OPERATOR_VERIFIED_PRIVATE`),
+`EXTERNAL_DEPENDENCIES` (`UNVERIFIED` / `REVIEWED_PRIVATE`),
+`SIGNED_OWNER_CHILD_DATA_PLANE` (`NOT_PROVEN` / `SEPARATELY_REVIEWED`),
+and `HOST_TRANSACTION_AND_ROLLBACK` (`NOT_IMPLEMENTED` until reviewed).
+These are **operator evidence labels**, not a schema accepted by any
+existing gate, not signatures, and never installation authorization.
+Keep provider identifiers, screenshots, account metadata, recovery
+material and credentials in operator-controlled private storage.
+
+**Stop rule:** Any missing, stale, ambiguous, non-isolated or
+cross-host-attributed evidence => `HOLD`. Even if both provider
+restores and signed traffic prove healthy, production remains
+`INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` until the separate
+retained-node **no-recreate** writer/rollback, exact two-host recovery
+protocol, release qualification and explicit live-operation approval
+are independently reviewed. No Backhaul or U-OPTI update is requested
+from the live servers by this documentation change.
 ## Production blockers still OPEN — do not bypass
 
 - Actual IR/Grandoptical running Node digest and complete signed RC7 runtime
