@@ -887,6 +887,11 @@ def _retained_review_pending_recovery(paths: Paths) -> str | None:
     return None
 
 
+def _retained_live_root_required() -> bool:
+    """Separate the root-only admission from filesystem ownership reads."""
+    return os.geteuid() == 0
+
+
 def _retained_live_signed_witness(*, role: str, expected_node_image: str,
                                   paths: Paths = Paths()) -> str:
     """Stable, role-scoped LIVE Node/FRP witness for future retained writer.
@@ -896,7 +901,7 @@ def _retained_live_signed_witness(*, role: str, expected_node_image: str,
     or authorize any real transaction. Signed local Agent GETs consume replay
     nonces; no Node, FRP, broker, routing or engine bytes are written here.
     """
-    if (paths != Paths() or os.geteuid() != 0
+    if (paths != Paths() or not _retained_live_root_required()
             or role not in ("ir", "foreign")
             or IMAGE.fullmatch(expected_node_image) is None):
         raise Hold("RETAINED_LIVE_WITNESS_SCOPE_UNTRUSTED")
