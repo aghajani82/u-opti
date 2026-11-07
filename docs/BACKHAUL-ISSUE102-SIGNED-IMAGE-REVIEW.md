@@ -894,6 +894,34 @@ The normal existing no-flag menu review remains strictly preinstall
 (`not-installed`). This is a **post-install acceptance prerequisite**,
 not an authorization for executing the install.
 
+## Production writer release gate: signed postcommit on REAL two-Node CI topology
+
+The new postcommit verifier must be exercised against the original
+`smite-managed-backhaul-host-executor.py` retained transaction, not only
+synthetic 0600 records or mocked signed Agent responses. The full existing
+signed two-Node Docker integration now pins the *actual* exact fsynced
+`retained-rc7.json`, committed FRP receipt and engine Manifest **after
+each** role's real Host Executor transition, directly calls the same pure
+`_review_rc7_retained_committed_pair` acceptance logic shipped for
+`verify-rc7-bundle --expect-backhaul-ready`, and asserts the report remains
+`INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD`. Its surrounding
+`observe()` phase verifies the real RC7 signed inventory/replay, active
+tracked FRPS Owner/Foreign FRPC Child, WSS TLS/443, broker and bounded
+Backhaul data-plane. Journal phase spoofing with a valid recomputed
+checksum, wrong receipt bytes, wrong manifest bytes and duplicate JSON
+keys fail closed with **no** mutation of the real running signed fixtures.
+After rollback, the same postcommit verifier must reject the durable
+`RESTORED` journal; sealed cleanup still proves the exact original pair
+and absence of leftover recovery files.
+
+**Scope restriction:** This test proves the postcommit state machine with
+real *disposable* signed Docker Nodes and exact Host Executor journals.
+It does **not** verify signatures on actual IR/Grandoptical host releases,
+provider backup/isolated restore, an independent remote live FRP peer or
+operator deployment approval. A working signed lab test is not permission
+to disable the live two-host writer admission. The production writer
+and recovery procedure remain the central remaining Issue #102 work.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
