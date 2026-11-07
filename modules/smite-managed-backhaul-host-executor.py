@@ -1865,8 +1865,10 @@ def recover(*, expected_node_image: str, role_confirm: str,
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Backhaul disposable-host executor; explicit trial only, no tunnel Apply")
-    p.add_argument("action", choices=("install", "rollback", "recover", "review-in-place"))
+        description="Backhaul reviewed host executor; IR retained metadata canary only, no tunnel Apply")
+    p.add_argument("action", choices=(
+        "install", "rollback", "recover", "review-in-place",
+        "install-retained-ir", "rollback-retained-ir"))
     p.add_argument("--stage", type=Path)
     p.add_argument("--arch", choices=tuple(package.OFFICIAL_BINARY_SHA256))
     p.add_argument("--signed-pair-manifest", type=Path)
@@ -1882,7 +1884,37 @@ def main() -> int:
     try:
         if os.geteuid() != 0:
             raise Hold("ROOT_REQUIRED")
-        if args.action == "review-in-place":
+        if args.action in ("install-retained-ir", "rollback-retained-ir"):
+            # These actions are explicitly IR-only. Never enroll the
+            # live foreign production Node through this canary.
+            challenge = ("INSTALL-RETAINED-BACKHAUL-IR"
+                         if args.action == "install-retained-ir"
+                         else "ROLLBACK-RETAINED-BACKHAUL-IR")
+            if (args.arch is None or args.confirm_role != challenge
+                    or not sys.stdin.isatty()
+                    or input("Type " + challenge + ": ").strip()
+                    != challenge):
+                raise Hold("RETAINED_LIVE_IR_OPERATOR_CONFIRMATION_REQUIRED")
+            if args.action == "install-retained-ir":
+                if (args.signed_pair_manifest is None
+                        or args.signed_pair_manifest_sha256 is None
+                        or args.signed_pair_source_sha is None
+                        or args.signed_pair_publish_ref is None
+                        or args.signed_pair_trusted_root is None):
+                    raise Hold("RETAINED_LIVE_SIGNED_RELEASE_PINS_REQUIRED")
+                result = _retained_live_ir_canary(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image,
+                    signed_pair_manifest=args.signed_pair_manifest,
+                    signed_pair_manifest_sha256=args.signed_pair_manifest_sha256,
+                    signed_pair_source_sha=args.signed_pair_source_sha,
+                    signed_pair_publish_ref=args.signed_pair_publish_ref,
+                    signed_pair_trusted_root=args.signed_pair_trusted_root)
+            else:
+                result = _retained_live_ir_rollback(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image)
+        elif args.action == "review-in-place":
             if args.arch is None or args.confirm_role != "REVIEW-BACKHAUL-IN-PLACE":
                 raise Hold("IN_PLACE_REVIEW_ARCH_AND_CONFIRMATION_REQUIRED")
             result = review_in_place_binary(
