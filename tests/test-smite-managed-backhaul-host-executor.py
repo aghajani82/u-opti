@@ -502,6 +502,37 @@ class HostExecutor(unittest.TestCase):
         runner=RetainedRunner(self.runtime)
         return runner,audit
 
+    def test_retained_real_signed_witness_hold_has_sanitized_phase(self):
+        # The previously generic RETAINED_NODE_PREVIEW_UNVERIFIED concealed
+        # whether Cosign, Node identity, official binary or the existing
+        # FRP tunnel-registry read failed. Fixed stage names only: never
+        # expose the actual exception, Docker logs, paths or tunnel bytes.
+        runner, audit = self._retained_review_fixture()
+        approved = dict(audit, SIGNED_REGISTRY_PAIR_PROOF="COSIGN_VERIFIED",
+                        NODE_ROLE="IR")
+        original = (self.config / "engine-state/engines.json").read_bytes()
+        with patch.object(exe, "Paths", return_value=self.paths), \
+             patch.object(exe.admission, "report", return_value=approved), \
+             patch.object(exe, "_retained_live_signed_witness",
+                          side_effect=exe.Hold("SECRET_PATH_OR_TOKEN")) as witness:
+            report = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=self.paths, runner=runner)
+        self.assertEqual(witness.call_count, 1)
+        self.assertEqual(
+            report["REASON"], "RETAINED_PREVIEW_LOCAL_SIGNED_WITNESS_UNVERIFIED")
+        self.assertEqual(report["SIGNED_REGISTRY_PAIR_PROOF"], "COSIGN_VERIFIED")
+        self.assertEqual(report["RETAINED_NODE_BACKHAUL_BINARY"], "UNVERIFIED")
+        self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(report["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("SECRET_PATH_OR_TOKEN", str(report))
+        self.assertEqual((self.config / "engine-state/engines.json").read_bytes(),
+                         original)
+        self.assertFalse(self.state.exists())
+        # The only commands were read-only Docker inspect; not a writer.
+        self.assertTrue(all(call[:2] == ("docker", "inspect")
+                            for call in runner.calls))
+
     def test_retained_read_only_review_holds_existing_engine_lock(self):
         # Read-only admission must neither create a lock nor race with FRP
         # enrollment or a retained Backhaul paired-receipt transaction.
