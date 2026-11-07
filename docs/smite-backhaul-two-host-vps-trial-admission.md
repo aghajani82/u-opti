@@ -6,6 +6,15 @@
 > do not yet implement a real-host Backhaul installer. **Do not run these
 > commands on production or assume U-OPTI main has these new files.**
 
+> **ACTIVE IR / Grandoptical — DO NOT USE THIS DISPOSABLE-HOST PROCEDURE.**
+> Issue #102's actual retained Node pair already has active saved FRP
+> tunnels (`20182`, `optical`, `nahavi`) and Grandoptical Sanaei data.
+> The `SAVED_TUNNELS=ZERO`/rebuild assumptions and experimental
+> host-executor steps here are **not** valid for those servers.
+> The current non-authorizing operator/provider recovery and signed
+> peer evidence requirements are in
+> [BACKHAUL-ISSUE102-SIGNED-IMAGE-REVIEW.md](BACKHAUL-ISSUE102-SIGNED-IMAGE-REVIEW.md#production-recovery-evidence--live-ir--grandoptical-operator-only-hold).
+> Neither document authorizes a live install or host change.
 ## Step 1 — Before touching either test VPS
 
 - Keep stable/main unchanged. Use the reviewed experimental branch only in
