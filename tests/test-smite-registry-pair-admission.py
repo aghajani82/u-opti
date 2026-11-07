@@ -259,6 +259,86 @@ print(json.dumps([{"critical": {"type": "cosign container image signature",
                 self.check(trusted_root=alias)
             self.assertFalse(self.logs.exists())
 
+    def test_rc7_missing_cosign_uses_only_temp_sha_pinned_verified_asset(self):
+        # No host installation: a precisely pinned official asset is used
+        # for both roles and removed after the signed check.
+        asset = b"offline-test-cosign-executable"
+        self.document["source_commit"] = gate.COSIGN_RC7_SOURCE_SHA
+        self.document["publish_ref"] = gate.COSIGN_RC7_PUBLISH_REF
+        self.document["version"] = "2.0.0-rc.7"
+        self.persist()
+        root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
+        seen = []
+        def fake_run(args, **kwargs):
+            if args[0] == "curl":
+                self.assertIn("--proto-redir", args)
+                self.assertIn("=https", args)
+                self.assertIn(gate.COSIGN_RC7_AMD64_URL, args)
+                Path(args[-1]).write_bytes(asset)
+                return subprocess.CompletedProcess(args, 0, b"", b"")
+            self.assertTrue(args[0].startswith("/tmp/"))
+            self.assertEqual(Path(args[0]).read_bytes(), asset)
+            self.assertEqual(Path(args[0]).stat().st_mode & 0o777, 0o700)
+            self.assertEqual(args[1], "verify")
+            self.assertIn("--trusted-root", args)
+            role = "panel" if "smite-panel@" in args[-1] else "node"
+            seen.append((args[0], role))
+            payload = [{
+                "critical": {"type": "cosign container image signature",
+                             "image": {"docker-manifest-digest": args[-1].split("@")[-1]}},
+                "optional": {"smite_source_sha": gate.COSIGN_RC7_SOURCE_SHA,
+                             "smite_role": role},
+            }]
+            return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+        with patch.object(gate.shutil, "which", return_value=None), \
+             patch.object(gate.platform, "machine", return_value="x86_64"), \
+             patch.object(gate, "COSIGN_RC7_AMD64_SHA256",
+                          hashlib.sha256(asset).hexdigest()), \
+             patch.object(gate.subprocess, "run", side_effect=fake_run) as run:
+            self.check(trusted_root=root, source_sha=gate.COSIGN_RC7_SOURCE_SHA,
+                       publish_ref=gate.COSIGN_RC7_PUBLISH_REF)
+            self.assertEqual(run.call_count, 3)
+        self.assertEqual([x[1] for x in seen], ["panel", "node"])
+        self.assertEqual(len({x[0] for x in seen}), 1)
+        self.assertFalse(Path(seen[0][0]).exists())
+
+    def test_rc7_missing_cosign_bad_hash_or_download_holds_before_verify(self):
+        self.document["source_commit"] = gate.COSIGN_RC7_SOURCE_SHA
+        self.document["publish_ref"] = gate.COSIGN_RC7_PUBLISH_REF
+        self.document["version"] = "2.0.0-rc.7"
+        self.persist()
+        root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
+        for rc in (0, 22):
+            with self.subTest(curl_returncode=rc):
+                def fake_run(args, **kwargs):
+                    self.assertEqual(args[0], "curl")
+                    if rc == 0:
+                        Path(args[-1]).write_bytes(b"not-the-reviewed-executable")
+                    return subprocess.CompletedProcess(args, rc, b"", b"")
+                with patch.object(gate.shutil, "which", return_value=None), \
+                     patch.object(gate.platform, "machine", return_value="x86_64"), \
+                     patch.object(gate.subprocess, "run", side_effect=fake_run) as run:
+                    with self.assertRaises(gate.AdmissionHold):
+                        self.check(trusted_root=root,
+                                   source_sha=gate.COSIGN_RC7_SOURCE_SHA,
+                                   publish_ref=gate.COSIGN_RC7_PUBLISH_REF)
+                    self.assertEqual(run.call_count, 1)
+
+    def test_rc7_missing_cosign_wrong_arch_holds_without_network(self):
+        self.document["source_commit"] = gate.COSIGN_RC7_SOURCE_SHA
+        self.document["publish_ref"] = gate.COSIGN_RC7_PUBLISH_REF
+        self.document["version"] = "2.0.0-rc.7"
+        self.persist()
+        root = ROOT / "modules/smite-rc7-sigstore-trusted-root.json"
+        with patch.object(gate.shutil, "which", return_value=None), \
+             patch.object(gate.platform, "machine", return_value="aarch64"), \
+             patch.object(gate.subprocess, "run") as run:
+            with self.assertRaises(gate.AdmissionHold):
+                self.check(trusted_root=root,
+                           source_sha=gate.COSIGN_RC7_SOURCE_SHA,
+                           publish_ref=gate.COSIGN_RC7_PUBLISH_REF)
+            run.assert_not_called()
+
     def test_symlink_is_rejected(self):
         alias = self.folder / "alias.json"
         alias.symlink_to(self.path)
