@@ -258,9 +258,119 @@ class EnrollmentTests(unittest.TestCase):
                 replay.assert_not_called()
                 inventory.assert_not_called()
 
+    def test_signed_foreign_child_requires_real_signed_agent_and_wss_socket(self):
+        snippet=ctl.SIGNED_CHILD_REQUEST
+        self.assertIn("target='/api/agent/tunnels/status?tunnel_id='+tunnel_id",snippet)
+        self.assertIn("nonce=secrets.token_hex(16)",snippet)
+        self.assertIn("assert error.code==401",snippet)
+        self.assertIn("proc.net_connections",snippet)
+        self.assertIn("psutil.CONN_ESTABLISHED",snippet)
+        self.assertIn("getattr(entry.raddr,'port',None)==443",snippet)
+        self.assertIn("len(matching)==1",snippet)
+        self.assertIn("ProxyHandler({})",snippet)
+        self.assertNotIn("/tunnels/apply",snippet)
+        self.assertNotIn("/tunnels/remove",snippet)
+        compile(snippet, "<signed-child-readonly>", "exec")
+        child="FRP-IR-Grandoptical-20182"
+        expected={"schema":1,
+                  "child_id_sha256":ctl.sha(child.encode()),
+                  "instance_sha256":"a"*64,
+                  "signed_status":"PASS","wss_443_socket":"ESTABLISHED"}
+        raw=json.dumps(expected)
+        self.assertEqual(ctl.signed_child_payload(raw),expected)
+        with patch.object(ctl.rt,"run",return_value=raw) as run:
+            self.assertEqual(ctl.signed_child_inventory(child),"a"*64)
+            args,kwargs=run.call_args
+            self.assertEqual(args[0][:4],
+                             ["docker","exec","--env","UOPTI_FRP_CHILD_ID="+child])
+            self.assertEqual(args[0][4:8],
+                             ["smite-node","python3","-B","-c"])
+            self.assertEqual(kwargs["timeout"],30)
+        with patch.object(ctl.rt,"run") as run:
+            for child in ("", "../etc", "semi;colon", "a"*129, "a/b", "\n"):
+                with self.subTest(child=repr(child)),self.assertRaises(ctl.Hold):
+                    ctl.signed_child_inventory(child)
+            run.assert_not_called()
+
+    def test_signed_foreign_child_fails_closed_on_forged_or_partial_evidence(self):
+        good={"schema":1,"child_id_sha256":"b"*64,
+              "instance_sha256":"a"*64,"signed_status":"PASS",
+              "wss_443_socket":"ESTABLISHED"}
+        invalid=[
+            dict(good, instance_sha256="abc"),
+            dict(good, signed_status="UNVERIFIED"),
+            dict(good, wss_443_socket="LISTEN"),
+            dict(good, extra="secret"),
+            dict(good, schema=True),
+            dict(good, child_id_sha256="c"*63),
+            {"schema":1},
+            [good],
+        ]
+        for doc in invalid:
+            with self.subTest(doc=str(doc)[:40]),self.assertRaises(ctl.Hold):
+                ctl.signed_child_payload(json.dumps(doc))
+        for raw in ('{"schema":1,"schema":1}', 'bad', 'null', 'A'*4097):
+            with self.assertRaises(ctl.Hold):
+                ctl.signed_child_payload(raw)
+        valid=json.dumps(good)
+        with patch.object(ctl.rt,"run",return_value=valid) as run:
+            with self.assertRaisesRegex(ctl.Hold,"SIGNED_FRPC_CHILD_ID_MISMATCH"):
+                ctl.signed_child_inventory("child-20182")
+            run.assert_called_once()
+
+    def test_foreign_child_cli_remains_read_only_and_non_authorizing(self):
+        cid="FRP-IR-Grandoptical-20182"
+        calls=[]
+        def guard(label):
+            def inner(*_):
+                calls.append(label)
+            return inner
+        out=io.StringIO()
+        with patch("sys.argv",["enroll","verify-child","--role","foreign",
+                              "--tunnel-id",cid]), \
+             patch.object(ctl.os,"geteuid",return_value=0), \
+             patch.object(ctl.rt,"locked",return_value=contextlib.nullcontext()), \
+             patch.object(ctl,"state",return_value={"role":"foreign",
+                                                    "state":"COMMITTED"}), \
+             patch.object(ctl,"verify_file",side_effect=guard("receipt")), \
+             patch.object(ctl.rt,"signed_probe",side_effect=guard("replay")), \
+             patch.object(ctl,"enrolled_status",side_effect=guard("inventory")), \
+             patch.object(ctl,"signed_child_inventory",
+                          side_effect=lambda token: (
+                              calls.append("child") or "a"*64)), \
+             contextlib.redirect_stdout(out):
+            self.assertEqual(ctl.main(),0)
+        self.assertEqual(calls,["receipt","replay","inventory","child"])
+        rendered=out.getvalue()
+        self.assertIn("RC7_SIGNED_FOREIGN_FRPC_CHILD_VERIFY=PASS_LOCAL_TLS443",
+                      rendered)
+        self.assertIn("FRPC_CHILD_INSTANCE_SHA256="+"a"*64,rendered)
+        self.assertIn("SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN",rendered)
+        self.assertIn("FRP_DATA_PLANE=NOT_PROVEN",rendered)
+        self.assertIn("LIVE_CONFIG_CHANGES=NONE",rendered)
+        self.assertNotIn(cid,rendered)
+        for role,child in (("ir",cid),("foreign",None),
+                           ("foreign","../bad")):
+            with self.subTest(role=role,child=child):
+                args=["enroll","verify-child","--role",role]
+                if child is not None: args+=["--tunnel-id",child]
+                err=io.StringIO()
+                with patch("sys.argv",args), \
+                     patch.object(ctl.os,"geteuid",return_value=0), \
+                     patch.object(ctl.rt,"locked",return_value=contextlib.nullcontext()), \
+                     patch.object(ctl,"state",return_value={
+                         "role":role,"state":"COMMITTED"}), \
+                     patch.object(ctl,"verify_file") as verify, \
+                     patch.object(ctl,"signed_child_inventory") as child_probe, \
+                     contextlib.redirect_stderr(err):
+                    self.assertEqual(ctl.main(),2)
+                    verify.assert_not_called()
+                    child_probe.assert_not_called()
+                    self.assertIn("HOLD:",err.getvalue())
+
     def test_no_host_binaries_or_network_listener_side_effects(self):
         src=PATH.read_text()
-        self.assertIn("choices=('plan','apply','verify','verify-owner','rollback','recover')",src)
+        self.assertIn("choices=('plan','apply','verify','verify-owner','verify-child','rollback','recover')",src)
         self.assertIn("SNAPSHOTS-CONSOLES-VERIFIED",src)
         self.assertIn("SIGNED_INVENTORY",src)
         self.assertIn("FRP_BINARY_EXTERNAL_MOUNT",src)
