@@ -668,10 +668,10 @@ class HostExecutor(unittest.TestCase):
                 ("GITHUB_EVENT_NAME", "push"),
                 ("GITHUB_REPOSITORY", "someone-else/other"),
                 ("RUNNER_TEMP", str(self.root / "wrong-runner"))):
-            with self.subTest(env=variable), \\
-                 patch.dict(os.environ, {variable: value}), \\
+            with self.subTest(env=variable), \
+                 patch.dict(os.environ, {variable: value}), \
                  patch.object(exe, "_lock",
-                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \\
+                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
                  self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
                 exe._retained_step(paths, action="install", role="ir",
                                    arch="amd64", witness=lambda: "1" * 64)
@@ -682,14 +682,14 @@ class HostExecutor(unittest.TestCase):
             with self.subTest(marker=kind):
                 marker.unlink()
                 if kind == "tampered":
-                    marker.write_text("UNTRUSTED-LAB-MARKER\\n")
+                    marker.write_text("UNTRUSTED-LAB-MARKER\n")
                 elif kind == "symlink":
                     reference = self.root / "fake-marker-reference"
                     reference.write_bytes(valid_marker)
                     marker.symlink_to(reference)
                 with patch.object(
                         exe, "_lock",
-                        side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \\
+                        side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
                      self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
                     exe._retained_step(paths, action="install", role="ir",
                                        arch="amd64", witness=lambda: "1" * 64)
@@ -708,9 +708,9 @@ class HostExecutor(unittest.TestCase):
         outsider = self.root.parent / "not-under-the-disposable-root"
         for field in ("node", "staging", "state", "lock",
                       "binary", "frp_state"):
-            with self.subTest(resource=field), \\
+            with self.subTest(resource=field), \
                  patch.object(exe, "_lock",
-                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \\
+                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
                  self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
                 exe._retained_step(
                     replace(paths, **{field: outsider / field}),
@@ -726,9 +726,9 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual(step("install"), "COMMITTED")
         committed = (manifest.read_bytes(), receipt.read_bytes())
         committed_journal = journal.read_bytes()
-        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), \\
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), \
              patch.object(exe, "_lock",
-                          side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \\
+                          side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
              self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
             step("rollback")
         self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
