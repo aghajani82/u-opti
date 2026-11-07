@@ -175,6 +175,86 @@ print(raw.decode('utf-8'))
 
 RC7_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
+# Foreign preflight reuses the existing verified RC7 Child checker. Inspect
+# *only* the saved FRP client identifiers: never output a token, config,
+# destination, address or entire tunnels.json. Unknown/malformed FRP
+# entries and missing/unreadable saved state fail closed, not "zero tunnels".
+RC7_BUNDLED_FOREIGN_SAVED_CHILDREN = r"""
+import json,os,re,stat
+path="/var/lib/smite-node/tunnels.json"
+fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+with os.fdopen(fd,"rb") as stream:
+    meta=os.fstat(stream.fileno())
+    assert stat.S_ISREG(meta.st_mode) and meta.st_nlink==1
+    assert 0 < meta.st_size <= 1048576
+    raw=stream.read(1048577)
+    assert 0 < len(raw) <= 1048576
+def no_duplicates(pairs):
+    out={}
+    for key,value in pairs:
+        if key in out: raise ValueError("duplicate")
+        out[key]=value
+    return out
+saved=json.loads(raw,object_pairs_hook=no_duplicates)
+assert isinstance(saved,dict)
+ids=[]
+for key,record in saved.items():
+    assert isinstance(key,str) and isinstance(record,dict)
+    if record.get("core") != "frp":
+        continue
+    spec=record.get("spec")
+    assert isinstance(spec,dict) and spec.get("mode") == "client"
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}",key)
+    ids.append(key)
+assert 0 < len(ids) <= 32
+print(json.dumps({"schema":1,"child_ids":sorted(ids)},sort_keys=True))
+"""
+
+RC7_CHILD_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _rc7_foreign_saved_child_ids(frp) -> tuple[str, ...]:
+    # The returned identifiers remain in memory only. Any invalid script
+    # response is a fixed HOLD, never raw input or Docker stderr.
+    raw = frp.rt.run(
+        ["docker", "exec", "smite-node", "python3", "-B", "-c",
+         RC7_BUNDLED_FOREIGN_SAVED_CHILDREN], timeout=30)
+    if not isinstance(raw, str) or not 0 < len(raw.encode("utf-8")) <= 4096:
+        raise Hold("RC7_BUNDLED_FOREIGN_SAVED_CHILDREN_UNTRUSTED")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise Hold("RC7_BUNDLED_FOREIGN_SAVED_CHILDREN_UNTRUSTED")
+            result[key] = value
+        return result
+    try:
+        doc = json.loads(raw, object_pairs_hook=unique)
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("RC7_BUNDLED_FOREIGN_SAVED_CHILDREN_UNTRUSTED") from exc
+    if (not isinstance(doc, dict) or set(doc) != {"schema", "child_ids"}
+            or type(doc["schema"]) is not int or doc["schema"] != 1
+            or not isinstance(doc["child_ids"], list)
+            or not 0 < len(doc["child_ids"]) <= 32
+            or any(type(x) is not str or RC7_CHILD_ID.fullmatch(x) is None
+                   for x in doc["child_ids"])
+            or doc["child_ids"] != sorted(set(doc["child_ids"]))):
+        raise Hold("RC7_BUNDLED_FOREIGN_SAVED_CHILDREN_UNTRUSTED")
+    return tuple(doc["child_ids"])
+
+
+def _rc7_foreign_signed_instances(frp, child_ids: tuple[str, ...]) -> tuple[str, ...]:
+    hashes = []
+    for child_id in child_ids:
+        fingerprint = frp.signed_child_inventory(child_id)
+        if type(fingerprint) is not str or RC7_SHA256.fullmatch(fingerprint) is None:
+            raise Hold("RC7_BUNDLED_FOREIGN_SIGNED_CHILD_UNTRUSTED")
+        hashes.append(fingerprint)
+    return tuple(hashes)
+
+
+
+
 
 def _strict_rc7_response(raw: str, *, kind: str) -> dict:
     if not isinstance(raw, str) or not 0 < len(raw.encode("utf-8")) <= 4096:
@@ -285,11 +365,20 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
             # read-only preflight. This is NOT proof of a Foreign FRPC Child,
             # actual forwarding, or a remotely signed cross-host response.
             owner_before = None
+            foreign_child_ids_before = None
+            foreign_instances_before = None
             if role == "ir":
                 owner_before = frp.signed_owner_inventory()
                 if (type(owner_before) is not str
                         or RC7_SHA256.fullmatch(owner_before) is None):
                     raise Hold("RC7_BUNDLED_OWNER_PROOF_INVALID")
+            else:
+                # Bind the exact set of persisted Foreign clients to the
+                # existing signed Agent + one-FRPC-PID/TCP443 verifier.
+                # Recheck them after pure planning under this same lock.
+                foreign_child_ids_before = _rc7_foreign_saved_child_ids(frp)
+                foreign_instances_before = _rc7_foreign_signed_instances(
+                    frp, foreign_child_ids_before)
             candidate, review = plan_rc7_backhaul_manifest_pair(
                 old_manifest, receipt, binary["sha256"], role=role)
             if (review.get("RC7_FRP_RECEIPT_BINDING")
@@ -307,6 +396,14 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                         or RC7_SHA256.fullmatch(owner_after) is None
                         or owner_after != owner_before):
                     raise Hold("RC7_BUNDLED_SIGNED_OWNER_CHANGED_DURING_REVIEW")
+            else:
+                foreign_child_ids_after = _rc7_foreign_saved_child_ids(frp)
+                if foreign_child_ids_after != foreign_child_ids_before:
+                    raise Hold("RC7_BUNDLED_FOREIGN_CHILD_SET_CHANGED_DURING_REVIEW")
+                foreign_instances_after = _rc7_foreign_signed_instances(
+                    frp, foreign_child_ids_after)
+                if foreign_instances_after != foreign_instances_before:
+                    raise Hold("RC7_BUNDLED_SIGNED_CHILD_CHANGED_DURING_REVIEW")
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.
@@ -327,6 +424,9 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
         "RC7_IR_SIGNED_FRPS_OWNER": (
             "PASS_SIGNED_AGENT_LISTENER_STABLE" if role == "ir"
             else "NOT_APPLICABLE_FOREIGN"),
+        "RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN": (
+            "PASS_STABLE_LOCAL_ONLY" if role == "foreign"
+            else "NOT_APPLICABLE_IR"),
         "RC7_FOREIGN_FRPC_CHILD_FORWARDING": "NOT_PROVEN",
         "RC7_SIGNED_REPLAY": "PASS",
         "NODE_RECREATED": "NO",
