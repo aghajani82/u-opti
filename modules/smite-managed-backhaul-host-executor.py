@@ -442,6 +442,8 @@ def _retained_step_core(paths, *, action, role, arch, witness,
                 or IMAGE.fullmatch(approved.node_image) is None
                 or type(approved.runtime_witness) is not str
                 or SHA.fullmatch(approved.runtime_witness) is None
+                or SHA.fullmatch(approved.node_env_sha256) is None
+                or SHA.fullmatch(approved.node_compose_sha256) is None
                 or not isinstance(approved.old_pair, tuple)
                 or len(approved.old_pair) != 2
                 or any(type(x) is not bytes or not 0 < len(x) <= 8192
@@ -474,6 +476,15 @@ def _retained_step_core(paths, *, action, role, arch, witness,
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
+        if isinstance(_admission, RetainedLivePrepared):
+            # Recheck mutable host settings under the SAME exclusive lock
+            # that will record PREPARED. The local signed runtime witness
+            # alone does not cover external Compose or .env file edits.
+            if (_sha(_read(paths.node / ".env", 16384))
+                    != _admission.node_env_sha256
+                    or _sha(_read(paths.node / "docker-compose.yml", 131072))
+                    != _admission.node_compose_sha256):
+                raise Hold("RETAINED_LIVE_NODE_CONFIG_CHANGED_BEFORE_WRITE")
         manifest, receipt, journal = _retained_files(paths)
         for conflict in (_journal(paths), receipt.with_name("record.next"),
                          manifest.with_name("engines.json.rc7-next"),
@@ -969,6 +980,8 @@ class RetainedLivePrepared:
     node_image: str
     old_pair: tuple[bytes, bytes]
     runtime_witness: str
+    node_env_sha256: str = ""
+    node_compose_sha256: str = ""
 
 
 def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
@@ -1042,6 +1055,9 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
                 raise Hold("RETAINED_LIVE_EXISTING_JOURNAL")
             old_pair = (pair._pair_read_private(manifest),
                         pair._pair_read_private(receipt))
+            env_digest = _sha(_read(paths.node / ".env", 16384))
+            compose_digest = _sha(
+                _read(paths.node / "docker-compose.yml", 131072))
             pair._pair_expected_transition(
                 *old_pair, package.OFFICIAL_BINARY_SHA256[arch], role=role)
             first = _retained_live_signed_witness(
@@ -1052,11 +1068,16 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
                     paths=paths)
                     or old_pair != (pair._pair_read_private(manifest),
                                     pair._pair_read_private(receipt))
+                    or env_digest != _sha(_read(paths.node / ".env", 16384))
+                    or compose_digest != _sha(_read(
+                        paths.node / "docker-compose.yml", 131072))
                     or _retained_review_pending_recovery(paths) is not None):
                 raise Hold("RETAINED_LIVE_PREPARE_CONCURRENT_DRIFT")
         return RetainedLivePrepared(
             paths=paths, role=role, arch=arch, node_image=expected_node_image,
-            old_pair=old_pair, runtime_witness=first)
+            old_pair=old_pair, runtime_witness=first,
+            node_env_sha256=env_digest,
+            node_compose_sha256=compose_digest)
     except Hold:
         raise
     except Exception as exc:
@@ -1220,7 +1241,10 @@ def _retained_live_ir_rollback(*, arch: str,
         raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED") from exc
     prepared = RetainedLivePrepared(
         paths=paths, role="ir", arch=arch, node_image=expected_node_image,
-        old_pair=originals, runtime_witness=witness)
+        old_pair=originals, runtime_witness=witness,
+        node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+        node_compose_sha256=_sha(_read(
+            paths.node / "docker-compose.yml", 131072)))
 
     def current_witness():
         return _retained_live_signed_witness(
