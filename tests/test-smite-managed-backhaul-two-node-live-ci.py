@@ -1665,7 +1665,7 @@ def main():
         executor = load("ci_host_retained_executor",
                         REPO / "modules/smite-managed-backhaul-host-executor.py")
 
-        def host_step(role, root, name, action):
+        def host_step(role, root, name, action, *, stale_witness=False):
             # The signed two-container CI rehearsal must keep ALL retained
             # transaction resources inside its disposable test root. Leaving
             # default staging/binary fields pointing at real host paths is a
@@ -1698,12 +1698,55 @@ def main():
                 return sha(json.dumps(values, sort_keys=True).encode())
 
             official_retained_binary_probe(name)
+            if action == "preflight":
+                # Match the coordinator's actual locked before-image review
+                # using BOTH running signed Nodes before any enrollment.
+                manifest = root / "node/config/engine-state/engines.json"
+                receipt = root / "rc7-frp-enrollment/record.json"
+                with executor._lock(paths.lock):
+                    check((manifest.read_bytes(), receipt.read_bytes())
+                          == originals[role], "CI_RETAINED_PREFLIGHT_PAIR_CHANGED")
+                    check(not (paths.state / "retained-rc7.json").exists()
+                          and not (paths.state / "retained-rc7-cleanup.json").exists(),
+                          "CI_RETAINED_PREFLIGHT_RECOVERY_NOT_EMPTY")
+                    return witness()
+            options = {}
+            if action == "install":
+                options = {
+                    "expected_before": originals[role],
+                    "expected_witness": (
+                        "0" * 64 if stale_witness else retained_baselines[role]),
+                }
             return executor._retained_step(paths, action=action, role=role,
-                                           arch="amd64", witness=witness)
+                                           arch="amd64", witness=witness,
+                                           **options)
 
         for _, root, _ in roots:
             directory(root / "host-state")
         observe("before", root_ir, root_foreign)
+        # Bind both active FRP/Node witnesses and their exact initial
+        # manifest/receipt bytes, not a newly adopted writer-time baseline.
+        retained_baselines = {
+            role: host_step(role, root, name, "preflight")
+            for role, root, name in roots
+        }
+        # Real signed Node/FRPS/FRPC integration must reject a stale
+        # coordinator witness BEFORE creating an IR journal or writing FRP.
+        try:
+            host_step("ir", root_ir, "ci-uopti-ir", "install",
+                      stale_witness=True)
+        except executor.Hold as exc:
+            check(str(exc) == "RETAINED_PREFLIGHT_WITNESS_CHANGED",
+                  "CI_RETAINED_STALE_WITNESS_WRONG_HOLD")
+        else:
+            raise Hold("CI_RETAINED_STALE_WITNESS_ACCEPTED")
+        check(not (root_ir / "host-state/retained-rc7.json").exists()
+              and not (root_ir / "host-state/retained-rc7-cleanup.json").exists()
+              and (root_ir / "node/config/engine-state/engines.json").read_bytes()
+                  == originals["ir"][0]
+              and (root_ir / "rc7-frp-enrollment/record.json").read_bytes()
+                  == originals["ir"][1],
+              "CI_RETAINED_STALE_WITNESS_WROTE_ENGINE_STATE")
         for role, root, name in roots:
             check(host_step(role, root, name, "install") == "COMMITTED",
                   "CI_RETAINED_COMMIT_MISSING")
@@ -1712,8 +1755,26 @@ def main():
             check(host_step(role, root, name, "rollback") == "RESTORED",
                   "CI_RETAINED_ROLLBACK_MISSING")
         observe("after-rollback", root_ir, root_foreign)
+        # A RESTORED journal is still unfinished recovery evidence. Finish
+        # both role-specific terminal cleanups under the unchanged signed
+        # Node/FRP witness and prove NO leftover engine journal or seal.
+        for role, root, name in roots:
+            check(host_step(role, root, name, "cleanup") == "CLEANED",
+                  "CI_RETAINED_TERMINAL_CLEANUP_MISSING")
+            check((root / "node/config/engine-state/engines.json").read_bytes()
+                  == originals[role][0]
+                  and (root / "rc7-frp-enrollment/record.json").read_bytes()
+                  == originals[role][1]
+                  and not (root / "host-state/retained-rc7.json").exists()
+                  and not (root / "host-state/retained-rc7-cleanup.json").exists(),
+                  "CI_RETAINED_TERMINAL_RECOVERY_EVIDENCE_LEFTOVER")
+        signed_child_probe()
+        signed_owner_action("status", "active")
+        forward_probe("after-retained-terminal-cleanup")
         seen.clear()
         print("RC7_RETAINED_HOST_TRANSACTION_REAL_DATA_AND_ROLLBACK=PASS", flush=True)
+        print("RC7_SIGNED_RETAINED_PREFLIGHT_WITNESS_AND_TERMINAL_CLEANUP=PASS",
+              flush=True)
 
         # A successful complete dual-host file transition is *always* undone.
         rehearse_broker_restart = True
