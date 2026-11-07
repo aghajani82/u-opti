@@ -481,6 +481,17 @@ def verify_rc7_bundled_backhaul(
                     frp, foreign_child_ids_before)
             retained_journal = None
             if expected_backhaul_state == "ready":
+                # Do not accept a COMMITTED journal when an independent
+                # recovery or a cleanup seal is active on this host.
+                for pending in (
+                        RC7_RETAINED_JOURNAL.with_name(
+                            "retained-rc7-cleanup.json"),
+                        frp.JOURNAL / "record.next",
+                        frp.MANIFEST.with_name("engines.json.rc7-next"),
+                        frp.MANIFEST.with_name(
+                            "engines.json.rc7-rollback-next")):
+                    if os.path.lexists(pending):
+                        raise Hold("RC7_RETAINED_COMPETING_RECOVERY")
                 # A valid signed inventory alone cannot prove that the
                 # Backhaul entry belongs to our crash-recoverable two-file
                 # transaction. Require its exact durable COMMITTED journal
@@ -804,6 +815,8 @@ def main() -> int:
     arg.add_argument("--lab-root", type=Path)
     args = arg.parse_args()
     try:
+        if args.expect_backhaul_ready and args.action != "verify-rc7-bundle":
+            raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
         if args.action == "verify-rc7-bundle":
             if args.auto_role and args.role:
                 raise Hold("RC7_BUNDLED_CONFLICTING_ROLE_SELECTION")
