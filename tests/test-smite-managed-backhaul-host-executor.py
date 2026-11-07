@@ -136,6 +136,50 @@ class HostExecutor(unittest.TestCase):
         values.update(kwargs)
         return exe.install(**values)
 
+    def test_exclusive_engine_lock_stable_inode_and_nested_writer_hold(self):
+        # This lock is used only inside the independently gated executor.
+        # A stable, private inode serializes both writers; no write occurs.
+        with exe._lock(self.lock):
+            with self.assertRaisesRegex(
+                    exe.Hold, "ANOTHER_ENGINE_TRANSACTION_ACTIVE"):
+                with exe._lock(self.lock):
+                    self.fail("competing writer admitted")
+        self.assertTrue(self.lock.is_file())
+        self.assertEqual(self.lock.stat().st_mode & 0o777, 0o600)
+
+    def test_exclusive_engine_lock_refuses_replaced_or_unlinked_inode(self):
+        # Simulate adversarial replacement in the narrow window immediately
+        # AFTER flock succeeds and BEFORE any engine transaction may begin.
+        # The read-only lock already verifies this and writers must too.
+        real_flock = exe.fcntl.flock
+        for replacement in ("new-inode", "unlinked"):
+            with self.subTest(replacement=replacement):
+                if self.lock.exists():
+                    self.lock.unlink()
+                entered = []
+                def race(fd, flags):
+                    real_flock(fd, flags)
+                    self.lock.unlink()
+                    if replacement == "new-inode":
+                        self.lock.write_bytes(b"")
+                        self.lock.chmod(0o600)
+                with patch.object(exe.fcntl, "flock", side_effect=race):
+                    with self.assertRaisesRegex(
+                            exe.Hold, "ENGINE_LOCK_CHANGED"):
+                        with exe._lock(self.lock):
+                            entered.append("TRANSACTION_BEGIN")
+                self.assertEqual(entered, [])
+
+    def test_exclusive_engine_lock_rejects_relative_symlinked_parent(self):
+        relative = Path("unsafe-relative-engine.lock")
+        parent_alias = self.root / "alias-parent"
+        parent_alias.symlink_to(self.root, target_is_directory=True)
+        for unsafe in (relative, parent_alias / "engine.lock"):
+            with self.subTest(unsafe=str(unsafe)), self.assertRaisesRegex(
+                    exe.Hold, "UNSAFE_LOCK_PATH"):
+                with exe._lock(unsafe):
+                    self.fail("unsafe lock admitted")
+
     def test_legacy_trial_recreator_refuses_all_live_paths_before_any_action(self):
         from dataclasses import replace
         live = exe.Paths()
