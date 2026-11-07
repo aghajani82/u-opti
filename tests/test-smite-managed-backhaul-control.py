@@ -220,7 +220,12 @@ class OperatorControl(unittest.TestCase):
         node_details = fake.node_details
 
         def checked_runtime():
-            wss.check_runtime_signature(live, baseline)
+            try:
+                wss.check_runtime_signature(live, baseline)
+            except wss.Hold as exc:
+                # The existing FRP wrapper propagates WSS admission failures
+                # through its own imported runtime Hold class.
+                raise fake.rt.Hold(str(exc)) from exc
             return node_details()
 
         fake.node_details = checked_runtime
@@ -228,7 +233,7 @@ class OperatorControl(unittest.TestCase):
              patch.object(control, "_load", return_value=fake):
             # The old Foreign WSS journal must HOLD rather than skip proof.
             with self.assertRaisesRegex(
-                    control.Hold, "RC7_BUNDLED_READONLY_PROBE_FAILED"):
+                    control.Hold, "RC7_BUNDLED_RUNTIME_UNVERIFIED"):
                 control.verify_rc7_bundled_backhaul("foreign")
             self.assertEqual(calls, [])
             # The signed, operator-gated WSS recovery preserves the original
