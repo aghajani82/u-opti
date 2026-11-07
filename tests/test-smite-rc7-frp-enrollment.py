@@ -270,6 +270,11 @@ class EnrollmentTests(unittest.TestCase):
         self.assertIn("proc.net_connections",snippet)
         self.assertIn("psutil.CONN_ESTABLISHED",snippet)
         self.assertIn("getattr(entry.raddr,'port',None)==443",snippet)
+        self.assertIn("frp_standard_wss_host()",snippet)
+        self.assertIn("os.O_NOFOLLOW",snippet)
+        self.assertIn("trustedCaFile:",snippet)
+        self.assertIn("_stage='WSS_CONFIG'",snippet)
+        self.assertNotIn("print(raw_config)",snippet)
         self.assertIn("len(matching)==1",snippet)
         self.assertIn("ProxyHandler({})",snippet)
         self.assertNotIn("/tunnels/apply",snippet)
@@ -324,7 +329,7 @@ class EnrollmentTests(unittest.TestCase):
 
     def test_child_failure_stages_are_bounded_never_trusted_as_pass(self):
         expected={"INPUT","IDENTITY","SIGNED_STATUS","SIGNED_PAYLOAD",
-                  "REPLAY","PROCESS","TCP443","OUTPUT"}
+                  "REPLAY","WSS_CONFIG","PROCESS","TCP443","OUTPUT"}
         self.assertEqual(set(ctl.CHILD_HOLD_STAGES), expected)
         for stage in sorted(expected):
             with self.subTest(stage=stage):
@@ -361,6 +366,8 @@ class EnrollmentTests(unittest.TestCase):
                 agent.read_identity=fail_identity
             auth=types.ModuleType("app.node_auth")
             auth.sign_request=lambda **_:{"X-Smite-Signature":"redacted"}
+            gateway=types.ModuleType("app.frp_gateway_config")
+            gateway.frp_standard_wss_host=lambda: "iran.grandoptical.ir"
             psutil=types.ModuleType("psutil")
             psutil.Error=RuntimeError
             psutil.STATUS_ZOMBIE="zombie"
@@ -400,14 +407,63 @@ class EnrollmentTests(unittest.TestCase):
                             req.full_url,401,"nonce-used",{},None)
                     return Response(json.dumps(result).encode(),req.full_url)
             out=io.StringIO()
-            with patch.dict(sys.modules,
-                            {"app":fake_app,"app.agent_auth":agent,
-                             "app.node_auth":auth,"psutil":psutil}), \
-                 patch.dict(os.environ,{"UOPTI_FRP_CHILD_ID":child}), \
-                 patch("urllib.request.build_opener",return_value=Opener()), \
-                 contextlib.redirect_stdout(out), \
-                 contextlib.redirect_stderr(io.StringIO()):
-                exec(compile(ctl.SIGNED_CHILD_REQUEST,"<rc7-child>","exec"),{})
+            # The real Node writes its private FRPC YAML at the reviewed
+            # fixed container path. Redirect ONLY that path to a disposable
+            # private fixture, without ever touching live Node files.
+            with tempfile.TemporaryDirectory() as directory:
+                config=Path(directory)/"frpc.yaml"
+                host="iran.grandoptical.ir"
+                spec=("loginFailExit: false\n"
+                      f'serverAddr: "{host}"\n'
+                      "serverPort: 443\n"
+                      "auth:\n  method: token\n"
+                      '  token: "HIDDEN_CONFIG_TOKEN"\n'
+                      "transport:\n  protocol: wss\n  tls:\n"
+                      "    enable: true\n"
+                      '    trustedCaFile: "/etc/ssl/certs/ca-certificates.crt"\n'
+                      f'    serverName: "{host}"\n'
+                      "\nproxies:\n  - name: anonymous\n"
+                      "    type: tcp\n    localIP: 127.0.0.1\n"
+                      "    localPort: 20182\n    remotePort: 20182\n")
+                if case=="wss_wrong_host":
+                    spec=spec.replace('serverAddr: "'+host+'"',
+                                      'serverAddr: "other.invalid"')
+                elif case=="wss_wrong_port":
+                    spec=spec.replace("serverPort: 443","serverPort: 7000")
+                elif case=="wss_wrong_transport":
+                    spec=spec.replace("protocol: wss","protocol: tcp")
+                elif case=="wss_wrong_ca":
+                    spec=spec.replace("ca-certificates.crt","unsafe.pem")
+                elif case=="wss_wrong_sni":
+                    spec=spec.replace('serverName: "'+host+'"',
+                                      'serverName: "other.invalid"')
+                elif case=="wss_duplicate":
+                    spec+="serverPort: 443\n"
+                config.write_text(spec)
+                config.chmod(0o600)
+                original_open=os.open
+                original_lstat=os.lstat
+                expected_path="/etc/smite-node/frp/frpc_"+child+".yaml"
+                def fake_open(path,flags,*args,**kwargs):
+                    if str(path)==expected_path:
+                        return original_open(config,flags,*args,**kwargs)
+                    return original_open(path,flags,*args,**kwargs)
+                def fake_lstat(path,*args,**kwargs):
+                    if str(path)==expected_path:
+                        return original_lstat(config,*args,**kwargs)
+                    return original_lstat(path,*args,**kwargs)
+                with patch.dict(sys.modules,
+                                {"app":fake_app,"app.agent_auth":agent,
+                                 "app.node_auth":auth,
+                                 "app.frp_gateway_config":gateway,
+                                 "psutil":psutil}), \
+                     patch.dict(os.environ,{"UOPTI_FRP_CHILD_ID":child}), \
+                     patch("urllib.request.build_opener",return_value=Opener()), \
+                     patch("os.open",side_effect=fake_open), \
+                     patch("os.lstat",side_effect=fake_lstat), \
+                     contextlib.redirect_stdout(out), \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    exec(compile(ctl.SIGNED_CHILD_REQUEST,"<rc7-child>","exec"),{})
             return out.getvalue().strip()
 
         good=run_case("pass")
@@ -418,6 +474,12 @@ class EnrollmentTests(unittest.TestCase):
         for case,expected in (
                 ("identity","IDENTITY"),("signed_status","SIGNED_STATUS"),
                 ("payload","SIGNED_PAYLOAD"),("replay","REPLAY"),
+                ("wss_wrong_host","WSS_CONFIG"),
+                ("wss_wrong_port","WSS_CONFIG"),
+                ("wss_wrong_transport","WSS_CONFIG"),
+                ("wss_wrong_ca","WSS_CONFIG"),
+                ("wss_wrong_sni","WSS_CONFIG"),
+                ("wss_duplicate","WSS_CONFIG"),
                 ("process","PROCESS"),("tcp443","TCP443")):
             with self.subTest(case=case):
                 raw=run_case(case)
