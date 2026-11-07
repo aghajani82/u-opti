@@ -502,6 +502,37 @@ class HostExecutor(unittest.TestCase):
         runner=RetainedRunner(self.runtime)
         return runner,audit
 
+    def test_retained_real_signed_witness_hold_has_sanitized_phase(self):
+        # The previously generic RETAINED_NODE_PREVIEW_UNVERIFIED concealed
+        # whether Cosign, Node identity, official binary or the existing
+        # FRP tunnel-registry read failed. Fixed stage names only: never
+        # expose the actual exception, Docker logs, paths or tunnel bytes.
+        runner, audit = self._retained_review_fixture()
+        approved = dict(audit, SIGNED_REGISTRY_PAIR_PROOF="COSIGN_VERIFIED",
+                        NODE_ROLE="IR")
+        original = (self.config / "engine-state/engines.json").read_bytes()
+        with patch.object(exe, "Paths", return_value=self.paths), \
+             patch.object(exe.admission, "report", return_value=approved), \
+             patch.object(exe, "_retained_live_signed_witness",
+                          side_effect=exe.Hold("SECRET_PATH_OR_TOKEN")) as witness:
+            report = exe.review_in_place_binary(
+                expected_node_image=IMAGE, arch="amd64",
+                paths=self.paths, runner=runner)
+        self.assertEqual(witness.call_count, 1)
+        self.assertEqual(
+            report["REASON"], "RETAINED_PREVIEW_LOCAL_SIGNED_WITNESS_UNVERIFIED")
+        self.assertEqual(report["SIGNED_REGISTRY_PAIR_PROOF"], "COSIGN_VERIFIED")
+        self.assertEqual(report["RETAINED_NODE_BACKHAUL_BINARY"], "UNVERIFIED")
+        self.assertEqual(report["INSTALL_ALLOWED"], "NO")
+        self.assertEqual(report["ACTIVATION_GATE"], "HOLD")
+        self.assertNotIn("SECRET_PATH_OR_TOKEN", str(report))
+        self.assertEqual((self.config / "engine-state/engines.json").read_bytes(),
+                         original)
+        self.assertFalse(self.state.exists())
+        # The only commands were read-only Docker inspect; not a writer.
+        self.assertTrue(all(call[:2] == ("docker", "inspect")
+                            for call in runner.calls))
+
     def test_retained_read_only_review_holds_existing_engine_lock(self):
         # Read-only admission must neither create a lock nor race with FRP
         # enrollment or a retained Backhaul paired-receipt transaction.
@@ -798,6 +829,65 @@ class HostExecutor(unittest.TestCase):
             return frp if name == "smite-rc7-frp-enrollment.py" else control
         return registry, container, calls, proc, broker, load
 
+    def test_retained_legacy_tunnel_registry_snapshot_safe_existing_modes(self):
+        registry = self.data / "tunnels.json"
+        saved = b'{"existing":{"core":"frp","spec":{"kind":"protected"}}}\n'
+        registry.write_bytes(saved)
+        # Historical root-owned Smite files are allowed to be readable
+        # by others but NEVER writable by others. Never chmod live host.
+        for mode in (0o600, 0o640, 0o644, 0o400):
+            with self.subTest(mode=oct(mode)), \
+                 patch.object(exe, "_retained_registry_root_owned",
+                              return_value=True):
+                registry.chmod(mode)
+                self.assertEqual(
+                    exe._retained_saved_tunnel_registry_snapshot(registry),
+                    saved)
+        for mode in (0o666, 0o620, 0o606):
+            with self.subTest(bad_mode=oct(mode)), \
+                 patch.object(exe, "_retained_registry_root_owned",
+                              return_value=True), \
+                 self.assertRaisesRegex(
+                     exe.Hold, "RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED"):
+                registry.chmod(mode)
+                exe._retained_saved_tunnel_registry_snapshot(registry)
+        registry.chmod(0o600)
+        link = self.data / "registry-link"
+        link.symlink_to(registry)
+        with patch.object(exe, "_retained_registry_root_owned",
+                          return_value=True), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED"):
+            exe._retained_saved_tunnel_registry_snapshot(link)
+        with patch.object(exe, "_retained_registry_root_owned",
+                          return_value=False), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_REGISTRY_SNAPSHOT_UNTRUSTED"):
+            exe._retained_saved_tunnel_registry_snapshot(registry)
+        self.assertEqual(registry.read_bytes(), saved)
+
+    def test_retained_legacy_registry_snapshot_rejects_mutation_during_read(self):
+        registry = self.data / "tunnels.json"
+        registry.write_bytes(b'{"existing":{"core":"frp","spec":{}}}\n')
+        registry.chmod(0o644)
+        original = registry.read_bytes()
+        read_real = exe.os.read
+        switched = False
+        def raced(fd, n):
+            nonlocal switched
+            result = read_real(fd, n)
+            if not switched:
+                switched = True
+                registry.write_bytes(original + b" ")
+            return result
+        with patch.object(exe, "_retained_registry_root_owned",
+                          return_value=True), \
+             patch.object(exe.os, "read", side_effect=raced), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_REGISTRY_CHANGED_DURING_READ"):
+            exe._retained_saved_tunnel_registry_snapshot(registry)
+        self.assertTrue(switched)
+
     def test_retained_production_witness_requires_real_scoped_host_before_io(self):
         with patch.object(exe, "_load",
                           side_effect=AssertionError("DOCKER_OR_AGENT_IO")), \
@@ -825,6 +915,7 @@ class HostExecutor(unittest.TestCase):
                 saved = registry.read_bytes()
                 with patch.object(exe, "Paths", return_value=self.paths), \
                      patch.object(exe, "_retained_live_root_required", return_value=True), \
+                     patch.object(exe, "_retained_registry_root_owned", return_value=True), \
                      patch.object(exe, "_load", side_effect=loader), \
                      patch.object(exe.admission.host, "frp_process_footprint",
                                   return_value=proc), \
@@ -877,6 +968,7 @@ class HostExecutor(unittest.TestCase):
                 original = registry.read_bytes()
                 with patch.object(exe, "Paths", return_value=self.paths), \
                      patch.object(exe, "_retained_live_root_required", return_value=True), \
+                     patch.object(exe, "_retained_registry_root_owned", return_value=True), \
                      patch.object(exe, "_load", side_effect=loader), \
                      patch.object(exe.admission.host, "frp_process_footprint",
                                   return_value=proc), \

@@ -1055,6 +1055,48 @@ the Foreign stage, independent recovery and real client data-plane
 are separately tested. Do not confuse this metadata canary with a
 ready-to-use Backhaul tunnel.
 
+## IR first live canary preflight HOLD — preserve legacy FRP registry bytes
+
+The first official IR option-3 retained metadata-canary attempt (PR #177)
+stopped at `RETAINED_LIVE_SIGNED_PREFLIGHT_INCOMPLETE`, **before** its
+transaction directory or paired Manifest/FRP receipt writer ran.
+Real `verify-rc7-bundle --auto-role` had independently passed signed
+Backhaul v0.7.2 binary, FRP Owner, replay, exact committed receipt and
+running Node, but the host-specific `review-in-place` printed only
+`RETAINED_NODE_PREVIEW_UNVERIFIED` after Cosign verification.
+
+A specific code incompatibility existed between the two host views:
+`host-gate.tunnel_inventory()` intentionally accepts existing **root-owned
+regular** `node-data/tunnels.json` bytes without requiring mode exactly
+0600, whereas `_retained_live_signed_witness()` incorrectly passed
+that legacy registry through `_pair_read_private()`, which requires
+**exact 0600** for *transaction files*. Historical root-owned, non-writable
+registry files at 0640/0644 therefore failed the local live witness despite
+passing host audit. This is a code mismatch, not evidence of a damaged
+registry. The precise mode on the live IR host has not been independently
+observed; do not claim the incompatibility was the only failure cause.
+
+The witness now uses a dedicated read-only inode-pinned snapshot for the
+existing registry: root ownership, no symlink, one link, regular file,
+bounded nonempty bytes, owner-read permission, **no group/other write**
+permission, `O_NOFOLLOW` and matching inode/size/ctime/mtime before and
+after the FD read. Historic 0600/0640/0644 are accepted; writable, replaced,
+partially read or non-root-owned files still fail closed. The strict **0600**
+transaction Manifest/receipt/Journal reader is unchanged. The registry is
+NEVER chmodded, overwritten, re-serialized or sent to GitHub.
+
+The formerly generic preview exception now returns a fixed, sanitized
+phase (`RETAINED_PREVIEW_INITIAL_UNVERIFIED`,
+`RETAINED_PREVIEW_LOCAL_SIGNED_WITNESS_UNVERIFIED`,
+`RETAINED_PREVIEW_BINARY_AND_NODE_UNVERIFIED`, or
+`RETAINED_PREVIEW_EXACT_PAIR_AND_RUNTIME_UNVERIFIED`), without displaying
+credential-bearing exceptions. If the IR review still HOLDs for an
+independent legitimate runtime or signature problem after updating U-OPTI,
+**do not bypass the gate or repeat writes**; use the new exact phase for
+a narrow fix in main. The existing IR-only metadata canary and exact
+Journal rollback remain the sole live write path and no foreign node,
+FRP route, WSS/443 or Backhaul tunnel is activated by this repair.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
