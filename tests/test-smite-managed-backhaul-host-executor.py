@@ -1011,6 +1011,25 @@ class HostExecutor(unittest.TestCase):
             exe._retained_step_core(
                 exe.Paths(), action="install", role="ir",
                 arch="amd64", witness=lambda: "f" * 64)
+        # Even a Python caller importing the internal object cannot
+        # use it to write on canonical live paths, a misleading unmarked
+        # temporary directory or an alternate host alias.
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED"):
+            exe._retained_step_core(
+                exe.Paths(), action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64,
+                _admission=exe._RETAINED_CI_WRITER_ADMISSION)
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED"):
+            exe._retained_step_core(
+                self.paths, action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64,
+                _admission=exe._RETAINED_CI_WRITER_ADMISSION)
         # A forged string cannot satisfy the internal CI entry capability.
         with patch.object(exe, "_lock",
                           side_effect=AssertionError("WRITER_OPENED")), \
