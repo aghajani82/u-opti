@@ -488,6 +488,15 @@ def _lab_lock(root: Path):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Hold("Another Backhaul engine transaction is in progress") from exc
+        # The FRP/Backhaul paired lab shares this path with the RC7 writer.
+        # Reject an unlinked/replaced lock inode before any journal write.
+        try:
+            current = file.lstat()
+        except OSError as exc:
+            raise Hold("Engine transaction lock changed") from exc
+        if (not stat.S_ISREG(current.st_mode)
+                or (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino)):
+            raise Hold("Engine transaction lock changed")
         yield
     finally:
         os.close(fd)

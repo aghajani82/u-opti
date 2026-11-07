@@ -693,6 +693,63 @@ class TransactionLab(unittest.TestCase):
         self.assertEqual(manifest.read_bytes(), old_manifest)
         self.assertEqual(receipt.read_bytes(), old_receipt)
 
+    def test_rc7_pair_and_legacy_shared_lock_reject_detached_inode(self):
+        # Both CI-only paths use the *same* lock pathname. Replacing it
+        # after a successful flock must not admit a second writer.
+        self._rc7_pair_lab_fixture()
+        control = load("bh_control_split_lock_test",
+                       ROOT / "smite-managed-backhaul-control.py")
+        lock = self.root / ".smite-engine-transaction.lock"
+        real_flock = lab.fcntl.flock
+        for caller in ("paired", "legacy"):
+            for change in ("replace", "unlink"):
+                with self.subTest(caller=caller, change=change):
+                    if lock.exists() or lock.is_symlink():
+                        lock.unlink()
+                    lock.write_bytes(b"")
+                    lock.chmod(0o600)
+                    entered = []
+                    def detach(fd, flags):
+                        real_flock(fd, flags)
+                        lock.unlink()
+                        if change == "replace":
+                            lock.write_bytes(b"")
+                            lock.chmod(0o600)
+                    with patch.object(lab.fcntl, "flock", side_effect=detach):
+                        if caller == "paired":
+                            with self.assertRaisesRegex(
+                                    lab.Hold, "RC7_PAIR_SHARED_LOCK_CHANGED"):
+                                with lab._rc7_pair_shared_lock(self.root):
+                                    entered.append(True)
+                        else:
+                            with self.assertRaisesRegex(
+                                    control.Hold, "Engine transaction lock changed"):
+                                with control._lab_lock(self.root):
+                                    entered.append(True)
+                    self.assertEqual(entered, [])
+                    # A held fd is never an authorization after unlink.
+                    # These tests must not touch any FRP receipt or journal.
+                    self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+
+    def test_rc7_pair_and_legacy_shared_lock_accept_stable_inode(self):
+        self._rc7_pair_lab_fixture()
+        control = load("bh_control_stable_lock_test",
+                       ROOT / "smite-managed-backhaul-control.py")
+        lock = self.root / ".smite-engine-transaction.lock"
+        for name, acquire in (
+                ("paired", lambda: lab._rc7_pair_shared_lock(self.root)),
+                ("legacy", lambda: control._lab_lock(self.root))):
+            with self.subTest(name=name):
+                with acquire():
+                    before = lock.stat()
+                    self.assertEqual(before.st_mode & 0o777, 0o600)
+                    self.assertEqual(before.st_nlink, 1)
+                    with self.assertRaises((lab.Hold, control.Hold)):
+                        with acquire():
+                            self.fail("shared lock admitted competing writer")
+                self.assertEqual((lock.stat().st_dev, lock.stat().st_ino),
+                                 (before.st_dev, before.st_ino))
+
     def test_rc7_pair_shared_lock_fail_closed_on_symlink_and_bad_mode(self):
         manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
         lock = self.root / ".smite-engine-transaction.lock"
