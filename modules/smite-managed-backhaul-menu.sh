@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Independent Smite Engine Management: Backhaul preview only.
-# No installation, deletion, apt, curl, Docker, Nginx, firewall, or SSH here.
-# The install button stays CLOSED pending authorized two-host acceptance.
+# Independent Smite Engine Management: read-only reviews and scoped IR canary.
+# Existing option 3 may call only the signed IR metadata-enrollment/rollback
+# executor after explicit TTY confirmation. No new tunnel, FRP Apply, Docker
+# restart/recreate, Grandoptical write, Nginx/firewall, or SSH action here.
+# Full two-host Backhaul tunnel activation remains gated/disabled.
 SMITE_ENGINE_MENU_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_MANAGED_BACKHAUL_CONTROL="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-control.py"
 SMITE_MANAGED_FRP_MENU="$SMITE_ENGINE_MENU_DIR/smite-managed-frp-menu.sh"
