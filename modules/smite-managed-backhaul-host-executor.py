@@ -437,7 +437,8 @@ def _retained_step_core(paths, *, action, role, arch, witness,
         approved = _admission
         if (not _retained_live_root_required()
                 or paths != Paths() or approved.paths != Paths()
-                or role != "ir" or approved.role != role
+                or role not in ("ir", "foreign")
+                or approved.role != role
                 or approved.arch != arch
                 or IMAGE.fullmatch(approved.node_image) is None
                 or type(approved.runtime_witness) is not str
@@ -1325,6 +1326,249 @@ def _retained_live_ir_rollback(*, arch: str,
         "FRP_ENGINE": "READY_SIGNED_INVENTORY",
         "NODE_RESTARTED": "NO",
         "FOREIGN_NODE_CHANGED": "NO",
+    }
+
+
+def _retained_live_foreign_canary(*, arch: str, expected_node_image: str,
+                             signed_pair_manifest: Path,
+                             signed_pair_manifest_sha256: str,
+                             signed_pair_source_sha: str,
+                             signed_pair_publish_ref: str,
+                             signed_pair_trusted_root: Path) -> dict[str, str]:
+    """Perform one Foreign-only metadata enrollment, with signed postcheck/rollback.
+
+    No Node/FRPC restart, no Backhaul listener/tunnel creation, no IR
+    mutation. Only the foreign exact Manifest+FRP receipt pair can change.
+    This is NOT a two-host Backhaul tunnel activation. Foreign canary
+    requires independently reviewed backup/console recovery admission at CLI.
+    """
+    paths = Paths()
+    prepared = _retained_live_prepare(
+        role="foreign", arch=arch, expected_node_image=expected_node_image,
+        signed_pair_manifest=signed_pair_manifest,
+        signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+        signed_pair_source_sha=signed_pair_source_sha,
+        signed_pair_publish_ref=signed_pair_publish_ref,
+        signed_pair_trusted_root=signed_pair_trusted_root, paths=paths)
+    control = _load("uopti_retained_live_acceptance",
+                    "smite-managed-backhaul-control.py")
+    # Require real signed agent, stable FRPC children and not-installed engine
+    # BEFORE creating even the private new journal parent directories.
+    initial = control.verify_rc7_bundled_backhaul("foreign")
+    if (initial.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or initial.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or initial.get("RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN")
+            != "PASS_STABLE_LOCAL_ONLY"
+            or initial.get("NODE_RECREATED") != "NO"
+            or initial.get("ACTIVATION_GATE") != "HOLD"
+            or initial.get("INSTALL_ALLOWED") != "NO"):
+        raise Hold("RETAINED_LIVE_FOREIGN_SIGNED_INITIAL_HOLD")
+    # This is the first sanctioned write on the Foreign canary. The state
+    # directory may not exist yet, but must be private and root-owned.
+    _mkdir_chain(paths.state, Path("/var/lib/u-opti"))
+
+    def witness():
+        return _retained_live_signed_witness(
+            role="foreign", expected_node_image=prepared.node_image,
+            paths=paths)
+
+    # The shared engine lock is acquired inside the existing reviewed core,
+    # which compares exact prewrite bytes and witness before PREPARED journal.
+    try:
+        result = _retained_step_core(
+            paths, action="install", role="foreign", arch=arch, witness=witness,
+            expected_before=prepared.old_pair,
+            expected_witness=prepared.runtime_witness, _admission=prepared)
+        if result != "COMMITTED":
+            raise Hold("RETAINED_LIVE_FOREIGN_COMMIT_UNVERIFIED")
+    except Exception as exc:
+        # Even an interrupted PREPARED write can leave the Manifest and
+        # receipt as a mixed pair. Attempt exact signed compensation only
+        # when our durable journal actually exists; otherwise no guessed
+        # restore or destructive recovery is permitted.
+        if os.path.lexists(paths.state / "retained-rc7.json"):
+            try:
+                _retained_live_foreign_rollback(
+                    arch=arch, expected_node_image=expected_node_image)
+            except Exception as recovery_exc:
+                raise Hold(
+                    "RETAINED_LIVE_FOREIGN_RECOVERY_MANUAL_REVIEW_REQUIRED"
+                ) from recovery_exc
+            raise Hold("RETAINED_LIVE_FOREIGN_PARTIAL_WRITE_ROLLED_BACK") from exc
+        raise Hold("RETAINED_LIVE_FOREIGN_NO_JOURNAL_COMMIT_HOLD") from exc
+
+    # The signed verification uses the same immutable running Node and
+    # exact paired COMMITTED receipt; do not equate the filesystem write
+    # with successful authenticated runtime enrollment.
+    try:
+        verified = control.verify_rc7_bundled_backhaul(
+            "foreign", expected_backhaul_state="ready")
+        if (verified.get("RC7_BACKHAUL_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_BACKHAUL_MANIFEST_PLAN")
+                != "COMMITTED_PAIR_VERIFIED_READ_ONLY"
+                or verified.get("RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN")
+                != "PASS_STABLE_LOCAL_ONLY"
+                or verified.get("NODE_RECREATED") != "NO"
+                or verified.get("INSTALL_ALLOWED") != "NO"
+                or verified.get("ACTIVATION_GATE") != "HOLD"):
+            raise Hold("RETAINED_LIVE_FOREIGN_POSTCOMMIT_UNVERIFIED")
+    except Exception as exc:
+        # The same explicit journal-based recovery entry is exercised
+        # after failed signed acceptance AND by a later operator. Never
+        # erase a journal or restart Node when recovery proof is absent.
+        try:
+            _retained_live_foreign_rollback(
+                arch=arch, expected_node_image=expected_node_image)
+        except Exception as recovery_exc:
+            raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_MANUAL_REVIEW_REQUIRED") from recovery_exc
+        raise Hold("RETAINED_LIVE_FOREIGN_POSTCOMMIT_ROLLED_BACK") from exc
+    return {
+        "RETAINED_FOREIGN_BACKHAUL_ENROLLMENT": "PASS_SIGNED_METADATA_ONLY",
+        "BACKHAUL_TUNNEL_ACTIVATED": "NO",
+        "FRP_CHILDREN_CHANGED": "NO_REQUESTED",
+        "NODE_RESTARTED": "NO",
+        "IR_NODE_CHANGED": "NO",
+        "ROLLBACK_JOURNAL": "RETAINED_PRIVATE",
+        "TWO_HOST_BACKHAUL_ACTIVATION_GATE": "HOLD",
+    }
+
+
+def _retained_live_foreign_rollback(*, arch: str,
+                               expected_node_image: str) -> dict[str, str]:
+    """Explicit safe Foreign-only compensation using its original durable journal.
+
+    Never build rollback originals from current files or unsigned caller
+    input. This entry intentionally works with PREPARED/mixed files that
+    cannot pass the not-installed/ready preflight during an interrupted
+    write. The core verifies exact original pair semantics and allowable
+    mixed phase states under the shared engine lock before any mutation.
+    """
+    paths = Paths()
+    if (not _retained_live_root_required()
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or IMAGE.fullmatch(expected_node_image) is None):
+        raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_INPUT_UNTRUSTED")
+    witness = _retained_live_signed_witness(
+        role="foreign", expected_node_image=expected_node_image, paths=paths)
+    journal = paths.state / "retained-rc7.json"
+    cleanup_seal = paths.state / "retained-rc7-cleanup.json"
+    if not os.path.lexists(journal) and os.path.lexists(cleanup_seal):
+        # A crash after journal unlink but before seal unlink is an
+        # intentional recovery state, not an excuse to reconstruct an
+        # untrusted journal. The existing core's sealed cleanup verifies
+        # the original two byte hashes, role, witness, receipt semantics
+        # and durable seal while holding the exclusive lock.
+        try:
+            originals = (
+                pair._pair_read_private(
+                    paths.node / "config/engine-state/engines.json"),
+                pair._pair_read_private(paths.frp_state / "record.json"))
+            pair._pair_expected_transition(
+                *originals, package.OFFICIAL_BINARY_SHA256[arch],
+                role="foreign")
+            control = _load("uopti_retained_sealed_recovery",
+                            "smite-managed-backhaul-control.py")
+            prior = control.verify_rc7_bundled_backhaul("foreign")
+            if (prior.get("RC7_BACKHAUL_ENGINE")
+                    != "NOT_INSTALLED_SIGNED_INVENTORY"
+                    or prior.get("RC7_FRP_ENGINE")
+                    != "READY_SIGNED_INVENTORY"
+                    or prior.get("NODE_RECREATED") != "NO"):
+                raise Hold("RETAINED_LIVE_FOREIGN_SEALED_SIGNED_HOLD")
+            prepared = RetainedLivePrepared(
+                paths=paths, role="foreign", arch=arch,
+                node_image=expected_node_image, old_pair=originals,
+                runtime_witness=witness,
+                node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+                node_compose_sha256=_sha(_read(
+                    paths.node / "docker-compose.yml", 131072)))
+            result = _retained_step_core(
+                paths, action="cleanup", role="foreign", arch=arch,
+                witness=lambda: _retained_live_signed_witness(
+                    role="foreign", expected_node_image=expected_node_image,
+                    paths=paths),
+                _admission=prepared)
+            if result != "CLEANED":
+                raise Hold("RETAINED_LIVE_FOREIGN_SEALED_CLEANUP_UNVERIFIED")
+            return {
+                "RETAINED_FOREIGN_BACKHAUL_ROLLBACK":
+                    "PASS_SIGNED_SEALED_CLEANUP_RECOVERED",
+                "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+                "NODE_RESTARTED": "NO",
+                "IR_NODE_CHANGED": "NO",
+            }
+        except Exception as exc:
+            raise Hold("RETAINED_LIVE_FOREIGN_SEALED_RECOVERY_HOLD") from exc
+    try:
+        envelope = pair._pair_load_json(
+            pair._pair_read_private(journal, limit=40000))
+        record = envelope["record"]
+        fields = {"schema", "role", "binary", "witness", "manifest",
+                  "receipt", "phase"}
+        if (set(envelope) != {"record", "sha256"}
+                or not isinstance(record, dict) or set(record) != fields
+                or type(record["schema"]) is not int or record["schema"] != 1
+                or record["role"] != "foreign"
+                or record["binary"] != package.OFFICIAL_BINARY_SHA256[arch]
+                or record["witness"] != witness
+                or record["phase"] not in (
+                    "PREPARED", "COMMITTED", "RESTORING", "RESTORED")
+                or _sha(json.dumps(record, sort_keys=True).encode())
+                    != envelope["sha256"]):
+            raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_JOURNAL_UNTRUSTED")
+        originals = []
+        for key in ("manifest", "receipt"):
+            value = record[key]
+            if (type(value) is not str or not 0 < len(value) <= 16384
+                    or len(value) % 2
+                    or re.fullmatch(r"(?:[0-9a-f]{2})+", value) is None):
+                raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_JOURNAL_UNTRUSTED")
+            originals.append(bytes.fromhex(value))
+        originals = tuple(originals)
+        pair._pair_expected_transition(
+            *originals, package.OFFICIAL_BINARY_SHA256[arch], role="foreign")
+    except (pair.Hold, KeyError, ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_JOURNAL_UNTRUSTED") from exc
+    prepared = RetainedLivePrepared(
+        paths=paths, role="foreign", arch=arch, node_image=expected_node_image,
+        old_pair=originals, runtime_witness=witness,
+        node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+        node_compose_sha256=_sha(_read(
+            paths.node / "docker-compose.yml", 131072)))
+
+    def current_witness():
+        return _retained_live_signed_witness(
+            role="foreign", expected_node_image=expected_node_image, paths=paths)
+
+    rolled = _retained_step_core(
+        paths, action="rollback", role="foreign", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if rolled != "RESTORED":
+        raise Hold("RETAINED_LIVE_FOREIGN_ROLLBACK_NOT_RESTORED")
+    # Signed preinstall inventory must be truly restored before erasing
+    # journal. A successful byte write alone is never acceptance.
+    control = _load("uopti_retained_recovery_acceptance",
+                    "smite-managed-backhaul-control.py")
+    prior = control.verify_rc7_bundled_backhaul("foreign")
+    if (prior.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or prior.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or prior.get("RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN")
+            != "PASS_STABLE_LOCAL_ONLY"
+            or prior.get("NODE_RECREATED") != "NO"):
+        raise Hold("RETAINED_LIVE_FOREIGN_ROLLBACK_SIGNED_UNVERIFIED")
+    cleaned = _retained_step_core(
+        paths, action="cleanup", role="foreign", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if cleaned != "CLEANED":
+        raise Hold("RETAINED_LIVE_FOREIGN_CLEANUP_UNVERIFIED")
+    return {
+        "RETAINED_FOREIGN_BACKHAUL_ROLLBACK": "PASS_SIGNED_EXACT_RESTORED",
+        "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+        "NODE_RESTARTED": "NO",
+        "IR_NODE_CHANGED": "NO",
     }
 
 
