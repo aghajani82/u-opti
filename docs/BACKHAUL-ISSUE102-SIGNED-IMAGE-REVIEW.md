@@ -804,6 +804,29 @@ evidence check; it neither implements a production writer nor authenticates
 the actual live IR/Grandoptical peer/source and provider recovery state.
 
 `INSTALL_ALLOWED=NO` and `ACTIVATION_GATE=HOLD` remain mandatory.
+## Retained Host Executor writer is CI-only even when called directly
+
+The retained `_retained_step` is an internal install/recover/rollback/cleanup
+writer, not a live production API. The two-host coordinator has long
+required a marked isolated GitHub PR lab; a direct Python call to the
+lower writer previously checked only the **canonical** production path
+aliases, and therefore could accept unrelated absolute paths without
+repeating the coordinator's CI-lab admission. This was a real fail-closed
+boundary gap: no caller should be able to bypass the sandbox merely by
+calling the underlying mutation function directly.
+
+Before **any** engine lock, recovery-journal or Manifest/receipt write,
+the writer now enforces the existing `pair.admission` GitHub-PR
+environment/runner-root/private-marker validation **itself**, and checks
+all six supplied transaction resource paths are inside the same marked
+temporary root with no symlink traversal. Direct calls with missing
+or forged markers, wrong GitHub context, alternate roots, or outside
+state/lock/binary/FRP resources yield `RETAINED_CI_LAB_ONLY` HOLD.
+Tests include install and a pending recovery journal without a valid lab
+context; the journal and original FRP/Manifest remain byte-exact.
+
+This is **not** a production switch or signed live-host attestation.
+`INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD` are unchanged.
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
