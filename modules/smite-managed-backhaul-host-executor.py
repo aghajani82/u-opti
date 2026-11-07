@@ -887,6 +887,101 @@ def _retained_review_pending_recovery(paths: Paths) -> str | None:
     return None
 
 
+def _retained_live_signed_witness(*, role: str, expected_node_image: str,
+                                  paths: Paths = Paths()) -> str:
+    """Stable, role-scoped LIVE Node/FRP witness for future retained writer.
+
+    This is a read-only building block, NOT a live writer admission token.
+    It does not contact the peer, attest provider backups, sign a release
+    or authorize any real transaction. Signed local Agent GETs consume replay
+    nonces; no Node, FRP, broker, routing or engine bytes are written here.
+    """
+    if (paths != Paths() or os.geteuid() != 0
+            or role not in ("ir", "foreign")
+            or IMAGE.fullmatch(expected_node_image) is None):
+        raise Hold("RETAINED_LIVE_WITNESS_SCOPE_UNTRUSTED")
+    try:
+        frp = _load("uopti_retained_live_frp", "smite-rc7-frp-enrollment.py")
+        control = _load("uopti_retained_live_bh", "smite-managed-backhaul-control.py")
+        doc = frp.node_details()
+        if doc.get("role") != role or doc.get("state") != "COMMITTED":
+            raise Hold("RETAINED_LIVE_ROLE_UNVERIFIED")
+        node = frp.rt.inspect_container("smite-node")
+        if (node.get("Name") != "/smite-node"
+                or node.get("Config", {}).get("Image") != expected_node_image):
+            raise Hold("RETAINED_LIVE_IMAGE_PIN_CHANGED")
+        identity = _retained_container_fingerprint(node)
+        mounts = node.get("Mounts")
+        if not isinstance(mounts, list):
+            raise Hold("RETAINED_LIVE_MOUNTS_UNTRUSTED")
+        matched = [mount for mount in mounts if
+                   isinstance(mount, dict)
+                   and mount.get("Destination") == "/var/lib/smite-node"]
+        if (len(matched) != 1 or matched[0].get("Type") != "volume"
+                or matched[0].get("Driver") != "local"
+                or not isinstance(matched[0].get("Source"), str)):
+            raise Hold("RETAINED_LIVE_NODE_VOLUME_UNTRUSTED")
+        data = Path(matched[0]["Source"])
+        if (not data.is_absolute() or data.is_symlink()
+                or not data.is_dir()):
+            raise Hold("RETAINED_LIVE_NODE_VOLUME_UNTRUSTED")
+        # Exact bytes of the persisted FRP registry are read locally,
+        # without printing any tunnel IDs, tokens, proxy ports or hosts.
+        # A corrupt or concurrently written registry must fail closed.
+        registry = data / "tunnels.json"
+        saved = pair._pair_read_private(registry, limit=262144)
+        frp.rt.signed_probe()
+        footprint = admission.host.frp_process_footprint()
+        if role == "ir":
+            if (footprint.get("FRPS_PROCESS_LOCAL") != "OBSERVED_UNATTESTED"
+                    or SHA.fullmatch(
+                        footprint.get("FRPS_INSTANCE_SHA256", "")) is None):
+                raise Hold("RETAINED_LIVE_FRPS_PROCESS_UNVERIFIED")
+            owner = frp.signed_owner_inventory()
+            if not isinstance(owner, str) or SHA.fullmatch(owner) is None:
+                raise Hold("RETAINED_LIVE_SIGNED_OWNER_UNVERIFIED")
+            broker = admission.host.broker_socket_footprint()
+            if (broker.get("BROKER_SOCKET_LOCAL") != "PRESENT_UNATTESTED"
+                    or SHA.fullmatch(
+                        broker.get("BROKER_SOCKET_ID_SHA256", "")) is None):
+                raise Hold("RETAINED_LIVE_BROKER_UNVERIFIED")
+            role_proof = (owner, footprint["FRPS_INSTANCE_SHA256"],
+                          broker["BROKER_SOCKET_ID_SHA256"])
+        else:
+            if (footprint.get("FRPC_PROCESS_LOCAL") != "OBSERVED_UNATTESTED"
+                    or SHA.fullmatch(
+                        footprint.get("FRPC_INSTANCE_SHA256", "")) is None):
+                raise Hold("RETAINED_LIVE_FRPC_PROCESS_UNVERIFIED")
+            children = control._rc7_foreign_saved_child_ids(frp)
+            if not children:
+                raise Hold("RETAINED_LIVE_FOREIGN_CHILDREN_MISSING")
+            signed_children = control._rc7_foreign_signed_instances(frp, children)
+            if (len(signed_children) != len(children)
+                    or not all(type(s) is str and SHA.fullmatch(s)
+                               for s in signed_children)):
+                raise Hold("RETAINED_LIVE_SIGNED_CHILDREN_UNVERIFIED")
+            role_proof = (footprint["FRPC_INSTANCE_SHA256"],
+                          tuple(signed_children),
+                          _sha(json.dumps(children, sort_keys=True).encode()))
+        # A signed read can itself span a Node restart or FRP process
+        # change. Repeat the local immutable/process evidence afterward.
+        after = frp.rt.inspect_container("smite-node")
+        if (_retained_container_fingerprint(after) != identity
+                or after.get("Config", {}).get("Image") != expected_node_image
+                or admission.host.frp_process_footprint() != footprint
+                or pair._pair_read_private(registry, limit=262144) != saved):
+            raise Hold("RETAINED_LIVE_NODE_OR_FRP_DRIFT")
+        if role == "ir" and admission.host.broker_socket_footprint() != broker:
+            raise Hold("RETAINED_LIVE_BROKER_DRIFT")
+        payload = [role, expected_node_image, identity, _sha(saved), role_proof]
+        return _sha(json.dumps(payload, sort_keys=True).encode())
+    except Hold:
+        raise
+    except Exception as exc:
+        # Local exceptions and Docker output might include secrets.
+        raise Hold("RETAINED_LIVE_SIGNED_WITNESS_UNVERIFIED") from exc
+
+
 def review_in_place_binary(*, expected_node_image: str, arch: str,
                            paths: Paths = Paths(), runner=subprocess.run,
                            signed_pair_manifest: Path | None = None,
