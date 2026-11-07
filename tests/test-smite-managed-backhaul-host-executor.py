@@ -962,6 +962,70 @@ class HostExecutor(unittest.TestCase):
             self.assertFalse((info["paths"].state /
                               "retained-rc7-cleanup.json").exists())
 
+    def test_two_host_rejects_both_role_preflight_receipt_drift_without_writes(self):
+        # The first observer runs AFTER the original paired preflights.
+        # Even a semantically valid whitespace edit to a COMMITTED receipt
+        # must not become the new baseline for the exact rollback.
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
+               "GITHUB_REPOSITORY": "aghajani82/u-opti",
+               "RUNNER_TEMP": str(self.root.parent)}
+        for drift_role in ("ir", "foreign"):
+            with self.subTest(role=drift_role):
+                hosts = self._retained_two_host_real_executor_fixture()
+                before = {role: hosts[role]["before"] for role in hosts}
+                changed = []
+                def observe(phase, *_):
+                    if phase == "before":
+                        receipt = hosts[drift_role]["receipt"]
+                        receipt.write_bytes(receipt.read_bytes() + b"\n")
+                        changed.append(drift_role)
+                    return True
+                with patch.dict(os.environ, env), \
+                     patch.object(exe.subprocess, "run",
+                                  side_effect=AssertionError("DOCKER_CALLED")), \
+                     self.assertRaisesRegex(
+                         exe.Hold, "RETAINED_TWO_HOST_PREFLIGHT_PAIR_CHANGED"):
+                    exe._retained_two_host_rehearsal_lab(
+                        hosts["ir"]["paths"], hosts["foreign"]["paths"],
+                        arch="amd64", observe=observe)
+                self.assertEqual(changed, [drift_role])
+                for role, info in hosts.items():
+                    self.assertEqual(info["manifest"].read_bytes(), before[role][0])
+                    self.assertEqual(info["receipt"].read_bytes(),
+                                     before[role][1] + (b"\n" if role == drift_role else b""))
+                    self.assertFalse((info["paths"].state / "retained-rc7.json").exists())
+                    self.assertFalse((info["paths"].state /
+                                      "retained-rc7-cleanup.json").exists())
+
+    def test_retained_step_requires_exact_preflight_bytes_under_writer_lock(self):
+        # A writer racing after the coordinator's second preflight check
+        # is rejected before creating the PREPARED journal on this host.
+        from dataclasses import replace
+        step, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        expected = (manifest.read_bytes(), receipt.read_bytes())
+        receipt.write_bytes(expected[1] + b"\n")
+        changed = (manifest.read_bytes(), receipt.read_bytes())
+        with self.assertRaisesRegex(exe.Hold, "RETAINED_PREFLIGHT_PAIR_CHANGED"):
+            exe._retained_step(paths, action="install", role="ir",
+                               arch="amd64", witness=lambda: "1"*64,
+                               expected_before=expected)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), changed)
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+        self.assertFalse((paths.state / "retained-rc7-cleanup.json").exists())
+        for invalid in (("bad", b"ok"), (b"", b"ok"), (b"ok", None), b"bad"):
+            with self.subTest(invalid=str(invalid)[:15]), self.assertRaisesRegex(
+                    exe.Hold, "RETAINED_EXPECTED_BASELINE_INVALID"):
+                exe._retained_step(paths, action="install", role="ir",
+                                   arch="amd64", witness=lambda: "1"*64,
+                                   expected_before=invalid)
+        receipt.write_bytes(expected[1])
+        self.assertEqual(
+            exe._retained_step(paths, action="install", role="ir",
+                               arch="amd64", witness=lambda: "1"*64,
+                               expected_before=expected),
+            "COMMITTED")
+
     def test_two_host_real_retained_executor_compensates_after_ir_and_foreign_crash(self):
         env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request",
                "GITHUB_REPOSITORY": "aghajani82/u-opti",
