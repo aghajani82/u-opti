@@ -335,12 +335,14 @@ class FrpOperator(unittest.TestCase):
         # the independent FRP menu is unchanged and foreign writes remain
         # explicitly forbidden by the production executor.
         self.assertIn(
-            '3) IR Backhaul retained install / rollback (no Node recreate)',
+            '3) Backhaul retained install / rollback (IR / Foreign, no Node recreate)',
             source)
         self.assertIn('smite_managed_bh_ir_retained_canary', source)
         self.assertIn('--confirm-role INSTALL-RETAINED-BACKHAUL-IR', source)
         self.assertIn('--confirm-role ROLLBACK-RETAINED-BACKHAUL-IR', source)
-        self.assertNotIn('INSTALL-RETAINED-BACKHAUL-FOREIGN', source)
+        self.assertIn('INSTALL-RETAINED-BACKHAUL-FOREIGN', source)
+        self.assertIn('ROLLBACK-RETAINED-BACKHAUL-FOREIGN', source)
+        self.assertIn('SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED', source)
         for body in (SOURCE.read_text(), MENU.read_text()):
             for forbidden in ("docker compose up", "docker restart", "systemctl start",
                               "iptables ", "ufw ", "nginx -s", "ssh ", "curl "):

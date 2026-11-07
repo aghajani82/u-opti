@@ -388,7 +388,9 @@ class SharedHostAdmission(unittest.TestCase):
         self.assertIn("smite_managed_bh_ir_retained_canary", menu)
         self.assertIn("install-retained-ir", menu)
         self.assertIn("rollback-retained-ir", menu)
-        self.assertNotIn("install-retained-foreign", menu)
+        self.assertIn("install-retained-foreign", menu)
+        self.assertIn("rollback-retained-foreign", menu)
+        self.assertIn("RETAINED_LIVE_FOREIGN_RECOVERY_APPROVAL_REQUIRED", menu)
         self.assertIn("HOLD: Host installation disabled. No changes made.", menu)
         self.assertNotIn("docker compose up", menu)
 

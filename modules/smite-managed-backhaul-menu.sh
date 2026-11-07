@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Independent Smite Engine Management: read-only reviews and scoped IR canary.
-# Existing option 3 may call only the signed IR metadata-enrollment/rollback
-# executor after explicit TTY confirmation. No new tunnel, FRP Apply, Docker
-# restart/recreate, Grandoptical write, Nginx/firewall, or SSH action here.
+# Existing option 3 uses only role-specific signed IR/Foreign metadata
+# enrollment/rollback with explicit TTY approval. Foreign requires qualified
+# independent restore+console evidence first. No new tunnel, FRP Apply, Docker
+# restart/recreate, Nginx/firewall, or SSH action here.
 # Full two-host Backhaul tunnel activation remains gated/disabled.
 SMITE_ENGINE_MENU_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SMITE_MANAGED_BACKHAUL_CONTROL="$SMITE_ENGINE_MENU_DIR/smite-managed-backhaul-control.py"
@@ -55,9 +56,10 @@ smite_managed_bh_ir_retained_canary() {
     esac
     local image="ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
     local mode
-    echo "IR-only Backhaul metadata canary: no Node restart or tunnel Apply."
-    echo "Grandoptical and existing FRP tunnels will not be modified."
-    read -rp "Enter I=install on IR, R=rollback on IR, or 0=cancel: " mode ||
+    echo "Retained Backhaul metadata enrollment: no Node restart or tunnel Apply."
+    echo "Existing FRP tunnels, Sanaei and all other services stay unchanged."
+    echo "Foreign requires independent restore + console proof, not merely a snapshot."
+    read -rp "I=IR install, R=IR rollback, F=Foreign install, B=Foreign rollback, 0=cancel: " mode ||
         return 2
     case "$mode" in
         I|i)
@@ -77,6 +79,40 @@ smite_managed_bh_ir_retained_canary() {
                 --expected-node-image "$image" \
                 --confirm-role ROLLBACK-RETAINED-BACKHAUL-IR
             ;;
+        F|f|B|b)
+            # No new top-level menu or installer: Foreign metadata and
+            # restoration use the same signed paired journal/rollback core.
+            # Independent provider restore+console proof is not conveyed
+            # by a snapshot file. Refuse to proceed on bare snapshot assent.
+            local recovery_confirm=""
+            echo "Foreign live clients: independently tested isolated restore"
+            echo "and a working provider console/rescue path are REQUIRED."
+            echo "If either is unverified, enter 0. No changes will occur."
+            read -rp "Type SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED or 0: " \
+                recovery_confirm || return 2
+            if [ "$recovery_confirm" != SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED ]; then
+                echo "HOLD: RETAINED_LIVE_FOREIGN_RECOVERY_APPROVAL_REQUIRED"
+                return 2
+            fi
+            if [[ "$mode" == [Ff] ]]; then
+                python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
+                    install-retained-foreign --arch "$arch" \
+                    --expected-node-image "$image" \
+                    --confirm-role INSTALL-RETAINED-BACKHAUL-FOREIGN \
+                    --confirm-snapshot-and-console "$recovery_confirm" \
+                    --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json" \
+                    --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
+                    --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
+                    --signed-pair-publish-ref refs/tags/v2.0.0-rc.7 \
+                    --signed-pair-trusted-root "$SMITE_ENGINE_MENU_DIR/smite-rc7-sigstore-trusted-root.json"
+            else
+                python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
+                    rollback-retained-foreign --arch "$arch" \
+                    --expected-node-image "$image" \
+                    --confirm-role ROLLBACK-RETAINED-BACKHAUL-FOREIGN \
+                    --confirm-snapshot-and-console "$recovery_confirm"
+            fi
+            ;;
         0) echo "No changes made." ;;
         *) echo "HOLD: Unrecognized IR-only operation"; return 2 ;;
     esac
@@ -92,7 +128,7 @@ smite_managed_bh_menu() {
         echo "======================================"
         echo "1) Status (read-only)"
         echo "2) Review installation prerequisites"
-        echo "3) IR Backhaul retained install / rollback (no Node recreate)"
+        echo "3) Backhaul retained install / rollback (IR / Foreign, no Node recreate)"
         echo "4) Show safe IR/KH report (read-only)"
         echo "5) FRP — Independent install/review"
         echo "0) Back"

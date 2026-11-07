@@ -1067,7 +1067,7 @@ class OperatorControl(unittest.TestCase):
         # The existing option 3 now offers an IR-only retained metadata
         # canary, but the walkthrough explicitly selects 0=cancel. A
         # noninteractive/dummy-node walkthrough must never mutate anything.
-        self.assertIn("IR Backhaul retained install / rollback", result.stdout)
+        self.assertIn("Backhaul retained install / rollback", result.stdout)
         # The test deliberately points SMITE_NODE_DIR at a disposable
         # noncanonical directory: option 3 must HOLD before even asking
         # for an IR confirmation, rather than using the test's next "0".
