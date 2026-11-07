@@ -212,6 +212,112 @@ def signed_owner_inventory():
                 SIGNED_OWNER_REQUEST],timeout=30)
     return signed_owner_payload(raw)
 
+
+# Complete the existing RC7 read-only FRP runtime review on a FOREIGN child.
+# An Agent HMAC status alone is NOT evidence of a live WSS control socket;
+# a host psutil snapshot alone is NOT an authenticated managed child.
+# Require BOTH on the reviewed pinned Node; never print credentials/config.
+SIGNED_CHILD_REQUEST=r"""
+import hashlib,json,os,psutil,re,secrets,urllib.error,urllib.request
+from app.agent_auth import read_identity
+from app.node_auth import sign_request
+
+tunnel_id=os.environ["UOPTI_FRP_CHILD_ID"]
+assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}",tunnel_id)
+node_id,secret=read_identity('/run/smite-node-identity/node-identity.json')
+target='/api/agent/tunnels/status?tunnel_id='+tunnel_id
+url='http://127.0.0.1:8888'+target
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        return None
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+headers=sign_request(secret=secret,node_id=node_id,method='GET',target=target,
+                     body=b'',nonce=secrets.token_hex(16))
+req=urllib.request.Request(url,headers=headers,method='GET')
+with opener.open(req,timeout=6) as response:
+    assert response.status==200 and response.geturl()==url
+    raw=response.read(4097)
+    assert 0<len(raw)<=4096
+def no_duplicates(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result: raise ValueError("duplicate")
+        result[key]=value
+body=json.loads(raw,object_pairs_hook=no_duplicates)
+assert body=={"status":"success",
+              "data":{"active":True,"type":"frp","process_running":True}}
+# Replaying the identical signed request must be denied by durable Agent auth.
+try:
+    opener.open(req,timeout=6)
+except urllib.error.HTTPError as error:
+    assert error.code==401
+else:
+    raise AssertionError("replay accepted")
+expected=['/usr/local/bin/frpc','-c',
+          '/etc/smite-node/frp/frpc_'+tunnel_id+'.yaml']
+matching=[]
+for proc in psutil.process_iter(['pid','cmdline','create_time','status']):
+    try:
+        info=proc.info
+        if info.get('cmdline')!=expected or info.get('status')==psutil.STATUS_ZOMBIE:
+            continue
+        connected=(proc.net_connections if hasattr(proc,'net_connections')
+                   else proc.connections)(kind='tcp')
+        established=sum(
+            entry.status==psutil.CONN_ESTABLISHED
+            and getattr(entry.raddr,'port',None)==443 for entry in connected)
+        matching.append((info['pid'],info['create_time'],established))
+    except (psutil.Error,OSError,ValueError,TypeError,KeyError):
+        continue
+assert len(matching)==1 and matching[0][2]>=1
+pid,started,_=matching[0]
+identifier=hashlib.sha256(
+    json.dumps([tunnel_id,pid,started],separators=(',',':')).encode()
+).hexdigest()
+print(json.dumps({"schema":1,"child_id_sha256":hashlib.sha256(
+    tunnel_id.encode('ascii')).hexdigest(),
+    "instance_sha256":identifier,"signed_status":"PASS",
+    "wss_443_socket":"ESTABLISHED"},sort_keys=True))
+"""
+
+def signed_child_payload(raw):
+    """Sanitize signed status AND inspected one-instance WSS socket proof."""
+    need(isinstance(raw,str) and 0<len(raw.encode('utf-8'))<=4096,
+         'SIGNED_FRPC_CHILD_RESPONSE_INVALID')
+    def no_duplicates(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result: raise Hold('SIGNED_FRPC_CHILD_RESPONSE_INVALID')
+            result[key]=value
+        return result
+    try: doc=json.loads(raw,object_pairs_hook=no_duplicates)
+    except (ValueError,UnicodeError,TypeError) as exc:
+        raise Hold('SIGNED_FRPC_CHILD_RESPONSE_INVALID') from exc
+    need(isinstance(doc,dict)
+         and set(doc)=={'schema','child_id_sha256','instance_sha256',
+                        'signed_status','wss_443_socket'}
+         and type(doc['schema']) is int and doc['schema']==1
+         and type(doc['child_id_sha256']) is str
+         and DIGEST.fullmatch(doc['child_id_sha256'])
+         and type(doc['instance_sha256']) is str
+         and DIGEST.fullmatch(doc['instance_sha256'])
+         and doc['signed_status']=='PASS'
+         and doc['wss_443_socket']=='ESTABLISHED',
+         'SIGNED_FRPC_CHILD_RESPONSE_INVALID')
+    return doc
+
+def signed_child_inventory(tunnel_id):
+    need(type(tunnel_id) is str and OWNER_ID.fullmatch(tunnel_id) is not None,
+         'FOREIGN_FRPC_CHILD_ID_REQUIRED')
+    raw=rt.run(['docker','exec','--env','UOPTI_FRP_CHILD_ID='+tunnel_id,
+                'smite-node','python3','-B','-c',
+                SIGNED_CHILD_REQUEST],timeout=30)
+    doc=signed_child_payload(raw)
+    need(doc['child_id_sha256']==sha(tunnel_id.encode('ascii')),
+         'SIGNED_FRPC_CHILD_ID_MISMATCH')
+    return doc['instance_sha256']
+
+
 def binaries():
     raw=p.run(['docker','exec','smite-node','python3','-B','-c',BINARY_AUDIT])
     try:digests=json.loads(raw)
@@ -384,13 +490,16 @@ def restore(entry):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('plan','apply','verify','verify-owner','rollback','recover'))
+    parser.add_argument('action',choices=('plan','apply','verify','verify-owner','verify-child','rollback','recover'))
     parser.add_argument('--role',choices=('ir','foreign'),required=True)
     parser.add_argument('--snapshot-confirm',default='')
+    parser.add_argument('--tunnel-id',help='Exact existing Foreign managed FRPC tunnel ID')
     args=parser.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
-        if args.action not in ('plan','verify','verify-owner'):
+        need(args.tunnel_id is None or args.action=='verify-child',
+             'FOREIGN_FRPC_CHILD_ID_UNEXPECTED')
+        if args.action not in ('plan','verify','verify-owner','verify-child'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-RC7-FRP-'+args.role.upper()
@@ -411,15 +520,26 @@ def main():
             with rt.locked():
                 entry=state()
                 need(entry['role']==args.role,'ROLE_MISMATCH')
-                if args.action in ('verify','verify-owner'):
+                if args.action in ('verify','verify-owner','verify-child'):
                     need(entry['state']=='COMMITTED','ENROLLMENT_NOT_COMMITTED')
                     if args.action=='verify-owner':
                         need(args.role=='ir','IR_FRPS_OWNER_ONLY')
+                    if args.action=='verify-child':
+                        need(args.role=='foreign','FOREIGN_FRPC_CHILD_ONLY')
+                        need(type(args.tunnel_id) is str and
+                             OWNER_ID.fullmatch(args.tunnel_id) is not None,
+                             'FOREIGN_FRPC_CHILD_ID_REQUIRED')
                     verify_file(entry);rt.signed_probe();enrolled_status()
                     if args.action=='verify-owner':
                         signed_owner_inventory()
                         print('RC7_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER')
                         print('FRPS_CHILD_FORWARDING=NOT_PROVEN')
+                    elif args.action=='verify-child':
+                        identity=signed_child_inventory(args.tunnel_id)
+                        print('RC7_SIGNED_FOREIGN_FRPC_CHILD_VERIFY=PASS_LOCAL_TLS443')
+                        print('FRPC_CHILD_INSTANCE_SHA256='+identity)
+                        print('SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN')
+                        print('FRP_DATA_PLANE=NOT_PROVEN')
                     else:
                         print('RC7_FRP_ENROLLMENT_VERIFY=PASS_SIGNED')
                     print('LIVE_CONFIG_CHANGES=NONE')
