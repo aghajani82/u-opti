@@ -906,7 +906,7 @@ class HostExecutor(unittest.TestCase):
         if not (self.config / "engine-state/engines.json").is_file():
             self._retained_review_fixture()
         paths = replace(self.paths, frp_state=self.root / "frp")
-        paths.frp_state.mkdir(mode=0o700)
+        paths.frp_state.mkdir(mode=0o700, exist_ok=True)
         manifest = self.config / "engine-state/engines.json"
         record = {
             "schema": 1, "state": "COMMITTED", "role": role,
