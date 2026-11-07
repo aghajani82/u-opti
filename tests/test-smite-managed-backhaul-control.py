@@ -125,7 +125,9 @@ class OperatorControl(unittest.TestCase):
 
     def _rc7_bundle_fake(self, *, role="foreign", inventory=None,
                          binary=None, mounts=None, probe_error=None,
-                         owner_hashes=None, owner_error=None):
+                         owner_hashes=None, owner_error=None,
+                         child_ids=None, child_lists=None,
+                         child_hashes=None, child_error=None):
         engines = {name: "not-installed" for name in control.ENGINES}
         engines["frp"] = "ready"
         if inventory is None:
@@ -153,6 +155,15 @@ class OperatorControl(unittest.TestCase):
             if "os.lstat(path)" in argv[-1]:
                 calls.append("binary")
                 return binary if isinstance(binary,str) else json.dumps(binary)
+            if 'path="/var/lib/smite-node/tunnels.json"' in argv[-1]:
+                calls.append("saved-children")
+                children = (["existing-frpc-one"] if child_ids is None
+                            else child_ids)
+                snapshots = ([{"schema":1,"child_ids":children}] * 2
+                             if child_lists is None else child_lists)
+                index = calls.count("saved-children") - 1
+                selected = snapshots[min(index,len(snapshots)-1)]
+                return selected if isinstance(selected,str) else json.dumps(selected)
             self.assertIn("target='/api/agent/engines'",argv[-1])
             calls.append("signed-inventory")
             return inventory if isinstance(inventory,str) else json.dumps(inventory)
@@ -189,11 +200,19 @@ class OperatorControl(unittest.TestCase):
                 raise FakeHold(owner_error)
             index = calls.count("signed-owner") - 1
             return signed_owner_values[min(index, len(signed_owner_values) - 1)]
+        def signed_child_inventory(child_id):
+            calls.append("signed-child")
+            if child_error is not None:
+                raise FakeHold(child_error)
+            hashes = (["a"*64] if child_hashes is None else child_hashes)
+            index = calls.count("signed-child") - 1
+            return hashes[min(index,len(hashes)-1)]
         fake = SimpleNamespace(
             Hold=FakeHold, rt=rt, node_details=node_details,
             MANIFEST=manifest_path, JOURNAL=journal_dir,
             read_private=private, state=state, verify_file=verify_file,
             signed_owner_inventory=signed_owner_inventory,
+            signed_child_inventory=signed_child_inventory,
         )
         return fake,calls
 
@@ -266,7 +285,10 @@ class OperatorControl(unittest.TestCase):
             status=control.verify_rc7_bundled_backhaul("foreign")
         self.assertEqual(calls,["runtime","mounts","replay","binary",
                                 "signed-inventory","manifest-read","receipt-read",
-                                "receipt-state","frp-verify","manifest-read","receipt-read"])
+                                "receipt-state","frp-verify",
+                                "saved-children","signed-child",
+                                "manifest-read","receipt-read",
+                                "saved-children","signed-child"])
         self.assertEqual(status["RC7_BACKHAUL_BINARY_PIN"],
                          "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH")
         self.assertEqual(status["RC7_FRP_RECEIPT_BINDING"],
@@ -282,6 +304,9 @@ class OperatorControl(unittest.TestCase):
         self.assertEqual(status["INSTALL_ALLOWED"],"NO")
         self.assertEqual(status["ACTIVATION_GATE"],"HOLD")
         self.assertEqual(status["SIGNED_OWNER_CHILD_CONTINUITY"],"NOT_PROVEN")
+        self.assertEqual(status["RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN"],
+                         "PASS_STABLE_LOCAL_ONLY")
+        self.assertNotIn("existing-frpc-one",str(status))
         self.assertNotIn("a"*64,str(status))
         self.assertNotIn("Docker",str(status))
 
@@ -295,6 +320,8 @@ class OperatorControl(unittest.TestCase):
         self.assertEqual(calls[-1], "signed-owner")
         self.assertEqual(status["RC7_IR_SIGNED_FRPS_OWNER"],
                          "PASS_SIGNED_AGENT_LISTENER_STABLE")
+        self.assertEqual(status["RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN"],
+                         "NOT_APPLICABLE_IR")
         self.assertEqual(status["RC7_FOREIGN_FRPC_CHILD_FORWARDING"], "NOT_PROVEN")
         self.assertEqual(status["SIGNED_OWNER_CHILD_CONTINUITY"], "NOT_PROVEN")
         self.assertEqual(status["INSTALL_ALLOWED"], "NO")
@@ -309,6 +336,89 @@ class OperatorControl(unittest.TestCase):
                          "NOT_APPLICABLE_FOREIGN")
         self.assertEqual(foreign_status["RC7_FOREIGN_FRPC_CHILD_FORWARDING"],
                          "NOT_PROVEN")
+        self.assertEqual(foreign_calls.count("saved-children"),2)
+        self.assertEqual(foreign_calls.count("signed-child"),2)
+
+    def test_rc7_foreign_signed_saved_children_all_three_stable(self):
+        three=("existing-child-one","existing-child-two","existing-child-three")
+        fake,calls=self._rc7_bundle_fake(child_ids=list(three))
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            outcome=control.verify_rc7_bundled_backhaul("foreign")
+        self.assertEqual(calls.count("saved-children"),2)
+        self.assertEqual(calls.count("signed-child"),6)
+        self.assertEqual(outcome["RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN"],
+                         "PASS_STABLE_LOCAL_ONLY")
+        self.assertEqual(outcome["RC7_FOREIGN_FRPC_CHILD_FORWARDING"],
+                         "NOT_PROVEN")
+        self.assertEqual(outcome["SIGNED_OWNER_CHILD_CONTINUITY"],"NOT_PROVEN")
+        self.assertEqual(outcome["ACTIVATION_GATE"],"HOLD")
+        self.assertEqual(outcome["INSTALL_ALLOWED"],"NO")
+        for tid in three:
+            self.assertNotIn(tid,str(outcome))
+
+    def test_rc7_foreign_saved_children_schema_and_missing_hold(self):
+        good={"schema":1,"child_ids":["child-a","child-b"]}
+        compile(control.RC7_BUNDLED_FOREIGN_SAVED_CHILDREN,
+                "<readonly-foreign-frp-children>","exec")
+        self.assertIn("os.O_NOFOLLOW",control.RC7_BUNDLED_FOREIGN_SAVED_CHILDREN)
+        self.assertNotIn("/tunnels/apply",
+                         control.RC7_BUNDLED_FOREIGN_SAVED_CHILDREN)
+        self.assertEqual(control._rc7_foreign_saved_child_ids(
+            SimpleNamespace(rt=SimpleNamespace(
+                run=lambda *_,**__:json.dumps(good)))),("child-a","child-b"))
+        for bad in (
+                {"schema":1,"child_ids":[]},
+                {"schema":1,"child_ids":["child-b","child-a"]},
+                {"schema":1,"child_ids":["child-a","child-a"]},
+                {"schema":1,"child_ids":["../escape"]},
+                {"schema":1,"child_ids":[True]},
+                {"schema":1,"child_ids":["a"*129]},
+                {"schema":True,"child_ids":["child-a"]},
+                {"schema":1,"child_ids":["child-a"],"token":"LEAK_ME"},
+                {"schema":1,"child_ids":["child-a"]*33},
+                '{"schema":1,"schema":1,"child_ids":["child-a"]}',
+                "LEAK_ME",
+        ):
+            with self.subTest(case=str(bad)[:80]):
+                payload=bad if isinstance(bad,str) else json.dumps(bad)
+                fake,calls=self._rc7_bundle_fake(child_lists=[payload])
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaisesRegex(
+                            control.Hold,
+                            "RC7_BUNDLED_FOREIGN_SAVED_CHILDREN_UNTRUSTED") as err:
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertNotIn("LEAK_ME",str(err.exception))
+                self.assertNotIn("signed-child",calls)
+
+    def test_rc7_foreign_child_set_or_process_drift_fails_closed(self):
+        cases=(
+            ({"child_lists":[{"schema":1,"child_ids":["child-a"]},
+                            {"schema":1,"child_ids":["child-b"]}]},
+             "RC7_BUNDLED_FOREIGN_CHILD_SET_CHANGED_DURING_REVIEW"),
+            ({"child_hashes":["a"*64,"b"*64]},
+             "RC7_BUNDLED_SIGNED_CHILD_CHANGED_DURING_REVIEW"),
+            ({"child_hashes":[None]},
+             "RC7_BUNDLED_FOREIGN_SIGNED_CHILD_UNTRUSTED"),
+        )
+        for kwargs,code in cases:
+            with self.subTest(reason=code):
+                fake,calls=self._rc7_bundle_fake(**kwargs)
+                with patch.object(control.os,"geteuid",return_value=0), \
+                     patch.object(control,"_load",return_value=fake):
+                    with self.assertRaisesRegex(control.Hold,code):
+                        control.verify_rc7_bundled_backhaul("foreign")
+                self.assertIn("signed-child",calls)
+
+        fake,calls=self._rc7_bundle_fake(child_error="SECRET_FROM_AGENT")
+        with patch.object(control.os,"geteuid",return_value=0), \
+             patch.object(control,"_load",return_value=fake):
+            with self.assertRaisesRegex(
+                control.Hold,"RC7_BUNDLED_RUNTIME_UNVERIFIED") as held:
+                control.verify_rc7_bundled_backhaul("foreign")
+        self.assertNotIn("SECRET_FROM_AGENT",str(held.exception))
+        self.assertEqual(calls.count("signed-child"),1)
 
     def test_rc7_ir_signed_owner_failure_and_identity_drift_fail_closed(self):
         for settings,expected in (
