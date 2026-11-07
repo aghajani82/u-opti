@@ -384,6 +384,20 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
             if any(candidate == fixed or fixed in candidate.parents
                    or candidate in fixed.parents for fixed in protected):
                 raise Hold("INDEPENDENT_DEPLOYMENT_APPROVAL_REQUIRED")
+    # This writer is private but directly callable by imported Python code.
+    # The two-host coordinator already requires a marked GitHub PR sandbox;
+    # require the SAME admission at this lower mutation boundary so no
+    # caller can bypass it by invoking _retained_step on alternate host paths.
+    # This check must precede opening the shared engine lock or any journal.
+    root = paths.node.parent
+    if (not root.is_absolute() or paths.node != root / "node"):
+        raise Hold("RETAINED_CI_LAB_ONLY")
+    try:
+        pair.admission(root)
+        for name in ("staging", "state", "lock", "binary", "frp_state"):
+            pair.ensure_in_lab(root, getattr(paths, name))
+    except (pair.Hold, OSError, ValueError, TypeError) as exc:
+        raise Hold("RETAINED_CI_LAB_ONLY") from exc
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):

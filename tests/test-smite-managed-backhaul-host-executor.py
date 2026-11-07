@@ -620,6 +620,20 @@ class HostExecutor(unittest.TestCase):
     def retained_fixture(self):
         from dataclasses import replace
         self._retained_review_fixture()
+        # Direct retained-writer calls must carry the SAME disposable CI
+        # admission marker and GitHub PR environment as the two-host lab.
+        # Never weaken the writer boundary to make fixtures pass.
+        marker = self.root / "EXPERIMENTAL-LAB"
+        marker.write_text(exe.pair.MARKER)
+        marker.chmod(0o600)
+        ci = patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "aghajani82/u-opti",
+            "RUNNER_TEMP": str(self.root.parent),
+        })
+        ci.start()
+        self.addCleanup(ci.stop)
         self.state.mkdir(mode=0o700, parents=True)
         frp = self.root / "frp"
         frp.mkdir(mode=0o700)
@@ -635,6 +649,96 @@ class HostExecutor(unittest.TestCase):
             return exe._retained_step(paths, action=action, role="ir", arch="amd64",
                                       witness=witness)
         return step, manifest, receipt
+
+    def test_retained_writer_cannot_bypass_ci_lab_admission_directly(self):
+        # The coordinator used to enforce pair.admission, but an imported
+        # direct writer call did not. Reject BEFORE acquiring any engine
+        # lock or writing a PREPARED journal on an alternate path.
+        from dataclasses import replace
+        step, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        original = (manifest.read_bytes(), receipt.read_bytes())
+        journal = self.state / "retained-rc7.json"
+        seal = self.state / "retained-rc7-cleanup.json"
+        marker = self.root / "EXPERIMENTAL-LAB"
+        valid_marker = marker.read_bytes()
+
+        for variable, value in (
+                ("GITHUB_ACTIONS", "false"),
+                ("GITHUB_EVENT_NAME", "push"),
+                ("GITHUB_REPOSITORY", "someone-else/other"),
+                ("RUNNER_TEMP", str(self.root / "wrong-runner"))):
+            with self.subTest(env=variable), \
+                 patch.dict(os.environ, {variable: value}), \
+                 patch.object(exe, "_lock",
+                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
+                 self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
+                exe._retained_step(paths, action="install", role="ir",
+                                   arch="amd64", witness=lambda: "1" * 64)
+            self.assertFalse(journal.exists())
+            self.assertFalse(seal.exists())
+
+        for kind in ("missing", "tampered", "symlink"):
+            with self.subTest(marker=kind):
+                marker.unlink()
+                if kind == "tampered":
+                    marker.write_text("UNTRUSTED-LAB-MARKER\n")
+                elif kind == "symlink":
+                    reference = self.root / "fake-marker-reference"
+                    reference.write_bytes(valid_marker)
+                    marker.symlink_to(reference)
+                with patch.object(
+                        exe, "_lock",
+                        side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
+                     self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
+                    exe._retained_step(paths, action="install", role="ir",
+                                       arch="amd64", witness=lambda: "1" * 64)
+                if marker.is_symlink() or marker.exists():
+                    marker.unlink()
+                if kind == "symlink":
+                    reference.unlink()
+                marker.write_bytes(valid_marker)
+                marker.chmod(0o600)
+            self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                             original)
+            self.assertFalse(journal.exists())
+
+        # Reject every alternate field outside the admitted disposable
+        # root (not merely the canonical live path aliases).
+        outsider = self.root.parent / "not-under-the-disposable-root"
+        for field in ("node", "staging", "state", "lock",
+                      "binary", "frp_state"):
+            with self.subTest(resource=field), \
+                 patch.object(exe, "_lock",
+                              side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
+                 self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
+                exe._retained_step(
+                    replace(paths, **{field: outsider / field}),
+                    action="install", role="ir", arch="amd64",
+                    witness=lambda: "1" * 64)
+            self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                             original)
+            self.assertFalse(journal.exists())
+            self.assertFalse(seal.exists())
+
+        # Admission is required for recovery/cleanup as well; lost CI
+        # context must leave an already valid COMMITTED journal intact.
+        self.assertEqual(step("install"), "COMMITTED")
+        committed = (manifest.read_bytes(), receipt.read_bytes())
+        committed_journal = journal.read_bytes()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}), \
+             patch.object(exe, "_lock",
+                          side_effect=AssertionError("LOCK_MUST_NOT_OPEN")), \
+             self.assertRaisesRegex(exe.Hold, "RETAINED_CI_LAB_ONLY"):
+            step("rollback")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                         committed)
+        self.assertEqual(journal.read_bytes(), committed_journal)
+        self.assertFalse(seal.exists())
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                         original)
 
     def test_signed_read_only_plan_for_actual_host_role_names(self):
         from dataclasses import replace
