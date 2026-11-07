@@ -428,6 +428,31 @@ def _retained_step_core(paths, *, action, role, arch, witness,
             or arch not in package.OFFICIAL_BINARY_SHA256
             or not callable(witness)):
         raise Hold("RETAINED_CORE_INPUT_UNTRUSTED")
+    # The internal Python object above is only a routing hint, NOT a
+    # security authority. A caller can import it just as readily as this
+    # function. Independently enforce the disposable CI runner admission
+    # here, BEFORE any shared engine lock, even when the wrapper is bypassed.
+    # Live admission must be built separately with actual signed peer and
+    # recovery proof; never accept a capability object as that evidence.
+    root = paths.node.parent
+    expected = {
+        "node": root / "node",
+        "staging": root / "stages",
+        "state": root / "state/engine/backhaul",
+        "lock": root / "engine.lock",
+        "binary": root / "installed/backhaul",
+        "frp_state": root / pair.PAIR_RECEIPT_DIR,
+    }
+    if (paths == Paths() or not root.is_absolute()
+            or any(getattr(paths, key) != value or value.resolve() != value
+                   for key, value in expected.items())):
+        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
+    try:
+        pair.admission(root)
+        for name in ("staging", "state", "lock", "binary", "frp_state"):
+            pair.ensure_in_lab(root, getattr(paths, name))
+    except (pair.Hold, OSError, ValueError, TypeError) as exc:
+        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
