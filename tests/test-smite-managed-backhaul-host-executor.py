@@ -1446,7 +1446,7 @@ class HostExecutor(unittest.TestCase):
         after = {
             **initial, "RC7_BACKHAUL_ENGINE": "READY_SIGNED_INVENTORY",
             "RC7_BACKHAUL_MANIFEST_PLAN":
-                "COMMITTED_PAFOREIGN_VERIFIED_READ_ONLY",
+                "COMMITTED_PAIR_VERIFIED_READ_ONLY",
         }
         control = SimpleNamespace(
             verify_rc7_bundled_backhaul=mock.Mock(
@@ -1480,7 +1480,7 @@ class HostExecutor(unittest.TestCase):
             report["RETAINED_FOREIGN_BACKHAUL_ENROLLMENT"],
             "PASS_SIGNED_METADATA_ONLY")
         self.assertEqual(report["BACKHAUL_TUNNEL_ACTIVATED"], "NO")
-        self.assertEqual(report["FOREIGN_NODE_CHANGED"], "NO")
+        self.assertEqual(report["IR_NODE_CHANGED"], "NO")
 
     def test_live_foreign_canary_rejects_unverified_signed_before_writer(self):
         from types import SimpleNamespace
