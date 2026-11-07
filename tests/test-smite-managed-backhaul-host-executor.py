@@ -901,7 +901,10 @@ class HostExecutor(unittest.TestCase):
 
     def _live_prepare_test_context(self, role):
         from dataclasses import replace
-        self._retained_review_fixture()
+        # The IR and Foreign role cases share one temporary fixture in
+        # this test. Only create the immutable original Manifest once.
+        if not (self.config / "engine-state/engines.json").is_file():
+            self._retained_review_fixture()
         paths = replace(self.paths, frp_state=self.root / "frp")
         paths.frp_state.mkdir(mode=0o700)
         manifest = self.config / "engine-state/engines.json"
