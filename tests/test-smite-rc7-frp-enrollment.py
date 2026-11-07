@@ -232,6 +232,32 @@ class EnrollmentTests(unittest.TestCase):
             self.assertEqual(ctl.main(),2)
         self.assertIn('HOLD: SIGNED_FRPS_OWNER_RESPONSE_INVALID',stderr.getvalue())
 
+    def test_foreign_verify_propagated_wss_runtime_hold_is_sanitized(self):
+        # WSS-runtime imports an independently instantiated admission module,
+        # so its Hold class is not the FRP module's Hold class. The same
+        # security rejection must return 2, never leak a traceback or token.
+        for error,expected in (
+            (ctl.rt.Hold('WSS_RUNTIME_SECURITY_DRIFT'),
+             'WSS_RUNTIME_SECURITY_DRIFT'),
+            (ctl.rt.Hold('SECRET_PRIVATE_WSS_TOKEN: unexpected bytes'),
+             'UNTRUSTED_FRP_ENROLLMENT_STATE'),
+        ):
+            with self.subTest(expected=expected):
+                stderr=io.StringIO()
+                with patch('sys.argv',['enroll','verify','--role','foreign']), \
+                     patch.object(ctl.os,'geteuid',return_value=0), \
+                     patch.object(ctl.rt,'locked',return_value=contextlib.nullcontext()), \
+                     patch.object(ctl,'state',return_value={'role':'foreign','state':'COMMITTED'}), \
+                     patch.object(ctl,'verify_file',side_effect=error), \
+                     patch.object(ctl.rt,'signed_probe') as replay, \
+                     patch.object(ctl,'enrolled_status') as inventory, \
+                     contextlib.redirect_stderr(stderr):
+                    self.assertEqual(ctl.main(),2)
+                self.assertEqual(stderr.getvalue().strip(),'HOLD: '+expected)
+                self.assertNotIn('Traceback',stderr.getvalue())
+                replay.assert_not_called()
+                inventory.assert_not_called()
+
     def test_no_host_binaries_or_network_listener_side_effects(self):
         src=PATH.read_text()
         self.assertIn("choices=('plan','apply','verify','verify-owner','rollback','recover')",src)

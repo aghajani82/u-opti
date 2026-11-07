@@ -428,7 +428,7 @@ def main():
                          'RECOVER_INCOMPLETE_FIRST')
                     restore(entry)
         return 0
-    except (Hold,RuntimeError,ValueError,OSError,KeyError,TypeError) as exc:
+    except (Hold,rt.Hold,RuntimeError,ValueError,OSError,KeyError,TypeError) as exc:
         msg=str(exc)
         print('HOLD: '+(msg if re.fullmatch('[A-Z0-9_]{1,100}',msg)
                          else 'UNTRUSTED_FRP_ENROLLMENT_STATE'),file=sys.stderr)
