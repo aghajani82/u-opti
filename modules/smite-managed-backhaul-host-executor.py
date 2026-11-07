@@ -420,34 +420,57 @@ def _retained_step_core(paths, *, action, role, arch, witness,
     preflight bytes and protected runtime BEFORE invoking this function.
     A production caller is deliberately not yet exposed by CLI or menu.
     """
-    if _admission is not _RETAINED_CI_WRITER_ADMISSION:
-        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
     if (not isinstance(paths, Paths)
             or action not in ("install", "rollback", "recover", "cleanup")
             or role not in ("ir", "foreign")
             or arch not in package.OFFICIAL_BINARY_SHA256
             or not callable(witness)):
         raise Hold("RETAINED_CORE_INPUT_UNTRUSTED")
-    # The internal Python object above is only a routing hint, NOT a
-    # security authority. A caller can import it just as readily as this
-    # function. Independently enforce the disposable CI runner admission
-    # here, BEFORE any shared engine lock, even when the wrapper is bypassed.
-    # Live admission must be built separately with actual signed peer and
-    # recovery proof; never accept a capability object as that evidence.
-    root = paths.node.parent
-    # Both the one-host regression fixture and the two-host integration
-    # use a private marked CI root, but their staged binary subdirectories
-    # differ. Enforce exact node layout and ROOT containment, not a
-    # guessed single staging/binary layout.
-    if (paths == Paths() or not root.is_absolute()
-            or paths.node != root / "node"):
-        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
-    try:
-        pair.admission(root)
-        for name in ("staging", "state", "lock", "binary", "frp_state"):
-            pair.ensure_in_lab(root, getattr(paths, name))
-    except (pair.Hold, OSError, ValueError, TypeError) as exc:
-        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
+    # Live writes are admitted only after the exact pinned signature +
+    # signed Owner/Node prewrite review AND explicit IR-only operator
+    # authorization. A forged Python object is no security boundary:
+    # compare every prepared field again, and core rechecks the actual
+    # running FRP/Node witness plus both exact bytes under its OWN lock.
+    # The foreign production host remains closed while the IR canary is
+    # evaluated, independently of this caller's permissions.
+    if isinstance(_admission, RetainedLivePrepared):
+        approved = _admission
+        if (not _retained_live_root_required()
+                or paths != Paths() or approved.paths != Paths()
+                or role != "ir" or approved.role != role
+                or approved.arch != arch
+                or IMAGE.fullmatch(approved.node_image) is None
+                or type(approved.runtime_witness) is not str
+                or SHA.fullmatch(approved.runtime_witness) is None
+                or not isinstance(approved.old_pair, tuple)
+                or len(approved.old_pair) != 2
+                or any(type(x) is not bytes or not 0 < len(x) <= 8192
+                       for x in approved.old_pair)
+                or action == "install" and (
+                    expected_before != approved.old_pair
+                    or expected_witness != approved.runtime_witness)
+                or action != "install" and (
+                    expected_before is not None
+                    or expected_witness is not None)):
+            raise Hold("RETAINED_LIVE_IR_WRITER_NOT_ADMITTED")
+    elif _admission is _RETAINED_CI_WRITER_ADMISSION:
+        # The imported singleton itself is not trusted as authorization.
+        # The existing strict disposable GitHub PR admission still runs
+        # before the shared lock and any filesystem mutation.
+        root = paths.node.parent
+        if (paths == Paths() or not root.is_absolute()
+                or paths.node != root / "node"):
+            raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
+        try:
+            pair.admission(root)
+            for name in ("staging", "state", "lock", "binary", "frp_state"):
+                pair.ensure_in_lab(root, getattr(paths, name))
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
+    else:
+        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
+    # The active shared lock, exact prior bytes and signed witness checks
+    # below are the SAME as for the fully exercised disposable CI writer.
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
@@ -984,7 +1007,8 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
             signed_pair_source_sha=signed_pair_source_sha,
             signed_pair_publish_ref=signed_pair_publish_ref,
             signed_pair_trusted_root=signed_pair_trusted_root)
-        if (not isinstance(review, dict) or "REASON" in review
+        if (not isinstance(review, dict) or review.get("REASON") not in (
+                    None, "INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
                 or review.get("RETAINED_NODE_BACKHAUL_BINARY")
                     != "OFFICIAL_EXECUTABLE_SHA256_MATCH"
                 or review.get("IN_PLACE_MANIFEST_TRANSACTION")
@@ -1039,6 +1063,108 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
         # Nothing about trusted release roots, file paths or credentials
         # must appear in HOLD output. In particular, do NOT print bytes.
         raise Hold("RETAINED_LIVE_PREPARE_FAILED") from exc
+
+
+def _retained_live_ir_canary(*, arch: str, expected_node_image: str,
+                             signed_pair_manifest: Path,
+                             signed_pair_manifest_sha256: str,
+                             signed_pair_source_sha: str,
+                             signed_pair_publish_ref: str,
+                             signed_pair_trusted_root: Path) -> dict[str, str]:
+    """Perform one IR-only metadata enrollment, with signed postcheck/rollback.
+
+    No Node/FRPS restart, no Backhaul listener/tunnel creation, no foreign
+    mutation. Only the existing exact Manifest+FRP receipt pair can change.
+    This is NOT a two-host Backhaul tunnel activation.
+    """
+    paths = Paths()
+    prepared = _retained_live_prepare(
+        role="ir", arch=arch, expected_node_image=expected_node_image,
+        signed_pair_manifest=signed_pair_manifest,
+        signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+        signed_pair_source_sha=signed_pair_source_sha,
+        signed_pair_publish_ref=signed_pair_publish_ref,
+        signed_pair_trusted_root=signed_pair_trusted_root, paths=paths)
+    control = _load("uopti_retained_live_acceptance",
+                    "smite-managed-backhaul-control.py")
+    # Require real signed agent, stable FRPS owner and not-installed engine
+    # BEFORE creating even the private new journal parent directories.
+    initial = control.verify_rc7_bundled_backhaul("ir")
+    if (initial.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or initial.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or initial.get("RC7_IR_SIGNED_FRPS_OWNER")
+            != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+            or initial.get("NODE_RECREATED") != "NO"
+            or initial.get("ACTIVATION_GATE") != "HOLD"
+            or initial.get("INSTALL_ALLOWED") != "NO"):
+        raise Hold("RETAINED_LIVE_IR_SIGNED_INITIAL_HOLD")
+    # This is the first sanctioned write on the IR canary. The state
+    # directory may not exist yet, but must be private and root-owned.
+    _mkdir_chain(paths.state, Path("/var/lib/u-opti"))
+
+    def witness():
+        return _retained_live_signed_witness(
+            role="ir", expected_node_image=prepared.node_image,
+            paths=paths)
+
+    # The shared engine lock is acquired inside the existing reviewed core,
+    # which compares exact prewrite bytes and witness before PREPARED journal.
+    result = _retained_step_core(
+        paths, action="install", role="ir", arch=arch, witness=witness,
+        expected_before=prepared.old_pair,
+        expected_witness=prepared.runtime_witness, _admission=prepared)
+    if result != "COMMITTED":
+        raise Hold("RETAINED_LIVE_IR_COMMIT_UNVERIFIED")
+
+    # The signed verification uses the same immutable running Node and
+    # exact paired COMMITTED receipt; do not equate the filesystem write
+    # with successful authenticated runtime enrollment.
+    try:
+        verified = control.verify_rc7_bundled_backhaul(
+            "ir", expected_backhaul_state="ready")
+        if (verified.get("RC7_BACKHAUL_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_BACKHAUL_MANIFEST_PLAN")
+                != "COMMITTED_PAIR_VERIFIED_READ_ONLY"
+                or verified.get("RC7_IR_SIGNED_FRPS_OWNER")
+                != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+                or verified.get("NODE_RECREATED") != "NO"
+                or verified.get("INSTALL_ALLOWED") != "NO"
+                or verified.get("ACTIVATION_GATE") != "HOLD"):
+            raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_UNVERIFIED")
+    except Exception as exc:
+        # Keep journal intact if compensation cannot be safely proven.
+        # Never restart Docker/FRPS/Node or overwrite unknown drift.
+        try:
+            rolled = _retained_step_core(
+                paths, action="rollback", role="ir", arch=arch,
+                witness=witness, _admission=prepared)
+            if rolled != "RESTORED":
+                raise Hold("RETAINED_LIVE_IR_RESTORED_UNVERIFIED")
+            prior = control.verify_rc7_bundled_backhaul("ir")
+            if (prior.get("RC7_BACKHAUL_ENGINE")
+                    != "NOT_INSTALLED_SIGNED_INVENTORY"
+                    or prior.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+                    or prior.get("NODE_RECREATED") != "NO"):
+                raise Hold("RETAINED_LIVE_IR_ROLLBACK_SIGNED_UNVERIFIED")
+            cleaned = _retained_step_core(
+                paths, action="cleanup", role="ir", arch=arch,
+                witness=witness, _admission=prepared)
+            if cleaned != "CLEANED":
+                raise Hold("RETAINED_LIVE_IR_CLEANUP_UNVERIFIED")
+        except Exception as recovery_exc:
+            raise Hold("RETAINED_LIVE_IR_RECOVERY_MANUAL_REVIEW_REQUIRED") from recovery_exc
+        raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_ROLLED_BACK") from exc
+    return {
+        "RETAINED_IR_BACKHAUL_ENROLLMENT": "PASS_SIGNED_METADATA_ONLY",
+        "BACKHAUL_TUNNEL_ACTIVATED": "NO",
+        "FRP_OWNER_CHANGED": "NO_REQUESTED",
+        "NODE_RESTARTED": "NO",
+        "FOREIGN_NODE_CHANGED": "NO",
+        "ROLLBACK_JOURNAL": "RETAINED_PRIVATE",
+        "TWO_HOST_BACKHAUL_ACTIVATION_GATE": "HOLD",
+    }
 
 
 def _retained_live_root_required() -> bool:
