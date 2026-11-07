@@ -1110,12 +1110,28 @@ def _retained_live_ir_canary(*, arch: str, expected_node_image: str,
 
     # The shared engine lock is acquired inside the existing reviewed core,
     # which compares exact prewrite bytes and witness before PREPARED journal.
-    result = _retained_step_core(
-        paths, action="install", role="ir", arch=arch, witness=witness,
-        expected_before=prepared.old_pair,
-        expected_witness=prepared.runtime_witness, _admission=prepared)
-    if result != "COMMITTED":
-        raise Hold("RETAINED_LIVE_IR_COMMIT_UNVERIFIED")
+    try:
+        result = _retained_step_core(
+            paths, action="install", role="ir", arch=arch, witness=witness,
+            expected_before=prepared.old_pair,
+            expected_witness=prepared.runtime_witness, _admission=prepared)
+        if result != "COMMITTED":
+            raise Hold("RETAINED_LIVE_IR_COMMIT_UNVERIFIED")
+    except Exception as exc:
+        # Even an interrupted PREPARED write can leave the Manifest and
+        # receipt as a mixed pair. Attempt exact signed compensation only
+        # when our durable journal actually exists; otherwise no guessed
+        # restore or destructive recovery is permitted.
+        if os.path.lexists(paths.state / "retained-rc7.json"):
+            try:
+                _retained_live_ir_rollback(
+                    arch=arch, expected_node_image=expected_node_image)
+            except Exception as recovery_exc:
+                raise Hold(
+                    "RETAINED_LIVE_IR_RECOVERY_MANUAL_REVIEW_REQUIRED"
+                ) from recovery_exc
+            raise Hold("RETAINED_LIVE_IR_PARTIAL_WRITE_ROLLED_BACK") from exc
+        raise Hold("RETAINED_LIVE_IR_NO_JOURNAL_COMMIT_HOLD") from exc
 
     # The signed verification uses the same immutable running Node and
     # exact paired COMMITTED receipt; do not equate the filesystem write
