@@ -809,7 +809,7 @@ class HostExecutor(unittest.TestCase):
                             ("foreign", "sha256:" + "a" * 64)):
             with self.subTest(role=role, image=image), \
                  patch.object(exe, "Paths", return_value=self.paths), \
-                 patch.object(exe.os, "geteuid", return_value=0), \
+                 patch.object(exe, "_retained_live_root_required", return_value=True), \
                  patch.object(exe, "_load",
                               side_effect=AssertionError("DOCKER_OR_AGENT_IO")), \
                  self.assertRaisesRegex(
@@ -824,7 +824,7 @@ class HostExecutor(unittest.TestCase):
                     self._live_witness_test_fixture(role))
                 saved = registry.read_bytes()
                 with patch.object(exe, "Paths", return_value=self.paths), \
-                     patch.object(exe.os, "geteuid", return_value=0), \
+                     patch.object(exe, "_retained_live_root_required", return_value=True), \
                      patch.object(exe, "_load", side_effect=loader), \
                      patch.object(exe.admission.host, "frp_process_footprint",
                                   return_value=proc), \
@@ -876,7 +876,7 @@ class HostExecutor(unittest.TestCase):
                     self._live_witness_test_fixture(role))
                 original = registry.read_bytes()
                 with patch.object(exe, "Paths", return_value=self.paths), \
-                     patch.object(exe.os, "geteuid", return_value=0), \
+                     patch.object(exe, "_retained_live_root_required", return_value=True), \
                      patch.object(exe, "_load", side_effect=loader), \
                      patch.object(exe.admission.host, "frp_process_footprint",
                                   return_value=proc), \
