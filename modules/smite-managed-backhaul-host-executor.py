@@ -420,37 +420,71 @@ def _retained_step_core(paths, *, action, role, arch, witness,
     preflight bytes and protected runtime BEFORE invoking this function.
     A production caller is deliberately not yet exposed by CLI or menu.
     """
-    if _admission is not _RETAINED_CI_WRITER_ADMISSION:
-        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
     if (not isinstance(paths, Paths)
             or action not in ("install", "rollback", "recover", "cleanup")
             or role not in ("ir", "foreign")
             or arch not in package.OFFICIAL_BINARY_SHA256
             or not callable(witness)):
         raise Hold("RETAINED_CORE_INPUT_UNTRUSTED")
-    # The internal Python object above is only a routing hint, NOT a
-    # security authority. A caller can import it just as readily as this
-    # function. Independently enforce the disposable CI runner admission
-    # here, BEFORE any shared engine lock, even when the wrapper is bypassed.
-    # Live admission must be built separately with actual signed peer and
-    # recovery proof; never accept a capability object as that evidence.
-    root = paths.node.parent
-    # Both the one-host regression fixture and the two-host integration
-    # use a private marked CI root, but their staged binary subdirectories
-    # differ. Enforce exact node layout and ROOT containment, not a
-    # guessed single staging/binary layout.
-    if (paths == Paths() or not root.is_absolute()
-            or paths.node != root / "node"):
-        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
-    try:
-        pair.admission(root)
-        for name in ("staging", "state", "lock", "binary", "frp_state"):
-            pair.ensure_in_lab(root, getattr(paths, name))
-    except (pair.Hold, OSError, ValueError, TypeError) as exc:
-        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
+    # Live writes are admitted only after the exact pinned signature +
+    # signed Owner/Node prewrite review AND explicit IR-only operator
+    # authorization. A forged Python object is no security boundary:
+    # compare every prepared field again, and core rechecks the actual
+    # running FRP/Node witness plus both exact bytes under its OWN lock.
+    # The foreign production host remains closed while the IR canary is
+    # evaluated, independently of this caller's permissions.
+    if isinstance(_admission, RetainedLivePrepared):
+        approved = _admission
+        if (not _retained_live_root_required()
+                or paths != Paths() or approved.paths != Paths()
+                or role != "ir" or approved.role != role
+                or approved.arch != arch
+                or IMAGE.fullmatch(approved.node_image) is None
+                or type(approved.runtime_witness) is not str
+                or SHA.fullmatch(approved.runtime_witness) is None
+                or SHA.fullmatch(approved.node_env_sha256) is None
+                or SHA.fullmatch(approved.node_compose_sha256) is None
+                or not isinstance(approved.old_pair, tuple)
+                or len(approved.old_pair) != 2
+                or any(type(x) is not bytes or not 0 < len(x) <= 8192
+                       for x in approved.old_pair)
+                or action == "install" and (
+                    expected_before != approved.old_pair
+                    or expected_witness != approved.runtime_witness)
+                or action != "install" and (
+                    expected_before is not None
+                    or expected_witness is not None)):
+            raise Hold("RETAINED_LIVE_IR_WRITER_NOT_ADMITTED")
+    elif _admission is _RETAINED_CI_WRITER_ADMISSION:
+        # The imported singleton itself is not trusted as authorization.
+        # The existing strict disposable GitHub PR admission still runs
+        # before the shared lock and any filesystem mutation.
+        root = paths.node.parent
+        if (paths == Paths() or not root.is_absolute()
+                or paths.node != root / "node"):
+            raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
+        try:
+            pair.admission(root)
+            for name in ("staging", "state", "lock", "binary", "frp_state"):
+                pair.ensure_in_lab(root, getattr(paths, name))
+        except (pair.Hold, OSError, ValueError, TypeError) as exc:
+            raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
+    else:
+        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
+    # The active shared lock, exact prior bytes and signed witness checks
+    # below are the SAME as for the fully exercised disposable CI writer.
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
+        if isinstance(_admission, RetainedLivePrepared):
+            # Recheck mutable host settings under the SAME exclusive lock
+            # that will record PREPARED. The local signed runtime witness
+            # alone does not cover external Compose or .env file edits.
+            if (_sha(_read(paths.node / ".env", 16384))
+                    != _admission.node_env_sha256
+                    or _sha(_read(paths.node / "docker-compose.yml", 131072))
+                    != _admission.node_compose_sha256):
+                raise Hold("RETAINED_LIVE_NODE_CONFIG_CHANGED_BEFORE_WRITE")
         manifest, receipt, journal = _retained_files(paths)
         for conflict in (_journal(paths), receipt.with_name("record.next"),
                          manifest.with_name("engines.json.rc7-next"),
@@ -946,6 +980,8 @@ class RetainedLivePrepared:
     node_image: str
     old_pair: tuple[bytes, bytes]
     runtime_witness: str
+    node_env_sha256: str = ""
+    node_compose_sha256: str = ""
 
 
 def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
@@ -984,7 +1020,8 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
             signed_pair_source_sha=signed_pair_source_sha,
             signed_pair_publish_ref=signed_pair_publish_ref,
             signed_pair_trusted_root=signed_pair_trusted_root)
-        if (not isinstance(review, dict) or "REASON" in review
+        if (not isinstance(review, dict) or review.get("REASON") not in (
+                    None, "INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED")
                 or review.get("RETAINED_NODE_BACKHAUL_BINARY")
                     != "OFFICIAL_EXECUTABLE_SHA256_MATCH"
                 or review.get("IN_PLACE_MANIFEST_TRANSACTION")
@@ -1018,6 +1055,9 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
                 raise Hold("RETAINED_LIVE_EXISTING_JOURNAL")
             old_pair = (pair._pair_read_private(manifest),
                         pair._pair_read_private(receipt))
+            env_digest = _sha(_read(paths.node / ".env", 16384))
+            compose_digest = _sha(
+                _read(paths.node / "docker-compose.yml", 131072))
             pair._pair_expected_transition(
                 *old_pair, package.OFFICIAL_BINARY_SHA256[arch], role=role)
             first = _retained_live_signed_witness(
@@ -1028,17 +1068,264 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
                     paths=paths)
                     or old_pair != (pair._pair_read_private(manifest),
                                     pair._pair_read_private(receipt))
+                    or env_digest != _sha(_read(paths.node / ".env", 16384))
+                    or compose_digest != _sha(_read(
+                        paths.node / "docker-compose.yml", 131072))
                     or _retained_review_pending_recovery(paths) is not None):
                 raise Hold("RETAINED_LIVE_PREPARE_CONCURRENT_DRIFT")
         return RetainedLivePrepared(
             paths=paths, role=role, arch=arch, node_image=expected_node_image,
-            old_pair=old_pair, runtime_witness=first)
+            old_pair=old_pair, runtime_witness=first,
+            node_env_sha256=env_digest,
+            node_compose_sha256=compose_digest)
     except Hold:
         raise
     except Exception as exc:
         # Nothing about trusted release roots, file paths or credentials
         # must appear in HOLD output. In particular, do NOT print bytes.
         raise Hold("RETAINED_LIVE_PREPARE_FAILED") from exc
+
+
+def _retained_live_ir_canary(*, arch: str, expected_node_image: str,
+                             signed_pair_manifest: Path,
+                             signed_pair_manifest_sha256: str,
+                             signed_pair_source_sha: str,
+                             signed_pair_publish_ref: str,
+                             signed_pair_trusted_root: Path) -> dict[str, str]:
+    """Perform one IR-only metadata enrollment, with signed postcheck/rollback.
+
+    No Node/FRPS restart, no Backhaul listener/tunnel creation, no foreign
+    mutation. Only the existing exact Manifest+FRP receipt pair can change.
+    This is NOT a two-host Backhaul tunnel activation.
+    """
+    paths = Paths()
+    prepared = _retained_live_prepare(
+        role="ir", arch=arch, expected_node_image=expected_node_image,
+        signed_pair_manifest=signed_pair_manifest,
+        signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+        signed_pair_source_sha=signed_pair_source_sha,
+        signed_pair_publish_ref=signed_pair_publish_ref,
+        signed_pair_trusted_root=signed_pair_trusted_root, paths=paths)
+    control = _load("uopti_retained_live_acceptance",
+                    "smite-managed-backhaul-control.py")
+    # Require real signed agent, stable FRPS owner and not-installed engine
+    # BEFORE creating even the private new journal parent directories.
+    initial = control.verify_rc7_bundled_backhaul("ir")
+    if (initial.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or initial.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or initial.get("RC7_IR_SIGNED_FRPS_OWNER")
+            != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+            or initial.get("NODE_RECREATED") != "NO"
+            or initial.get("ACTIVATION_GATE") != "HOLD"
+            or initial.get("INSTALL_ALLOWED") != "NO"):
+        raise Hold("RETAINED_LIVE_IR_SIGNED_INITIAL_HOLD")
+    # This is the first sanctioned write on the IR canary. The state
+    # directory may not exist yet, but must be private and root-owned.
+    _mkdir_chain(paths.state, Path("/var/lib/u-opti"))
+
+    def witness():
+        return _retained_live_signed_witness(
+            role="ir", expected_node_image=prepared.node_image,
+            paths=paths)
+
+    # The shared engine lock is acquired inside the existing reviewed core,
+    # which compares exact prewrite bytes and witness before PREPARED journal.
+    try:
+        result = _retained_step_core(
+            paths, action="install", role="ir", arch=arch, witness=witness,
+            expected_before=prepared.old_pair,
+            expected_witness=prepared.runtime_witness, _admission=prepared)
+        if result != "COMMITTED":
+            raise Hold("RETAINED_LIVE_IR_COMMIT_UNVERIFIED")
+    except Exception as exc:
+        # Even an interrupted PREPARED write can leave the Manifest and
+        # receipt as a mixed pair. Attempt exact signed compensation only
+        # when our durable journal actually exists; otherwise no guessed
+        # restore or destructive recovery is permitted.
+        if os.path.lexists(paths.state / "retained-rc7.json"):
+            try:
+                _retained_live_ir_rollback(
+                    arch=arch, expected_node_image=expected_node_image)
+            except Exception as recovery_exc:
+                raise Hold(
+                    "RETAINED_LIVE_IR_RECOVERY_MANUAL_REVIEW_REQUIRED"
+                ) from recovery_exc
+            raise Hold("RETAINED_LIVE_IR_PARTIAL_WRITE_ROLLED_BACK") from exc
+        raise Hold("RETAINED_LIVE_IR_NO_JOURNAL_COMMIT_HOLD") from exc
+
+    # The signed verification uses the same immutable running Node and
+    # exact paired COMMITTED receipt; do not equate the filesystem write
+    # with successful authenticated runtime enrollment.
+    try:
+        verified = control.verify_rc7_bundled_backhaul(
+            "ir", expected_backhaul_state="ready")
+        if (verified.get("RC7_BACKHAUL_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+                or verified.get("RC7_BACKHAUL_MANIFEST_PLAN")
+                != "COMMITTED_PAIR_VERIFIED_READ_ONLY"
+                or verified.get("RC7_IR_SIGNED_FRPS_OWNER")
+                != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+                or verified.get("NODE_RECREATED") != "NO"
+                or verified.get("INSTALL_ALLOWED") != "NO"
+                or verified.get("ACTIVATION_GATE") != "HOLD"):
+            raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_UNVERIFIED")
+    except Exception as exc:
+        # The same explicit journal-based recovery entry is exercised
+        # after failed signed acceptance AND by a later operator. Never
+        # erase a journal or restart Node when recovery proof is absent.
+        try:
+            _retained_live_ir_rollback(
+                arch=arch, expected_node_image=expected_node_image)
+        except Exception as recovery_exc:
+            raise Hold("RETAINED_LIVE_IR_RECOVERY_MANUAL_REVIEW_REQUIRED") from recovery_exc
+        raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_ROLLED_BACK") from exc
+    return {
+        "RETAINED_IR_BACKHAUL_ENROLLMENT": "PASS_SIGNED_METADATA_ONLY",
+        "BACKHAUL_TUNNEL_ACTIVATED": "NO",
+        "FRP_OWNER_CHANGED": "NO_REQUESTED",
+        "NODE_RESTARTED": "NO",
+        "FOREIGN_NODE_CHANGED": "NO",
+        "ROLLBACK_JOURNAL": "RETAINED_PRIVATE",
+        "TWO_HOST_BACKHAUL_ACTIVATION_GATE": "HOLD",
+    }
+
+
+def _retained_live_ir_rollback(*, arch: str,
+                               expected_node_image: str) -> dict[str, str]:
+    """Explicit safe IR-only compensation using its original durable journal.
+
+    Never build rollback originals from current files or unsigned caller
+    input. This entry intentionally works with PREPARED/mixed files that
+    cannot pass the not-installed/ready preflight during an interrupted
+    write. The core verifies exact original pair semantics and allowable
+    mixed phase states under the shared engine lock before any mutation.
+    """
+    paths = Paths()
+    if (not _retained_live_root_required()
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or IMAGE.fullmatch(expected_node_image) is None):
+        raise Hold("RETAINED_LIVE_IR_RECOVERY_INPUT_UNTRUSTED")
+    witness = _retained_live_signed_witness(
+        role="ir", expected_node_image=expected_node_image, paths=paths)
+    journal = paths.state / "retained-rc7.json"
+    cleanup_seal = paths.state / "retained-rc7-cleanup.json"
+    if not os.path.lexists(journal) and os.path.lexists(cleanup_seal):
+        # A crash after journal unlink but before seal unlink is an
+        # intentional recovery state, not an excuse to reconstruct an
+        # untrusted journal. The existing core's sealed cleanup verifies
+        # the original two byte hashes, role, witness, receipt semantics
+        # and durable seal while holding the exclusive lock.
+        try:
+            originals = (
+                pair._pair_read_private(
+                    paths.node / "config/engine-state/engines.json"),
+                pair._pair_read_private(paths.frp_state / "record.json"))
+            pair._pair_expected_transition(
+                *originals, package.OFFICIAL_BINARY_SHA256[arch],
+                role="ir")
+            control = _load("uopti_retained_sealed_recovery",
+                            "smite-managed-backhaul-control.py")
+            prior = control.verify_rc7_bundled_backhaul("ir")
+            if (prior.get("RC7_BACKHAUL_ENGINE")
+                    != "NOT_INSTALLED_SIGNED_INVENTORY"
+                    or prior.get("RC7_FRP_ENGINE")
+                    != "READY_SIGNED_INVENTORY"
+                    or prior.get("NODE_RECREATED") != "NO"):
+                raise Hold("RETAINED_LIVE_IR_SEALED_SIGNED_HOLD")
+            prepared = RetainedLivePrepared(
+                paths=paths, role="ir", arch=arch,
+                node_image=expected_node_image, old_pair=originals,
+                runtime_witness=witness,
+                node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+                node_compose_sha256=_sha(_read(
+                    paths.node / "docker-compose.yml", 131072)))
+            result = _retained_step_core(
+                paths, action="cleanup", role="ir", arch=arch,
+                witness=lambda: _retained_live_signed_witness(
+                    role="ir", expected_node_image=expected_node_image,
+                    paths=paths),
+                _admission=prepared)
+            if result != "CLEANED":
+                raise Hold("RETAINED_LIVE_IR_SEALED_CLEANUP_UNVERIFIED")
+            return {
+                "RETAINED_IR_BACKHAUL_ROLLBACK":
+                    "PASS_SIGNED_SEALED_CLEANUP_RECOVERED",
+                "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+                "NODE_RESTARTED": "NO",
+                "FOREIGN_NODE_CHANGED": "NO",
+            }
+        except Exception as exc:
+            raise Hold("RETAINED_LIVE_IR_SEALED_RECOVERY_HOLD") from exc
+    try:
+        envelope = pair._pair_load_json(
+            pair._pair_read_private(journal, limit=40000))
+        record = envelope["record"]
+        fields = {"schema", "role", "binary", "witness", "manifest",
+                  "receipt", "phase"}
+        if (set(envelope) != {"record", "sha256"}
+                or not isinstance(record, dict) or set(record) != fields
+                or type(record["schema"]) is not int or record["schema"] != 1
+                or record["role"] != "ir"
+                or record["binary"] != package.OFFICIAL_BINARY_SHA256[arch]
+                or record["witness"] != witness
+                or record["phase"] not in (
+                    "PREPARED", "COMMITTED", "RESTORING", "RESTORED")
+                or _sha(json.dumps(record, sort_keys=True).encode())
+                    != envelope["sha256"]):
+            raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED")
+        originals = []
+        for key in ("manifest", "receipt"):
+            value = record[key]
+            if (type(value) is not str or not 0 < len(value) <= 16384
+                    or len(value) % 2
+                    or re.fullmatch(r"(?:[0-9a-f]{2})+", value) is None):
+                raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED")
+            originals.append(bytes.fromhex(value))
+        originals = tuple(originals)
+        pair._pair_expected_transition(
+            *originals, package.OFFICIAL_BINARY_SHA256[arch], role="ir")
+    except (pair.Hold, KeyError, ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED") from exc
+    prepared = RetainedLivePrepared(
+        paths=paths, role="ir", arch=arch, node_image=expected_node_image,
+        old_pair=originals, runtime_witness=witness,
+        node_env_sha256=_sha(_read(paths.node / ".env", 16384)),
+        node_compose_sha256=_sha(_read(
+            paths.node / "docker-compose.yml", 131072)))
+
+    def current_witness():
+        return _retained_live_signed_witness(
+            role="ir", expected_node_image=expected_node_image, paths=paths)
+
+    rolled = _retained_step_core(
+        paths, action="rollback", role="ir", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if rolled != "RESTORED":
+        raise Hold("RETAINED_LIVE_IR_ROLLBACK_NOT_RESTORED")
+    # Signed preinstall inventory must be truly restored before erasing
+    # journal. A successful byte write alone is never acceptance.
+    control = _load("uopti_retained_recovery_acceptance",
+                    "smite-managed-backhaul-control.py")
+    prior = control.verify_rc7_bundled_backhaul("ir")
+    if (prior.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or prior.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or prior.get("RC7_IR_SIGNED_FRPS_OWNER")
+            != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+            or prior.get("NODE_RECREATED") != "NO"):
+        raise Hold("RETAINED_LIVE_IR_ROLLBACK_SIGNED_UNVERIFIED")
+    cleaned = _retained_step_core(
+        paths, action="cleanup", role="ir", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if cleaned != "CLEANED":
+        raise Hold("RETAINED_LIVE_IR_CLEANUP_UNVERIFIED")
+    return {
+        "RETAINED_IR_BACKHAUL_ROLLBACK": "PASS_SIGNED_EXACT_RESTORED",
+        "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+        "NODE_RESTARTED": "NO",
+        "FOREIGN_NODE_CHANGED": "NO",
+    }
 
 
 def _retained_live_root_required() -> bool:
@@ -1666,8 +1953,10 @@ def recover(*, expected_node_image: str, role_confirm: str,
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Backhaul disposable-host executor; explicit trial only, no tunnel Apply")
-    p.add_argument("action", choices=("install", "rollback", "recover", "review-in-place"))
+        description="Backhaul reviewed host executor; IR retained metadata canary only, no tunnel Apply")
+    p.add_argument("action", choices=(
+        "install", "rollback", "recover", "review-in-place",
+        "install-retained-ir", "rollback-retained-ir"))
     p.add_argument("--stage", type=Path)
     p.add_argument("--arch", choices=tuple(package.OFFICIAL_BINARY_SHA256))
     p.add_argument("--signed-pair-manifest", type=Path)
@@ -1683,7 +1972,37 @@ def main() -> int:
     try:
         if os.geteuid() != 0:
             raise Hold("ROOT_REQUIRED")
-        if args.action == "review-in-place":
+        if args.action in ("install-retained-ir", "rollback-retained-ir"):
+            # These actions are explicitly IR-only. Never enroll the
+            # live foreign production Node through this canary.
+            challenge = ("INSTALL-RETAINED-BACKHAUL-IR"
+                         if args.action == "install-retained-ir"
+                         else "ROLLBACK-RETAINED-BACKHAUL-IR")
+            if (args.arch is None or args.confirm_role != challenge
+                    or not sys.stdin.isatty()
+                    or input("Type " + challenge + ": ").strip()
+                    != challenge):
+                raise Hold("RETAINED_LIVE_IR_OPERATOR_CONFIRMATION_REQUIRED")
+            if args.action == "install-retained-ir":
+                if (args.signed_pair_manifest is None
+                        or args.signed_pair_manifest_sha256 is None
+                        or args.signed_pair_source_sha is None
+                        or args.signed_pair_publish_ref is None
+                        or args.signed_pair_trusted_root is None):
+                    raise Hold("RETAINED_LIVE_SIGNED_RELEASE_PINS_REQUIRED")
+                result = _retained_live_ir_canary(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image,
+                    signed_pair_manifest=args.signed_pair_manifest,
+                    signed_pair_manifest_sha256=args.signed_pair_manifest_sha256,
+                    signed_pair_source_sha=args.signed_pair_source_sha,
+                    signed_pair_publish_ref=args.signed_pair_publish_ref,
+                    signed_pair_trusted_root=args.signed_pair_trusted_root)
+            else:
+                result = _retained_live_ir_rollback(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image)
+        elif args.action == "review-in-place":
             if args.arch is None or args.confirm_role != "REVIEW-BACKHAUL-IN-PLACE":
                 raise Hold("IN_PLACE_REVIEW_ARCH_AND_CONFIRMATION_REQUIRED")
             result = review_in_place_binary(

@@ -331,7 +331,16 @@ class FrpOperator(unittest.TestCase):
         self.assertIn('5) FRP — Independent install/review', source)
         self.assertIn('smite_managed_frp_menu', source)
         self.assertIn('smite_managed_bh_menu', source)
-        self.assertIn('3) Install Backhaul (not enabled yet)', source)
+        # Existing option 3 is now a scoped IR-only metadata canary;
+        # the independent FRP menu is unchanged and foreign writes remain
+        # explicitly forbidden by the production executor.
+        self.assertIn(
+            '3) IR Backhaul retained install / rollback (no Node recreate)',
+            source)
+        self.assertIn('smite_managed_bh_ir_retained_canary', source)
+        self.assertIn('--confirm-role INSTALL-RETAINED-BACKHAUL-IR', source)
+        self.assertIn('--confirm-role ROLLBACK-RETAINED-BACKHAUL-IR', source)
+        self.assertNotIn('INSTALL-RETAINED-BACKHAUL-FOREIGN', source)
         for body in (SOURCE.read_text(), MENU.read_text()):
             for forbidden in ("docker compose up", "docker restart", "systemctl start",
                               "iptables ", "ufw ", "nginx -s", "ssh ", "curl "):

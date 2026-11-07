@@ -1040,6 +1040,298 @@ class HostExecutor(unittest.TestCase):
                 witness=lambda: "f" * 64,
                 _admission="RETAINED_CI_WRITER_ADMISSION")
 
+    def test_live_ir_signed_metadata_canary_only_commits_after_both_proofs(self):
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        paths = exe.Paths()
+        prepared = exe.RetainedLivePrepared(
+            paths=paths, role="ir", arch="amd64", node_image=IMAGE,
+            old_pair=(b"old-manifest", b"old-receipt"),
+            runtime_witness="f" * 64)
+        initial = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "RC7_IR_SIGNED_FRPS_OWNER": "PASS_SIGNED_AGENT_LISTENER_STABLE",
+            "NODE_RECREATED": "NO",
+            "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
+        }
+        after = {
+            **initial, "RC7_BACKHAUL_ENGINE": "READY_SIGNED_INVENTORY",
+            "RC7_BACKHAUL_MANIFEST_PLAN":
+                "COMMITTED_PAIR_VERIFIED_READ_ONLY",
+        }
+        control = SimpleNamespace(
+            verify_rc7_bundled_backhaul=mock.Mock(
+                side_effect=[initial, after]))
+        with patch.object(exe, "_retained_live_prepare",
+                          return_value=prepared) as prepare, \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_mkdir_chain") as directories, \
+             patch.object(exe, "_retained_step_core",
+                          return_value="COMMITTED") as core, \
+             patch.object(exe, "_retained_live_signed_witness",
+                          return_value="f" * 64):
+            report = exe._retained_live_ir_canary(
+                arch="amd64", expected_node_image=IMAGE,
+                signed_pair_manifest=Path("/signed-pair.json"),
+                signed_pair_manifest_sha256="1" * 64,
+                signed_pair_source_sha="2" * 40,
+                signed_pair_publish_ref="refs/tags/v2.0.0-rc.7",
+                signed_pair_trusted_root=Path("/sigstore.json"))
+        self.assertEqual(prepare.call_count, 1)
+        self.assertEqual(core.call_count, 1)
+        self.assertEqual(core.call_args.kwargs["action"], "install")
+        self.assertEqual(core.call_args.kwargs["role"], "ir")
+        self.assertEqual(core.call_args.kwargs["expected_before"],
+                         prepared.old_pair)
+        self.assertEqual(core.call_args.kwargs["expected_witness"],
+                         prepared.runtime_witness)
+        self.assertIs(core.call_args.kwargs["_admission"], prepared)
+        self.assertEqual(directories.call_count, 1)
+        self.assertEqual(
+            report["RETAINED_IR_BACKHAUL_ENROLLMENT"],
+            "PASS_SIGNED_METADATA_ONLY")
+        self.assertEqual(report["BACKHAUL_TUNNEL_ACTIVATED"], "NO")
+        self.assertEqual(report["FOREIGN_NODE_CHANGED"], "NO")
+
+    def test_live_ir_canary_rejects_unverified_signed_before_writer(self):
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        prepared = exe.RetainedLivePrepared(
+            paths=exe.Paths(), role="ir", arch="amd64", node_image=IMAGE,
+            old_pair=(b"old-manifest", b"old-receipt"),
+            runtime_witness="f" * 64)
+        false_initial = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "RC7_IR_SIGNED_FRPS_OWNER": "PASS_SIGNED_AGENT_LISTENER_STABLE",
+            "NODE_RECREATED": "YES", "INSTALL_ALLOWED": "NO",
+            "ACTIVATION_GATE": "HOLD",
+        }
+        control = SimpleNamespace(
+            verify_rc7_bundled_backhaul=mock.Mock(
+                return_value=false_initial))
+        with patch.object(exe, "_retained_live_prepare",
+                          return_value=prepared), \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_mkdir_chain",
+                          side_effect=AssertionError("DIRECTORY_WRITTEN")), \
+             patch.object(exe, "_retained_step_core",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_IR_SIGNED_INITIAL_HOLD"):
+            exe._retained_live_ir_canary(
+                arch="amd64", expected_node_image=IMAGE,
+                signed_pair_manifest=Path("/signed-pair.json"),
+                signed_pair_manifest_sha256="1" * 64,
+                signed_pair_source_sha="2" * 40,
+                signed_pair_publish_ref="refs/tags/v2.0.0-rc.7",
+                signed_pair_trusted_root=Path("/sigstore.json"))
+
+    def test_live_ir_failed_postcommit_must_rollback_without_foreign_mutation(self):
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        prepared = exe.RetainedLivePrepared(
+            paths=exe.Paths(), role="ir", arch="amd64", node_image=IMAGE,
+            old_pair=(b"old-manifest", b"old-receipt"),
+            runtime_witness="f" * 64)
+        initial = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "RC7_IR_SIGNED_FRPS_OWNER": "PASS_SIGNED_AGENT_LISTENER_STABLE",
+            "NODE_RECREATED": "NO",
+            "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
+        }
+        bad_post = {**initial, "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY"}
+        control = SimpleNamespace(verify_rc7_bundled_backhaul=mock.Mock(
+            side_effect=[initial, bad_post]))
+        with patch.object(exe, "_retained_live_prepare",
+                          return_value=prepared), \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_mkdir_chain"), \
+             patch.object(exe, "_retained_step_core",
+                          return_value="COMMITTED"), \
+             patch.object(exe, "_retained_live_ir_rollback",
+                          return_value={"RETAINED_IR_BACKHAUL_ROLLBACK": "PASS"}
+                          ) as rollback, \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_IR_POSTCOMMIT_ROLLED_BACK"):
+            exe._retained_live_ir_canary(
+                arch="amd64", expected_node_image=IMAGE,
+                signed_pair_manifest=Path("/signed-pair.json"),
+                signed_pair_manifest_sha256="1" * 64,
+                signed_pair_source_sha="2" * 40,
+                signed_pair_publish_ref="refs/tags/v2.0.0-rc.7",
+                signed_pair_trusted_root=Path("/sigstore.json"))
+        rollback.assert_called_once_with(
+            arch="amd64", expected_node_image=IMAGE)
+
+    def test_live_ir_recovery_corrupt_or_wrong_role_fails_before_lock(self):
+        from dataclasses import replace
+        paths = replace(self.paths, state=self.root / "retained-live-state")
+        paths.state.mkdir(mode=0o700)
+        receipt = self.root / "private-original"
+        originals = (b'{"schema": 1}', b'{"role": "ir"}')
+        record = {
+            "schema": 1, "role": "ir",
+            "binary": exe.package.OFFICIAL_BINARY_SHA256["amd64"],
+            "witness": "f" * 64, "phase": "PREPARED",
+            "manifest": originals[0].hex(), "receipt": originals[1].hex(),
+        }
+        for scenario in ("bad-checksum", "wrong-role", "wrong-witness"):
+            candidate = dict(record)
+            if scenario == "wrong-role":
+                candidate["role"] = "foreign"
+            if scenario == "wrong-witness":
+                candidate["witness"] = "e" * 64
+            envelope = {
+                "record": candidate,
+                "sha256": exe._sha(
+                    json.dumps(candidate, sort_keys=True).encode()),
+            }
+            if scenario == "bad-checksum":
+                envelope["sha256"] = "0" * 64
+            data = (json.dumps(envelope, sort_keys=True) + "\n").encode()
+            with self.subTest(scenario=scenario), \
+                 patch.object(exe, "Paths", return_value=paths), \
+                 patch.object(exe, "_retained_live_root_required",
+                              return_value=True), \
+                 patch.object(exe, "_retained_live_signed_witness",
+                              return_value="f" * 64), \
+                 patch.object(exe.pair, "_pair_read_private",
+                              return_value=data), \
+                 patch.object(exe, "_retained_step_core",
+                              side_effect=AssertionError("WRITER_OPENED")), \
+                 self.assertRaisesRegex(
+                     exe.Hold, "RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED"):
+                exe._retained_live_ir_rollback(
+                    arch="amd64", expected_node_image=IMAGE)
+
+    def test_ir_live_core_detects_config_drift_before_own_journal(self):
+        from contextlib import nullcontext
+        approved = exe.RetainedLivePrepared(
+            paths=exe.Paths(), role="ir", arch="amd64",
+            node_image=IMAGE, old_pair=(b"before1", b"before2"),
+            runtime_witness="f" * 64,
+            node_env_sha256="a" * 64,
+            node_compose_sha256="b" * 64)
+        with patch.object(exe, "_retained_live_root_required",
+                          return_value=True), \
+             patch.object(exe, "_lock",
+                          side_effect=lambda _: nullcontext()) as lock, \
+             patch.object(exe, "_read", return_value=b"unexpected-env"), \
+             patch.object(exe, "_retained_files",
+                          side_effect=AssertionError("JOURNAL_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_NODE_CONFIG_CHANGED_BEFORE_WRITE"):
+            exe._retained_step_core(
+                exe.Paths(), action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64, expected_before=approved.old_pair,
+                expected_witness=approved.runtime_witness,
+                _admission=approved)
+        self.assertEqual(lock.call_count, 1)
+
+    def test_ir_canary_compensates_interrupted_prepared_write(self):
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        prepared = exe.RetainedLivePrepared(
+            paths=exe.Paths(), role="ir", arch="amd64", node_image=IMAGE,
+            old_pair=(b"old-manifest", b"old-receipt"),
+            runtime_witness="f" * 64)
+        initial = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "RC7_IR_SIGNED_FRPS_OWNER": "PASS_SIGNED_AGENT_LISTENER_STABLE",
+            "NODE_RECREATED": "NO",
+            "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
+        }
+        control = SimpleNamespace(
+            verify_rc7_bundled_backhaul=mock.Mock(return_value=initial))
+        with patch.object(exe, "_retained_live_prepare",
+                          return_value=prepared), \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_mkdir_chain"), \
+             patch.object(exe, "_retained_step_core",
+                          side_effect=exe.Hold("PREPARED_WRITE_FAILED")), \
+             patch.object(exe.os.path, "lexists", return_value=True), \
+             patch.object(exe, "_retained_live_ir_rollback",
+                          return_value={"RETAINED_IR_BACKHAUL_ROLLBACK": "PASS"}
+                          ) as rollback, \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_IR_PARTIAL_WRITE_ROLLED_BACK"):
+            exe._retained_live_ir_canary(
+                arch="amd64", expected_node_image=IMAGE,
+                signed_pair_manifest=Path("/signed-pair.json"),
+                signed_pair_manifest_sha256="1" * 64,
+                signed_pair_source_sha="2" * 40,
+                signed_pair_publish_ref="refs/tags/v2.0.0-rc.7",
+                signed_pair_trusted_root=Path("/sigstore.json"))
+        rollback.assert_called_once_with(
+            arch="amd64", expected_node_image=IMAGE)
+
+    def test_ir_recovery_resumes_terminal_seal_without_recreating_journal(self):
+        from dataclasses import replace
+        from types import SimpleNamespace
+        import unittest.mock as mock
+        paths = replace(self.paths, state=self.root / "ir-retained-sealed")
+        paths.state.mkdir(mode=0o700)
+        seal = paths.state / "retained-rc7-cleanup.json"
+        seal.write_text("private sealed cleanup fixture\n")
+        seal.chmod(0o600)
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+        prior = {
+            "RC7_BACKHAUL_ENGINE": "NOT_INSTALLED_SIGNED_INVENTORY",
+            "RC7_FRP_ENGINE": "READY_SIGNED_INVENTORY",
+            "NODE_RECREATED": "NO",
+        }
+        control = SimpleNamespace(
+            verify_rc7_bundled_backhaul=mock.Mock(return_value=prior))
+        def read_pair(path, **kwargs):
+            if path.name == "engines.json":
+                return b'{"schema":1,"engines":{"frp":{}}}'
+            if path.name == "record.json":
+                return b'{"state":"COMMITTED","role":"ir"}'
+            raise AssertionError("UNEXPECTED_READ")
+        with patch.object(exe, "Paths", return_value=paths), \
+             patch.object(exe, "_retained_live_root_required",
+                          return_value=True), \
+             patch.object(exe, "_retained_live_signed_witness",
+                          return_value="f" * 64), \
+             patch.object(exe.pair, "_pair_read_private",
+                          side_effect=read_pair), \
+             patch.object(exe.pair, "_pair_expected_transition",
+                          return_value=(b"next-manifest", b"next-receipt")), \
+             patch.object(exe, "_load", return_value=control), \
+             patch.object(exe, "_retained_step_core",
+                          return_value="CLEANED") as core:
+            result = exe._retained_live_ir_rollback(
+                arch="amd64", expected_node_image=IMAGE)
+        self.assertEqual(
+            result["RETAINED_IR_BACKHAUL_ROLLBACK"],
+            "PASS_SIGNED_SEALED_CLEANUP_RECOVERED")
+        self.assertEqual(core.call_count, 1)
+        self.assertEqual(core.call_args.kwargs["action"], "cleanup")
+        self.assertEqual(core.call_args.kwargs["role"], "ir")
+        self.assertFalse((paths.state / "retained-rc7.json").exists())
+
+    def test_live_ir_core_rejects_foreign_even_with_imported_prepared_record(self):
+        prepared = exe.RetainedLivePrepared(
+            paths=exe.Paths(), role="foreign", arch="amd64",
+            node_image=IMAGE, old_pair=(b"before1", b"before2"),
+            runtime_witness="f" * 64)
+        with patch.object(exe, "_retained_live_root_required",
+                          return_value=True), \
+             patch.object(exe, "_lock",
+                          side_effect=AssertionError("LOCK_ACQUIRED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_IR_WRITER_NOT_ADMITTED"):
+            exe._retained_step_core(
+                exe.Paths(), action="install", role="foreign", arch="amd64",
+                witness=lambda: "f" * 64,
+                expected_before=prepared.old_pair,
+                expected_witness=prepared.runtime_witness,
+                _admission=prepared)
+
     def test_signed_read_only_plan_for_actual_host_role_names(self):
         from dataclasses import replace
         runner, audit = self._retained_review_fixture()

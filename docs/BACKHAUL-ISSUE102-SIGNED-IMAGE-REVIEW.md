@@ -999,6 +999,62 @@ allowed to create a live journal. Neither the CLI nor the menu calls
 the extracted writer for production; `INSTALL_ALLOWED=NO` and
 `ACTIVATION_GATE=HOLD` remain the only safe live response.
 
+## Operator-approved IR-only retained Backhaul metadata canary (2026-11-07)
+
+The existing U-OPTI **Backhaul option 3** now offers an explicitly
+interactive, role-scoped `I` **IR-only signed metadata enrollment**
+and `R` **IR-only exact rollback**. This is a *staged first-host canary*,
+not a two-host Backhaul tunnel setup. The Foreign/Grandoptical
+production Node, FRPC Children, Sanaei clients, Nginx, FRPS binary,
+WSS/443, all FRP routes, and running `smite-node` are never mutated.
+
+The prewrite implementation calls the existing full Cosign-signed RC7
+release/image, strict named-volume and protected-node/FRPS-Owner/Broker
+runtime witness, signed replay/inventory preflight, and exact pinned
+Manifest+committed FRP receipt planner. It accepts only the reviewed
+preauthorization **reason**
+`INDEPENDENT_DEPLOYMENT_APPROVAL_AND_RUNTIME_PROOF_REQUIRED` with
+all other evidence fields independently PASS and no altered image.
+A fresh explicit interactive root prompt requires
+`INSTALL-RETAINED-BACKHAUL-IR`. This operator acceptance covers the
+**IR metadata canary only**, not Grandoptical or Backhaul data-plane.
+
+Only after signed checks, the existing exact-pair transactional core
+receives the frozen original Manifest/receipt bytes and signed runtime
+witness under its **exclusive** FRP/Backhaul engine lock, with its
+durable root-owned PREPARED and COMMITTED journal. The core checks the
+original bytes and witness again before any write. The exact reviewed
+Backhaul hash is added to the Node engine manifest, and the exact
+committed FRP receipt's full-manifest hash is rebound atomically via
+the same fsynced two-file protocol; the FRP engine and tunnel registry
+are not modified. No Node/container Restart, Docker Compose,
+`frps` process, public port or route Apply is authorized.
+
+Before returning signed metadata success, the same existing
+`verify_rc7_bundled_backhaul(..., expected_backhaul_state="ready")`
+must reprove the active *same* Node, official bundled binary,
+signed HMAC replay/FRPS Owner, `frp=ready`, `backhaul=ready`,
+durable COMMITTED journal, and exact current Manifest+FRP receipt.
+If this postcheck fails, the executor attempts exact journal-driven
+Rollback, verifies signed `backhaul=not-installed` and `frp=ready`,
+then sealed CLEANED journal cleanup. If recovery cannot be proven,
+it **retains the journal for explicit operator intervention** instead
+of deleting evidence. The same menu option offers explicit root
+`ROLLBACK-RETAINED-BACKHAUL-IR`, using the private journal's original
+bytes and the stable signed local witness; a changed role, binary,
+runtime witness, checksum or phase is rejected before any write.
+
+**Scope limitation:** `PASS_SIGNED_METADATA_ONLY` does not create a
+Backhaul server/client, configure tunnels, open ports or establish
+cross-host transport. Existing `INSTALL_ALLOWED=NO` and
+`ACTIVATION_GATE=HOLD` remain in all *read-only* and two-host
+activation reports; **Grandoptical writes remain disabled**. The
+operator's IR shallow copied backup is not a verified isolated restore.
+No two-host Backhaul activation should be represented as working until
+the Foreign stage, independent recovery and real client data-plane
+are separately tested. Do not confuse this metadata canary with a
+ready-to-use Backhaul tunnel.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
