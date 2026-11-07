@@ -1134,25 +1134,12 @@ def _retained_live_ir_canary(*, arch: str, expected_node_image: str,
                 or verified.get("ACTIVATION_GATE") != "HOLD"):
             raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_UNVERIFIED")
     except Exception as exc:
-        # Keep journal intact if compensation cannot be safely proven.
-        # Never restart Docker/FRPS/Node or overwrite unknown drift.
+        # The same explicit journal-based recovery entry is exercised
+        # after failed signed acceptance AND by a later operator. Never
+        # erase a journal or restart Node when recovery proof is absent.
         try:
-            rolled = _retained_step_core(
-                paths, action="rollback", role="ir", arch=arch,
-                witness=witness, _admission=prepared)
-            if rolled != "RESTORED":
-                raise Hold("RETAINED_LIVE_IR_RESTORED_UNVERIFIED")
-            prior = control.verify_rc7_bundled_backhaul("ir")
-            if (prior.get("RC7_BACKHAUL_ENGINE")
-                    != "NOT_INSTALLED_SIGNED_INVENTORY"
-                    or prior.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
-                    or prior.get("NODE_RECREATED") != "NO"):
-                raise Hold("RETAINED_LIVE_IR_ROLLBACK_SIGNED_UNVERIFIED")
-            cleaned = _retained_step_core(
-                paths, action="cleanup", role="ir", arch=arch,
-                witness=witness, _admission=prepared)
-            if cleaned != "CLEANED":
-                raise Hold("RETAINED_LIVE_IR_CLEANUP_UNVERIFIED")
+            _retained_live_ir_rollback(
+                arch=arch, expected_node_image=expected_node_image)
         except Exception as recovery_exc:
             raise Hold("RETAINED_LIVE_IR_RECOVERY_MANUAL_REVIEW_REQUIRED") from recovery_exc
         raise Hold("RETAINED_LIVE_IR_POSTCOMMIT_ROLLED_BACK") from exc
@@ -1164,6 +1151,92 @@ def _retained_live_ir_canary(*, arch: str, expected_node_image: str,
         "FOREIGN_NODE_CHANGED": "NO",
         "ROLLBACK_JOURNAL": "RETAINED_PRIVATE",
         "TWO_HOST_BACKHAUL_ACTIVATION_GATE": "HOLD",
+    }
+
+
+def _retained_live_ir_rollback(*, arch: str,
+                               expected_node_image: str) -> dict[str, str]:
+    """Explicit safe IR-only compensation using its original durable journal.
+
+    Never build rollback originals from current files or unsigned caller
+    input. This entry intentionally works with PREPARED/mixed files that
+    cannot pass the not-installed/ready preflight during an interrupted
+    write. The core verifies exact original pair semantics and allowable
+    mixed phase states under the shared engine lock before any mutation.
+    """
+    paths = Paths()
+    if (not _retained_live_root_required()
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or IMAGE.fullmatch(expected_node_image) is None):
+        raise Hold("RETAINED_LIVE_IR_RECOVERY_INPUT_UNTRUSTED")
+    witness = _retained_live_signed_witness(
+        role="ir", expected_node_image=expected_node_image, paths=paths)
+    journal = paths.state / "retained-rc7.json"
+    try:
+        envelope = pair._pair_load_json(
+            pair._pair_read_private(journal, limit=40000))
+        record = envelope["record"]
+        fields = {"schema", "role", "binary", "witness", "manifest",
+                  "receipt", "phase"}
+        if (set(envelope) != {"record", "sha256"}
+                or not isinstance(record, dict) or set(record) != fields
+                or type(record["schema"]) is not int or record["schema"] != 1
+                or record["role"] != "ir"
+                or record["binary"] != package.OFFICIAL_BINARY_SHA256[arch]
+                or record["witness"] != witness
+                or record["phase"] not in (
+                    "PREPARED", "COMMITTED", "RESTORING", "RESTORED")
+                or _sha(json.dumps(record, sort_keys=True).encode())
+                    != envelope["sha256"]):
+            raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED")
+        originals = []
+        for key in ("manifest", "receipt"):
+            value = record[key]
+            if (type(value) is not str or not 0 < len(value) <= 16384
+                    or len(value) % 2
+                    or re.fullmatch(r"(?:[0-9a-f]{2})+", value) is None):
+                raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED")
+            originals.append(bytes.fromhex(value))
+        originals = tuple(originals)
+        pair._pair_expected_transition(
+            *originals, package.OFFICIAL_BINARY_SHA256[arch], role="ir")
+    except (pair.Hold, KeyError, ValueError, TypeError, UnicodeError) as exc:
+        raise Hold("RETAINED_LIVE_IR_RECOVERY_JOURNAL_UNTRUSTED") from exc
+    prepared = RetainedLivePrepared(
+        paths=paths, role="ir", arch=arch, node_image=expected_node_image,
+        old_pair=originals, runtime_witness=witness)
+
+    def current_witness():
+        return _retained_live_signed_witness(
+            role="ir", expected_node_image=expected_node_image, paths=paths)
+
+    rolled = _retained_step_core(
+        paths, action="rollback", role="ir", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if rolled != "RESTORED":
+        raise Hold("RETAINED_LIVE_IR_ROLLBACK_NOT_RESTORED")
+    # Signed preinstall inventory must be truly restored before erasing
+    # journal. A successful byte write alone is never acceptance.
+    control = _load("uopti_retained_recovery_acceptance",
+                    "smite-managed-backhaul-control.py")
+    prior = control.verify_rc7_bundled_backhaul("ir")
+    if (prior.get("RC7_BACKHAUL_ENGINE")
+            != "NOT_INSTALLED_SIGNED_INVENTORY"
+            or prior.get("RC7_FRP_ENGINE") != "READY_SIGNED_INVENTORY"
+            or prior.get("RC7_IR_SIGNED_FRPS_OWNER")
+            != "PASS_SIGNED_AGENT_LISTENER_STABLE"
+            or prior.get("NODE_RECREATED") != "NO"):
+        raise Hold("RETAINED_LIVE_IR_ROLLBACK_SIGNED_UNVERIFIED")
+    cleaned = _retained_step_core(
+        paths, action="cleanup", role="ir", arch=arch,
+        witness=current_witness, _admission=prepared)
+    if cleaned != "CLEANED":
+        raise Hold("RETAINED_LIVE_IR_CLEANUP_UNVERIFIED")
+    return {
+        "RETAINED_IR_BACKHAUL_ROLLBACK": "PASS_SIGNED_EXACT_RESTORED",
+        "FRP_ENGINE": "READY_SIGNED_INVENTORY",
+        "NODE_RESTARTED": "NO",
+        "FOREIGN_NODE_CHANGED": "NO",
     }
 
 
