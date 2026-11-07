@@ -922,6 +922,42 @@ operator deployment approval. A working signed lab test is not permission
 to disable the live two-host writer admission. The production writer
 and recovery procedure remain the central remaining Issue #102 work.
 
+## Production retained writer: stable signed local runtime witness (read-only)
+
+A real retained host writer must compare more than two correct Manifest and
+FRP receipt files: the same signed, running `smite-node`, attached named
+`node-data` volume, saved FRP tunnel registry, FRPS Owner / FRPC Child and
+Broker must survive without a restart or replacement. The existing CI writer
+previously used a disposable fixture's protected-runtime SHA, while the live
+host preflight had only partial local evidence. That fixture must **never**
+serve as real-host admission.
+
+The same Host Executor now has a private `_retained_live_signed_witness`
+helper used by its **production-path read-only review only after Cosign
+release verification**, under the existing shared engine lock. It rejects
+non-default/live-path aliases, non-root use, invalid role or mutable image,
+and requires the trusted RC7 WSS runtime, the exact pinned running Node
+image and unchanged Docker container ID/image/start/mounts. It reads the
+exact private persisted `node-data/tunnels.json` bytes through the actual
+Docker named volume (not a guessed name), sends the existing signed
+HMAC/replay probe, and binds the local /proc FRPS or FRPC process instance
+hash to the appropriate signed IR FRPS Owner or all saved Foreign
+managed FRPC Child instances. On IR, the existing strict Broker Unix socket
+inode fingerprint is required. It re-reads the Node identity, process
+footprint, registry and IR broker before returning a single private SHA
+witness. The review repeats the complete witness after the Manifest and
+FRP receipt pair check; drift is a fail-closed HOLD without private
+IDs, registry bytes, tokens, paths or exception messages.
+
+Passing reports only
+`RETAINED_LOCAL_SIGNED_RUNTIME_WITNESS=PASS_STABLE_LOCAL_ONLY`.
+It is not remote IR↔Grandoptical peer attestation, verified tunnel
+forwarding, off-host restore, a signed production rollout decision or
+authority to invoke the CI-only writer. `INSTALL_ALLOWED=NO`,
+`ACTIVATION_GATE=HOLD` and the existing Backhaul install menu remain
+unchanged. This is the **production writer's local runtime witness
+component**, not yet the production transaction controller.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,
