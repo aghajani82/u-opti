@@ -221,7 +221,7 @@ SIGNED_CHILD_REQUEST=r"""
 # This script executes *inside* the reviewed RC7 Node. Fail closed and
 # return only a bounded, fixed failure phase, never exception text, secret,
 # raw API response, process argv, destination, token or traceback.
-import hashlib,json,os,psutil,re,secrets,urllib.error,urllib.request
+import hashlib,json,os,psutil,re,secrets,stat,urllib.error,urllib.request
 from app.agent_auth import read_identity
 from app.node_auth import sign_request
 
@@ -263,6 +263,68 @@ try:
         assert error.code==401
     else:
         raise AssertionError("replay accepted")
+    _stage='WSS_CONFIG'
+    # The existing FRPC socket evidence is meaningful only if this exact
+    # managed child's private configuration still declares the reviewed
+    # RC7 WSS endpoint, TLS trust store and SNI. NEVER print config bytes.
+    from app.frp_gateway_config import frp_standard_wss_host
+    expected_host=frp_standard_wss_host()
+    assert type(expected_host) is str and re.fullmatch(
+        r'[A-Za-z0-9.-]{1,253}',expected_host) and '.' in expected_host
+    config_path='/etc/smite-node/frp/frpc_'+tunnel_id+'.yaml'
+    previous=os.lstat(config_path)
+    assert (stat.S_ISREG(previous.st_mode)
+            and previous.st_uid==os.geteuid()
+            and previous.st_nlink==1
+            and stat.S_IMODE(previous.st_mode)==0o600
+            and 0<previous.st_size<=131072)
+    fd=os.open(config_path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    with os.fdopen(fd,'rb') as stream:
+        before=os.fstat(stream.fileno())
+        assert (stat.S_ISREG(before.st_mode)
+                and before.st_uid==os.geteuid() and before.st_nlink==1
+                and stat.S_IMODE(before.st_mode)==0o600
+                and (before.st_dev,before.st_ino,before.st_mode,
+                     before.st_uid,before.st_nlink,before.st_size,
+                     before.st_mtime_ns,before.st_ctime_ns)==
+                    (previous.st_dev,previous.st_ino,previous.st_mode,
+                     previous.st_uid,previous.st_nlink,previous.st_size,
+                     previous.st_mtime_ns,previous.st_ctime_ns))
+        raw_config=stream.read(131073)
+        after=os.fstat(stream.fileno())
+    named=os.lstat(config_path)
+    assert (len(raw_config)==before.st_size
+            and (before.st_dev,before.st_ino,before.st_size,
+                 before.st_mtime_ns,before.st_ctime_ns)==
+                (after.st_dev,after.st_ino,after.st_size,
+                 after.st_mtime_ns,after.st_ctime_ns)
+            and (named.st_dev,named.st_ino,named.st_mode,named.st_uid,
+                 named.st_nlink,named.st_size,named.st_mtime_ns,named.st_ctime_ns)==
+                (before.st_dev,before.st_ino,before.st_mode,before.st_uid,
+                 before.st_nlink,before.st_size,before.st_mtime_ns,
+                 before.st_ctime_ns))
+    config=raw_config.decode('utf-8')
+    def unique_exact(pattern,expected):
+        match=re.findall(pattern,config,re.MULTILINE)
+        assert len(match)==1 and match[0]==expected
+    unique_exact(r'^serverAddr: "([^"\r\n]+)"$',expected_host)
+    unique_exact(r'^serverPort: ([0-9]+)$','443')
+    unique_exact(r'^(transport:)$','transport:')
+    unique_exact(r'^(  protocol: wss)$','  protocol: wss')
+    unique_exact(r'^(  tls:)$','  tls:')
+    unique_exact(r'^(    enable: true)$','    enable: true')
+    unique_exact(r'^    trustedCaFile: "([^"\r\n]+)"$',
+                 '/etc/ssl/certs/ca-certificates.crt')
+    unique_exact(r'^    serverName: "([^"\r\n]+)"$',expected_host)
+    # A second protocol/transport or untrusted TLS declaration must
+    # not be silently accepted by the read-only verifier.
+    assert (len(re.findall(r'^serverAddr:',config,re.MULTILINE))==1
+            and len(re.findall(r'^serverPort:',config,re.MULTILINE))==1
+            and len(re.findall(r'^  protocol:',config,re.MULTILINE))==1
+            and len(re.findall(r'^transport:',config,re.MULTILINE))==1
+            and len(re.findall(r'^  tls:',config,re.MULTILINE))==1
+            and len(re.findall(r'^    (?:enable|trustedCaFile|serverName):',
+                               config,re.MULTILINE))==3)
     _stage='PROCESS'
     expected=['/usr/local/bin/frpc','-c',
               '/etc/smite-node/frp/frpc_'+tunnel_id+'.yaml']
@@ -300,7 +362,7 @@ except Exception:
 """
 
 CHILD_HOLD_STAGES=frozenset(('INPUT','IDENTITY','SIGNED_STATUS',
-                             'SIGNED_PAYLOAD','REPLAY','PROCESS','TCP443','OUTPUT'))
+                             'SIGNED_PAYLOAD','REPLAY','WSS_CONFIG','PROCESS','TCP443','OUTPUT'))
 
 def signed_child_payload(raw):
     """Sanitize signed status AND inspected one-instance WSS socket proof."""
