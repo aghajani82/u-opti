@@ -292,6 +292,36 @@ def _strict_rc7_response(raw: str, *, kind: str) -> dict:
     return doc
 
 
+def _rc7_node_runtime_fingerprint(doc: object) -> tuple[str, str, str, str]:
+    """Read-only Docker identity continuity, never a signature or health proof.
+
+    The signed FRP/engine observation spans multiple Docker and HMAC probes.
+    Pin the *same running Node* throughout; comparing only signed Owner/Child
+    inventory would permit a restarted/replaced Node to masquerade as a
+    zero-recreate review. No IDs, source paths or digests leave this function.
+    """
+    try:
+        if not isinstance(doc, dict):
+            raise Hold("RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED")
+        ident, image = doc["Id"], doc["Image"]
+        state, mounts = doc["State"], doc["Mounts"]
+        if (not isinstance(ident, str) or not re.fullmatch(r"[0-9a-f]{64}", ident)
+                or not isinstance(image, str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", image)
+                or not isinstance(state, dict)
+                or state.get("Running") is not True
+                or not isinstance(state.get("StartedAt"), str)
+                or not state["StartedAt"]
+                or not isinstance(mounts, list)):
+            raise Hold("RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED")
+        return (
+            ident, image, state["StartedAt"],
+            hashlib.sha256(json.dumps(mounts, sort_keys=True).encode()).hexdigest(),
+        )
+    except (KeyError, ValueError, TypeError) as exc:
+        raise Hold("RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED") from exc
+
+
 def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
     """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
 
@@ -313,6 +343,7 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
             if doc.get("role") != role:
                 raise Hold("RC7_BUNDLED_RUNTIME_ROLE_MISMATCH")
             runtime = frp.rt.inspect_container("smite-node")
+            node_before = _rc7_node_runtime_fingerprint(runtime)
             mounts = runtime.get("Mounts")
             if not isinstance(mounts, list):
                 raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
@@ -404,6 +435,15 @@ def verify_rc7_bundled_backhaul(role: str) -> dict[str, str]:
                     frp, foreign_child_ids_after)
                 if foreign_instances_after != foreign_instances_before:
                     raise Hold("RC7_BUNDLED_SIGNED_CHILD_CHANGED_DURING_REVIEW")
+            # A signed endpoint may still be queried successfully after the
+            # Node container was replaced/restarted. Re-inspect *after* all
+            # signed reads and the exact receipt plan, while holding the
+            # original shared engine lock. Never report NODE_RECREATED=NO
+            # based only on unchanged FRP process or HMAC inventory hashes.
+            node_after = _rc7_node_runtime_fingerprint(
+                frp.rt.inspect_container("smite-node"))
+            if node_after != node_before:
+                raise Hold("RC7_BUNDLED_NODE_CHANGED_DURING_REVIEW")
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.

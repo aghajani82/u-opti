@@ -127,7 +127,8 @@ class OperatorControl(unittest.TestCase):
                          binary=None, mounts=None, probe_error=None,
                          owner_hashes=None, owner_error=None,
                          child_ids=None, child_lists=None,
-                         child_hashes=None, child_error=None):
+                         child_hashes=None, child_error=None,
+                         runtime_snapshots=None):
         engines = {name: "not-installed" for name in control.ENGINES}
         engines["frp"] = "ready"
         if inventory is None:
@@ -139,12 +140,21 @@ class OperatorControl(unittest.TestCase):
         def node_details():
             calls.append("runtime")
             return {"role": role}
+        default_mounts = mounts if mounts is not None else [
+            {"Destination": "/etc/smite-node", "Type": "bind"},
+            {"Destination": "/var/lib/smite-node", "Type": "volume"},
+        ]
+        initial_runtime = {
+            "Id": "1" * 64,
+            "Image": "sha256:" + "2" * 64,
+            "State": {"Running": True, "StartedAt": "2026-11-07T10:00:00Z"},
+            "Mounts": default_mounts,
+        }
         def inspect(_name):
             calls.append("mounts")
-            return {"Mounts": mounts if mounts is not None else [
-                {"Destination": "/etc/smite-node", "Type": "bind"},
-                {"Destination": "/var/lib/smite-node", "Type": "volume"},
-            ]}
+            snapshots = ([initial_runtime, initial_runtime]
+                         if runtime_snapshots is None else runtime_snapshots)
+            return snapshots[min(calls.count("mounts") - 1, len(snapshots) - 1)]
         def hmac():
             calls.append("replay")
             if probe_error:
@@ -288,7 +298,7 @@ class OperatorControl(unittest.TestCase):
                                 "receipt-state","frp-verify",
                                 "saved-children","signed-child",
                                 "manifest-read","receipt-read",
-                                "saved-children","signed-child"])
+                                "saved-children","signed-child","mounts"])
         self.assertEqual(status["RC7_BACKHAUL_BINARY_PIN"],
                          "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH")
         self.assertEqual(status["RC7_FRP_RECEIPT_BINDING"],
@@ -317,7 +327,7 @@ class OperatorControl(unittest.TestCase):
             status = control.verify_rc7_bundled_backhaul("ir")
         self.assertEqual(calls.count("signed-owner"), 2)
         self.assertLess(calls.index("frp-verify"), calls.index("signed-owner"))
-        self.assertEqual(calls[-1], "signed-owner")
+        self.assertEqual(calls[-2:], ["signed-owner", "mounts"])
         self.assertEqual(status["RC7_IR_SIGNED_FRPS_OWNER"],
                          "PASS_SIGNED_AGENT_LISTENER_STABLE")
         self.assertEqual(status["RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN"],
@@ -338,6 +348,58 @@ class OperatorControl(unittest.TestCase):
                          "NOT_PROVEN")
         self.assertEqual(foreign_calls.count("saved-children"),2)
         self.assertEqual(foreign_calls.count("signed-child"),2)
+
+    def test_rc7_signed_bundle_rejects_node_restart_image_or_mount_drift(self):
+        # Signed Owner/Child may still answer after Node replacement.
+        # Prove the exact running container remains unchanged throughout
+        # the signed read-only preflight, not just the FRP process hashes.
+        original = {
+            "Id": "1" * 64,
+            "Image": "sha256:" + "2" * 64,
+            "State": {"Running": True, "StartedAt": "2026-11-07T10:00:00Z"},
+            "Mounts": [
+                {"Destination": "/etc/smite-node", "Type": "bind"},
+                {"Destination": "/var/lib/smite-node", "Type": "volume"},
+            ],
+        }
+        for role in ("ir", "foreign"):
+            for change in ("recreated", "reimaged", "restarted", "remounted"):
+                with self.subTest(role=role, drift=change):
+                    after = json.loads(json.dumps(original))
+                    if change == "recreated":
+                        after["Id"] = "3" * 64
+                    elif change == "reimaged":
+                        after["Image"] = "sha256:" + "4" * 64
+                    elif change == "restarted":
+                        after["State"]["StartedAt"] = "2026-11-07T10:10:00Z"
+                    else:
+                        after["Mounts"].append({
+                            "Destination": "/other", "Type": "bind",
+                        })
+                    fake, calls = self._rc7_bundle_fake(
+                        role=role, runtime_snapshots=[original, after])
+                    with patch.object(control.os, "geteuid", return_value=0), \
+                         patch.object(control, "_load", return_value=fake), \
+                         self.assertRaisesRegex(
+                             control.Hold,
+                             "RC7_BUNDLED_NODE_CHANGED_DURING_REVIEW"):
+                        control.verify_rc7_bundled_backhaul(role)
+                    self.assertEqual(calls.count("mounts"), 2)
+                    self.assertIn("frp-verify", calls)
+                    self.assertIn(
+                        "signed-owner" if role == "ir" else "signed-child",
+                        calls)
+
+        # Missing reliable initial Docker identity is an early HOLD.
+        bad = dict(original, Id="not-a-docker-id")
+        fake, calls = self._rc7_bundle_fake(runtime_snapshots=[bad])
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake), \
+             self.assertRaisesRegex(
+                 control.Hold, "RC7_BUNDLED_NODE_IDENTITY_UNVERIFIED"):
+            control.verify_rc7_bundled_backhaul("foreign")
+        self.assertNotIn("replay", calls)
+        self.assertNotIn("signed-inventory", calls)
 
     def test_rc7_foreign_signed_saved_children_all_three_stable(self):
         three=("existing-child-one","existing-child-two","existing-child-three")
