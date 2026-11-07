@@ -403,11 +403,16 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
     # never these CI lab paths and never a bypassing caller boolean.
     return _retained_step_core(
         paths, action=action, role=role, arch=arch, witness=witness,
-        expected_before=expected_before, expected_witness=expected_witness)
+        expected_before=expected_before, expected_witness=expected_witness,
+        _admission=_RETAINED_CI_WRITER_ADMISSION)
+
+
+_RETAINED_CI_WRITER_ADMISSION = object()
 
 
 def _retained_step_core(paths, *, action, role, arch, witness,
-                        expected_before=None, expected_witness=None):
+                        expected_before=None, expected_witness=None,
+                        _admission=None):
     """Common fsynced exact-pair mutation and recovery after entry admission.
 
     Internal mutation primitive shared by strictly separate admission paths.
@@ -415,6 +420,14 @@ def _retained_step_core(paths, *, action, role, arch, witness,
     preflight bytes and protected runtime BEFORE invoking this function.
     A production caller is deliberately not yet exposed by CLI or menu.
     """
+    if _admission is not _RETAINED_CI_WRITER_ADMISSION:
+        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
+    if (not isinstance(paths, Paths)
+            or action not in ("install", "rollback", "recover", "cleanup")
+            or role not in ("ir", "foreign")
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or not callable(witness)):
+        raise Hold("RETAINED_CORE_INPUT_UNTRUSTED")
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
@@ -969,7 +982,16 @@ def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
         with _read_only_engine_lock(paths.lock):
             if _retained_review_pending_recovery(paths) is not None:
                 raise Hold("RETAINED_LIVE_COMPETING_RECOVERY")
-            manifest, receipt, journal = _retained_files(paths)
+            # Production journal directory is normally ABSENT until an
+            # authorized writer creates it. A read-only preflight must
+            # never create a directory merely to inspect its state.
+            manifest = paths.node / "config/engine-state/engines.json"
+            receipt = paths.frp_state / "record.json"
+            journal = paths.state / "retained-rc7.json"
+            for directory in (manifest.parent, receipt.parent):
+                if (directory.resolve(strict=True) != directory):
+                    raise Hold("RETAINED_LIVE_DIRECTORY_UNTRUSTED")
+                _dir(directory)
             if (os.path.lexists(journal)
                     or os.path.lexists(paths.state /
                                        "retained-rc7-cleanup.json")):
