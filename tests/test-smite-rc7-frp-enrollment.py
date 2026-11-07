@@ -439,8 +439,10 @@ class EnrollmentTests(unittest.TestCase):
                                       'serverName: "other.invalid"')
                 elif case=="wss_duplicate":
                     spec+="serverPort: 443\n"
+                elif case=="wss_duplicate_host":
+                    spec+='serverAddr: "other.invalid"\n'
                 config.write_text(spec)
-                config.chmod(0o600)
+                config.chmod(0o644 if case=="wss_wrong_perm" else 0o600)
                 original_open=os.open
                 original_lstat=os.lstat
                 expected_path="/etc/smite-node/frp/frpc_"+child+".yaml"
@@ -448,9 +450,19 @@ class EnrollmentTests(unittest.TestCase):
                     if str(path)==expected_path:
                         return original_open(config,flags,*args,**kwargs)
                     return original_open(path,flags,*args,**kwargs)
+                lstat_calls={"config":0}
                 def fake_lstat(path,*args,**kwargs):
                     if str(path)==expected_path:
-                        return original_lstat(config,*args,**kwargs)
+                        lstat_calls["config"]+=1
+                        meta=original_lstat(config,*args,**kwargs)
+                        if case=="wss_race" and lstat_calls["config"]==2:
+                            return types.SimpleNamespace(
+                                st_mode=meta.st_mode,st_uid=meta.st_uid,
+                                st_nlink=meta.st_nlink,st_size=meta.st_size,
+                                st_dev=meta.st_dev,st_ino=meta.st_ino,
+                                st_mtime_ns=meta.st_mtime_ns+1,
+                                st_ctime_ns=meta.st_ctime_ns)
+                        return meta
                     return original_lstat(path,*args,**kwargs)
                 with patch.dict(sys.modules,
                                 {"app":fake_app,"app.agent_auth":agent,
@@ -480,6 +492,9 @@ class EnrollmentTests(unittest.TestCase):
                 ("wss_wrong_ca","WSS_CONFIG"),
                 ("wss_wrong_sni","WSS_CONFIG"),
                 ("wss_duplicate","WSS_CONFIG"),
+                ("wss_duplicate_host","WSS_CONFIG"),
+                ("wss_wrong_perm","WSS_CONFIG"),
+                ("wss_race","WSS_CONFIG"),
                 ("process","PROCESS"),("tcp443","TCP443")):
             with self.subTest(case=case):
                 raw=run_case(case)
