@@ -1664,6 +1664,55 @@ def main():
         # overlays. Snapshot stable identity, never private credentials in logs.
         executor = load("ci_host_retained_executor",
                         REPO / "modules/smite-managed-backhaul-host-executor.py")
+        # Bind the new actual production postcommit verifier to the *real*
+        # two signed RC7 Nodes, FRP 0.71.0 Owner/Child, WSS/443 and real
+        # retained Host Executor receipts, not only unit-mocked agent data.
+        control = load("ci_backhaul_signed_postcommit",
+                       REPO / "modules/smite-managed-backhaul-control.py")
+
+        def signed_retained_commit(role, root):
+            manifest = (root / "node/config/engine-state/engines.json").read_bytes()
+            receipt = (root / "rc7-frp-enrollment/record.json").read_bytes()
+            journal = (root / "host-state/retained-rc7.json").read_bytes()
+            checked = control._review_rc7_retained_committed_pair(
+                manifest, receipt, journal, sha(backhaul_bytes), role=role)
+            check(checked == {
+                "RC7_BACKHAUL_MANIFEST_PLAN": "COMMITTED_PAIR_VERIFIED_READ_ONLY",
+                "RC7_FRP_RECEIPT_BINDING": "EXACT_COMMITTED_REBIND_REVIEWED",
+                "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
+            }, "CI_SIGNED_RETAINED_POSTCOMMIT_FALSE_ACCEPTANCE")
+
+            # A valid SHA256 envelope is not enough. The actual verifier
+            # must refuse re-signed PREPARED states and an otherwise valid
+            # COMMITTED receipt that differs from the observed exact bytes.
+            tampered = json.loads(journal)
+            tampered["record"]["phase"] = "PREPARED"
+            tampered["sha256"] = sha(json.dumps(
+                tampered["record"], sort_keys=True).encode())
+            pending = (json.dumps(tampered, sort_keys=True) + "\n").encode()
+            for bad_manifest, bad_receipt, bad_journal in (
+                (manifest, receipt, pending),
+                (manifest, receipt + b"\n", journal),
+                (manifest + b"\n", receipt, journal),
+                (manifest, receipt, b'{"record":{},"record":{}}'),
+            ):
+                try:
+                    control._review_rc7_retained_committed_pair(
+                        bad_manifest, bad_receipt, bad_journal,
+                        sha(backhaul_bytes), role=role)
+                except control.Hold:
+                    pass
+                else:
+                    raise Hold("CI_SIGNED_RETAINED_POSTCOMMIT_TAMPER_ACCEPTED")
+            # Only RAM copies were tampered; the signed runtime's original
+            # exact paired files and private recovery journal remain intact.
+            check((root / "node/config/engine-state/engines.json").read_bytes()
+                    == manifest
+                  and (root / "rc7-frp-enrollment/record.json").read_bytes()
+                    == receipt
+                  and (root / "host-state/retained-rc7.json").read_bytes()
+                    == journal, "CI_SIGNED_RETAINED_POSTCOMMIT_NEGATIVE_WROTE")
+            return checked
 
         def host_step(role, root, name, action, *, stale_witness=False):
             # The signed two-container CI rehearsal must keep ALL retained
@@ -1751,10 +1800,27 @@ def main():
             check(host_step(role, root, name, "install") == "COMMITTED",
                   "CI_RETAINED_COMMIT_MISSING")
             observe("after-ir" if role == "ir" else "after-both", root_ir, root_foreign)
+            # observe() already proved real signed HMAC inventory, active
+            # FRP Owner/Child and bounded Backhaul traffic. Now require the
+            # EXACT host-executor postcommit journal/receipt contract too.
+            signed_retained_commit(role, root)
         for role, root, name in reversed(roots):
             check(host_step(role, root, name, "rollback") == "RESTORED",
                   "CI_RETAINED_ROLLBACK_MISSING")
         observe("after-rollback", root_ir, root_foreign)
+        # The same verifier must NEVER call an exact rolled-back pair
+        # COMMITTED, even though FRP returns to signed ready status.
+        for role, root, _ in roots:
+            try:
+                control._review_rc7_retained_committed_pair(
+                    (root / "node/config/engine-state/engines.json").read_bytes(),
+                    (root / "rc7-frp-enrollment/record.json").read_bytes(),
+                    (root / "host-state/retained-rc7.json").read_bytes(),
+                    sha(backhaul_bytes), role=role)
+            except control.Hold:
+                pass
+            else:
+                raise Hold("CI_SIGNED_RETAINED_RESTORED_MISREPORTED_COMMITTED")
         # A RESTORED journal is still unfinished recovery evidence. Finish
         # both role-specific terminal cleanups under the unchanged signed
         # Node/FRP witness and prove NO leftover engine journal or seal.
@@ -1773,6 +1839,7 @@ def main():
         forward_probe("after-retained-terminal-cleanup")
         seen.clear()
         print("RC7_RETAINED_HOST_TRANSACTION_REAL_DATA_AND_ROLLBACK=PASS", flush=True)
+        print("RC7_RETAINED_SIGNED_TWO_NODE_POSTCOMMIT_EXACT_PAIR=PASS", flush=True)
         print("RC7_SIGNED_RETAINED_PREFLIGHT_WITNESS_AND_TERMINAL_CLEANUP=PASS",
               flush=True)
 
