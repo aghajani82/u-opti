@@ -329,7 +329,8 @@ def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
     return "CLEANED"
 
 
-def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
+def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
+                   expected_witness=None):
     """Apply or compensate under the same lock used by RC7 FRP enrollment.
 
     witness() re-authenticates this retained node and returns the stable
@@ -348,6 +349,14 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
                 or any(type(raw) is not bytes or not 0 < len(raw) <= 8192
                        for raw in expected_before)):
             raise Hold("RETAINED_EXPECTED_BASELINE_INVALID")
+        # The coordinator's separately collected protected-runtime witness
+        # belongs to the exact preflight pair. Never adopt a fresh process
+        # identity in the handoff interval after the two-host admission.
+        if (type(expected_witness) is not str
+                or SHA.fullmatch(expected_witness) is None):
+            raise Hold("RETAINED_EXPECTED_WITNESS_REQUIRED")
+    elif expected_witness is not None:
+        raise Hold("RETAINED_EXPECTED_WITNESS_UNEXPECTED")
     # Never lock or write a protected live resource through an alternate
     # field, a parent/child alias or a symlink. An earlier boundary checked
     # only node/frp_state/state, overlooking the real shared FRP lock path.
@@ -397,6 +406,9 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
         fingerprint = witness()
         if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
             raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
+        if (expected_witness is not None
+                and fingerprint != expected_witness):
+            raise Hold("RETAINED_PREFLIGHT_WITNESS_CHANGED")
         seal = paths.state / "retained-rc7-cleanup.json"
         # A coordinator's fresh install must start with an empty journal.
         # An independently appearing COMMITTED receipt/journal between the
@@ -485,6 +497,11 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
                 raise Hold("RETAINED_TERMINAL_CLEANUP_REQUIRED")
             if phase != "NEW":
                 raise Hold("RETAINED_RECOVERY_REQUIRED")
+            # Do not even create the durable PREPARED journal if a concurrent
+            # FRP/Node change happened after our first witness observation.
+            if (expected_witness is not None
+                    and witness() != expected_witness):
+                raise Hold("RETAINED_PREFLIGHT_WITNESS_CHANGED")
             record_phase("PREPARED")
             destination = after
             order = (0, 1)
@@ -611,13 +628,15 @@ def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
     try:
         if _retained_step(ir, action="install", role="ir", arch=arch,
                           witness=lambda: witness("ir", roots[0]),
-                          expected_before=snapshots["ir"]) != "COMMITTED":
+                          expected_before=snapshots["ir"],
+                          expected_witness=baselines["ir"]) != "COMMITTED":
             raise Hold("RETAINED_TWO_HOST_IR_APPLY_NOT_COMMITTED")
         if not observed("after-ir") or inject == "after-ir":
             raise Hold("RETAINED_TWO_HOST_AFTER_IR_PROOF_FAILED")
         if _retained_step(foreign, action="install", role="foreign", arch=arch,
                           witness=lambda: witness("foreign", roots[1]),
-                          expected_before=snapshots["foreign"]) != "COMMITTED":
+                          expected_before=snapshots["foreign"],
+                          expected_witness=baselines["foreign"]) != "COMMITTED":
             raise Hold("RETAINED_TWO_HOST_FOREIGN_APPLY_NOT_COMMITTED")
         if not observed("after-both") or inject == "after-both":
             raise Hold("RETAINED_TWO_HOST_AFTER_BOTH_PROOF_FAILED")
