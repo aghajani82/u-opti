@@ -482,6 +482,11 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
                        "journal_sha256": _sha(raw_journal)}
             envelope = {"record": cleanup,
                         "sha256": _sha(json.dumps(cleanup, sort_keys=True).encode())}
+            # Refuse a stale protected Node/FRP identity or changed pair
+            # before writing even the terminal cleanup seal. The later
+            # cleanup verification remains necessary for subsequent races.
+            if current() != observed or witness() != fingerprint:
+                raise Hold("RETAINED_RUNTIME_OR_PAIR_DRIFT")
             # Persist terminal proof before deleting any recovery evidence.
             _atomic(seal, (json.dumps(envelope, sort_keys=True) + "\n").encode(), 0o600)
             return _retained_finish_cleanup(
@@ -509,6 +514,12 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
         else:
             if phase == "RESTORED" or (action == "recover" and phase == "COMMITTED"):
                 return phase
+            # Mirror install's pre-PREPARED identity check: a protected
+            # process or paired receipt may rotate while rollback is planned.
+            # Do not replace a valid recovery journal with RESTORING until
+            # the original witness and exact observed pair still hold.
+            if current() != observed or witness() != fingerprint:
+                raise Hold("RETAINED_RUNTIME_OR_PAIR_DRIFT")
             record_phase("RESTORING")
             destination = before
             order = (1, 0)
