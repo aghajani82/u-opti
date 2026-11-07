@@ -1455,6 +1455,57 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual(step("recover"), "RESTORED")
         self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
 
+    def test_retained_recovery_and_cleanup_recheck_witness_before_durable_write(self):
+        # A valid originally COMMITTED journal must not be prematurely
+        # overwritten with RESTORING when Node/FRP identity rotates after
+        # reading the protected runtime but before the first recovery write.
+        step, manifest, receipt = self.retained_fixture()
+        before = (manifest.read_bytes(), receipt.read_bytes())
+        self.assertEqual(step("install"), "COMMITTED")
+        committed = (manifest.read_bytes(), receipt.read_bytes())
+        journal = self.state / "retained-rc7.json"
+        seal = self.state / "retained-rc7-cleanup.json"
+        committed_journal = journal.read_bytes()
+
+        def rotate_after_first():
+            rotate_after_first.calls += 1
+            return ("1" if rotate_after_first.calls == 1 else "2") * 64
+        rotate_after_first.calls = 0
+
+        with self.assertRaisesRegex(
+                exe.Hold, "RETAINED_RUNTIME_OR_PAIR_DRIFT"):
+            step("rollback", rotate_after_first)
+        self.assertEqual(rotate_after_first.calls, 2)
+        self.assertEqual(journal.read_bytes(), committed_journal)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                         committed)
+        self.assertFalse(seal.exists())
+
+        # After the legitimate rollback, a new witness drift before sealing
+        # terminal cleanup must likewise preserve the RESTORED journal
+        # without creating a cleanup seal or unlinking recovery evidence.
+        self.assertEqual(step("rollback"), "RESTORED")
+        restored_journal = journal.read_bytes()
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+        rotate_after_first.calls = 0
+        with self.assertRaisesRegex(
+                exe.Hold, "RETAINED_RUNTIME_OR_PAIR_DRIFT"):
+            step("cleanup", rotate_after_first)
+        self.assertEqual(rotate_after_first.calls, 2)
+        self.assertEqual(journal.read_bytes(), restored_journal)
+        self.assertFalse(seal.exists())
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+
+        # Stable identity still permits byte-exact terminal cleanup and a
+        # fresh transaction with the existing no-Node-recreation path.
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertFalse(journal.exists())
+        self.assertFalse(seal.exists())
+        self.assertEqual(step("install"), "COMMITTED")
+        self.assertEqual(step("rollback"), "RESTORED")
+        self.assertEqual(step("cleanup"), "CLEANED")
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()), before)
+
     def test_retained_process_death_during_apply_and_compensation(self):
         step, manifest, receipt = self.retained_fixture()
         before = manifest.read_bytes(), receipt.read_bytes()
