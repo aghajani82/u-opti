@@ -740,6 +740,165 @@ class HostExecutor(unittest.TestCase):
         self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
                          original)
 
+    def _live_witness_test_fixture(self, role):
+        from types import SimpleNamespace
+        registry = self.data / "tunnels.json"
+        registry.write_text('{"schema":1,"tunnels":[]}\n')
+        registry.chmod(0o600)
+        image_id = "sha256:" + "3" * 64
+        container = {
+            "Name": "/smite-node",
+            "Id": "4" * 64,
+            "Image": image_id,
+            "Config": {"Image": IMAGE},
+            "State": {"Running": True, "StartedAt": "2026-11-07T09:00:00Z"},
+            "Mounts": [{
+                "Type": "volume", "Driver": "local",
+                "Destination": "/var/lib/smite-node",
+                "Source": str(self.data), "Name": "smite-node-data",
+            }],
+        }
+        calls = []
+        def inspect(_name):
+            calls.append("inspect")
+            return container
+        def signed_probe():
+            calls.append("signed-HMAC-replay")
+        def owner():
+            calls.append("signed-IR-owner")
+            return "5" * 64
+        frp = SimpleNamespace(
+            node_details=lambda: {"role": role, "state": "COMMITTED"},
+            rt=SimpleNamespace(inspect_container=inspect,
+                               signed_probe=signed_probe),
+            signed_owner_inventory=owner,
+        )
+        def children(_frp):
+            calls.append("persisted-foreign-children")
+            return ("optical", "nahavi", "20182")
+        def signed_children(_frp, ids):
+            calls.append("signed-foreign-children")
+            self.assertEqual(ids, ("optical", "nahavi", "20182"))
+            return ("6" * 64, "7" * 64, "8" * 64)
+        control = SimpleNamespace(
+            _rc7_foreign_saved_child_ids=children,
+            _rc7_foreign_signed_instances=signed_children,
+        )
+        proc = {
+            "FRPS_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+            "FRPS_INSTANCE_SHA256": "9" * 64,
+            "FRPC_PROCESS_LOCAL": "OBSERVED_UNATTESTED",
+            "FRPC_INSTANCE_SHA256": "a" * 64,
+        }
+        broker = {"BROKER_SOCKET_LOCAL": "PRESENT_UNATTESTED",
+                  "BROKER_SOCKET_ID_SHA256": "b" * 64}
+        def load(_alias, name):
+            self.assertIn(name, ("smite-rc7-frp-enrollment.py",
+                                 "smite-managed-backhaul-control.py"))
+            return frp if name == "smite-rc7-frp-enrollment.py" else control
+        return registry, container, calls, proc, broker, load
+
+    def test_retained_production_witness_requires_real_scoped_host_before_io(self):
+        with patch.object(exe, "_load",
+                          side_effect=AssertionError("DOCKER_OR_AGENT_IO")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_WITNESS_SCOPE_UNTRUSTED"):
+            exe._retained_live_signed_witness(
+                role="ir", expected_node_image=IMAGE, paths=self.paths)
+        for role, image in (("KH", IMAGE), ("ir", "tag:mutable"),
+                            ("foreign", "sha256:" + "a" * 64)):
+            with self.subTest(role=role, image=image), \
+                 patch.object(exe, "Paths", return_value=self.paths), \
+                 patch.object(exe.os, "geteuid", return_value=0), \
+                 patch.object(exe, "_load",
+                              side_effect=AssertionError("DOCKER_OR_AGENT_IO")), \
+                 self.assertRaisesRegex(
+                     exe.Hold, "RETAINED_LIVE_WITNESS_SCOPE_UNTRUSTED"):
+                exe._retained_live_signed_witness(
+                    role=role, expected_node_image=image, paths=self.paths)
+
+    def test_retained_signed_local_witness_both_roles_and_drift(self):
+        for role in ("ir", "foreign"):
+            with self.subTest(role=role):
+                registry, container, calls, proc, broker, loader = (
+                    self._live_witness_test_fixture(role))
+                saved = registry.read_bytes()
+                with patch.object(exe, "Paths", return_value=self.paths), \
+                     patch.object(exe.os, "geteuid", return_value=0), \
+                     patch.object(exe, "_load", side_effect=loader), \
+                     patch.object(exe.admission.host, "frp_process_footprint",
+                                  return_value=proc), \
+                     patch.object(exe.admission.host, "broker_socket_footprint",
+                                  return_value=broker):
+                    first = exe._retained_live_signed_witness(
+                        role=role, expected_node_image=IMAGE, paths=self.paths)
+                    second = exe._retained_live_signed_witness(
+                        role=role, expected_node_image=IMAGE, paths=self.paths)
+                    self.assertEqual(first, second)
+                    self.assertRegex(first, r"^[a-f0-9]{64}$")
+                    self.assertIn("signed-HMAC-replay", calls)
+                    self.assertEqual(calls.count("inspect"), 4)
+                    self.assertIn("signed-IR-owner" if role == "ir"
+                                  else "signed-foreign-children", calls)
+                    # Restart or image drift while the signed HMAC GET is
+                    # running must be rejected by the second Docker review.
+                    original_started = container["State"]["StartedAt"]
+                    def restart():
+                        container["State"]["StartedAt"] = "2026-11-07T09:10:00Z"
+                    frp_inspect_calls = calls.count("inspect")
+                    real_load = loader
+                    # Replace the Container ID on the *second* inspect only.
+                    def drifting_load(alias, name):
+                        module = real_load(alias, name)
+                        if name == "smite-rc7-frp-enrollment.py":
+                            base_inspect = module.rt.inspect_container
+                            def drift_inspect(value):
+                                doc = base_inspect(value)
+                                if calls.count("inspect") == frp_inspect_calls + 2:
+                                    restart()
+                                return doc
+                            module.rt.inspect_container = drift_inspect
+                        return module
+                    with patch.object(exe, "_load", side_effect=drifting_load), \
+                         self.assertRaisesRegex(
+                             exe.Hold, "RETAINED_LIVE_NODE_OR_FRP_DRIFT"):
+                        exe._retained_live_signed_witness(
+                            role=role, expected_node_image=IMAGE,
+                            paths=self.paths)
+                    container["State"]["StartedAt"] = original_started
+                self.assertEqual(registry.read_bytes(), saved)
+                self.assertNotIn(saved.decode(), str(first))
+
+    def test_retained_live_witness_fails_closed_on_missing_signed_proof(self):
+        for role in ("ir", "foreign"):
+            with self.subTest(role=role):
+                registry, container, calls, proc, broker, loader = (
+                    self._live_witness_test_fixture(role))
+                original = registry.read_bytes()
+                with patch.object(exe, "Paths", return_value=self.paths), \
+                     patch.object(exe.os, "geteuid", return_value=0), \
+                     patch.object(exe, "_load", side_effect=loader), \
+                     patch.object(exe.admission.host, "frp_process_footprint",
+                                  return_value=proc), \
+                     patch.object(exe.admission.host, "broker_socket_footprint",
+                                  return_value=broker):
+                    container["Config"]["Image"] = "tag:untrusted"
+                    with self.assertRaisesRegex(
+                            exe.Hold, "RETAINED_LIVE_IMAGE_PIN_CHANGED"):
+                        exe._retained_live_signed_witness(
+                            role=role, expected_node_image=IMAGE,
+                            paths=self.paths)
+                    container["Config"]["Image"] = IMAGE
+                    proc["FRPS_PROCESS_LOCAL" if role == "ir"
+                         else "FRPC_PROCESS_LOCAL"] = "NOT_OBSERVED"
+                    with self.assertRaisesRegex(
+                            exe.Hold, "RETAINED_LIVE_FRPS_PROCESS_UNVERIFIED"
+                            if role == "ir" else "RETAINED_LIVE_FRPC_PROCESS_UNVERIFIED"):
+                        exe._retained_live_signed_witness(
+                            role=role, expected_node_image=IMAGE,
+                            paths=self.paths)
+                self.assertEqual(registry.read_bytes(), original)
+
     def test_signed_read_only_plan_for_actual_host_role_names(self):
         from dataclasses import replace
         runner, audit = self._retained_review_fixture()
