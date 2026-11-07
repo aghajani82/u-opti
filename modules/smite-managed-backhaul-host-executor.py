@@ -329,7 +329,7 @@ def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
     return "CLEANED"
 
 
-def _retained_step(paths, *, action, role, arch, witness):
+def _retained_step(paths, *, action, role, arch, witness, expected_before=None):
     """Apply or compensate under the same lock used by RC7 FRP enrollment.
 
     witness() re-authenticates this retained node and returns the stable
@@ -339,6 +339,15 @@ def _retained_step(paths, *, action, role, arch, witness):
         raise Hold("RETAINED_OPERATION_INVALID")
     if arch not in package.OFFICIAL_BINARY_SHA256:
         raise Hold("OFFICIAL_BACKHAUL_ARCH_REQUIRED")
+    # The two-role coordinator binds install to the EXACT preflight bytes.
+    # A cooperating writer may alter an otherwise valid FRP receipt between
+    # the first host preflight and this lock; never silently adopt new bytes.
+    if expected_before is not None:
+        if (action != "install" or not isinstance(expected_before, tuple)
+                or len(expected_before) != 2
+                or any(type(raw) is not bytes or not 0 < len(raw) <= 8192
+                       for raw in expected_before)):
+            raise Hold("RETAINED_EXPECTED_BASELINE_INVALID")
     # Never lock or write a protected live resource through an alternate
     # field, a parent/child alias or a symlink. An earlier boundary checked
     # only node/frp_state/state, overlooking the real shared FRP lock path.
@@ -389,6 +398,13 @@ def _retained_step(paths, *, action, role, arch, witness):
         if not isinstance(fingerprint, str) or not SHA.fullmatch(fingerprint):
             raise Hold("RETAINED_RUNTIME_PROOF_REQUIRED")
         seal = paths.state / "retained-rc7-cleanup.json"
+        # A coordinator's fresh install must start with an empty journal.
+        # An independently appearing COMMITTED receipt/journal between the
+        # two-host preflight and this locked writer is NOT our transaction;
+        # never adopt it as an idempotent success or as rollback evidence.
+        if expected_before is not None and (os.path.lexists(journal)
+                                            or os.path.lexists(seal)):
+            raise Hold("RETAINED_PREFLIGHT_JOURNAL_APPEARED")
         if os.path.lexists(seal):
             if action != "cleanup":
                 raise Hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
@@ -427,6 +443,10 @@ def _retained_step(paths, *, action, role, arch, witness):
             if action != "install":
                 raise Hold("RETAINED_JOURNAL_MISSING")
             before = current()
+            # Re-check under the SAME exclusive lock as the first fsynced
+            # PREPARED journal write. Never create a journal on stale proof.
+            if expected_before is not None and before != expected_before:
+                raise Hold("RETAINED_PREFLIGHT_PAIR_CHANGED")
             record = {"schema": 1, "role": role, "binary": binary, "witness": fingerprint,
                       "manifest": before[0].hex(), "receipt": before[1].hex(), "phase": "NEW"}
 
@@ -577,15 +597,27 @@ def _retained_two_host_rehearsal_lab(ir: Paths, foreign: Paths, *,
 
     if not observed("before"):
         raise Hold("RETAINED_TWO_HOST_PRIOR_SYNTHETIC_PROOF_FAILED")
+    # The observer can be slow or untrusted. Both roles' EXACT original
+    # pairs must still match the preflight before any role is modified.
+    # Checking Foreign first prevents modifying IR if Foreign already drifted.
+    for role, paths in reversed(hosts):
+        with _lock(paths.lock):
+            manifest, receipt, journal = _retained_files(paths)
+            if (_retained_review_pending_recovery(paths) is not None
+                    or (pair._pair_read_private(manifest),
+                        pair._pair_read_private(receipt)) != snapshots[role]):
+                raise Hold("RETAINED_TWO_HOST_PREFLIGHT_PAIR_CHANGED")
     failed = False
     try:
         if _retained_step(ir, action="install", role="ir", arch=arch,
-                          witness=lambda: witness("ir", roots[0])) != "COMMITTED":
+                          witness=lambda: witness("ir", roots[0]),
+                          expected_before=snapshots["ir"]) != "COMMITTED":
             raise Hold("RETAINED_TWO_HOST_IR_APPLY_NOT_COMMITTED")
         if not observed("after-ir") or inject == "after-ir":
             raise Hold("RETAINED_TWO_HOST_AFTER_IR_PROOF_FAILED")
         if _retained_step(foreign, action="install", role="foreign", arch=arch,
-                          witness=lambda: witness("foreign", roots[1])) != "COMMITTED":
+                          witness=lambda: witness("foreign", roots[1]),
+                          expected_before=snapshots["foreign"]) != "COMMITTED":
             raise Hold("RETAINED_TWO_HOST_FOREIGN_APPLY_NOT_COMMITTED")
         if not observed("after-both") or inject == "after-both":
             raise Hold("RETAINED_TWO_HOST_AFTER_BOTH_PROOF_FAILED")
