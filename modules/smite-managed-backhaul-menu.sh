@@ -35,6 +35,51 @@ smite_managed_bh_host_gate() {
     python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_GATE" --node-dir "$SMITE_MANAGED_NODE_DIR" --format "$report_format"
 }
 
+smite_managed_bh_ir_retained_canary() {
+    # Existing option 3 only. No new menus, tunnel Apply, ports or Node
+    # lifecycle operations. The Python executor rechecks signed role=IR,
+    # exact release, Owner, FRP receipt, runtime and an explicit TTY challenge.
+    if [ ! -s "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" ] ||
+       [ -L "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" ] ||
+       [ "$SMITE_MANAGED_NODE_DIR" != /opt/smite-node ]; then
+        echo "HOLD: Reviewed canonical retained-node executor required."
+        return 2
+    fi
+    local arch=""
+    case "$(uname -m)" in
+        x86_64) arch=amd64 ;;
+        aarch64) arch=arm64 ;;
+        *) echo "HOLD: Unsupported Backhaul architecture"; return 2 ;;
+    esac
+    local image="ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
+    local mode
+    echo "IR-only Backhaul metadata canary: no Node restart or tunnel Apply."
+    echo "Grandoptical and existing FRP tunnels will not be modified."
+    read -rp "Enter I=install on IR, R=rollback on IR, or 0=cancel: " mode ||
+        return 2
+    case "$mode" in
+        I|i)
+            python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
+                install-retained-ir --arch "$arch" \
+                --expected-node-image "$image" \
+                --confirm-role INSTALL-RETAINED-BACKHAUL-IR \
+                --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json" \
+                --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
+                --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
+                --signed-pair-publish-ref refs/tags/v2.0.0-rc.7 \
+                --signed-pair-trusted-root "$SMITE_ENGINE_MENU_DIR/smite-rc7-sigstore-trusted-root.json"
+            ;;
+        R|r)
+            python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
+                rollback-retained-ir --arch "$arch" \
+                --expected-node-image "$image" \
+                --confirm-role ROLLBACK-RETAINED-BACKHAUL-IR
+            ;;
+        0) echo "No changes made." ;;
+        *) echo "HOLD: Unrecognized IR-only operation"; return 2 ;;
+    esac
+}
+
 smite_managed_bh_menu() {
     local choice
     while true; do
@@ -45,7 +90,7 @@ smite_managed_bh_menu() {
         echo "======================================"
         echo "1) Status (read-only)"
         echo "2) Review installation prerequisites"
-        echo "3) Install Backhaul (not enabled yet)"
+        echo "3) IR Backhaul retained install / rollback (no Node recreate)"
         echo "4) Show safe IR/KH report (read-only)"
         echo "5) FRP — Independent install/review"
         echo "0) Back"
@@ -165,9 +210,7 @@ smite_managed_bh_menu() {
                 fi
                 ;;
             3)
-                echo "HOLD: Backhaul installation on real IR/KH is disabled."
-                echo "No Docker, Smite, FRP, ports, routes or files changed."
-                echo "The independent install + rollback is validated in GitHub PR CI only."
+                smite_managed_bh_ir_retained_canary || :
                 ;;
             0) return ;;
             *) echo "Invalid choice" ;;
