@@ -2273,7 +2273,8 @@ def main() -> int:
         description="Backhaul reviewed host executor; IR retained metadata canary only, no tunnel Apply")
     p.add_argument("action", choices=(
         "install", "rollback", "recover", "review-in-place",
-        "install-retained-ir", "rollback-retained-ir"))
+        "install-retained-ir", "rollback-retained-ir",
+        "install-retained-foreign", "rollback-retained-foreign"))
     p.add_argument("--stage", type=Path)
     p.add_argument("--arch", choices=tuple(package.OFFICIAL_BINARY_SHA256))
     p.add_argument("--signed-pair-manifest", type=Path)
@@ -2317,6 +2318,42 @@ def main() -> int:
                     signed_pair_trusted_root=args.signed_pair_trusted_root)
             else:
                 result = _retained_live_ir_rollback(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image)
+        elif args.action in ("install-retained-foreign",
+                             "rollback-retained-foreign"):
+            # Foreign has active Sanaei clients and a separate external
+            # recovery domain. Snapshot creation alone is NOT restore proof.
+            # Require independent isolated restore/console attestation for
+            # any live Foreign metadata write, including explicit rollback.
+            # This is a role-scoped operator gate, not a replacement for
+            # the verified signed Foreign Child HMAC/process witness.
+            challenge = ("INSTALL-RETAINED-BACKHAUL-FOREIGN"
+                         if args.action == "install-retained-foreign"
+                         else "ROLLBACK-RETAINED-BACKHAUL-FOREIGN")
+            if (args.arch is None or args.confirm_role != challenge
+                    or args.confirm_snapshot_and_console != SNAPSHOT_CONFIRM
+                    or not sys.stdin.isatty()
+                    or input("Type " + challenge + ": ").strip()
+                    != challenge):
+                raise Hold("RETAINED_LIVE_FOREIGN_RECOVERY_APPROVAL_REQUIRED")
+            if args.action == "install-retained-foreign":
+                if (args.signed_pair_manifest is None
+                        or args.signed_pair_manifest_sha256 is None
+                        or args.signed_pair_source_sha is None
+                        or args.signed_pair_publish_ref is None
+                        or args.signed_pair_trusted_root is None):
+                    raise Hold("RETAINED_LIVE_FOREIGN_SIGNED_RELEASE_PINS_REQUIRED")
+                result = _retained_live_foreign_canary(
+                    arch=args.arch,
+                    expected_node_image=args.expected_node_image,
+                    signed_pair_manifest=args.signed_pair_manifest,
+                    signed_pair_manifest_sha256=args.signed_pair_manifest_sha256,
+                    signed_pair_source_sha=args.signed_pair_source_sha,
+                    signed_pair_publish_ref=args.signed_pair_publish_ref,
+                    signed_pair_trusted_root=args.signed_pair_trusted_root)
+            else:
+                result = _retained_live_foreign_rollback(
                     arch=args.arch,
                     expected_node_image=args.expected_node_image)
         elif args.action == "review-in-place":
