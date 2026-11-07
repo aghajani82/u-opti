@@ -899,6 +899,147 @@ class HostExecutor(unittest.TestCase):
                             paths=self.paths)
                 self.assertEqual(registry.read_bytes(), original)
 
+    def _live_prepare_test_context(self, role):
+        from dataclasses import replace
+        # The IR and Foreign role cases share one temporary fixture in
+        # this test. Only create the immutable original Manifest once.
+        if not (self.config / "engine-state/engines.json").is_file():
+            self._retained_review_fixture()
+        paths = replace(self.paths, frp_state=self.root / "frp")
+        paths.frp_state.mkdir(mode=0o700, exist_ok=True)
+        manifest = self.config / "engine-state/engines.json"
+        record = {
+            "schema": 1, "state": "COMMITTED", "role": role,
+            "old": None, "new": exe._sha(manifest.read_bytes()),
+            "binaries": {"frpc": "b" * 64, "frps": "c" * 64},
+        }
+        receipt = paths.frp_state / "record.json"
+        receipt.write_text(json.dumps(record, sort_keys=True) + "\n")
+        receipt.chmod(0o600)
+        report = {
+            "RETAINED_NODE_BACKHAUL_BINARY": "OFFICIAL_EXECUTABLE_SHA256_MATCH",
+            "IN_PLACE_MANIFEST_TRANSACTION": "PAIR_PLAN_VERIFIED_READ_ONLY",
+            "SIGNED_REGISTRY_PAIR_PROOF": "COSIGN_VERIFIED",
+            "RETAINED_LOCAL_SIGNED_RUNTIME_WITNESS": "PASS_STABLE_LOCAL_ONLY",
+            "INSTALL_ALLOWED": "NO", "ACTIVATION_GATE": "HOLD",
+        }
+        inputs = {
+            "role": role, "arch": "amd64", "expected_node_image": IMAGE,
+            "signed_pair_manifest": self.root / "signed-pair.json",
+            "signed_pair_manifest_sha256": "a" * 64,
+            "signed_pair_source_sha": "b" * 40,
+            "signed_pair_publish_ref": "refs/tags/v2.0.0-rc.7",
+            "signed_pair_trusted_root": self.root / "sigstore.json",
+            "paths": paths,
+        }
+        return inputs, manifest, receipt, report
+
+    def test_live_production_prepare_is_private_readonly_and_exact_both_roles(self):
+        from contextlib import nullcontext
+        for role in ("ir", "foreign"):
+            with self.subTest(role=role):
+                inputs, manifest, receipt, report = (
+                    self._live_prepare_test_context(role))
+                originals = (manifest.read_bytes(), receipt.read_bytes())
+                self.assertFalse(inputs["paths"].state.exists())
+                with patch.object(exe, "Paths", return_value=inputs["paths"]), \
+                     patch.object(exe, "_retained_live_root_required",
+                                  return_value=True), \
+                     patch.object(exe, "review_in_place_binary",
+                                  return_value=report) as reviewed, \
+                     patch.object(exe, "_retained_live_signed_witness",
+                                  return_value="f" * 64) as signed, \
+                     patch.object(exe, "_read_only_engine_lock",
+                                  side_effect=lambda _: nullcontext()), \
+                     patch.object(exe, "_lock",
+                                  side_effect=AssertionError("WRITER_OPENED")):
+                    evidence = exe._retained_live_prepare(**inputs)
+                self.assertEqual(evidence.old_pair, originals)
+                self.assertEqual(evidence.role, role)
+                self.assertEqual(evidence.runtime_witness, "f" * 64)
+                self.assertEqual(evidence.node_image, IMAGE)
+                self.assertEqual(reviewed.call_count, 1)
+                self.assertEqual(signed.call_count, 2)
+                self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                                 originals)
+                self.assertFalse(inputs["paths"].state.exists())
+                self.assertFalse((inputs["paths"].state / "retained-rc7.json").exists())
+
+    def test_live_prepare_rejects_unsigned_missing_and_drifting_evidence(self):
+        from contextlib import nullcontext
+        inputs, manifest, receipt, report = self._live_prepare_test_context("ir")
+        original_pair = (manifest.read_bytes(), receipt.read_bytes())
+        negative_reports = (
+            {**report, "SIGNED_REGISTRY_PAIR_PROOF": "NOT_SUPPLIED"},
+            {**report, "ACTIVATION_GATE": "PASS"},
+            {**report, "RETAINED_LOCAL_SIGNED_RUNTIME_WITNESS": "UNVERIFIED"},
+            {**report, "REASON": "RECOVERY_REQUIRED"},
+        )
+        for untrusted in negative_reports:
+            with self.subTest(report=untrusted), \
+                 patch.object(exe, "Paths", return_value=inputs["paths"]), \
+                 patch.object(exe, "_retained_live_root_required",
+                              return_value=True), \
+                 patch.object(exe, "review_in_place_binary",
+                              return_value=untrusted), \
+                 patch.object(exe, "_retained_live_signed_witness",
+                              side_effect=AssertionError("SIGNED_PROBE_EARLY")), \
+                 patch.object(exe, "_read_only_engine_lock",
+                              side_effect=AssertionError("LOCK_EARLY")), \
+                 self.assertRaisesRegex(
+                     exe.Hold, "RETAINED_LIVE_SIGNED_PREFLIGHT_INCOMPLETE"):
+                exe._retained_live_prepare(**inputs)
+        with patch.object(exe, "Paths", return_value=inputs["paths"]), \
+             patch.object(exe, "_retained_live_root_required", return_value=True), \
+             patch.object(exe, "review_in_place_binary", return_value=report), \
+             patch.object(exe, "_retained_live_signed_witness",
+                          side_effect=["f" * 64, "e" * 64]), \
+             patch.object(exe, "_read_only_engine_lock",
+                          side_effect=lambda _: nullcontext()), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_LIVE_PREPARE_CONCURRENT_DRIFT"):
+            exe._retained_live_prepare(**inputs)
+        self.assertEqual((manifest.read_bytes(), receipt.read_bytes()),
+                         original_pair)
+        self.assertFalse(inputs["paths"].state.exists())
+
+    def test_common_retained_writer_core_requires_prior_admission_before_lock(self):
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_PRODUCTION_WRITER_NOT_ADMITTED"):
+            exe._retained_step_core(
+                exe.Paths(), action="install", role="ir",
+                arch="amd64", witness=lambda: "f" * 64)
+        # Even a Python caller importing the internal object cannot
+        # use it to write on canonical live paths, a misleading unmarked
+        # temporary directory or an alternate host alias.
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED"):
+            exe._retained_step_core(
+                exe.Paths(), action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64,
+                _admission=exe._RETAINED_CI_WRITER_ADMISSION)
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED"):
+            exe._retained_step_core(
+                self.paths, action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64,
+                _admission=exe._RETAINED_CI_WRITER_ADMISSION)
+        # A forged string cannot satisfy the internal CI entry capability.
+        with patch.object(exe, "_lock",
+                          side_effect=AssertionError("WRITER_OPENED")), \
+             self.assertRaisesRegex(
+                 exe.Hold, "RETAINED_PRODUCTION_WRITER_NOT_ADMITTED"):
+            exe._retained_step_core(
+                self.paths, action="install", role="ir", arch="amd64",
+                witness=lambda: "f" * 64,
+                _admission="RETAINED_CI_WRITER_ADMISSION")
+
     def test_signed_read_only_plan_for_actual_host_role_names(self):
         from dataclasses import replace
         runner, audit = self._retained_review_fixture()

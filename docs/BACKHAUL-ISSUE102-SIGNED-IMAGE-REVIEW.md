@@ -958,6 +958,47 @@ authority to invoke the CI-only writer. `INSTALL_ALLOWED=NO`,
 unchanged. This is the **production writer's local runtime witness
 component**, not yet the production transaction controller.
 
+## Retained production transaction prewrite — exact signed baseline, no writes
+
+After PR #175's stable local signed runtime witness, the Host Executor
+now separates its **single fsynced pair writer / Rollback / Recovery core**
+from the admission that invokes it. The existing `_retained_step` still
+permits only the private, marked disposable PR laboratory and hands an
+internal admission capability to the same exact journal writer. Direct
+calls to the extracted mutation core without that capability fail **before
+the lock or any file write**. The legacy recreating installer and the
+existing Backhaul menu remain unchanged/disabled.
+
+A new private `_retained_live_prepare` entry provides the **single-host
+production prewrite data**, strictly read-only: the exact canonical
+production paths, role and immutable pinned Node image are required; the
+existing root/Cosign-verified `review_in_place_binary` must return an
+official bundled executable, valid signed release, stable local
+Owner/Child/Broker evidence, and `PAIR_PLAN_VERIFIED_READ_ONLY`, while
+continuing to report `INSTALL_ALLOWED=NO` / `ACTIVATION_GATE=HOLD`.
+It then holds the existing *read-only* engine lock, rejects competing
+FRP or retained Recovery/cleanup state, reads the exact original 0600
+Manifest and committed FRP receipt, recomputes the reviewed exact
+transition, and pins two repeated local signed runtime fingerprints.
+It returns a **private memory-only baseline** containing the exact bytes,
+role, immutable release image, architecture and witness. It creates **no
+journal, state directory, lock or container**. A missing
+`/var/lib/u-opti/smite-engine-host/backhaul` on a first real IR install
+is expected at this stage and is *not* auto-created by the review.
+
+Important: This is preparation for a separate **production two-host
+writer/admission**, not the release of one. A live writer must obtain
+independently authenticated cross-host Owner+Child/data-plane evidence,
+separately verified recovery authority for each role, enforce the
+private pinned before-bytes/witness again under its **exclusive**
+transaction lock and verify committed signed inventory (PRs #173/#174)
+before it reports success. If the peer's postcommit test fails, preserve
+the shared FRP tunnel and recover via the sealed Rollback. Merely
+supplying a positive local witness or shell confirmation must never be
+allowed to create a live journal. Neither the CLI nor the menu calls
+the extracted writer for production; `INSTALL_ALLOWED=NO` and
+`ACTIVATION_GATE=HOLD` remain the only safe live response.
+
 ## Production recovery evidence — live IR + Grandoptical (operator-only, HOLD)
 
 **Current scope (Issue #102, 2026-11-07):** Two **active**, not disposable,

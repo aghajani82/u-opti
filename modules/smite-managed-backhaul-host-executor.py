@@ -398,6 +398,56 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
             pair.ensure_in_lab(root, getattr(paths, name))
     except (pair.Hold, OSError, ValueError, TypeError) as exc:
         raise Hold("RETAINED_CI_LAB_ONLY") from exc
+    # The isolated PR admission above is intentional. Live production
+    # enrollment MUST use its separately authenticated two-host entry,
+    # never these CI lab paths and never a bypassing caller boolean.
+    return _retained_step_core(
+        paths, action=action, role=role, arch=arch, witness=witness,
+        expected_before=expected_before, expected_witness=expected_witness,
+        _admission=_RETAINED_CI_WRITER_ADMISSION)
+
+
+_RETAINED_CI_WRITER_ADMISSION = object()
+
+
+def _retained_step_core(paths, *, action, role, arch, witness,
+                        expected_before=None, expected_witness=None,
+                        _admission=None):
+    """Common fsynced exact-pair mutation and recovery after entry admission.
+
+    Internal mutation primitive shared by strictly separate admission paths.
+    Not a user-facing API: callers must validate their host, signed proof,
+    preflight bytes and protected runtime BEFORE invoking this function.
+    A production caller is deliberately not yet exposed by CLI or menu.
+    """
+    if _admission is not _RETAINED_CI_WRITER_ADMISSION:
+        raise Hold("RETAINED_PRODUCTION_WRITER_NOT_ADMITTED")
+    if (not isinstance(paths, Paths)
+            or action not in ("install", "rollback", "recover", "cleanup")
+            or role not in ("ir", "foreign")
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or not callable(witness)):
+        raise Hold("RETAINED_CORE_INPUT_UNTRUSTED")
+    # The internal Python object above is only a routing hint, NOT a
+    # security authority. A caller can import it just as readily as this
+    # function. Independently enforce the disposable CI runner admission
+    # here, BEFORE any shared engine lock, even when the wrapper is bypassed.
+    # Live admission must be built separately with actual signed peer and
+    # recovery proof; never accept a capability object as that evidence.
+    root = paths.node.parent
+    # Both the one-host regression fixture and the two-host integration
+    # use a private marked CI root, but their staged binary subdirectories
+    # differ. Enforce exact node layout and ROOT containment, not a
+    # guessed single staging/binary layout.
+    if (paths == Paths() or not root.is_absolute()
+            or paths.node != root / "node"):
+        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
+    try:
+        pair.admission(root)
+        for name in ("staging", "state", "lock", "binary", "frp_state"):
+            pair.ensure_in_lab(root, getattr(paths, name))
+    except (pair.Hold, OSError, ValueError, TypeError) as exc:
+        raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED") from exc
     binary = package.OFFICIAL_BINARY_SHA256[arch]
 
     with _lock(paths.lock):
@@ -885,6 +935,110 @@ def _retained_review_pending_recovery(paths: Paths) -> str | None:
         if os.path.lexists(pending):
             return "COMPETING_RECOVERY_REQUIRED"
     return None
+
+
+@dataclass(frozen=True)
+class RetainedLivePrepared:
+    """Private exact prewrite evidence, never a production install permit."""
+    paths: Paths
+    role: str
+    arch: str
+    node_image: str
+    old_pair: tuple[bytes, bytes]
+    runtime_witness: str
+
+
+def _retained_live_prepare(*, role: str, arch: str, expected_node_image: str,
+                           signed_pair_manifest: Path,
+                           signed_pair_manifest_sha256: str,
+                           signed_pair_source_sha: str,
+                           signed_pair_publish_ref: str,
+                           signed_pair_trusted_root: Path,
+                           paths: Paths = Paths()) -> RetainedLivePrepared:
+    """Prepare the exact production file pair without executing the writer.
+
+    This is a SINGLE-host, read-only internal prewrite phase. No release
+    admission is granted here: two-host recovery, separately signed peer
+    proof, emergency console and operator authorization remain missing.
+    A future reviewed coordinator must call the shared transactional core
+    only under those independent protections; this function never does.
+    """
+    if (paths != Paths() or not _retained_live_root_required()
+            or role not in ("ir", "foreign")
+            or arch not in package.OFFICIAL_BINARY_SHA256
+            or IMAGE.fullmatch(expected_node_image) is None
+            or any(type(value) is not str or not value
+                   for value in (signed_pair_manifest_sha256,
+                                 signed_pair_source_sha,
+                                 signed_pair_publish_ref))
+            or not isinstance(signed_pair_manifest, Path)
+            or not signed_pair_manifest.is_absolute()
+            or not isinstance(signed_pair_trusted_root, Path)
+            or not signed_pair_trusted_root.is_absolute()):
+        raise Hold("RETAINED_LIVE_PREPARE_INPUT_UNTRUSTED")
+    try:
+        review = review_in_place_binary(
+            expected_node_image=expected_node_image, arch=arch, paths=paths,
+            signed_pair_manifest=signed_pair_manifest,
+            signed_pair_manifest_sha256=signed_pair_manifest_sha256,
+            signed_pair_source_sha=signed_pair_source_sha,
+            signed_pair_publish_ref=signed_pair_publish_ref,
+            signed_pair_trusted_root=signed_pair_trusted_root)
+        if (not isinstance(review, dict) or "REASON" in review
+                or review.get("RETAINED_NODE_BACKHAUL_BINARY")
+                    != "OFFICIAL_EXECUTABLE_SHA256_MATCH"
+                or review.get("IN_PLACE_MANIFEST_TRANSACTION")
+                    != "PAIR_PLAN_VERIFIED_READ_ONLY"
+                or review.get("SIGNED_REGISTRY_PAIR_PROOF") != "COSIGN_VERIFIED"
+                or review.get("RETAINED_LOCAL_SIGNED_RUNTIME_WITNESS")
+                    != "PASS_STABLE_LOCAL_ONLY"
+                or review.get("INSTALL_ALLOWED") != "NO"
+                or review.get("ACTIVATION_GATE") != "HOLD"):
+            raise Hold("RETAINED_LIVE_SIGNED_PREFLIGHT_INCOMPLETE")
+        # The preceding signed review acquired a shared engine lock and
+        # released it. Capture the paired bytes under another read lock;
+        # a future writer MUST compare both exact bytes and this independent
+        # runtime witness *again* under the exclusive writer lock.
+        with _read_only_engine_lock(paths.lock):
+            if _retained_review_pending_recovery(paths) is not None:
+                raise Hold("RETAINED_LIVE_COMPETING_RECOVERY")
+            # Production journal directory is normally ABSENT until an
+            # authorized writer creates it. A read-only preflight must
+            # never create a directory merely to inspect its state.
+            manifest = paths.node / "config/engine-state/engines.json"
+            receipt = paths.frp_state / "record.json"
+            journal = paths.state / "retained-rc7.json"
+            for directory in (manifest.parent, receipt.parent):
+                if (directory.resolve(strict=True) != directory):
+                    raise Hold("RETAINED_LIVE_DIRECTORY_UNTRUSTED")
+                _dir(directory)
+            if (os.path.lexists(journal)
+                    or os.path.lexists(paths.state /
+                                       "retained-rc7-cleanup.json")):
+                raise Hold("RETAINED_LIVE_EXISTING_JOURNAL")
+            old_pair = (pair._pair_read_private(manifest),
+                        pair._pair_read_private(receipt))
+            pair._pair_expected_transition(
+                *old_pair, package.OFFICIAL_BINARY_SHA256[arch], role=role)
+            first = _retained_live_signed_witness(
+                role=role, expected_node_image=expected_node_image,
+                paths=paths)
+            if (first != _retained_live_signed_witness(
+                    role=role, expected_node_image=expected_node_image,
+                    paths=paths)
+                    or old_pair != (pair._pair_read_private(manifest),
+                                    pair._pair_read_private(receipt))
+                    or _retained_review_pending_recovery(paths) is not None):
+                raise Hold("RETAINED_LIVE_PREPARE_CONCURRENT_DRIFT")
+        return RetainedLivePrepared(
+            paths=paths, role=role, arch=arch, node_image=expected_node_image,
+            old_pair=old_pair, runtime_witness=first)
+    except Hold:
+        raise
+    except Exception as exc:
+        # Nothing about trusted release roots, file paths or credentials
+        # must appear in HOLD output. In particular, do NOT print bytes.
+        raise Hold("RETAINED_LIVE_PREPARE_FAILED") from exc
 
 
 def _retained_live_root_required() -> bool:
