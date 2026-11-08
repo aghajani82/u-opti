@@ -69,19 +69,20 @@ class SubprocessDriver:
                  "--format", cls.PS_FMT],
                 ["docker", "update", "--restart", "unless-stopped", name],
                 ["docker", "rm", "-f", name],
+                ["docker", "start", name],
             ):
                 return True
-            if len(argv) == 23 and argv[:6] == [
-                "docker", "run", "-d", "--name", name, "--label"
+            if len(argv) == 22 and argv[:5] == [
+                "docker", "create", "--name", name, "--label"
             ]:
-                label = argv[6]
+                label = argv[5]
                 if not label.startswith("uopti.tx="):
                     return False
                 txn_id = label[len("uopti.tx="):]
                 if len(txn_id) != 32 or any(ch not in "0123456789abcdef" for ch in txn_id):
                     return False
                 expected = [
-                    "docker", "run", "-d", "--name", name,
+                    "docker", "create", "--name", name,
                     "--label", label, "--network", "host",
                     "--restart", "no", "--read-only",
                     "--cap-drop", "ALL", "--security-opt",
@@ -411,7 +412,12 @@ class LiveEngine:
             # Journal is fsynced before any installed target changes.
             state_write(target_dir / "journal.json", journal)
             try:
-                for resource, entry in zip(resources, journal["resources"]):
+                # Stage ONLY private Sidecar files first: Docker --mount
+                # requires the config source to exist. Reserve the exact
+                # transaction-labeled Docker name BEFORE editing/reloading
+                # shared Nginx. A concurrent foreign create is therefore
+                # rejected without touching the live ingress.
+                def apply_resource(resource, entry):
                     target = safe_target(Path(resource["path"]), role, self.root)
                     ensure_private_parent(target, self.root)
                     if resource["operation"] == "edit":
@@ -425,12 +431,31 @@ class LiveEngine:
                                 owner=entry["uid"], group=entry["gid"],
                                 mode=entry["mode"],
                                 create=resource["operation"] == "create")
-                self.driver.call(["nginx", "-t"], timeout=15)
-                self.driver.call(["systemctl", "reload", "nginx"], timeout=25)
-                # A transaction label survives a power loss between Docker
-                # creation and journal update, enabling ownership verification.
+
+                paired = list(zip(resources, journal["resources"]))
+                private = [(r, e) for r, e in paired
+                           if r["path"].startswith(
+                               "/etc/u-opti/backhaul-sidecar/")]
+                ingress = [(r, e) for r, e in paired
+                           if not r["path"].startswith(
+                               "/etc/u-opti/backhaul-sidecar/")]
+                # Exact role config + compose only. Never reserve using
+                # caller-supplied paths or an unreviewed resource layout.
+                expected_private = {
+                    "/etc/u-opti/backhaul-sidecar/" + role + ".toml",
+                    "/etc/u-opti/backhaul-sidecar/compose-" + role + ".yml",
+                }
+                if ({r["path"] for r, _ in private} != expected_private
+                        or any(r["operation"] != "create" for r, _ in private)
+                        or any(r["operation"] == "edit" for r, _ in private)
+                        or len(private) + len(ingress) != len(paired)):
+                    raise ActivationRefused("Sidecar resource layout drift")
+                for resource, entry in private:
+                    apply_resource(resource, entry)
+                # docker create is inert: no listener and no container
+                # process until nginx -t and reload both succeed.
                 self.driver.call([
-                    "docker", "run", "-d", "--name", CONTAINER[role],
+                    "docker", "create", "--name", CONTAINER[role],
                     "--label", "uopti.tx=" + txn_id,
                     "--network", "host", "--restart", "no", "--read-only",
                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -439,6 +464,16 @@ class LiveEngine:
                     "--entrypoint", "/usr/local/bin/backhaul", IMAGE,
                     "-c", "/run/backhaul/config.toml",
                 ], timeout=60)
+                if not self.docker_owned(role, txn_id):
+                    raise ActivationRefused("Sidecar reservation ownership unverified")
+                for resource, entry in ingress:
+                    apply_resource(resource, entry)
+                self.driver.call(["nginx", "-t"], timeout=15)
+                self.driver.call(["systemctl", "reload", "nginx"], timeout=25)
+                # Only start the already-verified reserved container AFTER
+                # the shared ingress has passed its strict syntax test.
+                self.driver.call(["docker", "start", CONTAINER[role]],
+                                 timeout=60)
                 if not self.docker_owned(role, txn_id):
                     raise ActivationRefused("Sidecar ownership could not be verified")
                 self.driver.call(["docker", "update", "--restart", "unless-stopped",
