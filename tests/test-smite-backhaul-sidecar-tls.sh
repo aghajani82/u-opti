@@ -16,7 +16,9 @@ kh_bh="uopti-tls-kbh-$tag"
 ir_ng="uopti-tls-ing-$tag"
 kh_ng="uopti-tls-kng-$tag"
 bad_ng="uopti-tls-bng-$tag"
-image="ghcr.io/zzedix/smite-node@sha256:967c78b645a3367df4ae8413280cfca56dbe59c5f3897325313bc6cbf56e276e"
+# Use the same immutable RC7 image pinned by live retained-node admission.
+# This CI job never uses the production hosts, nodes or network.
+image="ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
 tmp="$(mktemp -d)"
 created=""
 network_created=no
@@ -110,10 +112,24 @@ http {
   ssl_certificate_key /etc/nginx/conf.d/ir.key;
   include /etc/nginx/conf.d/ir-control.inc;
   include /etc/nginx/conf.d/ir-xhttp.inc;
+  # Synthetic FRP WSS and 20182 siblings on the same TLS/443 ingress.
+  # These mock existing routes, not signed real FRPS/FRPC transport.
+  location = /~!frp {
+   proxy_pass http://FRP_MOCK_UPSTREAM:7000;
+   proxy_http_version 1.1;
+   proxy_set_header Upgrade $http_upgrade;
+   proxy_set_header Connection "upgrade";
+  }
+  location = /20182/category-software-99 {
+   proxy_pass http://FRP_MOCK_UPSTREAM:7000;
+  }
+  location ^~ /20182/category-software-99/ {
+   proxy_pass http://FRP_MOCK_UPSTREAM:7000;
+  }
   location / { return 404; }
  }
 }
-""")
+""".replace('FRP_MOCK_UPSTREAM',server))
 (dst/"kh-nginx.conf").write_text("""events { worker_connections 256; }
 http {
  server {
@@ -155,6 +171,26 @@ class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args): pass
 HTTPServer(('127.0.0.1',56053),Handler).serve_forever()
 """)
+# Synthetic sibling only. Real Backhaul runs from the pinned RC7 binary.
+(dst/"frp-sibling-mock.py").write_text("""
+from http.server import BaseHTTPRequestHandler,HTTPServer
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path=='/~!frp':
+   if self.headers.get('Upgrade','').lower()!='websocket':
+    self.send_error(426); return
+   body=b'uopti-frp-wss-sibling-stable'
+  elif self.path=='/20182/category-software-99' or self.path.startswith('/20182/category-software-99/'):
+   body=b'uopti-frp-20182-sibling-stable'
+  else:
+   self.send_error(404); return
+  self.send_response(200)
+  self.send_header('Content-Length',str(len(body)))
+  self.end_headers()
+  self.wfile.write(body)
+ def log_message(self,*args): pass
+HTTPServer(('0.0.0.0',7000),Handler).serve_forever()
+""")
 PY
 find "$tmp" -maxdepth 1 -type f -exec chmod 0600 {} +
 chmod 0700 "$tmp/kh-good" "$tmp/kh-bad"
@@ -168,8 +204,11 @@ docker run -d --name "$ir_bh" --network "$network" --read-only \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges \
     --mount "type=bind,src=$tmp/ir.toml,dst=/tmp/config.toml,readonly" \
     --mount "type=bind,src=$tmp/ca.pem,dst=/tmp/test-root-ca.pem,readonly" \
+    --mount "type=bind,src=$tmp/frp-sibling-mock.py,dst=/tmp/frp-sibling-mock.py,readonly" \
     --entrypoint /usr/local/bin/backhaul "$image" -c /tmp/config.toml >/dev/null
 created="$ir_bh $created"
+# Separate, isolated sibling responder; no real FRPS or saved tunnels touched.
+docker exec -d "$ir_bh" python3 /tmp/frp-sibling-mock.py >/dev/null
 
 docker run -d --name "$ir_ng" --network "$network" --network-alias ir.kolbe1.ir \
     --mount "type=bind,src=$tmp/ir-nginx.conf,dst=/etc/nginx/nginx.conf,readonly" \
@@ -195,6 +234,34 @@ for name in "$kh_ng" "$bad_ng"; do
     created="$name $created"
 done
 for name in "$ir_ng" "$kh_ng" "$bad_ng"; do docker exec "$name" nginx -t >/dev/null 2>&1; done
+
+# A real RC7 Backhaul tunnel must not disturb sibling FRP routes even during
+# KH Backhaul stop/start, rejected config, and exact isolated rollback.
+verify_preserved_frp_443() {
+    docker exec -i "$ir_bh" python3 - <<'PY_FRP_CONTINUITY'
+import ssl,time
+from urllib.request import Request,urlopen
+ctx=ssl.create_default_context(cafile='/tmp/test-root-ca.pem')
+for path,expected,upgrade in (
+    ('/~!frp',b'uopti-frp-wss-sibling-stable',True),
+    ('/20182/category-software-99',b'uopti-frp-20182-sibling-stable',False),
+    ('/20182/category-software-99/subpath',b'uopti-frp-20182-sibling-stable',False)):
+ for attempt in range(15):
+  try:
+   headers={'Upgrade':'websocket','Connection':'Upgrade'} if upgrade else {}
+   req=Request('https://ir.kolbe1.ir:443'+path,headers=headers)
+   with urlopen(req,context=ctx,timeout=2) as res:
+    if res.status==200 and res.read()==expected:
+     break
+  except Exception:
+   pass
+  time.sleep(.2)
+ else:
+  raise SystemExit('FAIL: isolated shared-443 sibling lost route '+path)
+print('PASS: mock FRP WSS and 20182 namespace preserved on shared 443')
+PY_FRP_CONTINUITY
+}
+verify_preserved_frp_443
 
 # KH bridge is initially absent, but the separate synthetic legacy endpoint
 # remains healthy. Enable only the owned KH bridge via atomic config swap.
@@ -261,7 +328,7 @@ for i in range(40):
  try:
   with urlopen('http://127.0.0.1:56053/health',timeout=2) as r:
    if r.status==200 and r.read()==expected:
-    print('PASS: two Nginx proxies, verified TLS, Backhaul WS data roundtrip')
+    print('PASS: real pinned RC7 Backhaul binary, two Nginx proxies, verified TLS and WS data roundtrip')
     sys.exit(0)
  except Exception: time.sleep(1)
 raise SystemExit('FAIL: full Nginx/TLS/Backhaul roundtrip not established')
@@ -297,6 +364,7 @@ PY
 # to lose its KH responder, then return after only the client is restarted.
 docker stop -t 2 "$kh_bh" >/dev/null
 [[ "$(docker inspect -f '{{.State.Running}}' "$kh_bh")" == false ]]
+verify_preserved_frp_443
 docker exec -i "$ir_bh" python3 - "$kh_ng" <<'PY'
 from urllib.request import urlopen
 import sys,time
@@ -317,6 +385,7 @@ else:
 PY
 docker start "$kh_bh" >/dev/null
 docker exec -d "$kh_bh" python3 /tmp/echo.py >/dev/null
+verify_preserved_frp_443
 docker exec -i "$ir_bh" python3 - <<'PY'
 from urllib.request import urlopen
 import time
@@ -425,4 +494,5 @@ else:
  raise SystemExit('FAIL: rolled-back KH bridge still accepts new control traffic')
 PY
 [[ "$(docker inspect -f '{{.State.Running}}' "$kh_bh")" == false ]]
-echo "PASS: KH only Sidecar stopped, KH Nginx baseline bytes and service restored"
+verify_preserved_frp_443
+echo "PASS: real RC7 Backhaul WS/TLS rollback preserved synthetic FRP WSS, 20182 and KH legacy"
