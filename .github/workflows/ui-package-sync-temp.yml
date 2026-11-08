@@ -73,7 +73,7 @@ jobs:
           print('NO_SERVER_ACTIONS=YES')
           PY
       - name: Offline unit tests before writing commit
-        run: python3 -m unittest discover -s tests -p 'test-smite-panel-ui.py'
+        run: python3 tests/test-smite-panel-ui.py
       - name: Commit verified static assets and digest to candidate branch only
         shell: bash
         run: |
