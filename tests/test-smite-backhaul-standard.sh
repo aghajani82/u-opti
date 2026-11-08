@@ -37,6 +37,14 @@ if uopti_bh_render_ir_control 443 >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 18476 >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 56053 /56053/web 'bad;host' >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 56053 /18476/web kh.kolbe1.ir >/dev/null; then exit 1; fi
+# Regression: a non-/web FRP namespace was previously accepted as XHTTP,
+# potentially shadowing the active 20182/category-software-99 location.
+for forbidden in /20182/category-software-99 /20182/store /20182/www /20182 /18476/category-software-99; do
+    if uopti_bh_render_ir_xhttp 56053 "$forbidden" kh.kolbe1.ir >/dev/null; then
+        echo "ERROR: foreign numeric FRP namespace accepted: $forbidden" >&2
+        exit 1
+    fi
+done
 if uopti_bh_render_ir_xhttp 56053 /56053/www/ kh.kolbe1.ir >/dev/null; then exit 1; fi
 if uopti_bh_render_ir_xhttp 56053 '/56053/www;evil' kh.kolbe1.ir >/dev/null; then exit 1; fi
 # XHTTP path and data port are separate configuration choices. Render only.
