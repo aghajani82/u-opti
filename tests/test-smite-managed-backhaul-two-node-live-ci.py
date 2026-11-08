@@ -1467,6 +1467,104 @@ def forward_probe(phase: str):
             time.sleep(0.6)
 
 
+# Sample a real FRP 0.71.0 WSS/443 data path throughout the entire
+# retained Backhaul transaction. Existing phase checks alone can miss a short
+# FRP outage between signed host writes. This runs ONLY in the private CI IR
+# Node, with its real Foreign FRPC child and an ephemeral echo target.
+# No new API, daemon, install logic, host ports, or live-node service.
+FRP_CONTINUITY_MONITOR = r"""
+import socket
+import time
+from pathlib import Path
+
+root = Path('/var/lib/smite-node')
+ready = root / 'ci-frp-continuous-ready'
+stop = root / 'ci-frp-continuous-stop'
+ready.write_text('READY\n')
+samples = 0
+failures = 0
+while not stop.exists():
+ try:
+  payload = b'RC7-FRP-CONTINUITY-' + str(samples).encode('ascii')
+  expected = b'CI-ACK:' + payload
+  with socket.create_connection(('127.0.0.1', 20182), timeout=2) as peer:
+   peer.settimeout(2)
+   peer.sendall(payload)
+   response = b''
+   while len(response) < len(expected):
+    part = peer.recv(len(expected) - len(response))
+    if not part:
+     break
+    response += part
+   if response != expected:
+    raise OSError('FRP_ACK_MISMATCH')
+ except (OSError, ValueError):
+  failures += 1
+ samples += 1
+ time.sleep(0.1)
+print('CI_FRP_CONTINUOUS_SAMPLES=' + str(samples))
+print('CI_FRP_CONTINUOUS_FAILURES=' + str(failures))
+if failures or samples < 30:
+ raise SystemExit(2)
+print('RC7_REAL_FRP_FORWARDING_NO_FAILED_SAMPLES_DURING_BACKHAUL=PASS')
+"""
+
+
+def start_frp_continuity_monitor(root: Path):
+    # Spawn a real concurrent, bounded observation process *inside* the
+    # disposable IR Node. Only disposable node-data gets two marker files.
+    ready = root / "node-data/ci-frp-continuous-ready"
+    stop = root / "node-data/ci-frp-continuous-stop"
+    check(not ready.exists() and not stop.exists(),
+          "CI_FRP_CONTINUOUS_STALE_MARKER")
+    process = subprocess.Popen(
+        ["docker", "exec", "ci-uopti-ir", "python", "-B", "-c",
+         FRP_CONTINUITY_MONITOR],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True)
+    for attempt in range(60):
+        if ready.is_file() and process.poll() is None:
+            print("RC7_FRP_CONTINUOUS_MONITOR_STARTED=PASS", flush=True)
+            return process, stop
+        if process.poll() is not None:
+            break
+        time.sleep(0.1)
+    if process.poll() is None:
+        process.kill()
+    process.communicate(timeout=8)
+    raise Hold("CI_FRP_CONTINUOUS_MONITOR_NOT_READY")
+
+
+def finish_frp_continuity_monitor(process, stop: Path):
+    # No test-generated private token ever reaches logs. Treat even one
+    # missed FRP response as a HOLD, not as an acceptable transient outage.
+    check(process.poll() is None, "CI_FRP_CONTINUOUS_MONITOR_EXITED_EARLY")
+    stop.write_text("STOP\n")
+    try:
+        stdout, _ = process.communicate(timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate(timeout=8)
+        raise Hold("CI_FRP_CONTINUOUS_MONITOR_STOP_TIMEOUT") from exc
+    clean = [line.strip() for line in stdout.splitlines()]
+    check(process.returncode == 0 and
+          "RC7_REAL_FRP_FORWARDING_NO_FAILED_SAMPLES_DURING_BACKHAUL=PASS"
+          in clean, "CI_FRP_CONTINUOUS_FORWARDING_INTERRUPTED")
+    count_lines = [line for line in clean
+                   if line.startswith("CI_FRP_CONTINUOUS_SAMPLES=")]
+    failed_lines = [line for line in clean
+                    if line.startswith("CI_FRP_CONTINUOUS_FAILURES=")]
+    check(len(count_lines) == 1 and len(failed_lines) == 1
+          and count_lines[0].partition("=")[2].isdigit()
+          and int(count_lines[0].partition("=")[2]) >= 30
+          and failed_lines[0] == "CI_FRP_CONTINUOUS_FAILURES=0",
+          "CI_FRP_CONTINUOUS_SAMPLE_RECEIPT_INVALID")
+    print(count_lines[0], flush=True)
+    print("CI_FRP_CONTINUOUS_FAILURES=0", flush=True)
+    print("RC7_REAL_FRP_FORWARDING_NO_FAILED_SAMPLES_DURING_BACKHAUL=PASS",
+          flush=True)
+
+
 def main():
     check(os.environ.get("GITHUB_ACTIONS") == "true"
           and os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
@@ -1491,6 +1589,8 @@ def main():
     root_foreign = Path(tempfile.mkdtemp(prefix="backhaul-live-foreign-", dir=runner))
     network = "uopti-bh-pr-" + secrets.token_hex(6)
     started = {}
+    monitor_process = None
+    monitor_stop = None
     try:
         roots = (("ir", root_ir, "ci-uopti-ir"),
                  ("foreign", root_foreign, "ci-uopti-foreign"))
@@ -1557,6 +1657,9 @@ def main():
         signed_child_apply(token)
         print("CI_WSS_STAGE=SIGNED_FOREIGN_CHILD_APPLY_PASS", flush=True)
         forward_probe("initial")
+        # Monitor every signed FRP data roundtrip continuously, including
+        # between host transaction steps and while Backhaul starts/stops.
+        monitor_process, monitor_stop = start_frp_continuity_monitor(root_ir)
         official_retained_binary_probe("ci-uopti-ir")
         official_retained_binary_probe("ci-uopti-foreign")
         print("CI_WSS_STAGE=RETAINED_NODE_OFFICIAL_BINARY_READ_PASS", flush=True)
@@ -1581,6 +1684,8 @@ def main():
 
         def observe(phase, ir, foreign):
             nonlocal broker_restarted, backhaul_active, backhaul_client_active
+            check(monitor_process is not None and monitor_process.poll() is None,
+                  "CI_FRP_CONTINUOUS_MONITOR_EXITED_DURING_TRANSACTION")
             if phase == "after-ir" and rehearse_broker_restart and not broker_restarted:
                 started["ci-uopti-broker"] = broker_restart(root_ir)
                 broker_restarted = True
@@ -1881,6 +1986,8 @@ def main():
         print("RC7_BROKER_ROUTE_PUBLISH=NOT_PROVEN")
         check(not backhaul_active and not backhaul_client_active,
               "CI_BACKHAUL_LEFT_RUNNING_AFTER_RECOVERY")
+        finish_frp_continuity_monitor(monitor_process, monitor_stop)
+        monitor_process = None
         print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_TLS_443_WS_DATA_ROUNDTRIP=PASS")
         print("RC7_SIGNED_BACKHAUL_FOREIGN_CLIENT_EXACT_ROLLBACK=PASS")
         print("RC7_SIGNED_BACKHAUL_SERVER_WITH_LIVE_FRP_OWNER_CHILD=PASS")
@@ -1906,6 +2013,19 @@ def main():
         print("INSTALL_ALLOWED=NO")
         print("ACTIVATION_GATE=HOLD")
     finally:
+        # On a failed test step, always stop the disposable monitoring
+        # process before removing its private Docker network and mounts.
+        if monitor_process is not None:
+            if monitor_process.poll() is None:
+                try:
+                    if monitor_stop is not None:
+                        monitor_stop.write_text("STOP\n")
+                    monitor_process.communicate(timeout=12)
+                except (OSError, subprocess.TimeoutExpired):
+                    monitor_process.kill()
+                    monitor_process.communicate(timeout=8)
+            else:
+                monitor_process.communicate(timeout=8)
         for name in DOCKER_NAMES:
             subprocess.run(["docker", "rm", "-f", name],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
