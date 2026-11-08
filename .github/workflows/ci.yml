@@ -393,6 +393,8 @@ jobs:
           python3 -m py_compile modules/smite-managed-backhaul-control.py tests/test-smite-managed-backhaul-control.py
           python3 -B tests/test-smite-managed-backhaul-control.py -v
           bash -n modules/smite-managed-backhaul-menu.sh
+          bash -n tests/test-smite-backhaul-retained-menu-ready.sh
+          bash tests/test-smite-backhaul-retained-menu-ready.sh
           grep -Fq '"smite-managed-backhaul-control.py"' install.sh
           grep -Fq '"smite-managed-backhaul-menu.sh"' install.sh
           grep -Fq '                "smite-managed-backhaul-control.py"' u-opti
