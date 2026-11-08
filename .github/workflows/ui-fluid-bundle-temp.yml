@@ -1,0 +1,88 @@
+# One-time offline artifact pinning. Removed from the candidate before merge.
+name: Temporary full-width Smite UI bundle pin (one-shot)
+on:
+  push:
+    branches: [fix/smite-ui-dashboard-fluid-bundle-20261108]
+    paths: ['.github/workflows/ui-fluid-bundle-temp.yml']
+permissions:
+  contents: write
+jobs:
+  generate-verified-static-payload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: c19b3a704f49e02746b602fd3ddba68fccc0601d
+          path: smite-source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: smite-source/frontend/package-lock.json
+      - name: Build exact approved Smite main source
+        working-directory: smite-source/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Verify immutable CI file checksums and pin the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib, re
+          root = pathlib.Path('smite-source/frontend/dist')
+          expected = {
+            'assets/index-BEGdlx2C.css':'2509570fe684497f573cf389091e0dc9c86e896c5f42cfcc4a95f44d64c54a95',
+            'assets/index-cynBRQFF.js':'0ca9afbc084f195105d7130c9d610b28412c5c77a3f1b39195021170199d2cb1',
+            'index.html':'a2b8fa071b027245321758b07de2276bd1f32b81bfe0bb947a40f5487cc093b4'
+          }
+          names={str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
+          if names != set(expected) or any(p.is_symlink() for p in root.rglob('*')):
+            raise SystemExit('HOLD: built asset set differs from reviewed Smite main CI')
+          for name,sha in expected.items():
+            if hashlib.sha256((root/name).read_bytes()).hexdigest() != sha:
+              raise SystemExit('HOLD: unreviewed static asset: '+name)
+          css=(root/'assets/index-BEGdlx2C.css').read_text()
+          if '@media (min-width: 1024px){html{font-size:90%}}' not in css:
+            raise SystemExit('HOLD: approved 90% CSS rule missing')
+          obj={'source_sha':'c19b3a704f49e02746b602fd3ddba68fccc0601d', 'workflow_run':42511220506,
+               'files':{p:base64.b64encode((root/p).read_bytes()).decode('ascii') for p in sorted(expected)}}
+          raw=(json.dumps(obj,sort_keys=True,separators=(',',':'))+'\n').encode()
+          pathlib.Path('modules/smite-panel-ui.json').write_bytes(raw)
+          checksum=hashlib.sha256(raw).hexdigest()
+          helper=pathlib.Path('modules/smite-panel-ui.py')
+          source=helper.read_text()
+          source,count=re.subn(r"(?m)^BUNDLE_SHA = '[a-f0-9]{64}'$", "BUNDLE_SHA = '"+checksum+"'",source)
+          if count != 1:raise SystemExit('HOLD: bundle checksum pin not found')
+          source,count=re.subn(r"(?m)^SOURCE = '[a-f0-9]{40}'$", "SOURCE = '"+obj['source_sha']+"'",source)
+          if count != 1:raise SystemExit('HOLD: source pin not found')
+          helper.write_text(source)
+          doc=pathlib.Path('docs/SMITE-PANEL-UI-UPDATE.md')
+          ds=doc.read_text()
+          if ds.count('TO_BE_REPLACED_WITH_VALIDATED_BUNDLE_DIGEST')!=1:
+            raise SystemExit('HOLD: guide placeholder not found')
+          doc.write_text(ds.replace('TO_BE_REPLACED_WITH_VALIDATED_BUNDLE_DIGEST',checksum))
+          print('SMITE_MAIN_SOURCE='+obj['source_sha'])
+          print('PINNED_UI_BUNDLE_SHA256='+checksum)
+          print('AFFECTED_SERVERS=NONE')
+          PY
+      - name: Verify UI-only transaction, metadata, rollback, image-pin tests
+        run: |
+          python3 -m py_compile modules/smite-panel-ui.py tests/test-smite-panel-ui.py
+          python3 -B tests/test-smite-panel-ui.py -v
+      - name: Commit approved UI-only payload on candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add modules/smite-panel-ui.py modules/smite-panel-ui.json docs/SMITE-PANEL-UI-UPDATE.md
+          git diff --cached --quiet && { echo 'HOLD: no UI bundle changes'; exit 1; }
+          git commit -m 'fix(ui): pin verified Smite full-width dashboard static assets'
+          git push origin HEAD:fix/smite-ui-dashboard-fluid-bundle-20261108
