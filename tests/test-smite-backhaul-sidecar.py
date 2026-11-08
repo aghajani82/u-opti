@@ -97,7 +97,12 @@ class SidecarTests(unittest.TestCase):
         self.assertIn("location = /45561/web {", numeric["ir-xhttp.inc"])
         self.assertIn("location ^~ /45561/web/ {", numeric["ir-xhttp.inc"])
         for path in ("/channel", "/tunnel/x", "/assets/../x",
-                     "/assets/evil/", "/assets/x;include"):
+                     "/assets/evil/", "/assets/x;include",
+                     "/20182/category-software-99", "/20182/store",
+                     "/20182/www", "/20182", "/18476/category-software-99",
+                     "/451230/web"):
+            # These must be rejected before producing an XHTTP include:
+            # they claim a separate numeric FRP/port namespace.
             with self.subTest(path=path), self.assertRaises(sidecar.UnsafeCandidate):
                 sidecar.candidate_files(
                     "ir", self.secret, "ir.kolbe1.ir", "kh.kolbe1.ir",
