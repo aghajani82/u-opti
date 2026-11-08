@@ -67,7 +67,11 @@ class Updates(unittest.TestCase):
         self.assertIn('@media (min-width: 1024px){html{font-size:90%}}', css)
         self.assertNotIn('font-size:81.25%', css)
         self.assertNotIn('smite-login-footer', css)
-        # The dashboard must have no old max-width cap and should fill its grid parent.\n        # This exact asset SHA comes from the audited Smite PR #56 browser build.\n        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-cynBRQFF.js'])).hexdigest(),\n                         '0ca9afbc084f195105d7130c9d610b28412c5c77a3f1b39195021170199d2cb1')\n        html=base64.b64decode(files['index.html']).decode()
+        # The dashboard must have no old max-width cap and should fill its grid parent.
+        # This exact asset SHA comes from the audited Smite PR #56 browser build.
+        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-cynBRQFF.js'])).hexdigest(),
+                         '0ca9afbc084f195105d7130c9d610b28412c5c77a3f1b39195021170199d2cb1')
+        html=base64.b64decode(files['index.html']).decode()
         self.assertIn('/assets/index-BEGdlx2C.css', html)
         self.assertIn('/assets/index-cynBRQFF.js', html)
         # The existing Panel image and admission rules remain unchanged.
