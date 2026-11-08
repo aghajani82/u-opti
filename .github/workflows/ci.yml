@@ -172,6 +172,11 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/test-smite-stage27-signed-nginx-hmac.py
           python3 -B tests/test-smite-stage27-signed-nginx-hmac.py
+      - name: Validate shared 443 Backhaul/FRP WS routing with real isolated Nginx
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/test-smite-backhaul-shared-443.py -v
 
   managed-frp-official-artifact:
     # Trusted official downloads only on disposable PR CI, never push/main.
