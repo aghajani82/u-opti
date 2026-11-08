@@ -35,8 +35,8 @@ EOF_COMPOSE
 chmod 0600 "$lab/node/docker-compose.yml"
 asset="frp_0.71.0_linux_${arch}.tar.gz"
 url="https://github.com/fatedier/frp/releases/download/v0.71.0/$asset"
-curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
-  --max-time 120 --output "$lab/$asset" "$url"
+source "$(dirname "${BASH_SOURCE[0]}")/ci-fetch-official-release.sh"
+ci_fetch_official_release "$url" "$lab/$asset"
 printf '%s  %s\n' "$expected" "$lab/$asset" | sha256sum --check --status
 python3 -B - "$PWD" "$lab" "$arch" <<'PY'
 import hashlib

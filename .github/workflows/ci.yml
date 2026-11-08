@@ -619,6 +619,15 @@ jobs:
         shell: bash
         run: |
           python3 -B tests/test-smite-backhaul-sidecar-live-engine.py
+          bash -n tests/ci-install-official-cosign.sh
+          python3 -B tests/test-ci-official-cosign-installer.py
+          bash -n tests/ci-fetch-official-release.sh
+          python3 -B tests/test-ci-official-release-fetch.py
+          python3 -m py_compile tests/ci-stage24-release-transport.py
+          bash -n tests/test-smite-managed-frp-official.sh
+          bash -n tests/test-smite-managed-frp-signed-compose.sh
+          bash -n tests/test-smite-managed-backhaul-official.sh
+          bash -n tests/test-smite-stage24-compose-runtime.sh
 
       - name: Test private offline IR/KH Nginx integration and rollback manifests
         shell: bash
@@ -979,9 +988,12 @@ jobs:
           ref: 115f032761564a069d0aa2ca891e55d53a1c6ea0
           path: .signed-owner-smite-source
           persist-credentials: false
-      - uses: sigstore/cosign-installer@v4.1.0
-        with:
-          cosign-release: 'v3.0.6'
+      # Same v3.0.5 bootstrap SHA and dual v3.0.6 Sigstore checks as
+      # upstream cosign-installer@v4.1.0; GitHub API asset fallback
+      # only changes transport when github.com/releases returns HTTP 504.
+      - name: Install exactly verified official Cosign v3.0.6
+        shell: bash
+        run: bash tests/ci-install-official-cosign.sh
       - name: Authenticate both RC7 images before retained-node qualification
         run: |
           python3 -B modules/smite-registry-pair-admission.py \

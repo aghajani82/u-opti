@@ -173,7 +173,12 @@ sudo docker compose -f "$base" -f "$ci_override" config --quiet
 
 # Compile real Smite Node image from the exact reviewed source SHA.
 # This image is LOCAL to CI, with no tag publication or external services.
-docker build -q -f "$SMITE/node/Dockerfile" --build-arg SMITE_VERSION=2.0.0-rc.0 -t smite-node:stage15-local "$SMITE/node" >/dev/null
+# The reviewed source tree stays byte-for-byte untouched. Only a derived
+# temporary CI Dockerfile uses immutable official GitHub asset endpoints,
+# with additional pinned FRP archive SHA-256 verification.
+python3 -B "$ROOT/tests/ci-stage24-release-transport.py" \
+  --source "$SMITE" --output "$lab/ci-stage24.Dockerfile"
+docker build -q -f "$lab/ci-stage24.Dockerfile" --build-arg SMITE_VERSION=2.0.0-rc.0 -t smite-node:stage15-local "$SMITE/node" >/dev/null
 
 # One-time enrollment is OFFLINE, explicit and scoped to a disposable runner.
 # Mount the host folders at the EXACT CONTAINER paths used by Smite Strict:

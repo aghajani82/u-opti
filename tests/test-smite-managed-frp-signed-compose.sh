@@ -34,8 +34,8 @@ chmod 0600 "$lab/node/.env"
 asset="frp_0.71.0_linux_amd64.tar.gz"
 url="https://github.com/fatedier/frp/releases/download/v0.71.0/$asset"
 expected="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
-curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
-  --max-time 120 --output "$lab/$asset" "$url"
+source "$root/tests/ci-fetch-official-release.sh"
+ci_fetch_official_release "$url" "$lab/$asset"
 printf '%s  %s\n' "$expected" "$lab/$asset" | sha256sum --check --status
 
 # All filesystem admission and recovery is root-only inside disposable lab.
