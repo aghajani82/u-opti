@@ -28,6 +28,8 @@ class FakeDriver:
         self.running_id = None
         self.fail_next = None
         self.fail_ps = False
+        self.occupy_on_create = False
+        self.started = False
 
     def call(self, argv, timeout=45):
         cmd = " ".join(argv[:2])
@@ -45,11 +47,22 @@ class FakeDriver:
             if "-f" in argv:
                 return self.running_id + "|" + live.IMAGE
             return "yes"
-        if argv[:2] == ["docker", "run"]:
+        if argv[:2] == ["docker", "create"]:
+            if self.occupy_on_create:
+                self.running_id = "f" * 32
+                raise live.ActivationRefused("foreign container raced reservation")
+            if self.running_id is not None:
+                raise live.ActivationRefused("container already exists")
             tx = next(x[9:] for x in argv if x.startswith("uopti.tx="))
             self.running_id = tx
+            self.started = False
+        if argv[:2] == ["docker", "start"]:
+            if self.running_id is None:
+                raise live.ActivationRefused("no reserved container")
+            self.started = True
         if argv[:3] == ["docker", "rm", "-f"]:
             self.running_id = None
+            self.started = False
         return "ok"
 
 
@@ -104,6 +117,12 @@ class LiveEngineTests(unittest.TestCase):
                     txid = engine.apply(role, rows, txn_id="a" * 32)
                 self.assertEqual(txid, "a" * 32)
                 self.assertIsNotNone(driver.running_id)
+                self.assertTrue(driver.started)
+                commands = [tuple(x[:2]) for x in driver.calls]
+                self.assertLess(commands.index(("docker", "create")),
+                                commands.index(("nginx", "-t")))
+                self.assertLess(commands.index(("systemctl", "reload")),
+                                commands.index(("docker", "start")))
                 changed = next(x for x in rows if x["operation"] == "edit")
                 target = root / changed["path"].lstrip("/")
                 self.assertEqual(target.read_bytes(), changed["after"])
@@ -166,7 +185,7 @@ class LiveEngineTests(unittest.TestCase):
 
     def test_nginx_or_docker_error_rolls_back_with_journal(self):
         for role in ("ir", "kh"):
-            for stage in ("nginx -t", "docker run", "docker update"):
+            for stage in ("nginx -t", "docker create", "docker start", "docker update"):
                 with self.subTest(role=role, failure=stage):
                     root, rows, driver, engine, original = self.fixture(role)
                     driver.fail_next = stage
@@ -179,6 +198,48 @@ class LiveEngineTests(unittest.TestCase):
                                      original)
                     self.assertTrue((root / "var/lib/u-opti/backhaul-sidecar" /
                                     ("b" * 32) / "journal.json").exists())
+
+    def test_racing_foreign_name_does_not_modify_live_nginx(self):
+        # A Docker actor steals the exact name between our ps preflight
+        # and atomic reservation. No reload or Nginx file mutation is
+        # allowed; preserve the foreign container and recovery journal.
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, rows, driver, engine, original = self.fixture(role)
+                self.approve(engine, rows, role)
+                driver.occupy_on_create = True
+                with self.assertRaisesRegex(
+                        live.ActivationRefused, "Foreign or unverified"):
+                    engine.apply(role, rows, txn_id="1" * 32)
+                self.assertEqual(driver.running_id, "f" * 32)
+                self.assertFalse(driver.started)
+                self.assertFalse(any(cmd[:2] == ["nginx", "-t"]
+                                     or cmd[:2] == ["systemctl", "reload"]
+                                     or cmd[:2] == ["docker", "start"]
+                                     for cmd in driver.calls))
+                for row in rows:
+                    target = root / row["path"].lstrip("/")
+                    if row["operation"] == "edit":
+                        self.assertEqual(target.read_bytes(), original)
+                journal = root / "var/lib/u-opti/backhaul-sidecar" / (
+                    "1" * 32) / "journal.json"
+                self.assertTrue(journal.exists())
+
+    def test_bad_nginx_does_not_start_reserved_sidecar(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, rows, driver, engine, original = self.fixture(role)
+                self.approve(engine, rows, role)
+                driver.fail_next = "nginx -t"
+                with self.mock_health(), self.assertRaises(live.ActivationRefused):
+                    engine.apply(role, rows, txn_id="2" * 32)
+                self.assertIsNone(driver.running_id)
+                self.assertFalse(driver.started)
+                self.assertFalse(any(cmd[:2] == ["docker", "start"]
+                                     for cmd in driver.calls))
+                edit = next(x for x in rows if x["operation"] == "edit")
+                self.assertEqual(
+                    (root / edit["path"].lstrip("/")).read_bytes(), original)
 
     def test_unknown_file_drift_refuses_destructive_rollback(self):
         root, rows, driver, engine, _ = self.fixture("kh")
@@ -213,7 +274,7 @@ class LiveEngineTests(unittest.TestCase):
         image = live.IMAGE
         name = live.CONTAINER["ir"]
         allowed_run = [
-            "docker", "run", "-d", "--name", name,
+            "docker", "create", "--name", name,
             "--label", label, "--network", "host", "--restart", "no",
             "--read-only", "--cap-drop", "ALL", "--security-opt",
             "no-new-privileges", "--mount",
@@ -222,6 +283,7 @@ class LiveEngineTests(unittest.TestCase):
             "/run/backhaul/config.toml",
         ]
         self.assertTrue(strict.allowed(allowed_run))
+        self.assertTrue(strict.allowed(["docker", "start", name]))
         self.assertTrue(strict.allowed(["docker", "ps", "-a", "--filter",
                                        "name=^/" + name + "$", "--format",
                                        "{{.Names}}"]))
@@ -238,6 +300,8 @@ class LiveEngineTests(unittest.TestCase):
             ["systemctl", "stop", "nginx"],
             ["nginx", "-s", "stop"],
             ["docker", "inspect", name],
+            ["docker", "run", "-d", "--name", name],
+            ["docker", "start", "smite-node"],
             ["docker", "ps", "-a"],
             allowed_run + ["--privileged"],
             [x.replace("host", "bridge") for x in allowed_run],
