@@ -56,11 +56,22 @@ class Updates(unittest.TestCase):
     def test_path_traversal_and_bad_encoding_rejected(self):
         for files in [dict(OLD,**{'../main.py':'YQ=='}), {'index.html':'not base64'}]:
             with self.assertRaises(ValueError):ui.validate(files)
-    def test_pinned_source_and_original_sizes(self):
+    def test_pinned_source_and_90_percent_desktop_density(self):
         files=ui.bundle(BUNDLE)
+        metadata=json.loads(BUNDLE.read_text())
+        self.assertEqual(metadata['source_sha'], 'd4b318de24faff3261a93687c37c52ca6a2a0acc')
+        self.assertEqual(ui.SOURCE, metadata['source_sha'])
+        self.assertEqual(metadata['workflow_run'], 42504320814)
+        self.assertEqual(set(files), {'index.html', 'assets/index-BEGdlx2C.css', 'assets/index-CBheFV49.js'})
         css=''.join(base64.b64decode(v).decode() for k,v in files.items() if k.endswith('.css'))
-        self.assertNotIn('font-size:81.25%',css)
-        self.assertNotIn('smite-login-footer',css)
+        self.assertIn('@media (min-width: 1024px){html{font-size:90%}}', css)
+        self.assertNotIn('font-size:81.25%', css)
+        self.assertNotIn('smite-login-footer', css)
+        html=base64.b64decode(files['index.html']).decode()
+        self.assertIn('/assets/index-BEGdlx2C.css', html)
+        self.assertIn('/assets/index-CBheFV49.js', html)
+        # The existing Panel image and admission rules remain unchanged.
+        self.assertEqual(ui.IMAGE, 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8')
 
 
 def real_docker():
