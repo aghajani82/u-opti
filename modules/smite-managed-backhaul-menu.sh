@@ -38,6 +38,38 @@ smite_managed_bh_host_gate() {
     python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_GATE" --node-dir "$SMITE_MANAGED_NODE_DIR" --format "$report_format"
 }
 
+# Read-only, signed post-enrollment check. A matched status is ONLY an
+# installation refusal: it cannot authorize an Apply or change live services.
+# A missing/incomplete result falls through to the existing full executor gate.
+smite_managed_bh_retained_already_enrolled() {
+    local role="$1" report="" line=""
+    [ -s "$SMITE_MANAGED_BACKHAUL_CONTROL" ] &&
+        [ ! -L "$SMITE_MANAGED_BACKHAUL_CONTROL" ] || return 1
+    report="$(python3 -B "$SMITE_MANAGED_BACKHAUL_CONTROL" \
+        verify-rc7-bundle --auto-role --expect-backhaul-ready 2>/dev/null)" || return 1
+    for line in \
+        'RC7_BACKHAUL_ENGINE=READY_SIGNED_INVENTORY' \
+        'RC7_FRP_ENGINE=READY_SIGNED_INVENTORY' \
+        'RC7_BACKHAUL_MANIFEST_PLAN=COMMITTED_PAIR_VERIFIED_READ_ONLY' \
+        'RC7_SIGNED_REPLAY=PASS' \
+        'NODE_RECREATED=NO'; do
+        grep -Fxq "$line" <<< "$report" || return 1
+    done
+    case "$role" in
+        ir)
+            grep -Fxq 'RC7_IR_SIGNED_FRPS_OWNER=PASS_SIGNED_AGENT_LISTENER_STABLE' \
+                <<< "$report"
+            ;;
+        foreign)
+            grep -Fxq 'RC7_FOREIGN_LOCAL_SIGNED_FRPC_CHILDREN=PASS_STABLE_LOCAL_ONLY' \
+                <<< "$report" &&
+            grep -Fxq 'RC7_IR_SIGNED_FRPS_OWNER=NOT_APPLICABLE_FOREIGN' \
+                <<< "$report"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 smite_managed_bh_ir_retained_canary() {
     # Existing option 3 only. No new menus, tunnel Apply, ports or Node
     # lifecycle operations. The Python executor rechecks signed role=IR,
@@ -63,6 +95,10 @@ smite_managed_bh_ir_retained_canary() {
         return 2
     case "$mode" in
         I|i)
+            if smite_managed_bh_retained_already_enrolled ir; then
+                echo "HOLD: RETAINED_IR_BACKHAUL_ALREADY_ENROLLED_SIGNED; no changes."
+                return 2
+            fi
             python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
                 install-retained-ir --arch "$arch" \
                 --expected-node-image "$image" \
@@ -80,6 +116,11 @@ smite_managed_bh_ir_retained_canary() {
                 --confirm-role ROLLBACK-RETAINED-BACKHAUL-IR
             ;;
         F|f|B|b)
+            if [[ "$mode" == [Ff] ]] &&
+               smite_managed_bh_retained_already_enrolled foreign; then
+                echo "HOLD: RETAINED_FOREIGN_BACKHAUL_ALREADY_ENROLLED_SIGNED; no changes."
+                return 2
+            fi
             # No new top-level menu or installer: Foreign metadata and
             # restoration use the same signed paired journal/rollback core.
             # Independent provider restore+console proof is not conveyed
