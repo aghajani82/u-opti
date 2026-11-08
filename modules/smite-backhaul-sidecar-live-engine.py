@@ -387,6 +387,19 @@ class LiveEngine:
             raise ActivationRefused("Fresh admission approval missing or outdated")
         self._approved = None  # One-time scoped admission, no replay.
         with exclusive(self.root):
+            # A previously existing Sidecar name must be rejected BEFORE
+            # creating a journal or changing shared Nginx files. Otherwise
+            # docker run fails late and a safe rollback may HOLD because the
+            # container belongs to a different transaction/operator.
+            # An unreachable Docker daemon also fails closed before writes.
+            occupied = self.driver.call([
+                "docker", "ps", "-a", "--filter",
+                "name=^/" + CONTAINER[role] + "$", "--format", "{{.Names}}"
+            ], timeout=10)
+            if occupied != "":
+                raise ActivationRefused(
+                    "Existing Sidecar container name; no changes made"
+                )
             target_dir = self._txn_dir(txn_id)
             target_dir.mkdir(mode=0o700, exist_ok=False)
             private_directory(target_dir)
