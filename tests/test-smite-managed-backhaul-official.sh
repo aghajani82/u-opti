@@ -38,7 +38,8 @@ sudo chown 0:0 "$lab/stages"
 sudo chmod 0700 "$lab/stages"
 url="https://github.com/Musixal/Backhaul/releases/download/v0.7.2/backhaul_linux_amd64.tar.gz"
 expected="57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
-curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 --proto '=https' --proto-redir '=https' "$url" -o "$lab/backhaul.tar.gz"
+source "$root/tests/ci-fetch-official-release.sh"
+ci_fetch_official_release "$url" "$lab/backhaul.tar.gz"
 printf '%s  %s\n' "$expected" "$lab/backhaul.tar.gz" | sha256sum -c -
 sudo python3 "$root/modules/smite-managed-backhaul.py" prepare \
   --node-dir "$lab/node" --archive "$lab/backhaul.tar.gz" \
@@ -52,10 +53,9 @@ test "$(sudo "$stage/backhaul.bin" -v)" = "v0.7.2"
 # archives. A tarball checksum alone cannot verify an already running
 # image's extracted /usr/local/bin/backhaul. The binary hashes are public.
 arm_archive="$lab/backhaul_linux_arm64.tar.gz"
-curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 \
-  --proto '=https' --proto-redir '=https' \
+ci_fetch_official_release \
   "https://github.com/Musixal/Backhaul/releases/download/v0.7.2/backhaul_linux_arm64.tar.gz" \
-  -o "$arm_archive"
+  "$arm_archive"
 python3 - "$root" "$lab/backhaul.tar.gz" "$arm_archive" <<'PY_BINARY_PINS'
 import hashlib, importlib.util, sys
 from pathlib import Path
@@ -164,8 +164,8 @@ frp_url="https://github.com/fatedier/frp/releases/download/v0.71.0/$frp_asset"
 frp_hash="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 # The trial lab was deliberately changed to owner=root, mode 0700.
 # Download/verify the second official asset as root, not the runner user.
-sudo curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
-  --max-time 120 --output "$lab/$frp_asset" "$frp_url"
+sudo bash -c 'source "$1"; ci_fetch_official_release "$2" "$3"' \
+  _ "$root/tests/ci-fetch-official-release.sh" "$frp_url" "$lab/$frp_asset"
 test "$(sudo sha256sum "$lab/$frp_asset" | awk '{print $1}')" = "$frp_hash"
 
 # Only after the pinned tar digest matches, read exactly the two regular
