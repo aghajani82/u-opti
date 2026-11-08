@@ -621,6 +621,13 @@ jobs:
           python3 -B tests/test-smite-backhaul-sidecar-live-engine.py
           bash -n tests/ci-install-official-cosign.sh
           python3 -B tests/test-ci-official-cosign-installer.py
+          bash -n tests/ci-fetch-official-release.sh
+          python3 -B tests/test-ci-official-release-fetch.py
+          python3 -m py_compile tests/ci-stage24-release-transport.py
+          bash -n tests/test-smite-managed-frp-official.sh
+          bash -n tests/test-smite-managed-frp-signed-compose.sh
+          bash -n tests/test-smite-managed-backhaul-official.sh
+          bash -n tests/test-smite-stage24-compose-runtime.sh
 
       - name: Test private offline IR/KH Nginx integration and rollback manifests
         shell: bash
