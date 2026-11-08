@@ -59,21 +59,21 @@ class Updates(unittest.TestCase):
     def test_pinned_source_and_90_percent_desktop_density(self):
         files=ui.bundle(BUNDLE)
         metadata=json.loads(BUNDLE.read_text())
-        self.assertEqual(metadata['source_sha'], 'c19b3a704f49e02746b602fd3ddba68fccc0601d')
+        self.assertEqual(metadata['source_sha'], '5e7a289071e446345ac27e4255994daf3446430a')
         self.assertEqual(ui.SOURCE, metadata['source_sha'])
-        self.assertEqual(metadata['workflow_run'], 42511220506)
-        self.assertEqual(set(files), {'index.html', 'assets/index-BEGdlx2C.css', 'assets/index-cynBRQFF.js'})
+        self.assertEqual(metadata['workflow_run'], 42513266989)
+        self.assertEqual(set(files), {'index.html', 'assets/index-c0Ew1NGv.css', 'assets/index-B4YJt7yO.js'})
         css=''.join(base64.b64decode(v).decode() for k,v in files.items() if k.endswith('.css'))
         self.assertIn('@media (min-width: 1024px){html{font-size:90%}}', css)
         self.assertNotIn('font-size:81.25%', css)
         self.assertNotIn('smite-login-footer', css)
-        # The dashboard must have no old max-width cap and should fill its grid parent.
-        # This exact asset SHA comes from the audited Smite PR #56 browser build.
-        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-cynBRQFF.js'])).hexdigest(),
-                         '0ca9afbc084f195105d7130c9d610b28412c5c77a3f1b39195021170199d2cb1')
+        # All six content routes have no old max-width cap; layout geometry is covered by Smite PR #57 browser CI.
+        # This exact asset SHA comes from the audited Smite main PR #57 UI build.
+        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-B4YJt7yO.js'])).hexdigest(),
+                         '54706d8104b87737d5d0c729dcd446eb95d06adcf9867fb7126604a804045abc')
         html=base64.b64decode(files['index.html']).decode()
-        self.assertIn('/assets/index-BEGdlx2C.css', html)
-        self.assertIn('/assets/index-cynBRQFF.js', html)
+        self.assertIn('/assets/index-c0Ew1NGv.css', html)
+        self.assertIn('/assets/index-B4YJt7yO.js', html)
         # The existing Panel image and admission rules remain unchanged.
         self.assertEqual(ui.IMAGE, 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8')
 
