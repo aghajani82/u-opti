@@ -238,6 +238,15 @@ jobs:
           python3 -m py_compile tests/test-uopti-update-noop.py
           python3 -B tests/test-uopti-update-noop.py -v
 
+      - name: Verify reviewed Smite UI density bundle and backup/rollback (offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile modules/smite-panel-ui.py tests/test-smite-panel-ui.py
+          python3 -B tests/test-smite-panel-ui.py -v
+          grep -Fq '"smite-panel-ui.py"' u-opti
+          grep -Fq '"smite-panel-ui.json"' u-opti
+
       - name: Safely install fresh and adopt legacy U-OPTI under forced shell crash
         shell: bash
         run: |
