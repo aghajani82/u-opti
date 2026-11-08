@@ -62,9 +62,12 @@ def validated_profile(data_port: int, xhttp_path: str | None) -> tuple[int, str]
             or path == "/tunnel" or path.startswith("/tunnel/")
             or path == "/~!frp" or path.startswith("/~!frp/")):
         raise UnsafeCandidate("Invalid or reserved XHTTP path")
-    numeric = re.match(r"/([0-9]+)/web(?:/|$)", path)
+    # Any numeric first segment can belong to an existing FRP tunnel (for
+    # example /20182/category-software-99); checking only /PORT/web
+    # accidentally allowed a different port's namespace to be claimed.
+    numeric = re.match(r"/([0-9]+)(?:/|$)", path)
     if numeric and numeric[1] != str(data_port):
-        raise UnsafeCandidate("Numeric /PORT/web path must use selected Xray port")
+        raise UnsafeCandidate("Numeric /PORT path must use selected Xray port")
     return data_port, path
 
 
