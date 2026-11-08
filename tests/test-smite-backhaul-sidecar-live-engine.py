@@ -121,6 +121,49 @@ class LiveEngineTests(unittest.TestCase):
                     if row["operation"] == "create":
                         self.assertFalse((root / row["path"].lstrip("/")).exists())
 
+    def test_existing_sidecar_name_blocks_before_any_nginx_or_journal_write(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, rows, driver, engine, original = self.fixture(role)
+                self.approve(engine, rows, role)
+                # A foreign or stale process occupies the exact Sidecar
+                # name between review and Apply. It cannot be adopted.
+                driver.running_id = "f" * 32
+                with self.assertRaisesRegex(
+                        live.ActivationRefused, "Existing Sidecar container name"):
+                    engine.apply(role, rows, txn_id="7" * 32)
+                self.assertEqual(driver.running_id, "f" * 32)
+                self.assertEqual(len(driver.calls), 1)
+                self.assertEqual(driver.calls[0][:2], ["docker", "ps"])
+                self.assertFalse((root / "var/lib/u-opti/backhaul-sidecar" /
+                                  ("7" * 32)).exists())
+                for row in rows:
+                    target = root / row["path"].lstrip("/")
+                    if row["operation"] == "edit":
+                        self.assertEqual(target.read_bytes(), original)
+                    else:
+                        self.assertFalse(target.exists())
+
+    def test_unavailable_docker_refuses_before_any_nginx_or_journal_write(self):
+        for role in ("ir", "kh"):
+            with self.subTest(role=role):
+                root, rows, driver, engine, original = self.fixture(role)
+                self.approve(engine, rows, role)
+                driver.fail_ps = True
+                with self.assertRaisesRegex(
+                        live.ActivationRefused, "mock daemon unreachable"):
+                    engine.apply(role, rows, txn_id="8" * 32)
+                self.assertEqual(len(driver.calls), 1)
+                self.assertEqual(driver.calls[0][:2], ["docker", "ps"])
+                self.assertFalse((root / "var/lib/u-opti/backhaul-sidecar" /
+                                  ("8" * 32)).exists())
+                for row in rows:
+                    target = root / row["path"].lstrip("/")
+                    if row["operation"] == "edit":
+                        self.assertEqual(target.read_bytes(), original)
+                    else:
+                        self.assertFalse(target.exists())
+
     def test_nginx_or_docker_error_rolls_back_with_journal(self):
         for role in ("ir", "kh"):
             for stage in ("nginx -t", "docker run", "docker update"):
