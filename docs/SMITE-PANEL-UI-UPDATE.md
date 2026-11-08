@@ -18,7 +18,7 @@ The helper admits only the exact reviewed RC7 Panel image, uses the local Docker
 - Build: https://github.com/aghajani82/Smite/actions/runs/42513266989 (all frontend validations passed).
 - CI artifact: `smite-rc7-ui-only-static-preview`, id `13630845198`. Exact compiled assets from this source were reproduced and their per-file SHA-256 values independently checked before embedding in U-OPTI.
 - `modules/smite-panel-ui.json` contains the exact CI static bytes in base64; original per-file manifest hashes were checked before packaging.
-- Bundle SHA-256: `REPLACE_WITH_VERIFIED_FULLWIDTH_BUNDLE_SHA`, pinned in the helper.
+- Bundle SHA-256: `ad92e819a4a47e80b1991b5d52e1873bb5b08db48118a86e660fe15f979286e1`, pinned in the helper.
 - Backend image selection/signature validation remains unchanged. This UI package is SHA-pinned distribution data, not a newly signed container image.
 
 ## Recovery and limits
