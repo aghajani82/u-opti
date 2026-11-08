@@ -12,8 +12,8 @@ import subprocess
 import sys
 import uuid
 
-BUNDLE_SHA = 'f61f77e3ac150b5611b8f5f05534cb7727557e1eaef8340eb3f966f2d02c7285'
-SOURCE = '115f032761564a069d0aa2ca891e55d53a1c6ea0'
+BUNDLE_SHA = '5affecc8ed26606931fb0ddfe360275ab2b51f5695a0e52eac8685ddfe607598'
+SOURCE = 'd4b318de24faff3261a93687c37c52ca6a2a0acc'
 IMAGE = 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8'
 STATE = Path('/var/lib/u-opti/smite-panel-ui')
 
