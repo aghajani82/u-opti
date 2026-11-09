@@ -74,7 +74,7 @@ smite_install_clean_rc_preflight() {
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
     [ -f "$SMITE_SELECTED_TRUSTED_ROOT" ]
-    [ "$(command sha256sum "$ROOT/modules/smite-selected-candidate.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
+    [ "$(command sha256sum "$ROOT/modules/smite-rc7-registry-pair.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
     [ -z "${DOCKER_HOST:-}" ]
     [ -z "${DOCKER_CONTEXT:-}" ]
     [ "${FAIL_SIGNATURE:-0}" = 0 ] || return 2

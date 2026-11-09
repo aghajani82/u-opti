@@ -21,6 +21,50 @@ NODE = "sha256:" + "c" * 64
 REF = "refs/tags/v2.0.0-rc.0"
 
 class RegistryPairAdmissionTests(unittest.TestCase):
+    def test_selected_rc8_keeps_release_gates_and_rc7_recovery_bytes(self):
+        # Real publication evidence is recorded in docs/SMITE-RC8-CANDIDATE.md.
+        # This test exercises offline admission/refusal only, not real Cosign.
+        selected = ROOT / "modules/smite-selected-candidate.json"
+        digest = "ed0fc73534d61f6bf9fd0d4710385bf8c336d417c9a2401ba8e13c9995267576"
+        source = "b7168f09bf236c9400adbeeaa9446a1a18293fa6"
+        ref = "refs/tags/v2.0.0-rc.8"
+        inputs = dict(manifest=selected, manifest_sha256=digest,
+                      source_sha=source, publish_ref=ref)
+        with patch.dict(os.environ, self.fake_env):
+            result = gate.verify_pair(**inputs)
+        self.assertEqual(result["source_sha"], source)
+        for role in ("panel", "node"):
+            with patch.dict(os.environ, {**self.fake_env, "FAKE_COSIGN_FAIL": role}):
+                with self.assertRaises(gate.AdmissionHold):
+                    gate.verify_pair(**inputs)
+        raw = selected.read_bytes()
+        self.assertTrue(raw.endswith(b"\n"))
+        old = ROOT / "modules/smite-rc7-registry-pair.json"
+        self.assertEqual(hashlib.sha256(old.read_bytes()).hexdigest(),
+                         "58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e")
+        bad = self.folder / "bad-selected.json"
+        doc = json.loads(raw)
+        swapped = {**doc, "images": {"panel": doc["images"]["node"],
+                                     "node": doc["images"]["panel"]}}
+        malformed = {**doc, "images": {**doc["images"], "node": "ghcr.io/aghajani82/smite-node@sha256:bad"}}
+        for content, expected in ((raw.rstrip(b"\n"), digest),
+                                  (old.read_bytes(), hashlib.sha256(old.read_bytes()).hexdigest()),
+                                  (json.dumps(swapped).encode(), None),
+                                  (json.dumps(malformed).encode(), None),
+                                  (json.dumps({**doc, "manifest_sha256": digest}).encode(), None)):
+            bad.write_bytes(content)
+            with patch.object(gate.subprocess, "run") as run:
+                with self.assertRaises(gate.AdmissionHold):
+                    gate.verify_pair(**{**inputs, "manifest": bad,
+                        "manifest_sha256": expected or hashlib.sha256(content).hexdigest()})
+                run.assert_not_called()
+        # RC8 never inherits the RC7-only temporary Cosign downloader.
+        with patch.object(gate.shutil, "which", return_value=None), \
+             patch.object(gate.subprocess, "run") as run:
+            with self.assertRaises(gate.AdmissionHold):
+                gate.verify_pair(**inputs, trusted_root=ROOT / "modules/smite-rc7-sigstore-trusted-root.json")
+            run.assert_not_called()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
