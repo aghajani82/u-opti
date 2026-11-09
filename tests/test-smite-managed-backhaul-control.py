@@ -1084,7 +1084,7 @@ class OperatorControl(unittest.TestCase):
                     with control._lab_lock(self.root):
                         self.fail("A second concurrent transaction acquired the lock")
 
-    def test_rc7_backhaul_review_supplies_pinned_root_to_both_existing_verifiers(self):
+    def test_selected_backhaul_review_supplies_pinned_root_to_both_existing_verifiers(self):
         # Intercept ONLY the Python verifier calls, not the menu logic. No
         # Docker or real host connection; test actual bash argument plumbing.
         stub_dir = self.root / "fake-bin"
@@ -1132,7 +1132,8 @@ class OperatorControl(unittest.TestCase):
                 for call in (*admission, *retained):
                     self.assertIn("--signed-pair-trusted-root " + expected, call)
                     self.assertIn("--signed-pair-source-sha "
-                                  "9a1270b31e8d44f13d09b71ab6b9798410b09c12", call)
+                                  "b7168f09bf236c9400adbeeaa9446a1a18293fa6", call)
+                    self.assertIn("--signed-pair-publish-ref refs/tags/v2.0.0-rc.8", call)
                 self.assertFalse((self.node / "config/engine-state").exists())
 
     def test_no_network_or_live_service_actions_in_menu_or_controller(self):
