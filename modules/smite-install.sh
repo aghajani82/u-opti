@@ -52,7 +52,7 @@ smite_install_field_trial_verify_candidate() {
     verifier="$helper_dir/smite-registry-pair-admission.py"
     manifest="$helper_dir/smite-field-trial-candidate.json"
     if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
-        manifest="$helper_dir/smite-selected-candidate.json"
+        manifest="$helper_dir/smite-rc7-registry-pair.json"
     fi
 
     [ -f "$verifier" ] && [ ! -L "$verifier" ] &&

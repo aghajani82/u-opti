@@ -86,6 +86,8 @@ smite_managed_bh_ir_retained_canary() {
         aarch64) arch=arm64 ;;
         *) echo "HOLD: Unsupported Backhaul architecture"; return 2 ;;
     esac
+    # Retained metadata and rollback still target the installed RC7 runtime.
+    # The selected RC8 candidate is read-only release evidence, not an upgrade.
     local image="ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
     local mode
     echo "Retained Backhaul metadata enrollment: no Node restart or tunnel Apply."
@@ -103,7 +105,7 @@ smite_managed_bh_ir_retained_canary() {
                 install-retained-ir --arch "$arch" \
                 --expected-node-image "$image" \
                 --confirm-role INSTALL-RETAINED-BACKHAUL-IR \
-                --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json" \
+                --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-rc7-registry-pair.json" \
                 --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
                 --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
                 --signed-pair-publish-ref refs/tags/v2.0.0-rc.7 \
@@ -141,7 +143,7 @@ smite_managed_bh_ir_retained_canary() {
                     --expected-node-image "$image" \
                     --confirm-role INSTALL-RETAINED-BACKHAUL-FOREIGN \
                     --confirm-snapshot-and-console "$recovery_confirm" \
-                    --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json" \
+                    --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-rc7-registry-pair.json" \
                     --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
                     --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
                     --signed-pair-publish-ref refs/tags/v2.0.0-rc.7 \
@@ -196,22 +198,24 @@ smite_managed_bh_menu() {
                         --signed-pair-source-sha "$SMITE_BH_PAIR_SOURCE_SHA")
                     [ -z "${SMITE_BH_PAIR_PUBLISH_REF:-}" ] || signed_pair_args+=(
                         --signed-pair-publish-ref "$SMITE_BH_PAIR_PUBLISH_REF")
-                    # Use the selected RC7 release pins on an ordinary menu
+                    # Use the selected RC8 release pins on an ordinary menu
                     # run. A partial explicit override must still fail closed.
                     if [ "${#signed_pair_args[@]}" -eq 0 ]; then
                         signed_pair_args=(
                             --signed-pair-manifest "$SMITE_ENGINE_MENU_DIR/smite-selected-candidate.json"
-                            --signed-pair-manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
-                            --signed-pair-source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12
-                            --signed-pair-publish-ref refs/tags/v2.0.0-rc.7)
+                            --signed-pair-manifest-sha256 ed0fc73534d61f6bf9fd0d4710385bf8c336d417c9a2401ba8e13c9995267576
+                            --signed-pair-source-sha b7168f09bf236c9400adbeeaa9446a1a18293fa6
+                            --signed-pair-publish-ref refs/tags/v2.0.0-rc.8)
                     fi
                     # The four independent pins must be complete. A partial
-                    # override must never fall back to the selected RC7 pair.
+                    # override must never fall back to the selected RC8 pair.
                     local signed_pair_complete=yes
                     if [ "${#signed_pair_args[@]}" -ne 8 ]; then
                         signed_pair_complete=no
                     fi
-                    # The RC7 release uses the upstream Sigstore public-good
+                    # This reviewed trust snapshot remains pinned; installed Cosign
+                    # is required for RC8 (the download fallback stays RC7-only).
+                    # The release uses the upstream Sigstore public-good
                     # root at one independently SHA-pinned historical commit.
                     # It is checked by smite-registry-pair-admission.py before
                     # cosign is invoked. This avoids an IR-host TUF CDN 403;
@@ -226,12 +230,12 @@ smite_managed_bh_menu() {
                     python3 -B "$SMITE_INDEPENDENT_ENGINE_HOST_GATE" \
                         --engine backhaul --node-dir "$SMITE_MANAGED_NODE_DIR" \
                         "${signed_pair_args[@]}" || :
-                    echo "===== EXISTING RC7 RETAINED-NODE REVIEW (READ ONLY) ====="
+                    echo "===== SELECTED CANDIDATE RETAINED-NODE REVIEW (READ ONLY) ====="
                     # Reuse the already reviewed executor, not the legacy
                     # Compose-recreating trial install. Never derive the
                     # expected image from mutable Docker labels or a tag.
                     # A different externally supplied pair must fail closed
-                    # against this selected RC7 immutable Node image pin.
+                    # against this selected RC8 immutable Node image pin.
                     local review_arch=""
                     case "$(uname -m)" in
                         x86_64) review_arch=amd64 ;;
@@ -252,7 +256,7 @@ smite_managed_bh_menu() {
                             --arch "$review_arch" \
                             --confirm-role REVIEW-BACKHAUL-IN-PLACE \
                             --expected-node-image \
-                            "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263" \
+                            "ghcr.io/aghajani82/smite-node@sha256:164991d2380f6bb334f05da0783b34c75e87746625d7f6b2e58b21f70187ff8b" \
                             "${signed_pair_args[@]}" || :
                     fi
                 else

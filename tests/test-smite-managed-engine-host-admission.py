@@ -442,7 +442,7 @@ CHOICES
                         self.assertIn("--arch amd64", calls)
                         self.assertIn("--expected-node-image " + selected["images"]["node"], calls)
                         self.assertIn("--signed-pair-manifest-sha256 " +
-                                      "58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e", calls)
+                                      "ed0fc73534d61f6bf9fd0d4710385bf8c336d417c9a2401ba8e13c9995267576", calls)
                         self.assertIn("--signed-pair-source-sha " + selected["source_commit"], calls)
                         self.assertIn("--signed-pair-publish-ref " + selected["publish_ref"], calls)
                     else:
@@ -459,6 +459,33 @@ CHOICES
                                 text=True, timeout=10)
         self.assertEqual(result.returncode, 2)
         self.assertIn("HOLD: Host installation disabled", result.stderr)
+
+    def test_retained_rc7_install_and_rollback_do_not_consume_selected_rc8(self):
+        # Intercept Python before any host action; exercise all existing modes.
+        script = r'''
+source "$MENU"
+uname() { echo x86_64; }
+python3() { printf '%s\n' "$@"; return 2; }
+smite_managed_bh_ir_retained_canary
+'''
+        old = json.loads((ROOT / "modules/smite-rc7-registry-pair.json").read_text())
+        for mode, action in (("I", "install-retained-ir"), ("R", "rollback-retained-ir"),
+                             ("F", "install-retained-foreign"), ("B", "rollback-retained-foreign")):
+            with self.subTest(mode=mode):
+                result = subprocess.run(["bash", "-c", script],
+                    input=mode + "\nSNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED\n",
+                    env={**os.environ, "MENU": str(ROOT / "modules/smite-managed-backhaul-menu.sh"),
+                         "SMITE_NODE_DIR": "/opt/smite-node"},
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(action, result.stdout)
+                self.assertIn(old["images"]["node"], result.stdout)
+                self.assertNotIn("smite-selected-candidate.json", result.stdout)
+                self.assertNotIn("refs/tags/v2.0.0-rc.8", result.stdout)
+                if mode in ("I", "F"):
+                    self.assertIn("smite-rc7-registry-pair.json", result.stdout)
+                    self.assertIn(old["source_commit"], result.stdout)
+                    self.assertIn(old["publish_ref"], result.stdout)
 
     def test_no_external_executor_or_snapshot_proof(self):
         body = SCRIPT.read_text()
