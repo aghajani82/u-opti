@@ -220,6 +220,12 @@ jobs:
           python3 -m py_compile tests/test-uopti-cli-entrypoint.py
           python3 -B tests/test-uopti-cli-entrypoint.py -v
 
+      - name: Verify Sanaei Docker installs pull only the owner's fork (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/test-docker-3xui-fork-image.py -v
+
       - name: Lock install/update downloads to a single immutable GitHub SHA (mocked, offline)
         shell: bash
         run: |
