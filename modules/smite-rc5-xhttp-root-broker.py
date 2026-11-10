@@ -458,5 +458,12 @@ if __name__ == "__main__":
         raise SystemExit("HOLD_USE_EXPLICIT_SERVE_ONLY")
     try:
         serve()
+    except BrokerHold as exc:
+        # At boot, expose only the fixed uppercase HOLD reason in the local
+        # root-only journal. Never log the private key, signed wire or routes.
+        reason = str(exc)
+        if re.fullmatch(r"[A-Z0-9_]{1,100}", reason):
+            print("BROKER_START_HOLD=" + reason, file=sys.stderr, flush=True)
+        raise SystemExit("HOLD_NO_SERVER_STARTED") from None
     except Exception:
-        raise SystemExit("HOLD_NO_SERVER_STARTED")
+        raise SystemExit("HOLD_NO_SERVER_STARTED") from None

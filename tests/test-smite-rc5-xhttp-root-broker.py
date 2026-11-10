@@ -390,6 +390,8 @@ class BrokerRegressionTests(unittest.TestCase):
         self.assertNotIn("shell=True", source)
         self.assertNotIn("AF_INET", source)
         self.assertNotIn("sudo ", source)
+        self.assertIn("BROKER_START_HOLD=", source)
+        self.assertIn('re.fullmatch(r"[A-Z0-9_]{1,100}", reason)', source)
         self.assertFalse(broker.SOCKET.exists())
 
     def test_authenticated_proposal_is_not_an_approval(self):
@@ -678,16 +680,25 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
                                   instance_id=INSTANCE)
 
-            # Reproduce the exact old unit emitted before missing lock paths
-            # were made optional for systemd namespace setup.
+            # Regression for the fresh rebuilt IR hostname failure:
+            # systemd silently skips "ConditionHost=ir*" on e.g. "iran".
+            # The unit must be bound to the private install journal instead;
+            # the Python Broker still checks root+signed role and refuses KH.
             service = root / "etc/systemd/system" / provisioner.SERVICE_NAME
-            legacy_unit = service.read_text().replace(
+            fresh_unit = service.read_text()
+            journal_condition = f"ConditionPathExists={provisioner.IR_INSTALL_JOURNAL}"
+            self.assertIn(journal_condition + "\n", fresh_unit)
+            self.assertNotIn("ConditionHost=", fresh_unit)
+            legacy_unit = fresh_unit.replace(
+                journal_condition, "ConditionHost=ir*",
+            ).replace(
                 "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock",
                 "ReadWritePaths=/run/lock/u-opti-smite-engine.lock",
             ).replace(
                 "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock",
                 "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock",
             )
+            self.assertIn("ConditionHost=ir*\n", legacy_unit)
             service.write_text(legacy_unit)
             service.chmod(0o644)
 
@@ -769,10 +780,56 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(list(route_dir.iterdir()), [])
             self.assertEqual(list((root / "etc/nginx").glob("**/*.conf")), [])
             repaired_unit = service.read_text()
+            self.assertEqual(repaired_unit, fresh_unit)
+            self.assertIn(journal_condition + "\n", repaired_unit)
+            self.assertNotIn("ConditionHost=", repaired_unit)
             self.assertIn("ReadWritePaths=-/run/lock/u-opti-smite-engine.lock", repaired_unit)
             self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
             self.assertNotIn("ReadWritePaths=/run/lock/u-opti-smite-engine.lock", repaired_unit)
             self.assertNotIn("ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
+
+    def test_systemd_unknown_hostname_condition_does_not_gain_activation(self):
+        repo = Path(__file__).resolve().parents[1]
+        source_dir = repo / "modules"
+        source = source_dir / "smite-rc5-xhttp-broker-provision.py"
+        spec = importlib.util.spec_from_file_location(
+            "broker_condition_refusal_test", source,
+        )
+        provisioner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provisioner)
+
+        with tempfile.TemporaryDirectory(prefix="uopti-broker-condition-reject-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            nginx = root / "etc/nginx"
+            nginx.mkdir(parents=True, mode=0o755)
+            modules = root / "usr/local/lib/u-opti/modules"
+            modules.mkdir(parents=True, mode=0o755)
+            broker_file = source_dir / "smite-rc5-xhttp-root-broker.py"
+            target = modules / broker_file.name
+            target.write_bytes(broker_file.read_bytes())
+            target.chmod(0o644)
+            provisioner.provision(
+                peer_gid=PEER_GID, root=root, source_dir=source_dir,
+                instance_id=INSTANCE,
+            )
+            service = root / "etc/systemd/system" / provisioner.SERVICE_NAME
+            trusted = service.read_text()
+            self.assertIn("ConditionPathExists=", trusted)
+            tampered = trusted.replace(
+                f"ConditionPathExists={provisioner.IR_INSTALL_JOURNAL}",
+                "ConditionHost=foreign*",
+            )
+            service.write_text(tampered)
+            service.chmod(0o644)
+            def unexpected_command(*_args, **_kwargs):
+                raise AssertionError("Unreviewed unit must be rejected before systemctl")
+            with self.assertRaisesRegex(
+                provisioner.ProvisionHold,
+                "BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW",
+            ):
+                provisioner.activate(root=root, runner=unexpected_command)
+            self.assertEqual(service.read_text(), tampered)
 
     def test_activation_socket_readiness_timeout_does_not_bypass_hold(self):
         repo = Path(__file__).resolve().parents[1]

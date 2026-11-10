@@ -199,13 +199,21 @@ class Journal:
                 conn.close()
         unit = self.root / ('etc/systemd/system/' + SERVICE)
         if unit.exists():
-            trusted(unit)
+            if d.get('role') != 'panel-iran':
+                raise Hold('FOREIGN_BROKER_UNIT')
+            item = trusted(unit)
+            if (not stat.S_ISREG(item.st_mode) or item.st_nlink != 1
+                    or stat.S_IMODE(item.st_mode) != 0o644):
+                raise Hold('BROKER_UNIT_CHANGED')
             cfg = etc / 'route-broker.json'
             trusted(cfg)
             gid = json.loads(cfg.read_text())['peer_gid']
             spec = importlib.util.spec_from_file_location('broker_provision', Path(__file__).with_name('smite-rc5-xhttp-broker-provision.py'))
             mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-            if unit.read_bytes() != mod._service_unit(gid):
+            # The signed installer may have stopped with the old exact
+            # ConditionHost=ir* unit; its bytes stay a trusted rollback
+            # input after the provisioner bugfix. Never bless unknown units.
+            if unit.read_bytes() not in mod.reviewed_service_unit_bytes(gid):
                 raise Hold('BROKER_UNIT_CHANGED')
         return unit.exists()
 
