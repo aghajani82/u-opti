@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
+import tarfile
 import json
 import os
 from pathlib import Path
@@ -36,6 +38,11 @@ url = next(x for x in argv if x.startswith("https://"))
 out = pathlib.Path(argv[argv.index("-o") + 1])
 with open(os.environ["MOCK_CALLS"], "a") as fp:
     fp.write(" ".join(argv) + "\n")
+if "codeload.github.com/" in url:
+    if os.environ.get("MOCK_BUNDLE") == "network":
+        sys.exit(28)
+    out.write_bytes(pathlib.Path(os.environ["MOCK_ARCHIVE"]).read_bytes())
+    sys.exit(0)
 if "/git/trees/" in url:
     tree = json.loads(pathlib.Path(os.environ["MOCK_MANIFEST"]).read_text())
     if os.environ.get("MOCK_TREE") == "truncated":
@@ -162,6 +169,58 @@ class InstallerDownloadTest(unittest.TestCase):
         )
         calls = self.calls.read_text().splitlines() if self.calls.exists() else []
         return result, target.read_bytes(), calls
+
+    def bundle_case(self, mode="valid"):
+        archive = self.root / "bundle.tar.gz"
+        self.env["MOCK_ARCHIVE"] = str(archive)
+        self.env["MOCK_BUNDLE"] = mode
+        with tarfile.open(archive, "w:gz") as tar:
+            root = tarfile.TarInfo("u-opti-" + PIN)
+            root.type = tarfile.DIRTYPE
+            tar.addfile(root)
+            for name, raw in FILES.items():
+                if mode == "missing" and name == "VERSION":
+                    continue
+                info = tarfile.TarInfo("u-opti-" + PIN + "/" + name)
+                if mode == "corrupt" and name == "u-opti":
+                    raw = raw[:-1] + b"X"
+                info.size = len(raw)
+                if mode == "symlink" and name == "u-opti":
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = "/etc/passwd"
+                    info.size = 0
+                    tar.addfile(info)
+                else:
+                    tar.addfile(info, io.BytesIO(raw))
+                if mode == "duplicate" and name == "VERSION":
+                    tar.addfile(info, io.BytesIO(raw))
+        if mode == "truncated":
+            archive.write_bytes(archive.read_bytes()[:50])
+        setup = (f"TEMP_DIR={str(self.stage)!r}\nSOURCE_SHA={PIN}\n"
+                 "MODULES=(alpha.sh)\n")
+        result = subprocess.run(["bash", "-c", setup + actual_installer_functions() +
+            "\nu_opti_install_prepare_tree || exit 21\n"
+            "u_opti_install_prepare_bundle || exit 22\n"
+            'u_opti_install_download "u-opti" "$TEMP_DIR/u-opti"\n'],
+            env=self.env, capture_output=True, text=True, timeout=12)
+        return result
+
+    def test_bundle_verifies_all_files_without_per_file_requests(self):
+        result = self.bundle_case()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.stage / "u-opti").read_bytes(), FILES["u-opti"])
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("codeload.github.com", calls[1])
+        self.assertIn(PIN, calls[1])
+
+    def test_bad_bundle_never_publishes_cache_or_destination(self):
+        for mode in ("corrupt", "missing", "symlink", "duplicate", "truncated", "network"):
+            with self.subTest(mode=mode):
+                result = self.bundle_case(mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.stage / ".bundle").exists())
+                self.assertFalse((self.stage / "u-opti").exists())
 
     def test_pinned_raw_success_verifies_and_stages(self):
         result, data, calls = self.run_case()
