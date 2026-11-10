@@ -121,6 +121,98 @@ class BrokerRegressionTests(unittest.TestCase):
             peer_gid=opts.get("gid", PEER_GID),
         )
 
+    def test_ir_role_proof_accepts_rebuilt_hostname_and_rejects_foreign(self):
+        # This is the same root-owned journal emitted by the RC7 fresh
+        # installer *before* provisioning the IR Broker. No live host touched.
+        admission = broker._load_module(
+            "uopti_rc7_ir_broker_role",
+            MODULE.parent / "smite-rc5-xhttp-broker-provision.py",
+        )
+        parent = self.root / "u-opti"
+        parent.mkdir(mode=0o700)
+        folder = parent / "rc6-install-journal"
+        folder.mkdir(mode=0o700)
+        journal = folder / "current.json"
+        state = self.root / "state.env"
+        pid = os.getpid()
+        start = Path("/proc", str(pid), "stat").read_text().rsplit(")", 1)[1].split()[19]
+        record = {
+            "schema": 1, "source": admission.IR_INSTALL_SOURCE,
+            "id": "uopti_rc6_" + "a" * 32, "role": "panel-iran",
+            "state": "INSTALLING", "installer_pid": pid,
+            "installer_start": start,
+        }
+
+        def save():
+            journal.write_text(json.dumps(record, sort_keys=True) + "\n")
+            journal.chmod(0o600)
+
+        save()
+        with patch.object(admission, "IR_INSTALL_JOURNAL", journal), \
+             patch.object(admission, "IR_INSTALL_STATE", state), \
+             patch.object(broker.os, "uname",
+                          return_value=SimpleNamespace(nodename="iran.new-lab")):
+            self.assertIsNone(admission._require_ir_root_role())
+            self.assertIsNone(broker._require_ir_root_role())
+
+            record["role"] = "foreign"
+            save()
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            with self.assertRaises(broker.BrokerHold):
+                broker._require_ir_root_role()
+
+            record["role"] = "panel-iran"
+            record["installer_start"] = "0"
+            save()
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            record["installer_start"] = start
+
+            record["source"] = "0" * 40
+            save()
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            record["source"] = admission.IR_INSTALL_SOURCE
+
+            record["state"] = "ROLLED_BACK"
+            save()
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+
+            record["state"] = "COMMITTED"
+            save()
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
+            state.chmod(0o600)
+            self.assertIsNone(admission._require_ir_root_role())
+            self.assertIsNone(broker._require_ir_root_role())
+
+            state.write_text("SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
+            state.chmod(0o600)
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
+            state.chmod(0o600)
+
+            journal.chmod(0o644)
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            journal.chmod(0o600)
+            journal.unlink()
+            journal.symlink_to(state)
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            journal.unlink()
+            save()
+
+            with patch.object(broker.os, "geteuid", return_value=1000):
+                with self.assertRaises(admission.ProvisionHold):
+                    admission._require_ir_root_role()
+                with self.assertRaises(broker.BrokerHold):
+                    broker._require_ir_root_role()
+
     def test_only_approved_peer_binding_and_once_nonce_calls_root_helper(self):
         self.assertEqual(self.accept(), "PASS_ROUTE_ADDED")
         self.assertEqual(self._calls, [(49328, "/49328/sso")])
