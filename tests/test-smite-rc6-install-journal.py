@@ -120,6 +120,62 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaises(m.Hold): self.j.rollback()
         self.assert_no_stop()
 
+    def setup_partial_ir_broker_service(self, role='panel-iran'):
+        self.install_partial()
+        doc = self.j.load()
+        doc['role'] = role
+        self.j.save(doc)
+        gid = 39100
+        peer = self.root / 'etc/u-opti/smite'
+        peer.mkdir(parents=True, mode=0o700)
+        peer.chmod(0o700)
+        config = peer / 'route-broker.json'
+        config.write_text(json.dumps({'peer_gid': gid}))
+        config.chmod(0o600)
+        service = self.root / 'etc/systemd/system/u-opti-smite-xhttp-broker.service'
+        service.parent.mkdir(parents=True, exist_ok=True)
+        provider = ROOT / 'modules/smite-rc5-xhttp-broker-provision.py'
+        spec = importlib.util.spec_from_file_location('rollback_broker_unit_fixture', provider)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        current = mod._service_unit(gid)
+        legacy = current.replace(
+            f'ConditionPathExists={mod.IR_INSTALL_JOURNAL}\n'.encode(),
+            b'ConditionHost=ir*\n',
+        )
+        self.assertNotEqual(legacy, current)
+        service.write_bytes(legacy)
+        service.chmod(0o644)
+        return service, mod
+
+    def test_signed_rc7_legacy_hostname_unit_can_be_rolled_back_after_update(self):
+        service, mod = self.setup_partial_ir_broker_service()
+        self.assertIn(service.read_bytes(), mod.reviewed_service_unit_bytes(39100))
+        result = self.j.rollback()
+        self.assertEqual(result, 'RC6_ROLLBACK=PASS_DATA_RETAINED')
+        self.assertFalse(self.objects['a'*64]['State']['Running'])
+        self.assertTrue(any(
+            a[:3] == ['systemctl', 'disable', '--now'] for a in self.calls
+        ))
+        archived = service.with_name(service.name + '.rc6-rollback-' + self.tx)
+        self.assertTrue(archived.exists())
+        self.assertEqual(archived.read_bytes().count(b'ConditionHost=ir*'), 1)
+
+    def test_unknown_broker_unit_and_foreign_role_refuse_rollback(self):
+        service, mod = self.setup_partial_ir_broker_service()
+        legacy = service.read_bytes()
+        service.write_bytes(legacy.replace(b'ConditionHost=ir*', b'ConditionHost=foreign*'))
+        with self.assertRaisesRegex(m.Hold, 'BROKER_UNIT_CHANGED'):
+            self.j.rollback()
+        self.assert_no_stop()
+        service.write_bytes(legacy)
+        doc = self.j.load()
+        doc['role'] = 'foreign'
+        self.j.save(doc)
+        with self.assertRaisesRegex(m.Hold, 'FOREIGN_BROKER_UNIT'):
+            self.j.rollback()
+        self.assert_no_stop()
+
     def test_legacy_rc6_rollback_survives_installer_update(self):
         self.install_partial()
         d = self.j.load(); d['source'] = m.LEGACY_SOURCE; self.j.save(d)
