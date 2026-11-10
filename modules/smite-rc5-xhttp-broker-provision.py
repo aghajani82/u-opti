@@ -349,7 +349,7 @@ def _ledger(source_dir: Path):
 def _service_unit(peer_gid: int) -> bytes:
     body = f"""[Unit]
 Description=U-OPTI Smite local XHTTP route broker
-ConditionHost=ir*
+ConditionPathExists={IR_INSTALL_JOURNAL}
 After=local-fs.target
 StartLimitIntervalSec=60s
 StartLimitBurst=3
@@ -624,15 +624,24 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
             or "ProtectSystem=full\n" not in unit):
         raise ProvisionHold("BROKER_ACTIVATION_CONFIG_INVALID")
 
-    # Older provisioners wrote exact lock-file ReadWritePaths entries. Those
-    # files are intentionally created lazily under /run/lock, so systemd must
-    # tolerate their absence when the persistent broker service starts.
+    # Older provisioners used ConditionHost=ir*, which silently skipped the
+    # service on a rebuilt IR VPS named "iran", even when the signed RC7
+    # panel-iran transaction and root security checks were valid. Systemd's
+    # condition is only a presence guard: the running broker STILL verifies
+    # the private root-owned IR role journal and rejects Foreign/stale state.
+    # Keep an exact allowlist of old systemd units for in-place recovery.
     expected_unit = _service_unit(peer_gid)
-    # Exactly the previous U-OPTI units are eligible for in-place upgrade:
-    # old optional-lock syntax, with or without runtime preservation. Do not
-    # bless any other service text, symlinks, drop-ins, or changed credentials.
     current_text = expected_unit.decode("ascii")
     old_text = current_text.replace("RuntimeDirectoryPreserve=yes\n", "")
+    previous_host_unit = current_text.replace(
+        f"ConditionPathExists={IR_INSTALL_JOURNAL}\n",
+        "ConditionHost=ir*\n",
+    )
+    if previous_host_unit == current_text:
+        raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
+    old_host_without_preserve = previous_host_unit.replace(
+        "RuntimeDirectoryPreserve=yes\n", ""
+    )
     lock_old = lambda value: value.replace(
         "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
         "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
@@ -640,7 +649,11 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
         "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
         "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
     )
-    known_old = {old_text, lock_old(old_text), lock_old(current_text)}
+    known_old = {
+        old_text, lock_old(old_text), lock_old(current_text),
+        previous_host_unit, lock_old(previous_host_unit),
+        old_host_without_preserve, lock_old(old_host_without_preserve),
+    }
     if unit in known_old:
         _replace_existing_trusted_file(service, expected_unit, 0o644)
         unit = current_text
