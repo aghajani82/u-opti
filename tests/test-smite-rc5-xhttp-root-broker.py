@@ -678,16 +678,25 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             provisioner.provision(peer_gid=PEER_GID, root=root, source_dir=source_dir,
                                   instance_id=INSTANCE)
 
-            # Reproduce the exact old unit emitted before missing lock paths
-            # were made optional for systemd namespace setup.
+            # Regression for the fresh rebuilt IR hostname failure:
+            # systemd silently skips "ConditionHost=ir*" on e.g. "iran".
+            # The unit must be bound to the private install journal instead;
+            # the Python Broker still checks root+signed role and refuses KH.
             service = root / "etc/systemd/system" / provisioner.SERVICE_NAME
-            legacy_unit = service.read_text().replace(
+            fresh_unit = service.read_text()
+            journal_condition = f"ConditionPathExists={provisioner.IR_INSTALL_JOURNAL}"
+            self.assertIn(journal_condition + "\n", fresh_unit)
+            self.assertNotIn("ConditionHost=", fresh_unit)
+            legacy_unit = fresh_unit.replace(
+                journal_condition, "ConditionHost=ir*",
+            ).replace(
                 "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock",
                 "ReadWritePaths=/run/lock/u-opti-smite-engine.lock",
             ).replace(
                 "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock",
                 "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock",
             )
+            self.assertIn("ConditionHost=ir*\n", legacy_unit)
             service.write_text(legacy_unit)
             service.chmod(0o644)
 
@@ -769,6 +778,9 @@ class InertBrokerProvisioningTests(unittest.TestCase):
             self.assertEqual(list(route_dir.iterdir()), [])
             self.assertEqual(list((root / "etc/nginx").glob("**/*.conf")), [])
             repaired_unit = service.read_text()
+            self.assertEqual(repaired_unit, fresh_unit)
+            self.assertIn(journal_condition + "\n", repaired_unit)
+            self.assertNotIn("ConditionHost=", repaired_unit)
             self.assertIn("ReadWritePaths=-/run/lock/u-opti-smite-engine.lock", repaired_unit)
             self.assertIn("ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock", repaired_unit)
             self.assertNotIn("ReadWritePaths=/run/lock/u-opti-smite-engine.lock", repaired_unit)
