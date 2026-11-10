@@ -390,6 +390,8 @@ class BrokerRegressionTests(unittest.TestCase):
         self.assertNotIn("shell=True", source)
         self.assertNotIn("AF_INET", source)
         self.assertNotIn("sudo ", source)
+        self.assertIn("BROKER_START_HOLD=", source)
+        self.assertIn('re.fullmatch(r"[A-Z0-9_]{1,100}", reason)', source)
         self.assertFalse(broker.SOCKET.exists())
 
     def test_authenticated_proposal_is_not_an_approval(self):
