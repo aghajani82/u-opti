@@ -54,7 +54,16 @@ docker() {
     [ "${FAIL_DOCKER:-0}" = 0 ] || return 1
     printf '%s\n' "${EXISTING_CONTAINER:-}"
 }
-curl() { printf 'fixture' > "${@: -1}"; }
+curl() {
+    printf '%s\n' "$*" >> "$TMP/curl-calls"
+    case "$*" in
+      *https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64*)
+        [ "${MOCK_COSIGN_RELEASE_FAIL:-0}" != 1 ] || return 28 ;;
+      *https://api.github.com/repos/sigstore/cosign/releases/assets/390331694*)
+        [ "${MOCK_COSIGN_API_FAIL:-0}" != 1 ] || return 28 ;;
+    esac
+    printf 'fixture' > "${@: -1}"
+}
 sha256sum() {
     if [[ "$1" == */cosign ]]; then
         if [ "${BAD_COSIGN:-0}" = 1 ]; then echo 'bad fixture'; else
@@ -105,6 +114,29 @@ smite_install_selected_fresh panel-iran <<< y
 [ "$(cat "$TMP/dispatch")" = panel ]
 [ "$(cat "$TMP/ui-dispatch")" = apply ]
 rm "$TMP/dispatch" "$TMP/ui-dispatch"
+# Exact selected installer Cosign bootstrap must never silently hang.
+# Simulate release CDN timeouts and verify official API fallback is used,
+# all transfer attempts are bounded, and the final pinned digest is checked.
+: > "$TMP/curl-calls"
+MOCK_COSIGN_RELEASE_FAIL=1 smite_install_selected_fresh foreign <<< y > "$TMP/fallback.log"
+[ "$(cat "$TMP/dispatch")" = foreign ]
+grep -q '^RC7_COSIGN_DOWNLOAD=OFFICIAL_GITHUB_API_FALLBACK' "$TMP/fallback.log"
+grep -Fq -- '--connect-timeout 10 --max-time 180' "$TMP/curl-calls"
+grep -Fq -- '--progress-bar' "$TMP/curl-calls"
+grep -Fq 'https://api.github.com/repos/sigstore/cosign/releases/assets/390331694' "$TMP/curl-calls"
+grep -q '^RC7_COSIGN_SHA256=VERIFIED' "$TMP/fallback.log"
+rm "$TMP/dispatch"
+: > "$TMP/curl-calls"
+if MOCK_COSIGN_RELEASE_FAIL=1 MOCK_COSIGN_API_FAIL=1 \
+  smite_install_selected_fresh foreign <<< y > "$TMP/all-downloads-failed.log" 2>&1; then
+    echo 'FAIL: RC7 accepted unavailable verifier'; exit 1
+fi
+grep -q 'HOLD_RC7_COSIGN_VERIFIER_UNAVAILABLE' "$TMP/all-downloads-failed.log"
+[ ! -e "$TMP/dispatch" ]
+[ "$(grep -c 'cosign-linux-amd64' "$TMP/curl-calls")" = 1 ]
+[ "$(grep -c '/assets/390331694' "$TMP/curl-calls")" = 1 ]
+echo 'RC7_VISIBLE_BOUNDED_COSIGN_AND_OFFICIAL_FALLBACK=PASS_ISOLATED'
+
 for flag in FAIL_DOCKER BAD_COSIGN BAD_TRUST_ROOT FAIL_SIGNATURE; do
     export "$flag=1"
     if smite_install_selected_fresh foreign <<< y; then echo "FAIL: accepted $flag"; exit 1; fi

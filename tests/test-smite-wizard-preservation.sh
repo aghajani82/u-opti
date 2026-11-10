@@ -30,6 +30,11 @@
 # 2026-11-03: reviewed static-only UI update/rollback menu and fresh-install hook.
 # 2026-11-03 RC7 Foreign: re-pin reviewed persisted signed-Sanaei attachment
 # and transaction-scoped Compose fail-closed guards (no legacy wizard drift).
+# 2026-11-10 RC7 fresh-install bootstrap: approved only the selected signed
+# Cosign v3.0.6 download path, adding visible bounded curl retries and a
+# same-hash official GitHub release-asset fallback. The isolated selected-
+# installer suite asserts timeout flags, fallback, SHA and fail-closed before
+# any Smite install transaction. All independent wizard pins remain unchanged.
 # 2026-11-09 RC8: reviewed one-line manifest filename change to the byte-exact
 # RC7 archive; fresh installation keeps all RC7 pins and behavior while the
 # selected manifest becomes RC8 release evidence. No other installer edits.
@@ -52,7 +57,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-a41f4093a8130453fdd89e290a6cc49eb0bb468f modules/smite-install.sh
+db44e5de982276d37be1aff48abd71e5a36777ef modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
