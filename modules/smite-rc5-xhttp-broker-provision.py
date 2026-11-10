@@ -383,6 +383,32 @@ WantedBy=multi-user.target
     return body.encode("ascii")
 
 
+def reviewed_service_unit_bytes(peer_gid: int) -> frozenset[bytes]:
+    """Exact, immutable known-unit variants for legacy install and rollback.
+
+    Unit names, credentials, paths, ConditionHost and sandbox permissions can
+    never be freely rewritten or adopted. Unknown contents always HOLD.
+    """
+    current = _service_unit(peer_gid).decode("ascii")
+    journal_condition = f"ConditionPathExists={IR_INSTALL_JOURNAL}\n"
+    if current.count(journal_condition) != 1:
+        raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
+    old_host = current.replace(journal_condition, "ConditionHost=ir*\n")
+    without_preserve = lambda unit: unit.replace("RuntimeDirectoryPreserve=yes\n", "")
+    old_locks = lambda unit: unit.replace(
+        "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
+        "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
+    ).replace(
+        "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
+        "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
+    )
+    exact = {current, old_locks(current), without_preserve(current),
+             old_locks(without_preserve(current)), old_host,
+             old_locks(old_host), without_preserve(old_host),
+             old_locks(without_preserve(old_host))}
+    return frozenset(unit.encode("ascii") for unit in exact)
+
+
 def provision(*, peer_gid: int, root: Path = Path("/"),
               source_dir: Path | None = None,
               instance_id: str | None = None) -> dict[str, str]:
@@ -624,41 +650,15 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
             or "ProtectSystem=full\n" not in unit):
         raise ProvisionHold("BROKER_ACTIVATION_CONFIG_INVALID")
 
-    # Older provisioners used ConditionHost=ir*, which silently skipped the
-    # service on a rebuilt IR VPS named "iran", even when the signed RC7
-    # panel-iran transaction and root security checks were valid. Systemd's
-    # condition is only a presence guard: the running broker STILL verifies
-    # the private root-owned IR role journal and rejects Foreign/stale state.
-    # Keep an exact allowlist of old systemd units for in-place recovery.
+    # Accept only the exact reviewed previous unit variants before atomically
+    # replacing an old hostname-conditioned service unit. This also preserves
+    # rollback compatibility for a signed RC7 partially installed host.
     expected_unit = _service_unit(peer_gid)
-    current_text = expected_unit.decode("ascii")
-    old_text = current_text.replace("RuntimeDirectoryPreserve=yes\n", "")
-    previous_host_unit = current_text.replace(
-        f"ConditionPathExists={IR_INSTALL_JOURNAL}\n",
-        "ConditionHost=ir*\n",
-    )
-    if previous_host_unit == current_text:
+    if unit.encode("ascii") not in reviewed_service_unit_bytes(peer_gid):
         raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
-    old_host_without_preserve = previous_host_unit.replace(
-        "RuntimeDirectoryPreserve=yes\n", ""
-    )
-    lock_old = lambda value: value.replace(
-        "ReadWritePaths=-/run/lock/u-opti-smite-engine.lock\n",
-        "ReadWritePaths=/run/lock/u-opti-smite-engine.lock\n",
-    ).replace(
-        "ReadWritePaths=-/run/lock/smite-xhttp-nginx-route.lock\n",
-        "ReadWritePaths=/run/lock/smite-xhttp-nginx-route.lock\n",
-    )
-    known_old = {
-        old_text, lock_old(old_text), lock_old(current_text),
-        previous_host_unit, lock_old(previous_host_unit),
-        old_host_without_preserve, lock_old(old_host_without_preserve),
-    }
-    if unit in known_old:
+    if unit.encode("ascii") != expected_unit:
         _replace_existing_trusted_file(service, expected_unit, 0o644)
-        unit = current_text
-    elif unit != current_text:
-        raise ProvisionHold("BROKER_ACTIVATION_UNIT_REQUIRES_REVIEW")
+        unit = expected_unit.decode("ascii")
 
     helper = trusted_file(root / "usr/local/libexec" / HELPER_MODULE, 0o755, 1024 * 1024)
     planner = trusted_file(root / "usr/local/libexec" / PLANNER_MODULE, 0o755, 1024 * 1024)
