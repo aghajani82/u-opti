@@ -56,6 +56,22 @@ def _load_module(name: str, path: Path):
     return module
 
 
+def _require_ir_root_role() -> None:
+    """Keep the legacy IR root guard; also accept a proven IR install role."""
+    if os.geteuid() != 0:
+        raise BrokerHold("IR_ROOT_ONLY")
+    if os.uname().nodename.split(".")[0].lower() == "ir":
+        return
+    try:
+        admission = _load_module(
+            "uopti_rc7_ir_broker_role",
+            HERE / "smite-rc5-xhttp-broker-provision.py",
+        )
+        admission._require_ir_root_role()
+    except Exception as exc:
+        raise BrokerHold("IR_ROOT_ONLY") from exc
+
+
 def _ledger_module():
     return _load_module("uopti_broker_nonce_ledger", HERE / "smite-rc5-xhttp-nonce-ledger.py")
 
@@ -274,8 +290,7 @@ def process(wire: bytes, *, peer_uid: int, peer_gid: int) -> str:
     signed IR/KH evidence and an active unique lease, NEVER from wire.
     A consumed nonce plus failed apply means HOLD for explicit reconciliation.
     """
-    if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-        raise BrokerHold("IR_ROOT_ONLY")
+    _require_ir_root_role()
     config = _configuration()
     if ((peer_uid, peer_gid) != (config["peer_uid"], config["peer_gid"])
             or type(wire) is not bytes or not 0 < len(wire) <= MAX_INPUT):
@@ -384,8 +399,7 @@ def _retire_dead_socket_at_start(peer_gid: int) -> None:
 
 def serve() -> None:
     """Explicit local root service command. No TCP listener, no auto-install."""
-    if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-        raise BrokerHold("IR_ROOT_ONLY")
+    _require_ir_root_role()
     config = _configuration()
     _dir(SOCKET.parent, mode=0o750, gid=config["peer_gid"])
     # Only a proven dead, root-owned socket is retired, never a live peer.
