@@ -2099,6 +2099,47 @@ smite_install_selected_paths() {
     [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
 }
 
+# Selected RC7 needs the exact official v3.0.6 Cosign asset before any
+# host transaction. A blocked github.com release URL must never hang silently:
+# both official retrieval paths are bounded and every candidate is SHA-pinned.
+smite_install_rc7_verified_cosign() {
+    local target="$1" expected_sha="$2" source url actual
+    local official="https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64"
+    # Immutable official release-asset ID from the reviewed CI bootstrap.
+    local api="https://api.github.com/repos/sigstore/cosign/releases/assets/390331694"
+    for source in release api; do
+        if [ "$source" = release ]; then
+            url="$official"
+            echo 'RC7_COSIGN_DOWNLOAD=OFFICIAL_RELEASE (visible, bounded)'
+        else
+            url="$api"
+            echo 'RC7_COSIGN_DOWNLOAD=OFFICIAL_GITHUB_API_FALLBACK (visible, bounded)'
+        fi
+        local -a headers=()
+        if [ "$source" = api ]; then
+            headers=(-H 'Accept: application/octet-stream')
+        fi
+        if curl -fL --progress-bar --proto '=https' --proto-redir '=https' \
+                --connect-timeout 10 --max-time 180 \
+                --retry 2 --retry-delay 2 --retry-max-time 240 \
+                --speed-time 30 --speed-limit 1024 \
+                "${headers[@]}" "$url" -o "$target"; then
+            actual="$(sha256sum "$target" | awk '{print $1}')" || return 2
+            if [ "$actual" = "$expected_sha" ]; then
+                echo 'RC7_COSIGN_SHA256=VERIFIED'
+                return 0
+            fi
+            echo "HOLD: RC7 Cosign $source download did not match the pinned SHA-256." >&2
+        else
+            echo "HOLD: RC7 Cosign $source download failed or timed out." >&2
+        fi
+        # Never reuse bytes from a failed transport/hash check in fallback.
+        rm -f -- "$target" || return 2
+    done
+    echo 'HOLD_RC7_COSIGN_VERIFIER_UNAVAILABLE: both official URLs failed or were untrusted. No Smite install transaction started.' >&2
+    return 2
+}
+
 smite_install_selected_fresh() (
     local role="$1" module_dir workdir containers path confirm
     case "$role" in panel-iran|foreign) ;; *) return 2 ;; esac
@@ -2151,13 +2192,8 @@ smite_install_selected_fresh() (
     umask 077
     workdir="$(mktemp -d)" || return 2
     trap 'rm -rf -- "$workdir"' EXIT
-    # Do not overwrite an installed verifier. Use a private, hash-checked copy.
-    curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 \
-        https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64 \
-        -o "$workdir/cosign" || return 2
-    [ "$(sha256sum "$workdir/cosign" | awk '{print $1}')" = "$SMITE_FIELD_TRIAL_COSIGN_SHA256" ] || {
-        echo 'HOLD: Cosign binary hash mismatch'; return 2;
-    }
+    # Private verifier only. No install proceeds before exact digest validation.
+    smite_install_rc7_verified_cosign "$workdir/cosign" "$SMITE_FIELD_TRIAL_COSIGN_SHA256" || return 2
     chmod 0700 "$workdir/cosign" || return 2
     # Reviewed Sigstore public-good TrustedRoot snapshot, pinned in this U-OPTI
     # release. The normal TUF CDN returns HTTP 403 on some Iranian networks.
