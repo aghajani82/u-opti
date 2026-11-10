@@ -214,6 +214,8 @@ fi
 echo "Checking required system packages..."
 
 REQUIRED_PACKAGES=(
+    "python3"
+    "ca-certificates"
     "sqlite3"
     "jq"
 )
@@ -236,8 +238,8 @@ if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
     else
         echo "Missing required packages: ${MISSING_PACKAGES[*]}"
         echo "Installing required system packages..."
-        apt-get -o DPkg::Lock::Timeout=300 update
-        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
+        apt-get -qq -o DPkg::Lock::Timeout=300 update
+        DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -q -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
     fi
 fi
 
@@ -298,6 +300,74 @@ try:
 except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
     sys.exit("HOLD: Untrusted GitHub source manifest: " + str(exc))
 PY_INSTALL_TREE
+}
+
+# Prefer one immutable archive over hundreds of individual HTTP requests.
+# Read selected regular files only; never extract archive paths or permissions.
+u_opti_install_prepare_bundle() {
+    local archive="$TEMP_DIR/.uopti-source.tar.gz"
+    INSTALL_BUNDLE_DIR=""
+    if ! curl -4 -fsSL --retry 0 --connect-timeout 8 --max-time 60 \
+        --speed-limit 100 --speed-time 15 --max-filesize 33554432 \
+        "https://codeload.github.com/aghajani82/u-opti/tar.gz/$SOURCE_SHA" \
+        -o "$archive" 2>"$TEMP_DIR/.bundle-error"; then
+        rm -f -- "$archive"
+        return 1
+    fi
+    if ! python3 -B - "$INSTALL_TREE_MANIFEST" "$archive" "$TEMP_DIR/.bundle" "$SOURCE_SHA" "${MODULES[@]}" <<'PY_INSTALL_BUNDLE'
+import hashlib, json, pathlib, sys, tarfile
+try:
+    manifest, archive, target, pin = sys.argv[1:5]
+    required = {"VERSION", "u-opti", "lib/common.sh"}
+    required.update("modules/" + name for name in sys.argv[5:])
+    tree = json.loads(pathlib.Path(manifest).read_text())
+    meta = {e["path"]: e for e in tree["tree"] if e.get("path") in required}
+    if tree.get("truncated") is not False or set(meta) != required:
+        raise ValueError("incomplete manifest")
+    prefix = "u-opti-" + pin + "/"
+    contents = {}
+    expanded = 0
+    with tarfile.open(archive, "r|gz") as bundle:
+        for count, member in enumerate(bundle, 1):
+            expanded += max(0, member.size)
+            if count > 20000 or expanded > 134217728:
+                raise ValueError("archive exceeds limits")
+            if member.name == prefix.rstrip("/") and member.isdir():
+                continue
+            if not member.name.startswith(prefix):
+                raise ValueError("unexpected archive root")
+            name = member.name[len(prefix):]
+            if name not in required:
+                continue
+            entry = meta[name]
+            if (name in contents or not member.isfile()
+                    or member.size != entry["size"] or not 0 < member.size <= 10485760):
+                raise ValueError("invalid archive member: " + name)
+            with bundle.extractfile(member) as stream:
+                raw = stream.read(member.size + 1)
+            digest = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+            if len(raw) != entry["size"] or digest != entry["sha"]:
+                raise ValueError("archive checksum mismatch: " + name)
+            contents[name] = raw
+    if set(contents) != required:
+        raise ValueError("archive missing required files")
+    # Publish the cache only after the entire archive passes validation.
+    root = pathlib.Path(target)
+    root.mkdir(mode=0o700)
+    for name, raw in contents.items():
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(raw)
+except (OSError, ValueError, KeyError, TypeError, EOFError, tarfile.TarError) as exc:
+    sys.exit("Bundle unavailable: " + str(exc))
+PY_INSTALL_BUNDLE
+    then
+        rm -rf -- "$TEMP_DIR/.bundle"
+        rm -f -- "$archive"
+        return 1
+    fi
+    rm -f -- "$archive"
+    INSTALL_BUNDLE_DIR="$TEMP_DIR/.bundle"
 }
 
 u_opti_install_verify_blob() {
@@ -396,6 +466,10 @@ u_opti_install_download() {
         echo "HOLD: Unsafe installer download path." >&2
         return 1
     fi
+    if [ -n "${INSTALL_BUNDLE_DIR:-}" ]; then
+        cp -- "$INSTALL_BUNDLE_DIR/$repo_path" "$destination" || return 1
+        return 0
+    fi
     staged="$(mktemp "$TEMP_DIR/.uopti-fetch-XXXXXXXX")" || return 1
     for attempt in 1 2; do
         if curl -4 -fsSL --retry 0 \
@@ -428,6 +502,13 @@ if ! u_opti_install_prepare_tree; then
     exit 1
 fi
 
+echo "Downloading and verifying installation bundle..."
+if u_opti_install_prepare_bundle; then
+    echo "Installation bundle verified (${#MODULES[@]} modules)."
+else
+    echo "Bundle unavailable; continuing with verified individual downloads."
+fi
+
 echo "Downloading VERSION..."
 u_opti_install_download "VERSION" "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
 REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
@@ -441,6 +522,7 @@ u_opti_install_download "u-opti" "$TEMP_DIR/u-opti" || { echo "Failed to downloa
 echo "Downloading common library..."
 u_opti_install_download "lib/common.sh" "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
 
+DOWNLOAD_INDEX=0
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
         system.sh) LABEL="System Information" ;;
@@ -491,7 +573,9 @@ for MODULE in "${MODULES[@]}"; do
         fakesite.sh) LABEL="Default Website / FakeSite" ;;
         *) LABEL="$MODULE" ;;
     esac
-    echo "Downloading $LABEL module..."
+    if [ -z "${INSTALL_BUNDLE_DIR:-}" ]; then
+        printf '[%d/%d] Downloading %s...\n' "$((++DOWNLOAD_INDEX))" "${#MODULES[@]}" "$LABEL"
+    fi
     u_opti_install_download "modules/$MODULE" "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
 done
 
@@ -642,78 +726,10 @@ echo "       Installation completed"
 echo "======================================"
 echo
 echo "Installed Version: $REMOTE_VERSION"
-echo
-echo "Installation Path:"
-echo "$INSTALL_PATH"
-echo
-echo "Library Path:"
-echo "$LIB_PATH"
-echo
-echo "SSH Module:"
-echo "$MODULES_PATH/ssh.sh"
-echo
-echo "Firewall Module:"
-echo "$MODULES_PATH/firewall.sh"
-echo
-echo "Fail2Ban Module:"
-echo "$MODULES_PATH/fail2ban.sh"
-echo
-echo "X-UI PRO Module:"
-echo "$MODULES_PATH/xui-pro.sh"
-echo
-echo "Certificate Module:"
-echo "$MODULES_PATH/certificate.sh"
-echo
-echo "Backup & Restore Module:"
-echo "$MODULES_PATH/backup.sh"
-echo
-
-echo "Docker Module:"
-echo "$MODULES_PATH/docker.sh"
-echo
-
-echo "Smite Compatibility Module:"
-echo "$MODULES_PATH/smite.sh"
-echo
-
-echo "Smite Digest Migration Module:"
-echo "$MODULES_PATH/smite-digest-migrate.sh"
-echo
-
-echo "Smite Installer Module:"
-echo "$MODULES_PATH/smite-install.sh"
-echo
-
-echo "Smite Gateway Module:"
-echo "$MODULES_PATH/smite-gateway.sh"
-echo
-
-echo "Smite Foreign Gateway Module:"
-echo "$MODULES_PATH/smite-foreign-gateway.sh"
-echo
-
-echo "Smite Private Network Module:"
-echo "$MODULES_PATH/smite-private-network.sh"
-echo
-
-echo "Smite EasyTier Module:"
-echo "$MODULES_PATH/smite-easytier.sh"
-echo
-
-echo "3x-UI Docker Module:"
-echo "$MODULES_PATH/docker-3xui.sh"
-echo
-
-echo "3x-UI Multi-Instance TLS Certificate Module:"
-echo "$MODULES_PATH/docker-3xui-certificate-multi.sh"
-echo
-
-echo "3x-UI Nginx / SSL Module:"
-echo "$MODULES_PATH/docker-3xui-nginx.sh"
-echo
-
-echo "Default Website / FakeSite Module:"
-echo "$MODULES_PATH/fakesite.sh"
+echo "Verified revision: $SOURCE_SHA"
+echo "Command: u-opti"
+echo "Files: $LIB_PATH"
+echo "Recovery backup: $BACKUP_DIR"
 echo
 
 "$INSTALL_PATH"
