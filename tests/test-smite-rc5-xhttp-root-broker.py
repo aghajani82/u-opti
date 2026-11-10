@@ -180,6 +180,24 @@ class BrokerRegressionTests(unittest.TestCase):
             with self.assertRaises(admission.ProvisionHold):
                 admission._require_ir_root_role()
 
+            record["state"] = "INSTALLING"
+            save()
+            # A preexisting root-owned 0755 /var/lib/u-opti is valid; its
+            # private rc6-install-journal child MUST remain 0700.
+            parent.chmod(0o755)
+            self.assertIsNone(admission._require_ir_root_role())
+            folder.chmod(0o755)
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+            folder.chmod(0o700)
+            parent.chmod(0o700)
+            # Repeated JSON keys must never rebind the trusted IR role.
+            journal.write_text(journal.read_text().replace(
+                '"role": "panel-iran"', '"role": "panel-iran", "role": "foreign"'))
+            journal.chmod(0o600)
+            with self.assertRaises(admission.ProvisionHold):
+                admission._require_ir_root_role()
+
             record["state"] = "COMMITTED"
             save()
             with self.assertRaises(admission.ProvisionHold):
