@@ -248,8 +248,6 @@ TEMP_DIR=$(mktemp -d)
 cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
 
-CACHE_BUST="$(date +%s%N)"
-
 # Fail closed BEFORE downloading/committing any installation files.
 if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
     echo "HOLD: GitHub source revision could not be verified; install cancelled." >&2
@@ -258,18 +256,190 @@ fi
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
 echo "Source revision locked for this installation: $SOURCE_SHA"
 
+# BEGIN: U-OPTI installer bounded and verified GitHub downloads
+# All files come from the single pinned commit. No live targets are modified
+# until every staged byte has passed Git blob integrity and syntax checks.
+u_opti_install_prepare_tree() {
+    INSTALL_TREE_MANIFEST="$TEMP_DIR/.uopti-source-tree.json"
+    if ! curl -4 -fsSL --retry 2 --retry-all-errors --retry-delay 1 \
+        --connect-timeout 8 --max-time 35 --speed-limit 100 --speed-time 15 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "https://api.github.com/repos/aghajani82/u-opti/git/trees/$SOURCE_SHA?recursive=1" \
+        -o "$INSTALL_TREE_MANIFEST"; then
+        echo "HOLD: Pinned GitHub source manifest could not be downloaded." >&2
+        return 1
+    fi
+    python3 -B - "$INSTALL_TREE_MANIFEST" "${MODULES[@]}" <<'PY_INSTALL_TREE'
+import json, pathlib, re, sys
+try:
+    tree = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    if (not isinstance(tree, dict) or tree.get("truncated") is not False
+            or not re.fullmatch(r"[0-9a-f]{40}", str(tree.get("sha", "")))
+            or not isinstance(tree.get("tree"), list)):
+        raise ValueError("invalid or truncated Git tree")
+    required = {"VERSION", "u-opti", "lib/common.sh"}
+    required.update("modules/" + name for name in sys.argv[2:])
+    seen = set()
+    for item in tree["tree"]:
+        if not isinstance(item, dict) or item.get("path") not in required:
+            continue
+        path = item["path"]
+        if (path in seen or item.get("type") != "blob"
+                or item.get("mode") not in ("100644", "100755")
+                or type(item.get("size")) is not int
+                or not 0 < item["size"] <= 10485760
+                or not re.fullmatch(r"[0-9a-f]{40}", str(item.get("sha", "")))):
+            raise ValueError("invalid or duplicate pinned file: " + path)
+        seen.add(path)
+    if seen != required:
+        raise ValueError("pinned tree missing required files: " +
+                         ", ".join(sorted(required - seen)))
+except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+    sys.exit("HOLD: Untrusted GitHub source manifest: " + str(exc))
+PY_INSTALL_TREE
+}
+
+u_opti_install_verify_blob() {
+    python3 -B - "$INSTALL_TREE_MANIFEST" "$1" "$2" <<'PY_INSTALL_CHECK'
+import hashlib, json, pathlib, re, sys
+try:
+    manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    path, local_path = sys.argv[2:]
+    if manifest.get("truncated") is not False:
+        raise ValueError("untrusted pinned tree")
+    entries = [entry for entry in manifest["tree"]
+               if isinstance(entry, dict) and entry.get("path") == path]
+    if len(entries) != 1:
+        raise ValueError("missing or duplicated pinned path")
+    meta = entries[0]
+    expected, size = meta.get("sha"), meta.get("size")
+    if (meta.get("type") != "blob" or meta.get("mode") not in ("100644", "100755")
+            or type(size) is not int or not 0 < size <= 10485760
+            or not isinstance(expected, str)
+            or re.fullmatch(r"[0-9a-f]{40}", expected) is None):
+        raise ValueError("invalid pinned blob metadata")
+    raw = pathlib.Path(local_path).read_bytes()
+    if len(raw) != size:
+        raise ValueError("incomplete download")
+    actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    if actual != expected:
+        raise ValueError("pinned Git blob SHA mismatch")
+except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+    sys.exit("HOLD: Download integrity check failed: " + str(exc))
+PY_INSTALL_CHECK
+}
+
+u_opti_install_api_fallback() {
+    local repo_path="$1" staged="$2" blob_sha="" response=""
+    blob_sha="$(python3 -B - "$INSTALL_TREE_MANIFEST" "$repo_path" <<'PY_INSTALL_SHA'
+import json, pathlib, re, sys
+try:
+    tree = json.loads(pathlib.Path(sys.argv[1]).read_text())
+    entries = [entry for entry in tree["tree"]
+               if isinstance(entry, dict) and entry.get("path") == sys.argv[2]]
+    if len(entries) != 1 or not re.fullmatch(r"[0-9a-f]{40}", str(entries[0].get("sha", ""))):
+        raise ValueError("invalid pinned blob")
+    print(entries[0]["sha"])
+except (OSError, ValueError, TypeError, KeyError) as exc:
+    sys.exit("HOLD: No trusted GitHub fallback blob: " + str(exc))
+PY_INSTALL_SHA
+    )" || return 1
+    response="$(mktemp "$TEMP_DIR/.uopti-api-XXXXXXXX")" || return 1
+    if ! curl -4 -fsSL --retry 1 --retry-all-errors --retry-delay 1 \
+        --connect-timeout 8 --max-time 40 --speed-limit 100 --speed-time 15 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "https://api.github.com/repos/aghajani82/u-opti/git/blobs/$blob_sha" \
+        -o "$response"; then
+        rm -f -- "$response"
+        return 1
+    fi
+    if ! python3 -B - "$response" "$blob_sha" "$staged" <<'PY_INSTALL_DECODE'
+import base64, binascii, hashlib, json, pathlib, re, sys
+try:
+    value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    expected = sys.argv[2]
+    if (not isinstance(value, dict)
+            or not re.fullmatch(r"[0-9a-f]{40}", expected)
+            or value.get("sha") != expected
+            or value.get("encoding") != "base64"
+            or type(value.get("size")) is not int
+            or not 0 < value["size"] <= 10485760
+            or not isinstance(value.get("content"), str)):
+        raise ValueError("invalid GitHub blob response")
+    raw = base64.b64decode("".join(value["content"].split()), validate=True)
+    if len(raw) != value["size"]:
+        raise ValueError("incomplete fallback blob")
+    actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    if actual != expected:
+        raise ValueError("fallback blob checksum mismatch")
+    pathlib.Path(sys.argv[3]).write_bytes(raw)
+except (OSError, UnicodeError, ValueError, TypeError, KeyError,
+        binascii.Error) as exc:
+    sys.exit("HOLD: Invalid GitHub API fallback: " + str(exc))
+PY_INSTALL_DECODE
+    then
+        rm -f -- "$response"
+        return 1
+    fi
+    rm -f -- "$response"
+    u_opti_install_verify_blob "$repo_path" "$staged"
+}
+
+u_opti_install_download() {
+    local repo_path="$1" destination="$2" staged="" attempt
+    if [[ ! "$repo_path" =~ ^(VERSION|u-opti|lib/common\.sh|modules/[a-zA-Z0-9._-]+)$ ]] ||
+       [[ "$repo_path" == *".."* ]] ||
+       [[ "$destination" != "$TEMP_DIR/"* ]] ||
+       [ -L "$destination" ]; then
+        echo "HOLD: Unsafe installer download path." >&2
+        return 1
+    fi
+    staged="$(mktemp "$TEMP_DIR/.uopti-fetch-XXXXXXXX")" || return 1
+    for attempt in 1 2; do
+        if curl -4 -fsSL --retry 0 \
+            --connect-timeout 8 --max-time 30 --speed-limit 100 --speed-time 15 \
+            "$BASE_URL/$repo_path" -o "$staged" &&
+           u_opti_install_verify_blob "$repo_path" "$staged"; then
+            mv -f -- "$staged" "$destination" && return 0
+            rm -f -- "$staged"
+            return 1
+        fi
+        if [ "$attempt" -eq 1 ]; then
+            echo "  Raw download unavailable; trying verified GitHub API: $repo_path" >&2
+            if u_opti_install_api_fallback "$repo_path" "$staged"; then
+                mv -f -- "$staged" "$destination" && return 0
+                rm -f -- "$staged"
+                return 1
+            fi
+            echo "  Verified API fallback unavailable; retrying raw once." >&2
+        fi
+        : > "$staged" || { rm -f -- "$staged"; return 1; }
+    done
+    rm -f -- "$staged"
+    echo "HOLD: Download failed after bounded retries and verified fallback: $repo_path" >&2
+    return 1
+}
+# END: U-OPTI installer bounded and verified GitHub downloads
+
+if ! u_opti_install_prepare_tree; then
+    echo "Installation stopped before changing installed files." >&2
+    exit 1
+fi
+
 echo "Downloading VERSION..."
-curl -fsSL --retry 3 "$BASE_URL/VERSION?cb=$CACHE_BUST" -o "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
+u_opti_install_download "VERSION" "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
 REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
 [ -n "$REMOTE_VERSION" ] || { echo "Error: Unable to determine U-OPTI version."; exit 1; }
 echo "Remote Version: $REMOTE_VERSION"
 echo
 
 echo "Downloading U-OPTI..."
-curl -fsSL --retry 3 "$BASE_URL/u-opti?cb=$CACHE_BUST" -o "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
+u_opti_install_download "u-opti" "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
 
 echo "Downloading common library..."
-curl -fsSL --retry 3 "$BASE_URL/lib/common.sh?cb=$CACHE_BUST" -o "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
+u_opti_install_download "lib/common.sh" "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
 
 for MODULE in "${MODULES[@]}"; do
     case "$MODULE" in
@@ -322,7 +492,7 @@ for MODULE in "${MODULES[@]}"; do
         *) LABEL="$MODULE" ;;
     esac
     echo "Downloading $LABEL module..."
-    curl -fsSL --retry 3 "$BASE_URL/modules/$MODULE?cb=$CACHE_BUST" -o "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
+    u_opti_install_download "modules/$MODULE" "$TEMP_DIR/$MODULE" || { echo "Failed to download $MODULE."; exit 1; }
 done
 
 echo

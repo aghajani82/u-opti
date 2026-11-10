@@ -253,6 +253,14 @@ jobs:
           grep -Fq '"smite-panel-ui.py"' u-opti
           grep -Fq '"smite-panel-ui.json"' u-opti
 
+      - name: Test bounded installer downloads, pinned integrity and GitHub API fallback (offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          python3 -m py_compile tests/test-uopti-installer-download.py
+          python3 -B tests/test-uopti-installer-download.py -v
+
       - name: Safely install fresh and adopt legacy U-OPTI under forced shell crash
         shell: bash
         run: |
