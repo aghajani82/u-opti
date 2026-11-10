@@ -199,6 +199,8 @@ class Journal:
                 conn.close()
         unit = self.root / ('etc/systemd/system/' + SERVICE)
         if unit.exists():
+            if d.get('role') != 'panel-iran':
+                raise Hold('FOREIGN_BROKER_UNIT')
             item = trusted(unit)
             if (not stat.S_ISREG(item.st_mode) or item.st_nlink != 1
                     or stat.S_IMODE(item.st_mode) != 0o644):
