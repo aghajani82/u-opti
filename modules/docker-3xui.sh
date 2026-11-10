@@ -3,7 +3,7 @@
 # U-OPTI - 3x-UI Docker Management
 # v0.13.0
 
-DOCKER_3XUI_IMAGE="ghcr.io/mhsanaei/3x-ui:latest"
+DOCKER_3XUI_IMAGE="ghcr.io/aghajani82/3x-ui:main"
 DOCKER_3XUI_CONTAINER="3xui"
 DOCKER_3XUI_DIR="/opt/3x-ui"
 DOCKER_3XUI_COMPOSE_FILE="$DOCKER_3XUI_DIR/docker-compose.yml"
