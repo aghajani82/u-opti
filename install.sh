@@ -211,6 +211,52 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
+# BEGIN: U-OPTI installer activity indicator
+# Keep actual work in the foreground: its exit status and errexit behavior
+# must never depend on the animation. Non-terminal logs remain plain text.
+INSTALL_ACTIVITY_PID=""
+TEMP_DIR=""
+u_opti_activity_stop() {
+    if [ -n "$INSTALL_ACTIVITY_PID" ]; then
+        kill "$INSTALL_ACTIVITY_PID" 2>/dev/null || true
+        wait "$INSTALL_ACTIVITY_PID" 2>/dev/null || true
+        INSTALL_ACTIVITY_PID=""
+        printf '\n' >&2
+    fi
+}
+u_opti_activity_start() {
+    u_opti_activity_stop
+    local label="$1"
+    printf '%s...\n' "$label" >&2
+    if [ -t 2 ] && [ "${TERM:-dumb}" != dumb ]; then
+        (
+            trap - EXIT INT TERM
+            local frame=0 started=$SECONDS dots
+            while :; do
+                case $((frame % 3)) in
+                    0) dots='.' ;;
+                    1) dots='..' ;;
+                    2) dots='...' ;;
+                esac
+                printf '\r  Working%-3s (%ds) ' "$dots" "$((SECONDS - started))" >&2
+                frame=$((frame + 1))
+                sleep 0.5
+            done
+        ) &
+        INSTALL_ACTIVITY_PID=$!
+    fi
+}
+cleanup() {
+    u_opti_activity_stop
+    if [ -n "$TEMP_DIR" ]; then
+        rm -rf -- "$TEMP_DIR"
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# END: U-OPTI installer activity indicator
+
 echo "Checking required system packages..."
 
 REQUIRED_PACKAGES=(
@@ -238,7 +284,9 @@ if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
     else
         echo "Missing required packages: ${MISSING_PACKAGES[*]}"
         echo "Installing required system packages..."
+        u_opti_activity_start "Refreshing system package lists"
         apt-get -qq -o DPkg::Lock::Timeout=300 update
+        u_opti_activity_stop
         DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l apt-get -q -o DPkg::Lock::Timeout=300 install -y "${MISSING_PACKAGES[@]}"
     fi
 fi
@@ -247,14 +295,15 @@ echo "System package preflight complete."
 echo
 
 TEMP_DIR=$(mktemp -d)
-cleanup() { rm -rf "$TEMP_DIR"; }
-trap cleanup EXIT
 
 # Fail closed BEFORE downloading/committing any installation files.
+u_opti_activity_start "Resolving verified source revision"
 if ! SOURCE_SHA="$(u_opti_resolve_source_sha "$BRANCH")"; then
+    u_opti_activity_stop
     echo "HOLD: GitHub source revision could not be verified; install cancelled." >&2
     exit 1
 fi
+u_opti_activity_stop
 BASE_URL="https://raw.githubusercontent.com/aghajani82/u-opti/$SOURCE_SHA"
 echo "Source revision locked for this installation: $SOURCE_SHA"
 
@@ -497,29 +546,47 @@ u_opti_install_download() {
 }
 # END: U-OPTI installer bounded and verified GitHub downloads
 
+u_opti_activity_start "Fetching and checking source manifest"
 if ! u_opti_install_prepare_tree; then
+    u_opti_activity_stop
     echo "Installation stopped before changing installed files." >&2
     exit 1
 fi
 
-echo "Downloading and verifying installation bundle..."
+u_opti_activity_stop
+
+u_opti_activity_start "Downloading and verifying installation bundle"
 if u_opti_install_prepare_bundle; then
+    u_opti_activity_stop
     echo "Installation bundle verified (${#MODULES[@]} modules)."
 else
+    u_opti_activity_stop
     echo "Bundle unavailable; continuing with verified individual downloads."
 fi
 
-echo "Downloading VERSION..."
+if [ -n "${INSTALL_BUNDLE_DIR:-}" ]; then
+    echo "Preparing VERSION from verified bundle..."
+else
+    echo "Downloading VERSION..."
+fi
 u_opti_install_download "VERSION" "$TEMP_DIR/VERSION" || { echo "Failed to download VERSION."; exit 1; }
 REMOTE_VERSION=$(tr -d '[:space:]' < "$TEMP_DIR/VERSION")
 [ -n "$REMOTE_VERSION" ] || { echo "Error: Unable to determine U-OPTI version."; exit 1; }
 echo "Remote Version: $REMOTE_VERSION"
 echo
 
-echo "Downloading U-OPTI..."
+if [ -n "${INSTALL_BUNDLE_DIR:-}" ]; then
+    echo "Preparing U-OPTI from verified bundle..."
+else
+    echo "Downloading U-OPTI..."
+fi
 u_opti_install_download "u-opti" "$TEMP_DIR/u-opti" || { echo "Failed to download u-opti."; exit 1; }
 
-echo "Downloading common library..."
+if [ -n "${INSTALL_BUNDLE_DIR:-}" ]; then
+    echo "Preparing common library from verified bundle..."
+else
+    echo "Downloading common library..."
+fi
 u_opti_install_download "lib/common.sh" "$TEMP_DIR/common.sh" || { echo "Failed to download common.sh."; exit 1; }
 
 DOWNLOAD_INDEX=0
@@ -631,7 +698,7 @@ fi
 echo "Feature verification passed."
 
 echo
-echo "Checking Bash syntax..."
+u_opti_activity_start "Checking Bash, Python and JSON syntax"
 bash -n "$TEMP_DIR/u-opti"
 bash -n "$TEMP_DIR/common.sh"
 for MODULE in "${MODULES[@]}"; do
@@ -641,6 +708,7 @@ for MODULE in "${MODULES[@]}"; do
         *) bash -n "$TEMP_DIR/$MODULE" || exit 1 ;;
     esac
 done
+u_opti_activity_stop
 echo "Bash/Python/JSON syntax checks passed."
 
 echo

@@ -12,6 +12,7 @@ import io
 import tarfile
 import json
 import os
+import pty
 from pathlib import Path
 import subprocess
 import tempfile
@@ -293,6 +294,68 @@ class InstallerDownloadTest(unittest.TestCase):
                         source.index('echo "Downloading VERSION..."'))
         self.assertLess(source.index('u_opti_install_download "u-opti"'),
                         source.index('echo "Preparing recoverable installation transaction..."'))
+
+
+class InstallerActivityTest(unittest.TestCase):
+    def functions(self):
+        source = INSTALLER.read_text()
+        start = source.index("# BEGIN: U-OPTI installer activity indicator")
+        end = source.index("# END: U-OPTI installer activity indicator")
+        return "set -e\n" + source[start:end]
+
+    def run_terminal(self, ending):
+        master, slave = pty.openpty()
+        try:
+            code = self.functions() + (
+                '\nu_opti_activity_start "Checking installation"\n'
+                'printf "%s\\n" "$INSTALL_ACTIVITY_PID"\n'
+                'sleep 1.1\n' + ending + '\n')
+            proc = subprocess.Popen(["bash", "-c", code], stderr=slave,
+                                    stdout=subprocess.PIPE,
+                                    env={**os.environ, "TERM": "xterm"})
+            os.close(slave)
+            slave = None
+            stdout, _ = proc.communicate(timeout=8)
+            output = b""
+            while True:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+            pid = int(stdout.strip())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            self.assertIn(b"Working.  ", output)
+            self.assertIn(b"Working.. ", output)
+            self.assertIn(b"Working...", output)
+            return proc.returncode, output
+        finally:
+            os.close(master)
+            if slave is not None:
+                os.close(slave)
+
+    def test_terminal_animation_stops_at_completion(self):
+        status, _ = self.run_terminal("u_opti_activity_stop")
+        self.assertEqual(status, 0)
+
+    def test_animation_cleanup_preserves_failure_status(self):
+        status, _ = self.run_terminal("(exit 7)")
+        self.assertEqual(status, 7)
+
+    def test_animation_cleanup_on_termination(self):
+        status, _ = self.run_terminal('kill -TERM "$$"')
+        self.assertEqual(status, 143)
+
+    def test_redirected_output_has_no_animation_or_background_process(self):
+        result = subprocess.run(["bash", "-c", self.functions() +
+            '\nu_opti_activity_start "Checking installation"\n'
+            'test -z "$INSTALL_ACTIVITY_PID"\nu_opti_activity_stop\n'],
+            capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, b"Checking installation...\n")
 
 
 if __name__ == "__main__":
