@@ -43,6 +43,86 @@ class ProvisionHold(RuntimeError):
     pass
 
 
+# Live IR admission is bound to a private RC7 install journal, not an
+# arbitrary VPS hostname. The old exact "ir" name remains compatible.
+IR_INSTALL_JOURNAL = Path("/var/lib/u-opti/rc6-install-journal/current.json")
+IR_INSTALL_STATE = Path("/etc/u-opti/smite/state.env")
+IR_INSTALL_SOURCE = "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+
+
+def _trusted_ir_file(path: Path, expected_mode: int) -> bytes:
+    st = path.lstat()
+    if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != expected_mode
+            or not 0 < st.st_size <= 8192):
+        raise ProvisionHold("IR_ROLE_PROOF_UNTRUSTED")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino, opened.st_size) != (st.st_dev, st.st_ino, st.st_size):
+            raise ProvisionHold("IR_ROLE_PROOF_CHANGED")
+        data = os.read(fd, 8193)
+        if len(data) != st.st_size:
+            raise ProvisionHold("IR_ROLE_PROOF_CHANGED")
+        return data
+    finally:
+        os.close(fd)
+
+
+def _strict_ir_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProvisionHold("IR_ROLE_PROOF_DUPLICATE_KEY")
+        result[key] = value
+    return result
+
+
+def _verified_ir_install_journal() -> bool:
+    """Authenticate only the exact root-owned panel-iran fresh transaction."""
+    try:
+        for folder in (IR_INSTALL_JOURNAL.parent.parent, IR_INSTALL_JOURNAL.parent):
+            info = folder.lstat()
+            expected_modes = ((0o700, 0o755) if folder == IR_INSTALL_JOURNAL.parent.parent
+                              else (0o700,))
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                    or stat.S_IMODE(info.st_mode) not in expected_modes):
+                return False
+        doc = json.loads(_trusted_ir_file(IR_INSTALL_JOURNAL, 0o600),
+                         object_pairs_hook=_strict_ir_object)
+        if (type(doc) is not dict or doc.get("schema") != 1
+                or doc.get("source") != IR_INSTALL_SOURCE
+                or doc.get("role") != "panel-iran"
+                or type(doc.get("id")) is not str
+                or re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", doc["id"]) is None):
+            return False
+        if doc.get("state") == "INSTALLING":
+            pid = doc.get("installer_pid")
+            start = doc.get("installer_start")
+            if (type(pid) is not int or pid <= 0
+                    or type(start) is not str or not start.isdecimal()):
+                return False
+            proc = Path("/proc", str(pid), "stat").read_text()
+            return proc.rsplit(")", 1)[1].split()[19] == start
+        if doc.get("state") != "COMMITTED":
+            return False
+        state = _trusted_ir_file(IR_INSTALL_STATE, 0o600).decode("utf-8")
+        fields = state.splitlines()
+        return (fields.count("SMITE_ROLE=panel-iran") == 1
+                and fields.count("SMITE_MANAGED_VERSION=2.0.0-rc.7") == 1)
+    except (OSError, ValueError, IndexError, UnicodeError, ProvisionHold):
+        return False
+
+
+def _require_ir_root_role() -> None:
+    if os.geteuid() != 0:
+        raise ProvisionHold("IR_ROOT_ONLY")
+    if os.uname().nodename.split(".")[0].lower() == "ir":
+        return
+    if not _verified_ir_install_journal():
+        raise ProvisionHold("IR_ROOT_ONLY")
+
+
 def _ensure_peer_group(peer_gid: int, runner) -> None:
     """Ensure the Node's primary GID resolves to a dedicated host group."""
     def lookup(key: str) -> str | None:
@@ -311,8 +391,7 @@ def provision(*, peer_gid: int, root: Path = Path("/"),
         raise ProvisionHold("INVALID_DEDICATED_PEER_GID")
     _check_root(root)
     if root == Path("/"):
-        if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-            raise ProvisionHold("IR_ROOT_ONLY")
+        _require_ir_root_role()
     source_dir = source_dir or Path(__file__).resolve().parent
     if not source_dir.is_absolute() or source_dir.is_symlink():
         raise ProvisionHold("UNTRUSTED_BROKER_SOURCE_DIR")
@@ -486,8 +565,7 @@ def activate(*, root: Path = Path("/"), runner=subprocess.run) -> dict[str, str]
     """Enable/start the prepared IR broker without grants or live route entries."""
     _check_root(root)
     if root == Path("/"):
-        if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-            raise ProvisionHold("IR_ROOT_ONLY")
+        _require_ir_root_role()
     elif runner is subprocess.run:
         raise ProvisionHold("ACTIVATION_TEST_ROOT_REQUIRES_MOCKED_RUNNER")
 
@@ -646,8 +724,7 @@ def _grant_context(root: Path) -> Path:
     """Require the existing private broker grant directory without creating it."""
     _check_root(root)
     if root == Path("/"):
-        if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-            raise ProvisionHold("IR_ROOT_ONLY")
+        _require_ir_root_role()
     etc = root / "etc/u-opti/smite"
     grants = etc / "route-grants"
     for path in (etc, grants):
@@ -1036,8 +1113,7 @@ def recover_node_socket(*, approved: bool = False, runner=subprocess.run) -> dic
     No new container, no route submission, no nonce reset, no FRP reapply.
     Interruption leaves the durable state intact and requires a fresh audit.
     """
-    if os.geteuid() != 0 or os.uname().nodename.split(".")[0].lower() != "ir":
-        raise ProvisionHold("IR_ROOT_ONLY")
+    _require_ir_root_role()
     broker = _load_recovery_broker()
     if not approved:
         proof = _socket_recovery_evidence(runner)
