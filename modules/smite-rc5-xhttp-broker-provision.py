@@ -83,8 +83,10 @@ def _verified_ir_install_journal() -> bool:
     try:
         for folder in (IR_INSTALL_JOURNAL.parent.parent, IR_INSTALL_JOURNAL.parent):
             info = folder.lstat()
+            expected_modes = ((0o700, 0o755) if folder == IR_INSTALL_JOURNAL.parent.parent
+                              else (0o700,))
             if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
-                    or stat.S_IMODE(info.st_mode) != 0o700):
+                    or stat.S_IMODE(info.st_mode) not in expected_modes):
                 return False
         doc = json.loads(_trusted_ir_file(IR_INSTALL_JOURNAL, 0o600),
                          object_pairs_hook=_strict_ir_object)
