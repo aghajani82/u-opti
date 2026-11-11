@@ -1420,6 +1420,24 @@ smite_install_panel_iran() {
             ;;
     esac
 
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
+        echo
+        echo "===== IR Node enrollment (required after core install) ====="
+        echo "IR_NODE_CONTAINER=HEALTHY_NOT_YET_PAIRED"
+        echo "IR_PANEL_NODE_REGISTRATION=PENDING_ADMIN_APPROVAL"
+        echo "The Iran Node is installed, but will NOT appear in the Panel's"
+        echo "Iran Nodes list until an administrator reserves and securely pairs it."
+        echo "Do NOT run Install Panel + Iran Node again to register it."
+        echo "1. Verify/configure the Panel's HTTPS/443 gateway first."
+        echo "2. U-OPTI -> Docker Management -> Smite Management ->"
+        echo "   Advanced -> Signed Pairing: check status, then enable Panel pairing."
+        echo "3. Panel -> Iran Nodes -> Add Iran Server: reserve NAME $node_name."
+        echo "   This creates a pending Panel record, NOT another Docker Node."
+        echo "4. Issue a one-time pairing code in the Panel, redeem in Advanced,"
+        echo "   then activate signed IR runtime and verify authenticated check-in."
+        echo "PAIRING_ACTIVATION=OPERATOR_APPROVAL_REQUIRED"
+        echo "PRODUCTION_ACTIVATION=NO"
+    fi
     smite_install_pause
 }
 
