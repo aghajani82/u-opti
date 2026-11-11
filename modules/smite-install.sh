@@ -1784,6 +1784,8 @@ smite_install_foreign_node() {
 smite_install_sanaei_foreign() {
     local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
     local signed_foreign=0 compose_project="" compose_service="" compose_files=""
+    local staged_identity=0 staged_identity_sha="" staged_identity_file=""
+    local pairing_helper="" recover_confirmation=""
     local -a instance_ids=() usable_ids=()
 
     clear
@@ -1831,14 +1833,51 @@ smite_install_sanaei_foreign() {
         fi
     fi
 
-    # Attaching Sanaei recreates base Compose. Never drop an active signed
-    # overlay or modify a credential-staged Node through this fresh-install path.
+    # Normal order remains Sanaei -> Gateway -> Pairing. Narrow exception:
+    # a previously redeemed but NOT activated RC7 KH identity may attach the
+    # already installed Sanaei database after exact read-only admission.
+    # Never remove/replace the identity, replay DB or signed runtime overlay.
     if [ "$signed_foreign" -eq 1 ]; then
-        if [ -e "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
-           [ -L "$SMITE_STATE_DIR/identities/node-identity.json" ] ||
-           ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env" ||
+        staged_identity_file="$SMITE_STATE_DIR/identities/node-identity.json"
+        if [ -e "$staged_identity_file" ] || [ -L "$staged_identity_file" ]; then
+            pairing_helper="$(dirname "${BASH_SOURCE[0]}")/smite-node-pairing.py"
+            if [ "$SMITE_MANAGED_VERSION" != "2.0.0-rc.7" ] ||
+               [ ! -f "$staged_identity_file" ] || [ -L "$staged_identity_file" ] ||
+               [ ! -f "$pairing_helper" ] || [ -L "$pairing_helper" ]; then
+                echo "HOLD: Staged pairing identity requires reviewed RC7 Foreign recovery." >&2
+                smite_install_pause
+                return
+            fi
+            if UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
+                 --verify-staged-foreign-sanaei >/dev/null 2>&1; then
+                echo "KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED"
+                echo "PAIRING_IDENTITY=PRESERVED"
+                smite_install_pause
+                return
+            fi
+            if ! UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
+                 --admit-staged-foreign-sanaei; then
+                echo "HOLD: Staged pairing Sanaei recovery admission refused; no Node changes." >&2
+                smite_install_pause
+                return
+            fi
+            echo "RC7 KH only: attach existing Sanaei DB read-only to paused Node."
+            echo "This recreates ONLY smite-node; pairing key, Gateway and FRP are retained."
+            read -r -p "Type ATTACH-STAGED-KH-SANAEI to proceed: " recover_confirmation || return
+            if [ "$recover_confirmation" != "ATTACH-STAGED-KH-SANAEI" ]; then
+                echo "Cancelled; no changes."
+                return
+            fi
+            staged_identity_sha="$(sha256sum "$staged_identity_file" | awk '{print $1}')" || return
+            [[ "$staged_identity_sha" =~ ^[a-f0-9]{64}$ ]] || {
+                echo "HOLD: Could not pin staged pairing identity before recovery." >&2
+                return
+            }
+            staged_identity=1
+        fi
+        if ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env" ||
            ! grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"; then
-            echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict." >&2
+            echo "HOLD: Install/attach Sanaei only while KH is paused + strict." >&2
             smite_install_pause
             return
         fi
@@ -1902,6 +1941,11 @@ smite_install_sanaei_foreign() {
     done
 
     if [ "${#usable_ids[@]}" -eq 0 ]; then
+        if [ "$staged_identity" -eq 1 ]; then
+            echo "HOLD: Staged identity recovery requires an existing registered Sanaei database." >&2
+            smite_install_pause
+            return
+        fi
         echo "No registered Sanaei database was found for this KH Node."
         echo "Launching the existing U-OPTI Sanaei installer."
         echo "After installation returns to U-OPTI, open this option again to"
@@ -1958,7 +2002,11 @@ smite_install_sanaei_foreign() {
     if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
        ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
-       ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'; then
+       ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols' ||
+       { [ "$staged_identity" -eq 1 ] &&
+         { [ "$(sha256sum "$staged_identity_file" | awk '{print $1}')" != "$staged_identity_sha" ] ||
+           ! UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
+             --verify-staged-foreign-sanaei; }; }; then
         echo "HOLD: Read-only Sanaei mount did not pass container verification; restoring Node configuration." >&2
         cp -a "$backup" "$SMITE_NODE_DIR/.env" || {
             echo "CRITICAL: Restore failed; backup retained at $backup" >&2
@@ -1977,6 +2025,10 @@ smite_install_sanaei_foreign() {
     fi
     rm -f "$backup"
     echo "KH_SANAEI_INVENTORY=PASS_READ_ONLY_SCHEMA"
+    if [ "$staged_identity" -eq 1 ]; then
+        echo "KH_STAGED_PAIRING_IDENTITY=UNCHANGED"
+        echo "KH_GATEWAY_CONTROL=VERIFIED"
+    fi
     echo "KH_NODE_RECREATE=PASS_HEALTHY"
     echo "KH_CLIENT_IDENTIFIERS=NOT_READ"
     smite_install_pause
