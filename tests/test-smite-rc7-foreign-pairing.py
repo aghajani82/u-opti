@@ -162,6 +162,28 @@ class ForeignRC7Tests(unittest.TestCase):
                  patch.object(p, "_run", side_effect=mock_run):
                 self.assertEqual(p._foreign_gateway_preflight(current),
                                  ("iran.grandoptical.ir", "grandoptical.ir", control))
+                # Exact pre-pairing Sanaei placeholder is accepted ONLY by
+                # explicit read-only recovery admission. Ordinary activation
+                # must continue refusing missing inventory.
+                service["environment"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "false"
+                service["volumes"][0]["source"] = str(node / ".sanaei-empty")
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current)
+                self.assertEqual(p._foreign_gateway_preflight(
+                    current, allow_unattached_sanaei=True,
+                ), ("iran.grandoptical.ir", "grandoptical.ir", control))
+                service["volumes"][0]["read_only"] = False
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current, allow_unattached_sanaei=True)
+                service["volumes"][0]["read_only"] = True
+                service["cap_add"] = ["NET_ADMIN", "SYS_MODULE", "SYS_ADMIN"]
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current, allow_unattached_sanaei=True)
+                service["cap_add"] = ["NET_ADMIN", "SYS_MODULE"]
+                service["volumes"][0]["source"] = "/opt/3x-ui/instances/01/db"
+                service["environment"]["SMITE_SANAEI_INVENTORY_ENABLED"] = "true"
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current, allow_unattached_sanaei=True)
                 service["volumes"][0]["read_only"] = False
                 with self.assertRaises(p.WizardHold):
                     p._foreign_gateway_preflight(current)
@@ -206,6 +228,74 @@ class ForeignRC7Tests(unittest.TestCase):
                 service["devices"] = ["/dev/net/tun:/dev/net/tun:rwm"]
                 self.assertEqual(p._foreign_gateway_preflight(current),
                                  ("iran.grandoptical.ir", "grandoptical.ir", control))
+
+    def test_staged_recovery_refuses_replay_and_signed_overlays(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            identity = root / "identity"
+            identity.mkdir()
+            candidate = root / "candidate.yml"
+            replay = root / "replay.sqlite3"
+            current = {
+                "SMITE_ROLE": "foreign",
+                "SMITE_CONNECTION_MODE": "standard",
+                "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            }
+            env = (
+                "SMITE_NODE_PANEL_AUTH_MODE=paused\\n"
+                "SMITE_AGENT_AUTH_MODE=strict\\n"
+                "SMITE_ENGINE_INVENTORY_MODE=managed\\n"
+            )
+            with patch.object(p, "_field_trial_gate"), \\
+                 patch.object(p, "_identity_record", return_value=("node-12345678", "a"*64)), \\
+                 patch.object(p, "_require_no_active_engine_overlays"), \\
+                 patch.object(p, "_foreign_gateway_preflight") as gateway, \\
+                 patch.object(p, "_run", return_value=env), \\
+                 patch.object(p, "NODE_SECURITY_CANDIDATE", candidate), \\
+                 patch.object(p, "REPLAY_DB", replay), \\
+                 patch.object(p, "IDENTITY_DIR", identity):
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    p.staged_foreign_sanaei_admission(current)
+                self.assertIn("ADMISSION_PASS_READ_ONLY", output.getvalue())
+                gateway.assert_called_with(current, allow_unattached_sanaei=True)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    p.staged_foreign_sanaei_admission(current, verify_attached=True)
+                gateway.assert_called_with(current, allow_unattached_sanaei=False)
+                for marker in (candidate, replay, identity / "replay-enrollment.json"):
+                    marker.touch()
+                    with self.subTest(marker=marker), self.assertRaises(p.WizardHold):
+                        p.staged_foreign_sanaei_admission(current)
+                    marker.unlink()
+                with patch.object(p, "_run", return_value=env.replace(
+                    "SMITE_NODE_PANEL_AUTH_MODE=paused",
+                    "SMITE_NODE_PANEL_AUTH_MODE=signed",
+                )):
+                    with self.assertRaises(p.WizardHold):
+                        p.staged_foreign_sanaei_admission(current)
+                with self.assertRaises(p.WizardHold):
+                    p.staged_foreign_sanaei_admission({
+                        **current, "SMITE_MANAGED_VERSION": "2.0.0-rc.6"
+                    })
+
+    def test_staged_recovery_wizard_requires_operator_and_preserves_identity(self):
+        source = (ROOT / "modules/smite-install.sh").read_text()
+        body = source.split("smite_install_sanaei_foreign() {", 1)[1].split(
+            "\\nsmite_install_field_trial_patch_compose_image()", 1
+        )[0]
+        for needle in (
+            "--admit-staged-foreign-sanaei",
+            "--verify-staged-foreign-sanaei",
+            "ATTACH-STAGED-KH-SANAEI",
+            "staged_identity_sha",
+            "PAIRING_IDENTITY=PRESERVED",
+            "Staged identity recovery requires an existing registered Sanaei database",
+        ):
+            # The recovered identity remains operator-owned, and no code or
+            # secret is ever passed through a shell command.
+            self.assertIn(needle, body)
+        self.assertNotIn("rm -f \\"$staged_identity_file\\"", body)
 
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
