@@ -100,6 +100,7 @@ python3() {
     command python3 "$@"
 }
 smite_install_ui_action() { echo "$1" >> "$TMP/ui-dispatch"; [ "${FAIL_UI:-0}" = 0 ]; }
+smite_install_finish_local_ir() { echo enrolled >> "$TMP/enrollment"; }
 smite_install_panel_iran() { echo panel >> "$TMP/dispatch"; }
 smite_install_foreign_node() { echo foreign >> "$TMP/dispatch"; }
 export DOCKER_CONTEXT=untrusted DOCKER_HOST=tcp://not-a-real-host:2375
@@ -112,6 +113,7 @@ smite_install_selected_fresh foreign <<< y
 rm "$TMP/dispatch"
 smite_install_selected_fresh panel-iran <<< y
 [ "$(cat "$TMP/dispatch")" = panel ]
+[ -s "$TMP/enrollment" ]
 [ "$(cat "$TMP/ui-dispatch")" = apply ]
 rm "$TMP/dispatch" "$TMP/ui-dispatch"
 # Exact selected installer Cosign bootstrap must never silently hang.

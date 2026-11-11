@@ -1108,7 +1108,11 @@ smite_install_panel_iran() {
     fi
     echo "Panel API bind address depends on the selected connection mode."
     echo "The Iran node always bootstraps against the local panel endpoint."
-    echo "TCP/443 gateway configuration is handled as a separate step."
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        echo "HTTPS/443 and secure local IR enrollment are included before admin creation."
+    else
+        echo "TCP/443 gateway configuration is handled as a separate step."
+    fi
     echo
 
     smite_install_require_tools || { smite_install_pause; return "${SMITE_INSTALL_FAILURE_CODE:-0}"; }
@@ -1380,6 +1384,13 @@ smite_install_panel_iran() {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
         if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
+
+    # The selected installer owns the remaining gateway, enrollment and admin
+    # steps. Do not announce completion or ask for credentials before those.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        echo 'IR_CORE=READY; continuing HTTPS and secure local enrollment...'
+        return 0
+    fi
 
     echo
     echo "======================================"
@@ -2258,8 +2269,36 @@ smite_install_selected_fresh() (
             echo 'HOLD: RC7 runtime installed; UI update pending. Use Install / Lifecycle option 8; do not reinstall.'
             return 2
         }
+        smite_install_finish_local_ir || return 2
     fi
 )
+
+# Core transaction is committed before enrollment: fresh-install rollback must
+# never delete a paired identity. Each enrollment stage keeps its own recovery.
+smite_install_finish_local_ir() {
+    local module_dir domain
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    local SMITE_GATEWAY_INSTALL_FLOW=1
+    declare -F smite_gateway_configure_panel >/dev/null || {
+        echo 'HOLD: HTTPS gateway module is unavailable'; return 2;
+    }
+    echo 'Preparing Panel HTTPS/443 and secure Iran Node enrollment...'
+    smite_gateway_configure_panel || return 2
+    domain="$(smite_gateway_panel_domain)" || return 2
+    smite_gateway_verify_443 "$domain" || return 2
+    UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B \
+        "$module_dir/smite-node-pairing.py" --complete-local-ir-install || {
+        echo 'HOLD: local Iran enrollment incomplete; retain installation and identity. Do not reinstall.'
+        return 2
+    }
+    echo 'Iran Node verified active. Create the Panel administrator account:'
+    smite_install_create_admin || return 2
+    echo 'PANEL_AND_IR_INSTALL=COMPLETE'
+    echo "Panel URL: https://$domain"
+    echo 'Sign in: Iran Nodes contains the authenticated local Node.'
+    smite_install_pause
+    return 0
+}
 
 smite_install_selected_rollback() (
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY DOCKER_CERT_PATH

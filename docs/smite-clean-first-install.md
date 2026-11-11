@@ -1,5 +1,37 @@
 # Smite Clean Install — first RC bootstrap integration (DRAFT / DISPOSABLE TRIAL ONLY)
 
+## Selected RC7 menu installation (2026-11-11)
+
+The normal **Install Panel + Iran Node** entry now completes core installation,
+HTTPS/443 setup, secure local IR enrollment and signed bidirectional verification
+before asking for the administrator username/password. The local root operator's
+installation approval authorizes only the co-located Iran slot. No temporary admin,
+remote unauthenticated registration, legacy fallback or tunnel activation is used.
+Pairing code issuance is audited as `local-root-install`; the code is redeemed
+through the verified HTTPS gateway and never printed or passed in process arguments.
+The UI must receive the real signed check-in before installation reports success.
+The historical offline Clean-RC and Foreign paths below retain their separate flow.
+
+A core transaction is committed before enrollment, so interrupted-install rollback
+cannot remove a paired identity. TLS, Panel activation and Node activation retain
+their existing rollback behavior. Failure reports HOLD, preserves the UUID/identity,
+and does not proceed to admin creation. Do not reinstall or delete identity files.
+After correcting an enrollment failure (with the HTTPS gateway already verified),
+root can resume the same local UUID using:
+
+```bash
+UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B /usr/local/lib/u-opti/modules/smite-node-pairing.py --complete-local-ir-install
+```
+
+After it reports `IR_INSTALL_ENROLLMENT=VERIFIED_ACTIVE`, create the admin with
+`cd /opt/smite && /usr/local/bin/smite admin create` if that step was not reached.
+A completed active retry only verifies signed traffic; it does not rekey or recreate
+containers. A consumed code with a lost credential response stops for reviewed
+recovery rather than silently rotating keys. Existing nodes/tunnels without the
+installer's private receipt are refused. These are repository/CI checks; a clean VPS
+installation remains the final host acceptance test.
+
+
 > Current Stage15 KH instructions: [signed KH installation and automation boundaries](SMITE-STAGE15-KH-INSTALL.md). Follow its Node → Sanaei → Gateway → Pairing order; the historical sequence below does not authorize post-pairing base-Compose recreation.
 
 ## Smite × U-OPTI delivery status (2026-10-27)

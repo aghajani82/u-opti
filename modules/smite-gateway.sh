@@ -29,6 +29,7 @@ fi
 
 
 smite_gateway_pause() {
+    [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" = 1 ] && return 0
     echo
     read -rp "Press Enter to return..."
 }
@@ -1149,12 +1150,12 @@ smite_gateway_configure_panel() {
     [ "$(id -u)" -eq 0 ] || {
         echo "ERROR: Run U-OPTI as root."
         smite_gateway_pause
-        return
+        return 1
     }
 
     smite_gateway_require_panel || {
         smite_gateway_pause
-        return
+        return 1
     }
 
     domain="$(smite_gateway_panel_domain)"
@@ -1162,7 +1163,7 @@ smite_gateway_configure_panel() {
         echo "ERROR: A valid Smite Panel domain could not be detected."
         echo "Expected PANEL_DOMAIN in $SMITE_PANEL_DIR/.env or SMITE_PANEL_DOMAIN in U-OPTI state."
         smite_gateway_pause
-        return
+        return 1
     fi
 
     echo "Panel domain : $domain"
@@ -1173,45 +1174,49 @@ smite_gateway_configure_panel() {
     echo "This operation does not open firewall/provider ports."
     echo "Public 8000 and 8888 should remain blocked."
     echo
-    read -rp "Configure the Smite 443 gateway? [y/N]: " confirm
+    if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" = 1 ]; then
+        confirm=yes
+    else
+        read -rp "Configure the Smite 443 gateway? [y/N]: " confirm
+    fi
     case "$confirm" in
         y|Y|yes|YES) ;;
-        *) echo "Gateway configuration cancelled."; sleep 1; return ;;
+        *) echo "Gateway configuration cancelled."; sleep 1; return 1 ;;
     esac
 
     echo
     smite_gateway_ensure_packages || {
         echo "ERROR: Could not prepare Nginx/Certbot/stream module."
         smite_gateway_pause
-        return
+        return 1
     }
 
     smite_gateway_ensure_certificate "$domain" || {
         echo "ERROR: Certificate preparation failed."
         smite_gateway_pause
-        return
+        return 1
     }
 
     backend_backup="$(smite_gateway_backup_file "$SMITE_GATEWAY_BACKEND_CONF")" || {
         echo "ERROR: Could not back up the current TLS backend configuration."
         smite_gateway_pause
-        return
+        return 1
     }
     stream_backup="$(smite_gateway_backup_file "$SMITE_GATEWAY_STREAM_CONF")" || {
         echo "ERROR: Could not back up the current stream configuration."
         smite_gateway_pause
-        return
+        return 1
     }
     map_backup="$(smite_gateway_backup_file "$SMITE_GATEWAY_MAP_FILE")" || {
         echo "ERROR: Could not back up the current stream map."
         smite_gateway_pause
-        return
+        return 1
     }
 
     if ! smite_gateway_prepare_private_backhaul; then
         echo "ERROR: Private Mode Backhaul preparation failed."
         smite_gateway_pause
-        return
+        return 1
     fi
 
     private_db_backup="$SMITE_GATEWAY_PRIVATE_DB_BACKUP"
@@ -1223,7 +1228,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     }
 
     smite_gateway_write_stream "$domain" || {
@@ -1232,7 +1237,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     }
 
     if ! nginx -t; then
@@ -1241,7 +1246,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     fi
 
     if ! systemctl reload nginx; then
@@ -1250,7 +1255,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     fi
 
     if ! smite_gateway_verify_443 "$domain"; then
@@ -1260,7 +1265,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     fi
 
     echo "Panel HTTPS/443: OK"
@@ -1271,7 +1276,7 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     fi
 
     if ! smite_gateway_verify_443 "$domain"; then
@@ -1280,18 +1285,23 @@ smite_gateway_configure_panel() {
             "$backend_backup" "$stream_backup" "$map_backup" \
             "$private_db_backup" "$private_backhaul_changed"
         smite_gateway_pause
-        return
+        return 1
     fi
 
     smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
     smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
-    if declare -F smite_frp_xhttp_install_timer >/dev/null; then
+    if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" != 1 ] && declare -F smite_frp_xhttp_install_timer >/dev/null; then
         smite_frp_xhttp_install_timer || echo "WARNING: FRP XHTTP automatic route timer could not be activated."
     fi
 
     smite_gateway_remove_unchanged_backup "$backend_backup" "$SMITE_GATEWAY_BACKEND_CONF"
     smite_gateway_remove_unchanged_backup "$stream_backup" "$SMITE_GATEWAY_STREAM_CONF"
     smite_gateway_remove_unchanged_backup "$map_backup" "$SMITE_GATEWAY_MAP_FILE"
+
+    if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" = 1 ]; then
+        echo 'PANEL_HTTPS_443=VERIFIED; continuing local IR enrollment...'
+        return 0
+    fi
 
     echo
     echo "======================================"
@@ -1317,6 +1327,7 @@ smite_gateway_configure_panel() {
     echo "Next: finish KH Smite/Sanaei setup, then configure the matching FRP port/path."
 
     smite_gateway_pause
+    return 0
 }
 
 show_smite_gateway_menu() {
