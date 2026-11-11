@@ -239,14 +239,27 @@ docker_smite_advanced_menu() {
         echo "1) Standard FRP Test Guide (read-only)"
         echo "2) FRP setup (beginner + Advanced)"
         echo "3) Legacy Backhaul offline preparation (NOT installer)"
+        echo "4) Signed Pairing (Field Trial / admin approval required)"
         echo "0) Back"
-        read -rp "Choose [0-3]: " choice || return
+        read -rp "Choose [0-4]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_frp_standard_guide ;;
             2) smite_frp_wizard_menu ;;
             3) smite_bh_management_menu ;;
+            4)
+                # Call the already reviewed, fail-closed signed-pairing helper
+                # from docker.sh. Never duplicate its credential workflow or
+                # fall back to unsigned/legacy registration.
+                if ! declare -F docker_smite_open_signed_pairing_advanced >/dev/null 2>&1; then
+                    echo "HOLD: Reviewed Signed Pairing helper is not loaded; update U-OPTI."
+                    read -rp "Press Enter to return..." || return
+                elif ! docker_smite_open_signed_pairing_advanced; then
+                    echo "HOLD: Signed Pairing controller refused; no fallback."
+                    read -rp "Press Enter to return..." || return
+                fi
+                ;;
             0) return ;;
             *) echo "Invalid selection." ;;
         esac
