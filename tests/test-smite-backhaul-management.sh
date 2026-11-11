@@ -182,29 +182,7 @@ grep -Fq '3) Tunnel Management (FRP / Backhaul / Rathole)' <<< "$menu"
 grep -Fq '5) Private Network Wizard' <<< "$menu"
 grep -Fq '6) Advanced & Legacy Tools' <<< "$menu"
 grep -Fq '4) Signed Pairing (Field Trial / admin approval required)' <<< "$menu"
-test "$(grep -c '^EXISTING_SIGNED_PAIRING_OK
-
-# The top-level shortcut invokes only the existing root review, with no arguments.
-# Python is intercepted: this menu regression cannot issue a real grant.
-python3() {
-    if [[ "$#" = 2 && "$1" = -B && "$2" = "$SMITE_BH_DIR/smite-stage15-root-review.py" ]]; then
-        echo ROOT_REVIEW_ONLY
-        return 2 # HOLD must remain visible and return to the menu.
-    fi
-    echo "Unexpected Python invocation: $*" >&2
-    return 99
-}
-review_menu="$(printf 'G\n\n0\n' | docker_smite_management_menu)"
-grep -Fq 'G) Approve FRP Port + Path (Stage15 / IR)' <<< "$review_menu"
-test "$(grep -c '^ROOT_REVIEW_ONLY$' <<< "$review_menu")" = 1
-# Missing helper: no fallback to RC2, install, or web approval.
-SMITE_BH_DIR="$tmp/missing"
-missing_review="$(printf 'g\n\n0\n' | docker_smite_management_menu)"
-grep -Fq 'HOLD: Stage15 root review module missing or symlinked.' <<< "$missing_review"
-! grep -q '^ROOT_REVIEW_ONLY$' <<< "$missing_review"
-echo 'Direct console review shortcut, HOLD return and missing-helper gate: PASS'
-
- <<< "$menu")" = 1
+test "$(grep -c '^EXISTING_SIGNED_PAIRING_OK$' <<< "$menu")" = 1
 # Real active Advanced menu must fail closed instead of silently creating an
 # unrelated menu that operators cannot reach. No legacy or unsigned fallback.
 unset -f docker_smite_open_signed_pairing_advanced
@@ -214,29 +192,7 @@ grep -Fq 'HOLD: Reviewed Signed Pairing helper is not loaded; update U-OPTI.' <<
 docker_smite_open_signed_pairing_advanced() { echo EXISTING_SIGNED_PAIRING_REFUSED; return 2; }
 refused_pairing="$(printf '6\n4\n\n0\n0\n' | docker_smite_management_menu)"
 grep -Fq 'HOLD: Signed Pairing controller refused; no fallback.' <<< "$refused_pairing"
-test "$(grep -c '^EXISTING_SIGNED_PAIRING_REFUSED
-
-# The top-level shortcut invokes only the existing root review, with no arguments.
-# Python is intercepted: this menu regression cannot issue a real grant.
-python3() {
-    if [[ "$#" = 2 && "$1" = -B && "$2" = "$SMITE_BH_DIR/smite-stage15-root-review.py" ]]; then
-        echo ROOT_REVIEW_ONLY
-        return 2 # HOLD must remain visible and return to the menu.
-    fi
-    echo "Unexpected Python invocation: $*" >&2
-    return 99
-}
-review_menu="$(printf 'G\n\n0\n' | docker_smite_management_menu)"
-grep -Fq 'G) Approve FRP Port + Path (Stage15 / IR)' <<< "$review_menu"
-test "$(grep -c '^ROOT_REVIEW_ONLY$' <<< "$review_menu")" = 1
-# Missing helper: no fallback to RC2, install, or web approval.
-SMITE_BH_DIR="$tmp/missing"
-missing_review="$(printf 'g\n\n0\n' | docker_smite_management_menu)"
-grep -Fq 'HOLD: Stage15 root review module missing or symlinked.' <<< "$missing_review"
-! grep -q '^ROOT_REVIEW_ONLY$' <<< "$missing_review"
-echo 'Direct console review shortcut, HOLD return and missing-helper gate: PASS'
-
- <<< "$refused_pairing")" = 1
+test "$(grep -c '^EXISTING_SIGNED_PAIRING_REFUSED$' <<< "$refused_pairing")" = 1
 echo 'Real Smite Advanced menu dispatches existing secure Signed Pairing with fail-closed missing/refused behavior: PASS'
 echo 'Backhaul offline candidates are independent of FRP and fixed Xray inbound; Core and role-aware Gateway stay primary: PASS'
 
