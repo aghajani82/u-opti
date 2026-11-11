@@ -1094,6 +1094,47 @@ docker_smite_frp_standard_guide() {
         esac
     done
 }
+# Existing signed-pairing controller, exposed under Advanced without bypassing
+# its Field Trial, HTTPS/443, admin-approval or paused/strict gates.
+docker_smite_open_signed_pairing_advanced() (
+    local wizard="$DOCKER_MODULE_DIR/smite-node-pairing-wizard.sh"
+    [ -s "$wizard" ] && [ ! -L "$wizard" ] && bash -n "$wizard" || {
+        echo "HOLD: Reviewed Smite signed-pairing wizard is missing or unsafe."
+        return 2
+    }
+    # shellcheck source=/dev/null
+    source "$wizard" || return 2
+    if ! declare -F smite_node_pairing_menu >/dev/null 2>&1; then
+        echo "HOLD: Signed-pairing controller entry is unavailable."
+        return 2
+    fi
+    smite_node_pairing_menu
+)
+
+docker_smite_advanced_menu() {
+    local choice=""
+    while true; do
+        clear
+        echo "======================================"
+        echo "        Smite Advanced Tools"
+        echo "======================================"
+        echo "1) Signed Pairing (Field Trial / admin approval required)"
+        echo "0) Back"
+        echo
+        read -rp "Choose [0-1]: " choice || return 0
+        choice="${choice#"${choice%%[![:space:]]*}"}"
+        choice="${choice%"${choice##*[![:space:]]}"}"
+        case "$choice" in
+            1) docker_smite_open_signed_pairing_advanced || {
+                   echo "HOLD: Signed Pairing did not complete."
+                   read -rp "Press Enter to return..."
+               } ;;
+            0) return 0 ;;
+            *) echo "Invalid selection"; sleep 1 ;;
+        esac
+    done
+}
+
 docker_smite_management_menu() {
     local choice
     while true; do
@@ -1103,13 +1144,15 @@ docker_smite_management_menu() {
         echo "======================================"
         echo "1) Private Network Wizard (existing 10-step flow)"
         echo "2) Standard FRP Test Guide (experimental)"
+        echo "3) Advanced Tools (Signed Pairing)"
         echo "0) Back"
-        read -rp "Choose [0-2]: " choice
+        read -rp "Choose [0-3]: " choice
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         case "$choice" in
             1) docker_smite_open_setup_wizard ;;
             2) docker_smite_frp_standard_guide ;;
+            3) docker_smite_advanced_menu ;;
             0) break ;;
             *) echo "Invalid selection"; sleep 1 ;;
         esac
