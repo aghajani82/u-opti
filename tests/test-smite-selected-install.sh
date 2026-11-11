@@ -174,3 +174,53 @@ if smite_install_selected_fresh panel-iran <<< y > "$TMP/ui-fail.log"; then exit
 unset FAIL_UI
 grep -q 'runtime installed; UI update pending' "$TMP/ui-fail.log"
 echo 'UI_UPDATE_ROLLBACK_MENU_AND_FRESH_INSTALL=PASS'
+
+# Review only the new menu functions. No host Docker installer is executed.
+mkdir -p "$TMP/advanced-pairing"
+cat > "$TMP/advanced-pairing/smite-node-pairing-wizard.sh" <<'PAIRING_STUB'
+smite_node_pairing_menu() {
+    echo 'SIGNED_PAIRING_EXISTING_HANDLER=CALLED'
+}
+PAIRING_STUB
+(
+    DOCKER_MODULE_DIR="$TMP/advanced-pairing"
+    source <(sed -n '/^docker_smite_open_signed_pairing_advanced() (/,$p' "$ROOT/modules/docker.sh")
+    printf '3\n1\n0\n0\n' | docker_smite_management_menu > "$TMP/advanced.log"
+)
+grep -q '3) Advanced Tools (Signed Pairing)' "$TMP/advanced.log"
+grep -q '1) Signed Pairing (Field Trial / admin approval required)' "$TMP/advanced.log"
+[ "$(grep -c 'SIGNED_PAIRING_EXISTING_HANDLER=CALLED' "$TMP/advanced.log")" = 1 ]
+
+# Symlinked wizard modules must be rejected, with no attempt to source them.
+rm "$TMP/advanced-pairing/smite-node-pairing-wizard.sh"
+echo 'echo UNSAFE_SIGNED_PAIRING_MODULE_WAS_RUN' > "$TMP/unauthorized.sh"
+ln -s "$TMP/unauthorized.sh" "$TMP/advanced-pairing/smite-node-pairing-wizard.sh"
+(
+    DOCKER_MODULE_DIR="$TMP/advanced-pairing"
+    source <(sed -n '/^docker_smite_open_signed_pairing_advanced() (/,$p' "$ROOT/modules/docker.sh")
+    printf '3\n1\n\n0\n0\n' | docker_smite_management_menu > "$TMP/reject-advanced.log"
+)
+grep -q 'HOLD: Reviewed Smite signed-pairing wizard is missing or unsafe' "$TMP/reject-advanced.log"
+! grep -q 'UNSAFE_SIGNED_PAIRING_MODULE_WAS_RUN' "$TMP/reject-advanced.log"
+
+# Fresh IR installer must report that running != registered; only the
+# admin-approved HTTPS/443 reservation/code/redemption may populate Iran Nodes.
+python3 -B - "$ROOT/modules/smite-install.sh" <<'PY_IR_NODE_NOTICE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+start = s.index('smite_install_panel_iran() {')
+end = s.index('smite_install_foreign_node() {', start)
+section = s[start:end]
+for marker in (
+    'IR_NODE_CONTAINER=HEALTHY_NOT_YET_PAIRED',
+    'IR_PANEL_NODE_REGISTRATION=PENDING_ADMIN_APPROVAL',
+    'Do NOT run Install Panel + Iran Node again',
+    'Advanced -> Signed Pairing',
+    'PAIRING_ACTIVATION=OPERATOR_APPROVAL_REQUIRED',
+):
+    assert section.count(marker) == 1, marker
+assert section.index('IR_NODE_CONTAINER=HEALTHY_NOT_YET_PAIRED') > section.index('smite_write_state')
+PY_IR_NODE_NOTICE
+echo 'SMITE_ADVANCED_SIGNED_PAIRING=PASS_ISOLATED_NO_AUTO_REGISTRATION'
+
