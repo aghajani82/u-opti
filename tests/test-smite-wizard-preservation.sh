@@ -35,6 +35,11 @@
 # same-hash official GitHub release-asset fallback. The isolated selected-
 # installer suite asserts timeout flags, fallback, SHA and fail-closed before
 # any Smite install transaction. All independent wizard pins remain unchanged.
+# 2026-11-11: reviewed only Smite Advanced -> existing signed-pairing
+# menu navigation plus precise post-install IR enrollment-pending guidance.
+# No admin reservation, identity generation, unsigned legacy registration,
+# automatic tunnel activation, or Panel/Node environment mutation is added.
+# Test the fail-closed Advanced dispatch and preserve all other menu entries.
 # 2026-11-09 RC8: reviewed one-line manifest filename change to the byte-exact
 # RC7 archive; fresh installation keeps all RC7 pins and behavior while the
 # selected manifest becomes RC8 release evidence. No other installer edits.
@@ -56,8 +61,8 @@ while read -r expected file; do
     fi
     echo "PRESERVED: $file"
 done <<'BASELINE'
-9061db13973f677cbeb78a45796d038d8eff0389 modules/docker.sh
-db44e5de982276d37be1aff48abd71e5a36777ef modules/smite-install.sh
+7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
+508d40d9cd26bb77184f61b2fd860b0e1ae645fe modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
