@@ -922,8 +922,11 @@ jobs:
 
   pairing-tls-e2e-isolated:
     # Real temporary Nginx stream/SNI/TLS and real Smite pairing API.
+    # Pin to the stable LTS apt mirror; ubuntu-latest (26.04) runner
+    # intermittently cannot resolve repositories to install the real stream module.
+    # No test logic is skipped or relaxed.
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout U-OPTI proposed branch
         uses: actions/checkout@v4
