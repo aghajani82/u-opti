@@ -244,18 +244,18 @@ class ForeignRC7Tests(unittest.TestCase):
                 "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
             }
             env = (
-                "SMITE_NODE_PANEL_AUTH_MODE=paused\\n"
-                "SMITE_AGENT_AUTH_MODE=strict\\n"
-                "SMITE_ENGINE_INVENTORY_MODE=managed\\n"
+                "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+                "SMITE_AGENT_AUTH_MODE=strict\n"
+                "SMITE_ENGINE_INVENTORY_MODE=managed\n"
             )
-            with patch.object(p, "_field_trial_gate"), \\
-                 patch.object(p, "_identity_record", return_value=("node-12345678", "a"*64)), \\
-                 patch.object(p, "_require_no_active_engine_overlays"), \\
-                 patch.object(p, "_foreign_gateway_preflight") as gateway, \\
-                 patch.object(p, "_run", return_value=env), \\
-                 patch.object(p, "NODE_SECURITY_CANDIDATE", candidate), \\
-                 patch.object(p, "REPLAY_DB", replay), \\
-                 patch.object(p, "IDENTITY_DIR", identity):
+            with (patch.object(p, "_field_trial_gate"),
+                  patch.object(p, "_identity_record", return_value=("node-12345678", "a"*64)),
+                  patch.object(p, "_require_no_active_engine_overlays"),
+                  patch.object(p, "_foreign_gateway_preflight") as gateway,
+                  patch.object(p, "_run", return_value=env),
+                  patch.object(p, "NODE_SECURITY_CANDIDATE", candidate),
+                  patch.object(p, "REPLAY_DB", replay),
+                  patch.object(p, "IDENTITY_DIR", identity)):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     p.staged_foreign_sanaei_admission(current)
                 self.assertIn("ADMISSION_PASS_READ_ONLY", output.getvalue())
@@ -282,7 +282,7 @@ class ForeignRC7Tests(unittest.TestCase):
     def test_staged_recovery_wizard_requires_operator_and_preserves_identity(self):
         source = (ROOT / "modules/smite-install.sh").read_text()
         body = source.split("smite_install_sanaei_foreign() {", 1)[1].split(
-            "\\nsmite_install_field_trial_patch_compose_image()", 1
+            "\nsmite_install_field_trial_patch_compose_image()", 1
         )[0]
         for needle in (
             "--admit-staged-foreign-sanaei",
@@ -292,10 +292,8 @@ class ForeignRC7Tests(unittest.TestCase):
             "PAIRING_IDENTITY=PRESERVED",
             "Staged identity recovery requires an existing registered Sanaei database",
         ):
-            # The recovered identity remains operator-owned, and no code or
-            # secret is ever passed through a shell command.
             self.assertIn(needle, body)
-        self.assertNotIn("rm -f \\"$staged_identity_file\\"", body)
+        self.assertNotIn('rm -f "$staged_identity_file"', body)
 
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
