@@ -32,6 +32,7 @@ jobs:
           python3 -B tests/test-smite-local-ir-install.py -v
           python3 -B tests/test-smite-local-ir-app.py
           bash tests/test-smite-integrated-ir-flow.sh
+          bash tests/test-smite-sanaei-result.sh
           sudo bash tests/test-smite-selected-install.sh
 
   rc7-wss-runtime-restart:

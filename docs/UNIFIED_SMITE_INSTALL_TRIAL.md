@@ -29,7 +29,8 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 ## Milestones
 - [x] Create isolated U-OPTI branch from current main.
 - [x] Persist this plan before implementation.
-- [ ] Inventory current U-OPTI and Smite enrollment/origin/replay paths; record exact sources.
+- [x] Inventory current U-OPTI and Smite enrollment/origin/replay paths; record exact sources.
+- [x] First implementation checkpoint: explicit Sanaei attachment result codes and isolated regressions.
 - [ ] Define and test admin-authorized single-use enrollment bound to node UUID, foreign role, name and approved HTTPS domain/control path.
 - [ ] Implement companion Smite trial branch: authenticated issuance/revocation, atomic redemption, safe origin authorization and UI.
 - [ ] Handle credential loss/retry/expired/revoked codes without duplicate identities or secret logging.
@@ -63,5 +64,16 @@ Fresh IR; fresh KH with new Sanaei; KH with existing Sanaei; multiple Sanaei sel
 7. Do not claim work continues when no session is running; this record enables the next session to resume.
 
 ## Latest checkpoint
-Branch created; baseline inspected. No runtime code changed yet.
-Next: inspect fork Smite pairing schema, credential issuance/redemption and foreign origin transport policy; settle the secure grant/retry contract before wiring installation.
+First implementation checkpoint (trial only): Sanaei attachment returns 2 for refusal/failure/cancellation, 3 when installation returned but attachment is pending, and 0 only after verified attachment in the signed lane. Legacy non-signed installer result is preserved. A UI pause no longer masks failure, including successful rollback after an unsuccessful attachment. No new combined installation entry is enabled yet.
+
+Validation: 10 isolated result-code scenarios PASS; existing integrated IR ordering/failure suite PASS; 8 RC7 Foreign pairing tests PASS; shell syntax PASS. The new test is wired into integrated-ir-install CI. Full remote CI and real host installation are not yet proven.
+
+Audited Smite fork main: 5e7a289071e446345ac27e4255994daf3446430a.
+- panel/app/routers/node_pairing.py: issue default 600 seconds, API max 900; reserve accepts name/role only.
+- panel/app/node_pairing_store.py: hashed single-use code, atomic consumption, encrypted per-node secret generated server-side at redemption. A lost response can strand the enrolled identity; no retry-safe install grant exists yet.
+- panel/app/signed_node_origins.py: trusted origins are a private read-only file, deliberately not writable from any API. Removing the IR terminal step needs an explicit new administrator-authorized trust path, not a chmod or a generic API write to that file.
+- modules/docker-3xui.sh: successful installer execs a fresh U-OPTI menu. Must gain a scoped return-to-caller mode before automatic DB attachment.
+
+Exact next step: design and test a separate Foreign installation grant with 7200-second default and bounded expiry, exact domain/node binding, and retry-safe identity delivery. Implement it on a companion Smite trial branch without changing existing RC7 pairing semantics. Specify migration and rollback for the new trusted-origin source. Then produce signed trial images and integrate the U-OPTI flow. Do not merely increase existing pairing TTL or bypass origin checks.
+
+No trial installation command is released: combined setup and its backend are not ready. Main and all live hosts remain unchanged.

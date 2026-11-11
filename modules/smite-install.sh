@@ -1781,6 +1781,9 @@ smite_install_foreign_node() {
     smite_install_pause
 }
 
+# Result contract for unified installation: 0 = verified attachment (signed
+# lane), 2 = failure/cancelled, 3 = Sanaei installed but attachment still pending.
+# The legacy non-signed lane continues returning its original installer result.
 smite_install_sanaei_foreign() {
     local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
     local signed_foreign=0 compose_project="" compose_service="" compose_files=""
@@ -1799,11 +1802,11 @@ smite_install_sanaei_foreign() {
         echo
         echo "Install the Smite Foreign Node first."
         smite_install_pause
-        return
+        return 2
     fi
 
     # shellcheck disable=SC1090
-    source "$SMITE_STATE_FILE"
+    source "$SMITE_STATE_FILE" || return 2
     current_role="${SMITE_ROLE:-}"
 
     if [ "$current_role" != "foreign" ]; then
@@ -1811,7 +1814,7 @@ smite_install_sanaei_foreign() {
         echo
         echo "Detected role: ${current_role:-Unknown}"
         smite_install_pause
-        return
+        return 2
     fi
 
     # A fresh RC7 install is selected inside an installer subshell. On the
@@ -1829,7 +1832,7 @@ smite_install_sanaei_foreign() {
            [ "$compose_service" != smite-node ] || [ "$compose_files" != "$SMITE_NODE_COMPOSE" ]; then
             echo "HOLD: RC7 Foreign Node Compose ownership is not the verified fresh transaction." >&2
             smite_install_pause
-            return
+            return 2
         fi
     fi
 
@@ -1846,32 +1849,32 @@ smite_install_sanaei_foreign() {
                [ ! -f "$pairing_helper" ] || [ -L "$pairing_helper" ]; then
                 echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict. (RC7-only staged identity recovery)" >&2
                 smite_install_pause
-                return
+                return 2
             fi
             if UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
                  --verify-staged-foreign-sanaei >/dev/null 2>&1; then
                 echo "KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED"
                 echo "PAIRING_IDENTITY=PRESERVED"
                 smite_install_pause
-                return
+                return 0
             fi
             if ! UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
                  --admit-staged-foreign-sanaei; then
                 echo "HOLD: Staged pairing Sanaei recovery admission refused; no Node changes." >&2
                 smite_install_pause
-                return
+                return 2
             fi
             echo "RC7 KH only: attach existing Sanaei DB read-only to paused Node."
             echo "This recreates ONLY smite-node; pairing key, Gateway and FRP are retained."
-            read -r -p "Type ATTACH-STAGED-KH-SANAEI to proceed: " recover_confirmation || return
+            read -r -p "Type ATTACH-STAGED-KH-SANAEI to proceed: " recover_confirmation || return 2
             if [ "$recover_confirmation" != "ATTACH-STAGED-KH-SANAEI" ]; then
                 echo "Cancelled; no changes."
-                return
+                return 2
             fi
-            staged_identity_sha="$(sha256sum "$staged_identity_file" | awk '{print $1}')" || return
+            staged_identity_sha="$(sha256sum "$staged_identity_file" | awk '{print $1}')" || return 2
             [[ "$staged_identity_sha" =~ ^[a-f0-9]{64}$ ]] || {
                 echo "HOLD: Could not pin staged pairing identity before recovery." >&2
-                return
+                return 2
             }
             staged_identity=1
         fi
@@ -1879,14 +1882,14 @@ smite_install_sanaei_foreign() {
            ! grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"; then
             echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict." >&2
             smite_install_pause
-            return
+            return 2
         fi
         if ! runtime_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" ||
            [ "$(printf '%s\n' "$runtime_env" | grep '^SMITE_NODE_PANEL_AUTH_MODE=')" != 'SMITE_NODE_PANEL_AUTH_MODE=paused' ] ||
            [ "$(printf '%s\n' "$runtime_env" | grep '^SMITE_AGENT_AUTH_MODE=')" != 'SMITE_AGENT_AUTH_MODE=strict' ]; then
             echo "HOLD: KH runtime is not confirmed paused; Sanaei attachment cancelled." >&2
             smite_install_pause
-            return
+            return 2
         fi
     fi
 
@@ -1895,7 +1898,7 @@ smite_install_sanaei_foreign() {
         echo
         echo "The existing Docker 3x-UI module must be loaded."
         smite_install_pause
-        return
+        return 2
     fi
 
     if [ "$signed_foreign" -ne 1 ]; then
@@ -1912,14 +1915,14 @@ smite_install_sanaei_foreign() {
         echo
         sleep 2
         docker_3xui_install
-        return
+        return $?
     fi
 
     if [ ! -f "$SMITE_NODE_COMPOSE" ] || [ -L "$SMITE_NODE_COMPOSE" ] ||
        [ ! -f "$SMITE_NODE_DIR/.env" ] || [ -L "$SMITE_NODE_DIR/.env" ]; then
         echo "HOLD: Clean-RC Foreign Node Compose and environment are required." >&2
         smite_install_pause
-        return
+        return 2
     fi
 
     # The existing Sanaei installer relaunches U-OPTI when it completes.
@@ -1929,7 +1932,7 @@ smite_install_sanaei_foreign() {
        ! docker_3xui_load_instance >/dev/null 2>&1; then
         echo "HOLD: U-OPTI multi-instance registry is unavailable." >&2
         smite_install_pause
-        return
+        return 2
     fi
     mapfile -t instance_ids < <(docker_3xui_instance_registered_ids 2>/dev/null || true)
     for index in "${instance_ids[@]}"; do
@@ -1944,15 +1947,16 @@ smite_install_sanaei_foreign() {
         if [ "$staged_identity" -eq 1 ]; then
             echo "HOLD: Staged identity recovery requires an existing registered Sanaei database." >&2
             smite_install_pause
-            return
+            return 2
         fi
         echo "No registered Sanaei database was found for this KH Node."
         echo "Launching the existing U-OPTI Sanaei installer."
         echo "After installation returns to U-OPTI, open this option again to"
         echo "connect its database to the read-only Smite inventory mount."
         smite_install_pause
-        docker_3xui_install
-        return
+        docker_3xui_install || return 2
+        # Sanaei installation alone does not complete the Node DB attachment.
+        return 3
     fi
 
     if [ "${#usable_ids[@]}" -eq 1 ]; then
@@ -1967,7 +1971,7 @@ smite_install_sanaei_foreign() {
         [ "$choice" -ge 1 ] && [ "$choice" -le "${#usable_ids[@]}" ] || {
             echo "HOLD: Invalid Sanaei instance selection." >&2
             smite_install_pause
-            return
+            return 2
         }
         selected="${usable_ids[$((choice - 1))]}"
     fi
@@ -1975,19 +1979,19 @@ smite_install_sanaei_foreign() {
     if ! docker_3xui_instance_load_state "$selected" >/dev/null 2>&1; then
         echo "HOLD: Selected Sanaei instance state is unavailable." >&2
         smite_install_pause
-        return
+        return 2
     fi
     helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-rc5-xhttp-sanaei-mount.py"
     [ -f "$helper" ] && [ ! -L "$helper" ] || {
         echo "HOLD: Sanaei mount verifier is not staged." >&2
         smite_install_pause
-        return
+        return 2
     }
     backup="$SMITE_NODE_DIR/.env.pre-sanaei-mount-$(date +%Y%m%d%H%M%S).bak"
     cp -a "$SMITE_NODE_DIR/.env" "$backup" || {
         echo "HOLD: Could not retain the Node environment rollback copy." >&2
         smite_install_pause
-        return
+        return 2
     }
     if ! python3 -B "$helper" \
         --instance-id "$selected" \
@@ -1996,7 +2000,7 @@ smite_install_sanaei_foreign() {
         --confirm-foreign-node; then
         rm -f "$backup"
         smite_install_pause
-        return
+        return 2
     fi
 
     if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
@@ -2011,17 +2015,17 @@ smite_install_sanaei_foreign() {
         cp -a "$backup" "$SMITE_NODE_DIR/.env" || {
             echo "CRITICAL: Restore failed; backup retained at $backup" >&2
             smite_install_pause
-            return
+            return 2
         }
         if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
            ! smite_wait_healthy smite-node 90; then
             echo "CRITICAL: Node rollback health is unconfirmed; backup retained at $backup" >&2
             smite_install_pause
-            return
+            return 2
         fi
         rm -f "$backup"
         smite_install_pause
-        return
+        return 2
     fi
     rm -f "$backup"
     echo "KH_SANAEI_INVENTORY=PASS_READ_ONLY_SCHEMA"
@@ -2032,6 +2036,7 @@ smite_install_sanaei_foreign() {
     echo "KH_NODE_RECREATE=PASS_HEALTHY"
     echo "KH_CLIENT_IDENTIFIERS=NOT_READ"
     smite_install_pause
+    return 0
 }
 
 
