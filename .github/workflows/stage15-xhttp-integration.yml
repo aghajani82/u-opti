@@ -6,7 +6,9 @@ permissions:
   contents: read
 jobs:
   bridge-and-contract:
-    runs-on: ubuntu-latest
+    # Run isolated Nginx regression on stable LTS mirrors to avoid
+    # ubuntu-latest (26.04) runner apt/DNS bootstrap outages. Same tests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

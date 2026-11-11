@@ -1641,6 +1641,7 @@ def _rc7_foreign_compose_command(*, staged_candidate: bool = False, rollback: bo
 
 def _foreign_gateway_preflight(
     current: dict[str, str], *, expected_image: str | None = None,
+    allow_unattached_sanaei: bool = False,
 ) -> tuple[str, str, str]:
     """Read only managed Gateway metadata; RC.2 requires additional admission."""
     version = current.get("SMITE_MANAGED_VERSION")
@@ -1707,9 +1708,22 @@ def _foreign_gateway_preflight(
             sanaei_mounts = [
                 v for v in volumes if isinstance(v, dict)
                 and v.get("target") == "/run/smite-sanaei-ro"
-                and v.get("source") == "/opt/3x-ui/instances/01/db"
-                and v.get("read_only") is True
             ]
+            if allow_unattached_sanaei:
+                # Narrow recovery from the operator's verified staging-order
+                # mistake. The identity is already stored but never mounted;
+                # strict/paused runtime must still point at the empty RO mount.
+                expected_sanaei = "false"
+                expected_mount = str(NODE_DIR / ".sanaei-empty")
+            else:
+                expected_sanaei = "true"
+                expected_mount = "/opt/3x-ui/instances/01/db"
+            valid_sanaei = (
+                len(sanaei_mounts) == 1
+                and sanaei_mounts[0].get("source") == expected_mount
+                and sanaei_mounts[0].get("read_only") is True
+                and environment.get("SMITE_SANAEI_INVENTORY_ENABLED") == expected_sanaei
+            )
             if (
                 service.get("image") != _FOREIGN_NODE_IMAGE_RC7
                 or service.get("network_mode") != "host"
@@ -1735,8 +1749,7 @@ def _foreign_gateway_preflight(
                 or environment.get("PANEL_ADDRESS") != panel + ":443"
                 or environment.get("SMITE_CONTROL_ADDRESS") != url
                 or environment.get("NODE_ROLE") != "foreign"
-                or environment.get("SMITE_SANAEI_INVENTORY_ENABLED") != "true"
-                or len(sanaei_mounts) != 1
+                or not valid_sanaei
             ):
                 raise WizardHold("RC7 Foreign effective Compose security has drifted")
         except (KeyError, ValueError, TypeError, AttributeError) as exc:
@@ -1783,6 +1796,50 @@ def _foreign_gateway_preflight(
     if payload != {"status": "ok", "service": "smite-node"}:
         raise WizardHold("Foreign control HTTPS readiness is not approved")
     return panel, domain, url
+
+
+def staged_foreign_sanaei_admission(
+    current: dict[str, str] | None = None, *, verify_attached: bool = False,
+) -> None:
+    """RC7 KH only: read-only staged-identity gate; never replace a key.
+
+    This is deliberately NOT an alternative pairing/redemption/activation
+    path. It only audits the exact paused/strict base Compose before the
+    existing Sanaei read-only mount helper may recreate a paused Node.
+    """
+    _field_trial_gate()
+    state = state_values() if current is None else current
+    if (state.get("SMITE_ROLE") != "foreign"
+            or state.get("SMITE_CONNECTION_MODE") != "standard"
+            or state.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.7"):
+        raise WizardHold("Staged Sanaei recovery requires the reviewed RC7 Foreign role")
+    _identity_record()  # Validate owner, mode, private directory and secret, never print it.
+    _require_no_active_engine_overlays()
+    for artifact in (
+        NODE_SECURITY_CANDIDATE,
+        REPLAY_DB,
+        IDENTITY_DIR / "replay-enrollment.json",
+    ):
+        if artifact.exists() or artifact.is_symlink():
+            raise WizardHold("Staged Sanaei recovery refuses signed/replay runtime artifacts")
+    _foreign_gateway_preflight(
+        state, allow_unattached_sanaei=not verify_attached,
+    )
+    runtime = _run([
+        "docker", "inspect", "-f",
+        "{{range .Config.Env}}{{println .}}{{end}}", "smite-node",
+    ], timeout=10, capture=True).splitlines()
+    for value in (
+        "SMITE_NODE_PANEL_AUTH_MODE=paused",
+        "SMITE_AGENT_AUTH_MODE=strict",
+        "SMITE_ENGINE_INVENTORY_MODE=managed",
+    ):
+        if value not in runtime:
+            raise WizardHold("Staged Sanaei recovery requires paused/strict managed runtime")
+    print("KH_SANAEI_STAGED_IDENTITY=" +
+          ("READY_READ_ONLY" if verify_attached else "ADMISSION_PASS_READ_ONLY"))
+    print("PAIRING_IDENTITY=PRESERVED")
+    print("NODE_RUNTIME=PAUSED_STRICT")
 
 
 def activate_foreign_node_field_trial(
@@ -1967,6 +2024,8 @@ def run(argv: list[str] | None = None) -> int:
     actions.add_argument("--redeem-preview", action="store_true")
     actions.add_argument("--activate-ir-node-field-trial", action="store_true")
     actions.add_argument("--activate-foreign-node-field-trial", action="store_true")
+    actions.add_argument("--admit-staged-foreign-sanaei", action="store_true")
+    actions.add_argument("--verify-staged-foreign-sanaei", action="store_true")
     # Separate explicit RC.2 lane; never switch the existing RC.1 wizard silently.
     actions.add_argument("--activate-foreign-node-rc2-field-trial", action="store_true")
     actions.add_argument("--approve-foreign-origin-field-trial", action="store_true")
@@ -1979,6 +2038,12 @@ def run(argv: list[str] | None = None) -> int:
         domain = state.get("SMITE_PANEL_DOMAIN", "")
         secure_endpoint("https://" + domain)
         print(f"ROLE={role} MODE=standard PANEL=https://{domain}:443")
+
+        if args.admit_staged_foreign_sanaei or args.verify_staged_foreign_sanaei:
+            staged_foreign_sanaei_admission(
+                state, verify_attached=args.verify_staged_foreign_sanaei,
+            )
+            return 0
 
         if args.status:
             identity = IDENTITY_FILE
