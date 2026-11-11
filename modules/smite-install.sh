@@ -1844,7 +1844,7 @@ smite_install_sanaei_foreign() {
             if [ "$SMITE_MANAGED_VERSION" != "2.0.0-rc.7" ] ||
                [ ! -f "$staged_identity_file" ] || [ -L "$staged_identity_file" ] ||
                [ ! -f "$pairing_helper" ] || [ -L "$pairing_helper" ]; then
-                echo "HOLD: Staged pairing identity requires reviewed RC7 Foreign recovery." >&2
+                echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict. (RC7-only staged identity recovery)" >&2
                 smite_install_pause
                 return
             fi
@@ -1877,7 +1877,7 @@ smite_install_sanaei_foreign() {
         fi
         if ! grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' "$SMITE_NODE_DIR/.env" ||
            ! grep -qx 'SMITE_AGENT_AUTH_MODE=strict' "$SMITE_NODE_DIR/.env"; then
-            echo "HOLD: Install/attach Sanaei only while KH is paused + strict." >&2
+            echo "HOLD: Install/attach Sanaei before pairing while KH is paused + strict." >&2
             smite_install_pause
             return
         fi
