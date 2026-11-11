@@ -136,7 +136,9 @@ def complete_local_ir_install(state: dict[str, str]) -> None:
         if actual != expected:
             raise WizardHold('Local bootstrap image differs from selected RC7')
     _panel_compose_command()
-    _ir_node_compose_command()
+    # Validate ownership/file set without executing the returned command. The
+    # inspection must also admit the already-active candidate on a safe retry.
+    _ir_node_compose_command(rollback=True)
     _private_dir(PAIRING_PRIVATE_DIR, create=True)
     lock_path = PAIRING_PRIVATE_DIR / 'local-ir-install.lock'
     fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)

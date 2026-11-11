@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('pairing', ROOT / 'modules/smite-node-pairing.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
+REAL_IR_COMPOSE = p._ir_node_compose_command
 
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
@@ -83,6 +84,27 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(self.identity.read_bytes(), original)
         self.assertEqual(self.events, ['_local_signed_replay_probe',
                                       '_wait_panel_signed_checkin', '_panel_to_ir_signed_probe'])
+
+    def test_active_retry_accepts_real_compose_ownership_guard(self):
+        self.complete()
+        self.signed = True
+        base = self.private / 'node-compose.yml'
+        candidate = self.private / 'node-candidate.yml'
+        base.write_text('services: {}')
+        original_run = self.run_host
+        def host(args, **kwargs):
+            if 'com.docker.compose.project.config_files' in args[3]:
+                return str(base) + ',' + str(candidate)
+            if 'com.docker.compose.project' in args[3]:
+                return 'uopti_rc6_' + 'a' * 32
+            if 'com.docker.compose.service' in args[3]:
+                return 'smite-node'
+            return original_run(args, **kwargs)
+        with patch.object(p, 'NODE_COMPOSE', base), \
+             patch.object(p, 'NODE_SECURITY_CANDIDATE', candidate), \
+             patch.object(p, '_ir_node_compose_command', REAL_IR_COMPOSE), \
+             patch.object(p, '_run', side_effect=host):
+            self.assertIn('VERIFIED_ACTIVE', self.complete())
 
     def test_failed_activation_retries_same_identity(self):
         self.activate.side_effect = p.WizardHold('probe failed')
