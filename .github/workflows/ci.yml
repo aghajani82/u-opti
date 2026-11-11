@@ -10,6 +10,30 @@ permissions:
   contents: read
 
 jobs:
+  integrated-ir-install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: 9a1270b31e8d44f13d09b71ab6b9798410b09c12
+          path: .local-ir-rc7
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install -r .local-ir-rc7/panel/requirements.txt
+      - name: Local enrollment order, failures, retries and exact RC7 app
+        env:
+          UOPTI_TEST_SMITE_SOURCE: .local-ir-rc7
+        run: |
+          python3 -B tests/test-smite-local-ir-install.py -v
+          python3 -B tests/test-smite-local-ir-app.py
+          bash tests/test-smite-integrated-ir-flow.sh
+          sudo bash tests/test-smite-selected-install.sh
+
   rc7-wss-runtime-restart:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

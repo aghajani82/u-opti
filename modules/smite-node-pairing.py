@@ -30,6 +30,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
+import fcntl
 from urllib import error, parse, request
 
 
@@ -66,6 +68,137 @@ _DOMAIN = re.compile(
 
 class WizardHold(Exception):
     """Safe refusal: never include secret data in its message."""
+
+
+# Local root bootstrap is deliberately not an HTTP endpoint. The installer
+# authorizes exactly its co-located IR slot before the first admin is created.
+# Use the application's reservation model and one-time code store, then redeem
+# through the same verified HTTPS ingress used by manually paired Nodes.
+_LOCAL_IR_RESERVE = r'''
+import asyncio, json, secrets, sys
+from sqlalchemy import select
+from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models import Node, Tunnel
+from app import node_pairing_store as pairing
+node_id, name = sys.argv[1:]
+def require(condition):
+    if not condition:
+        raise RuntimeError('Local IR reservation admission rejected')
+async def reserve():
+    require(settings.smite_node_registration_mode == 'signed')
+    require(settings.smite_panel_agent_auth_mode == 'signed')
+    require(settings.smite_node_pairing_preview_enabled)
+    async with AsyncSessionLocal() as db:
+        require((await db.execute(select(Tunnel.id))).first() is None)
+        rows = (await db.execute(select(Node))).scalars().all()
+        if rows:
+            require(len(rows) == 1)
+            row = rows[0]
+            require(row.id == node_id and row.name == name)
+            require(row.status == 'pending')
+            require(row.node_metadata == {
+                'role': 'iran', 'node_name': name,
+                'provisioning': 'reserved_for_pairing'})
+        else:
+            db.add(Node(id=node_id, name=name,
+                fingerprint='reserved-' + secrets.token_hex(16), status='pending',
+                node_metadata={'role': 'iran', 'node_name': name,
+                               'provisioning': 'reserved_for_pairing'}))
+            await db.commit()
+asyncio.run(reserve())
+code = pairing.issue_code(settings.db_path,
+    master_key=settings.smite_node_pairing_master_key,
+    node_id=node_id, role='iran', admin_id='local-root-install', ttl_seconds=600)
+print(code.code)
+'''
+
+
+def complete_local_ir_install(state: dict[str, str]) -> None:
+    """Fresh RC7 only; retain one identity across retries, never rekey it."""
+    _field_trial_gate()
+    if (state.get('SMITE_ROLE') != 'panel-iran'
+            or state.get('SMITE_CONNECTION_MODE') != 'standard'
+            or state.get('SMITE_MANAGED_VERSION') != '2.0.0-rc.7'):
+        raise WizardHold('Local bootstrap requires the selected RC7 IR install')
+    name = state.get('SMITE_NODE_NAME', '')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,62}', name):
+        raise WizardHold('Invalid local IR name')
+    domain = state.get('SMITE_PANEL_DOMAIN', '')
+    secure_endpoint('https://' + domain)
+    _require_no_active_engine_overlays()
+    for container, expected in (
+        ('smite-panel', _FOREIGN_PANEL_IMAGE_RC7),
+        ('smite-node', _FOREIGN_NODE_IMAGE_RC7),
+    ):
+        actual = _run(['docker', 'inspect', '-f', '{{.Config.Image}}', container],
+                      capture=True, timeout=15)
+        if actual != expected:
+            raise WizardHold('Local bootstrap image differs from selected RC7')
+    _panel_compose_command()
+    _ir_node_compose_command()
+    _private_dir(PAIRING_PRIVATE_DIR, create=True)
+    lock_path = PAIRING_PRIVATE_DIR / 'local-ir-install.lock'
+    fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise WizardHold('Local IR enrollment already running') from exc
+        _complete_local_ir_locked(state, name, domain)
+
+
+def _complete_local_ir_locked(state: dict[str, str], name: str, domain: str) -> None:
+    receipt = PAIRING_PRIVATE_DIR / 'local-ir-install.json'
+    if receipt.exists() or receipt.is_symlink():
+        try:
+            record = json.loads(_regular(receipt, mode=0o600))
+            node_id = record['node_id']
+            if (str(uuid.UUID(node_id)) != node_id or
+                    record != {'node_id': node_id, 'name': name, 'domain': domain}):
+                raise ValueError('Receipt mismatch')
+        except (ValueError, KeyError, TypeError, AssertionError) as exc:
+            raise WizardHold('Local IR enrollment receipt mismatch') from exc
+    else:
+        if IDENTITY_FILE.exists() or IDENTITY_FILE.is_symlink():
+            raise WizardHold('Existing Node identity is not installer-owned')
+        # Read-only admission before pairing changes or reserving any row.
+        with sqlite3.connect(PANEL_DB.absolute().as_uri() + '?mode=ro', uri=True) as db:
+            if db.execute('SELECT 1 FROM nodes LIMIT 1').fetchone() or db.execute(
+                    'SELECT 1 FROM tunnels LIMIT 1').fetchone():
+                raise WizardHold('Local bootstrap refuses existing Nodes or tunnels')
+        node_id = str(uuid.uuid4())
+        _atomic_write(receipt, (json.dumps({'node_id': node_id, 'name': name,
+                                          'domain': domain}) + '\n').encode(), 0o600)
+
+    if IDENTITY_FILE.exists() or IDENTITY_FILE.is_symlink():
+        stored_id, _ = _identity_record()
+        if stored_id != node_id:
+            raise WizardHold('Local IR identity differs from installer receipt')
+    else:
+        enable_panel_field_trial(state)
+        prepare_store()
+        code = _run(['docker', 'exec', 'smite-panel', 'python3', '-c',
+                     _LOCAL_IR_RESERVE, node_id, name], capture=True, timeout=30)
+        # Never print captured output, exceptions, or codes. A lost response
+        # after redemption must HOLD rather than rotate an existing identity.
+        if not _CODE.fullmatch(code):
+            raise WizardHold('Local IR reservation did not return a pairing code')
+        redeem(panel_url='https://' + domain, pairing_code=code,
+               node_id=node_id, role='iran', destination=IDENTITY_FILE)
+
+    effective = _run(['docker', 'inspect', '-f',
+                      '{{range .Config.Env}}{{println .}}{{end}}', 'smite-node'],
+                     capture=True, timeout=15).splitlines()
+    if 'SMITE_NODE_PANEL_AUTH_MODE=signed' in effective:
+        if 'SMITE_AGENT_AUTH_MODE=strict' not in effective:
+            raise WizardHold('Local IR runtime is not strict')
+        _local_signed_replay_probe()
+        _wait_panel_signed_checkin(node_id)
+        _panel_to_ir_signed_probe(node_id)
+    else:
+        activate_ir_node_field_trial(state)
+    print('IR_INSTALL_ENROLLMENT=VERIFIED_ACTIVE')
 
 
 def state_values(path: Path = STATE) -> dict[str, str]:
@@ -1825,6 +1958,7 @@ def run(argv: list[str] | None = None) -> int:
     actions.add_argument("--status", action="store_true")
     actions.add_argument("--prepare-store", action="store_true")
     actions.add_argument("--enable-panel-field-trial", action="store_true")
+    actions.add_argument("--complete-local-ir-install", action="store_true")
     actions.add_argument("--redeem-field-trial", action="store_true")
     # Backward-compatible name for older inert callers; live use still requires
     # the new explicit Field Trial gate and confirmation.
@@ -1866,6 +2000,10 @@ def run(argv: list[str] | None = None) -> int:
 
         if args.enable_panel_field_trial:
             enable_panel_field_trial(state)
+            return 0
+
+        if args.complete_local_ir_install:
+            complete_local_ir_install(state)
             return 0
 
         if args.activate_ir_node_field_trial:
