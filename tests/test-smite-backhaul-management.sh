@@ -158,14 +158,15 @@ docker_smite_open_setup_wizard() { echo PRIVATE_OK; }
 docker_smite_frp_standard_guide() { echo FRP_GUIDE_OK; }
 smite_frp_wizard_menu() { echo FRP_WIZARD_OK; }
 smite_bh_management_menu() { echo BACKHAUL_OK; }
+docker_smite_open_signed_pairing_advanced() { echo EXISTING_SIGNED_PAIRING_OK; }
 smite_tw_menu() { echo UNIFIED_TUNNELS_OK; }
 smite_tw_choose_role() { echo ir; }
 twcc_menu() { echo READONLY_STATUS_OK; }
 
 # IR role must route the final top-level Gateway entry to Panel Gateway.
 printf 'SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\n' > "$SMITE_BH_STATE_FILE"
-menu="$(printf '1\n2\n3\n4\n5\n6\n1\n2\n3\n0\n0\n' | docker_smite_management_menu)"
-for value in CORE_INSTALL_OK PANEL_GATEWAY_OK PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK; do
+menu="$(printf '1\n2\n3\n4\n5\n6\n1\n2\n3\n4\n0\n0\n' | docker_smite_management_menu)"
+for value in CORE_INSTALL_OK PANEL_GATEWAY_OK PRIVATE_OK UNIFIED_TUNNELS_OK READONLY_STATUS_OK FRP_GUIDE_OK FRP_WIZARD_OK BACKHAUL_OK EXISTING_SIGNED_PAIRING_OK; do
     grep -Fq "$value" <<< "$menu"
 done
 ! grep -Fq 'FOREIGN_GATEWAY_OK' <<< "$menu"
@@ -180,6 +181,19 @@ grep -Fq '2) 443 Gateway (auto-detect Panel / Foreign)' <<< "$menu"
 grep -Fq '3) Tunnel Management (FRP / Backhaul / Rathole)' <<< "$menu"
 grep -Fq '5) Private Network Wizard' <<< "$menu"
 grep -Fq '6) Advanced & Legacy Tools' <<< "$menu"
+grep -Fq '4) Signed Pairing (Field Trial / admin approval required)' <<< "$menu"
+test "$(grep -c '^EXISTING_SIGNED_PAIRING_OK$' <<< "$menu")" = 1
+# Real active Advanced menu must fail closed instead of silently creating an
+# unrelated menu that operators cannot reach. No legacy or unsigned fallback.
+unset -f docker_smite_open_signed_pairing_advanced
+missing_pairing="$(printf '6\n4\n\n0\n0\n' | docker_smite_management_menu)"
+grep -Fq 'HOLD: Reviewed Signed Pairing helper is not loaded; update U-OPTI.' <<< "$missing_pairing"
+! grep -Fq 'EXISTING_SIGNED_PAIRING_OK' <<< "$missing_pairing"
+docker_smite_open_signed_pairing_advanced() { echo EXISTING_SIGNED_PAIRING_REFUSED; return 2; }
+refused_pairing="$(printf '6\n4\n\n0\n0\n' | docker_smite_management_menu)"
+grep -Fq 'HOLD: Signed Pairing controller refused; no fallback.' <<< "$refused_pairing"
+test "$(grep -c '^EXISTING_SIGNED_PAIRING_REFUSED$' <<< "$refused_pairing")" = 1
+echo 'Real Smite Advanced menu dispatches existing secure Signed Pairing with fail-closed missing/refused behavior: PASS'
 echo 'Backhaul offline candidates are independent of FRP and fixed Xray inbound; Core and role-aware Gateway stay primary: PASS'
 
 # The top-level shortcut invokes only the existing root review, with no arguments.
