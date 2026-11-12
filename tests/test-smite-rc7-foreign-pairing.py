@@ -405,12 +405,17 @@ class ForeignRC7Tests(unittest.TestCase):
         }
         original = ("node-12345678", "a"*64)
         disk_id = "sha256:" + "d"*64
-        runtime = {"identity": original, "replay": True, "image_id": disk_id}
+        runtime = {"identity": original, "replay": True, "image_id": disk_id,
+                   "rotate_on_recreate": False}
         cmds = []
         def command(args, **kwargs):
             cmds.append(args)
             if "up" in args:
                 self.assertIn("--force-recreate", args)
+                # A genuinely broken recreate rotates the identity AFTER
+                # the caller captured it, never before that snapshot.
+                if runtime["rotate_on_recreate"]:
+                    runtime["identity"] = ("node-12345678", "b"*64)
                 return ""
             if args[:3] == ["docker", "inspect", "-f"]:
                 if args[3] == "{{.Config.Image}}": return p._FOREIGN_NODE_IMAGE_RC7
@@ -441,9 +446,10 @@ class ForeignRC7Tests(unittest.TestCase):
                     p.rollback_node_to_paused_field_trial(state)
                 self.assertIn("NODE_RUNTIME=PAUSED_STRICT", output.getvalue())
                 self.assertEqual(sum("up" in cmd for cmd in cmds), 1)
-                runtime["identity"] = ("node-12345678", "b"*64)
+                runtime["rotate_on_recreate"] = True
                 with self.assertRaisesRegex(p.WizardHold, "identity changed"):
                     p.rollback_node_to_paused_field_trial(state)
+                runtime["rotate_on_recreate"] = False
                 runtime["identity"] = original
                 runtime["image_id"] = "sha256:" + "e"*64
                 with self.assertRaisesRegex(p.WizardHold, "image ID differs"):
