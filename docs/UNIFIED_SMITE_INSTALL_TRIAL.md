@@ -31,7 +31,7 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - [x] Persist this plan before implementation.
 - [x] Inventory current U-OPTI and Smite enrollment/origin/replay paths; record exact sources.
 - [x] First implementation checkpoint: explicit Sanaei attachment result codes and isolated regressions.
-- [x] Implement and test the inert installation-grant store: UUID/name/domain binding, 2-hour expiry and atomic identity/origin commit. HTTP administrator authorization is still pending integration.
+- [x] Implement and test the inert installation-grant store: UUID/name/domain binding, 2-hour expiry and atomic identity/origin commit. Gated HTTP administrator authorization is implemented; UI remains pending.
 - [ ] Implement companion Smite trial branch: authenticated issuance/revocation, atomic redemption, safe origin authorization and UI.
 - [ ] Handle credential loss/retry/expired/revoked codes without duplicate identities or secret logging.
 - [ ] Build and verify signed trial images; bind installer to their exact digests.
@@ -102,3 +102,40 @@ Validation: 13 HTTP tests + 9 existing HTTP pairing + 3 MFA + 19 grant store + 1
 New verified finding: signed_agent_transport.py uses certificate validation, no redirects and trust_env=False, but still resolves DNS through httpx without public-IP pinning. The previous plan's assumption that a reusable reviewed DNS-pinning mechanism existed is not established. Add/test one for DB-approved Foreign origins before activation; syntax-only domain validation is insufficient.
 
 NEXT: gated DB-approved origin reader with consumed-grant/unrevoked-identity/name/role matching; deterministic denial on file/DB conflicts; retain existing file-origin behavior; public-IP DNS resolution pinning with original TLS SNI and hostname validation; negative private-IP/rebinding/redirect tests. After that UI and client durable-secret/lost-response handling, snapshots, signed image packaging and unified installer. Continue on the same branches, never main. No host install command yet.
+
+
+## Continuation checkpoint — approved origins and pinned DNS (2026-11-12)
+Companion Smite SHA: dd36201afe40f9edefd3aa3a9ed1afbb03ec69aa
+Branch: trial/unified-smite-install (both repositories). Main unchanged.
+
+Implemented separate default-OFF SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED.
+Read-only database lookup requires a consumed, unrevoked grant, exact identity/name/
+role/origin/control-path and matching consumption/approval/identity timestamps.
+Expired consumed grants do not disconnect an established identity. Unsafe or
+conflicting approval files, revoked identities and missing committed origin records
+fail closed. Existing file approvals remain read-only; matching file/DB origins
+still use the new network policy. Schema migration remains explicit.
+
+NodeClient uses public-IP DNS pinning for database-approved Foreign requests.
+Reject all DNS results if any address is non-public/special; connect to a vetted
+literal IPv4/IPv6 address with original Host, SNI and certificate hostname validation.
+No redirects, environment proxies, request retries or hostname re-resolution.
+HTTPCore pinned at 1.0.9. Existing file-only Iran/Foreign and FRP paths are preserved.
+
+Verification: 20 new tests + 97 existing tests = 117 local PASS. Both remote
+pairing-store and foreign-install-http jobs SUCCESS on the exact SHA above.
+Tests exercise actual HTTPX/HTTPCore connection/TLS setup with an offline backend;
+certificate failure is simulated, not a live public-CA or two-host deployment test.
+Local Smite checkout reconciled to the published commit with clean working tree.
+
+Rollback: disable issuance only, retain origin trust and grant/origin/identity
+records for established nodes. Do not disable trust or delete tables on active
+enrollments. Export/recovery tooling remains outstanding. Neither flag is enabled
+on live hosts. No signed trial image or runnable integrated installer yet.
+
+NEXT EXACT WORK: admin UI for pending Foreign reservation + domain + issue/reissue
+and safe one-time code presentation; durable client secret staging and signed
+lost-reply verification; explicit schema/ingress provisioning and snapshot/recovery;
+signed trial image pair + exact U-OPTI digest pins; unified installation orchestration.
+Do not recreate the grant store/HTTP/origin/DNS work. Continue these trial branches.
+No merge to main until Mohammad tests and approves. No host installation command yet.
