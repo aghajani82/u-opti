@@ -992,3 +992,62 @@ after tested transaction/recovery on disposable hosts. Preserve Iran
 option 1, FRP 20182, active Sanaei, current Node container and all
 signed replay data. Merge to main only following full host tests and
 explicit user acceptance.
+
+## Checkpoint — no-echo Foreign terminal intake, real PTY proof (2026-11-12)
+
+This step advances the user-approved **Iran Panel → one-use 2-hour JSON
+→ Foreign Smite Manager option 2** journey without bypassing the trial
+activation HOLD or rebuilding existing Foreign pairing components.
+
+The existing `smite-unified-foreign-packet-intake.py` now has two narrow
+reusable functions:
+- `read_hidden_tty(stream)` requires a REAL terminal, disables terminal
+  ECHO, ECHONL, ECHOE and ECHOK before the operator pastes the complete
+  multiline JSON, applies the existing 8192-byte/40-line/blank-line
+  terminator bound, and restores the original termios state in a
+  `finally` block after success, malformed JSON, callback failure or
+  Ctrl-C. Non-TTY pipes are not accepted as a substitute.
+- `capture_disposable_hidden_tty(..., confirm_scope=...)` calls the
+  existing strict `smi1` parser, passes only the NONSECRET Node name,
+  ID, Panel/Gateway origins and control URL to the confirmation callback
+  AFTER echo is restored, and on affirmative confirmation uses the
+  existing fsynced private 0700/0600, no-overwrite packet stager.
+  The installation code is never put in argv, stdout, shell history,
+  logs or environment. No new pairing, identity or activation engine.
+
+New tests in
+`tests/test-smite-unified-foreign-packet-intake.py` exercise an ACTUAL
+Linux pseudo-terminal with input submitted ONLY after echo was disabled,
+verify no reflected bearer code, exact permission-preserving stage,
+manual cancellation, incorrect destination and termios restoration
+after a simulated KeyboardInterrupt; non-terminal input is rejected.
+The original 11 packet validation/expiry/permission tests still run.
+The actual cross-repository
+`tests/test-smite-foreign-install-integration.py` now takes a REAL
+Smite ASGI/SQLite-issued grant, transfers its **pretty-printed JSON
+through this no-echo PTY**, confirms only nonsecret scope, and then
+reuses the existing Smite HTTP redemption, signed HMAC proof, retained
+identity promotion, lost-response reconciliation and expiry/revocation
+checks. No external Panel, host TTY, Docker or live network is used.
+
+GitHub Actions (both jobs SUCCESS on the tested code):
+https://github.com/aghajani82/u-opti/actions/runs/43244674444
+
+**Status: no public host input command yet.** The Python module still
+exposes `--status` ONLY. Both its private capture methods accept
+*disposable test fixture paths*, not production Node/host directories.
+No user needs to run a command on the live IR or Foreign server. No
+change to `main`, the public Smite Manager menu, existing FRP 20182,
+Backhaul, Sanaei Docker, Node identity or replay database. The unified
+signed image manifest remains `activation_allowed: false`.
+
+**NEXT:** wire an explicitly fresh/owned Foreign installer-local
+private packet capture at the correct stage of option 2, preserving the
+nonsecret scope-confirmation and the same single paste; then implement
+a reviewed, durable host recovery journal and **separately authorized**
+paused-to-strict-signed runtime activation with same immutable Node ID,
+without recreating Node. Require genuine Foreign→Panel signed check-in
+AND Panel→Foreign verified status before the Panel refresh can display
+Connected. Until the signed manifest and full recovery/dual-host tests
+permit activation, the public option 2 remains unchanged and HOLD
+must not be misreported as success. Merge only with final approval.
