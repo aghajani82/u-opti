@@ -734,9 +734,9 @@ The regression deliberately asserts option 2 is still not wired and Iran
 option 1 still calls its existing signed one-choice completion path.
 Existing signed pair, Foreign credential/identity, isolated Nginx, real
 disposable HTTPS and Iran/Sanaei regressions remain green. GitHub Actions
-[43232707642](https://github.com/aghajani82/u-opti/actions/runs/43232707642):
+[43233349119](https://github.com/aghajani82/u-opti/actions/runs/43233349119):
 **2/2 jobs SUCCESS** on tested source
-`fb910734a8de849f306a58fc5ff84f6b717ea880`.
+`f4f0487b3891eda6c90240241e8b9080873f8a8c`.
 
 **NEXT EXACT WORK — do not recreate the existing installers:**
 1. Introduce a **trial-branch-only, operator-gated** signed image selector
