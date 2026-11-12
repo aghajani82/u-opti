@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - modules/smite-foreign-install-client.py
+      - modules/smite-unified-foreign-identity-phase.py
+      - tests/test-smite-unified-foreign-identity-phase.py
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
@@ -45,6 +47,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r companion-smite/panel/requirements.txt
       - run: python -B tests/test-smite-foreign-install-client.py -v
+      - run: python -B tests/test-smite-unified-foreign-identity-phase.py -v
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
       - run: bash tests/test-smite-unified-sanaei-continuation.sh
