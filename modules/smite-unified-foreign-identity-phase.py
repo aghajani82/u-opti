@@ -19,7 +19,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 
@@ -90,11 +92,21 @@ def rehearse(*, packet_path, state_path, gateway_path, node_env_path,
         deny()
     if live.parent == Path("/"):
         deny()
-    # Do not inspect the host default /etc, /opt or /var paths even when
-    # a caller supplies the fixture flag by mistake.
-    if any(str(p).startswith(("/etc/u-opti/", "/opt/smite", "/var/lib/u-opti/"))
-           for p in paths):
+    # Enforce an OS temporary directory nested exactly as:
+    # <tempfile.gettempdir()>/<private-tmpdir>/foreign-fixture.
+    # Merely naming an arbitrary host path "foreign-fixture" is not a grant
+    # to stage a new identity under /etc, /var, /root or an active project.
+    top = Path(tempfile.gettempdir()).resolve()
+    if live.parent.parent.parent != top:
         deny()
+    for parent in (live.parent.parent, live.parent):
+        if parent.is_symlink() or not parent.is_dir():
+            deny()
+        info = parent.stat()
+        if (info.st_uid != os.geteuid()
+                or not stat.S_ISDIR(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o700):
+            deny()
 
     client = load("uopti_unified_client_phase", "smite-foreign-install-client.py")
     promotion = load("uopti_unified_promotion_phase", "smite-foreign-install-promotion.py")
