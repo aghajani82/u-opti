@@ -2052,6 +2052,10 @@ def activate_foreign_node_field_trial(
                         expected_identity=retained_identity,
                         require_replay=True,
                     )
+                    # Verify the *observed* post-recreate Compose owner now
+                    # has ONLY the original base file. A pre-rollback
+                    # command is not proof that Docker applied that file.
+                    _rc7_foreign_compose_command()
             except Exception:
                 rollback_ok = False
         if not rollback_ok:
@@ -2115,6 +2119,10 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
         _rc7_foreign_paused_rollback_verified(
             expected_identity=retained_identity, require_replay=retained_replay,
         )
+        # This is a separate read-only *after* witness, not the prior
+        # command selection. Never claim safe rollback while the failed
+        # signed candidate/foreign Compose files remain active.
+        _rc7_foreign_compose_command()
     print("NODE_RUNTIME=PAUSED_STRICT")
     print("PAIRING_IDENTITY=PRESERVED")
     print("REPLAY_HISTORY=PRESERVED")

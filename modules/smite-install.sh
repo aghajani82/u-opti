@@ -2522,6 +2522,20 @@ smite_install_selected_fresh() (
         if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
         return
     fi
+    # The current public Foreign choice still selects the *old* official
+    # RC7 image. The signed unified pair is READ-ONLY and has
+    # activation_allowed=false: starting a new Node here would leave a
+    # stranded, incomplete installation with an expiring Panel grant.
+    # Fail BEFORE Docker, package changes, prompting, journaling or writing
+    # any host installation files. Keep this explicit until the existing
+    # signed runtime/rollback and complete one-choice transaction are
+    # released and tested. Iran option 1 remains unaffected.
+    if [ "$role" = foreign ]; then
+        echo 'HOLD: Signed unified Foreign runtime activation is not yet released; no installation started.'
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+        return 2
+    fi
     smite_install_selected_paths || { echo 'HOLD: Selected recovery requires standard managed paths'; return 2; }
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
     [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC7 images qualify amd64 only'; return 2; }

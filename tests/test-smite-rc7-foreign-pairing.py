@@ -594,6 +594,101 @@ class ForeignRC7Tests(unittest.TestCase):
                 expected_identity=retained, require_replay=True,
             )
 
+    def test_manual_rc7_rollback_rechecks_effective_compose_after_recreate(self):
+        state = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard",
+        }
+        events = []
+        def compose(*, rollback=False, staged_candidate=False):
+            events.append(("compose", rollback, staged_candidate))
+            if not rollback:
+                # A successful command was sent to Docker, but the live
+                # service still reports the candidate in config_files.
+                raise p.WizardHold("Foreign RC7 active Compose files are not reviewed")
+            return ["docker", "compose", "--project-name", "test"]
+        def run(args, **kw):
+            events.append(("command", args))
+            if "up" in args:
+                return ""
+            if args[:3] == ["docker", "inspect", "-f"] and                     "{{range .Config.Env}}" in args[3]:
+                return (
+                    "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+                    "SMITE_AGENT_AUTH_MODE=strict\n"
+                    "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+                )
+            raise AssertionError(args)
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "not-yet-paired-identity.json"
+            with patch.object(p, "_field_trial_gate"), \
+                 patch.object(p, "_require_no_active_engine_overlays"), \
+                 patch.object(p, "_regular", return_value=b"owned"), \
+                 patch.object(p, "IDENTITY_FILE", missing), \
+                 patch.object(p, "_rc7_foreign_pinned_image_verified"), \
+                 patch.object(p, "_rc7_foreign_paused_rollback_verified"), \
+                 patch.object(p, "_rc7_foreign_compose_command", side_effect=compose), \
+                 patch.object(p, "_wait_container"), \
+                 patch.object(p, "_run", side_effect=run):
+                with self.assertRaisesRegex(p.WizardHold, "active Compose files"):
+                    p.rollback_node_to_paused_field_trial(state)
+        self.assertEqual(events[0], ("compose", True, False))
+        self.assertIn(("compose", False, False), events)
+        self.assertEqual(sum("up" in e[1] for e in events if e[0]=="command"),1)
+
+    def test_failed_foreign_activation_must_verify_compose_after_rollback(self):
+        state = {
+            "SMITE_ROLE": "foreign", "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard", "SMITE_NODE_NAME": "node-kh",
+        }
+        retained = ("node-12345678", "a"*64)
+        state_of = {"signed": False, "active_override": False}
+        events = []
+        def compose(*, rollback=False, staged_candidate=False):
+            events.append(("compose", rollback, staged_candidate))
+            if not (rollback or staged_candidate) and state_of["active_override"]:
+                raise p.WizardHold("Foreign RC7 active Compose files are not reviewed")
+            return ["docker", "compose", "--project-name", "test"]
+        def run(args, **kw):
+            events.append(("command", args))
+            if args[-2:] == ["config","--quiet"]:
+                return ""
+            if "up" in args:
+                if "-f" in args and "never" in args:
+                    state_of["signed"] = True
+                else:
+                    state_of["signed"] = False
+                    state_of["active_override"] = True
+                return ""
+            if args[:3] == ["docker", "inspect", "-f"] and                     "{{range .Config.Env}}" in args[3]:
+                return (
+                    "SMITE_NODE_PANEL_AUTH_MODE=" +
+                    ("signed" if state_of["signed"] else "paused") + "\n"
+                    "SMITE_AGENT_AUTH_MODE=strict\n"
+                    "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+                )
+            raise AssertionError(args)
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
+             patch.object(p, "_foreign_gateway_preflight",
+                          return_value=("iran.example.org","kh.example.org",
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \
+             patch.object(p, "_rc7_foreign_compose_command",side_effect=compose), \
+             patch.object(p, "_rc7_foreign_pinned_image_verified"), \
+             patch.object(p, "_identity_record",return_value=retained), \
+             patch.object(p, "_regular",return_value=b"owned"), \
+             patch.object(p, "_prepare_security_candidate"), \
+             patch.object(p, "_provision_replay_once"), \
+             patch.object(p, "_run",side_effect=run), \
+             patch.object(p, "_wait_container"), \
+             patch.object(p, "_local_signed_replay_probe",
+                          side_effect=p.WizardHold("synthetic lost signed proof")), \
+             patch.object(p, "_rc7_foreign_paused_rollback_verified"):
+            with self.assertRaisesRegex(p.WizardHold,"CRITICAL"):
+                p.activate_foreign_node_field_trial(state)
+        self.assertIn(("compose",False,False),events[-1:])
+        self.assertEqual(sum("up" in e[1] for e in events if e[0]=="command"),2)
+
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
         body = source.split("def activate_foreign_node_field_trial(", 1)[1].split(

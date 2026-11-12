@@ -163,6 +163,22 @@ mv "$PACKET" "$PACKET.unavailable"
 run 2 signed,paused,compose
 mv "$PACKET.unavailable" "$PACKET"
 
+# A publicly selected fresh Foreign option must now fail BEFORE any host
+# mutations, since the trial signed runtime explicitly disallows activation
+# and official RC7 cannot complete the same one-choice pairing transaction.
+# This tests the ACTUAL menu dispatcher, not a duplicate installer mock.
+# The explicit historical clean-rc branch below remains available for
+# isolated preflight/compatibility tests.
+SMITE_INSTALL_PROFILE=stable
+status=0
+smite_install_selected_fresh foreign > "$TMP/foreign-preflight-hold" 2>&1 || status=$?
+[ "$status" = 2 ]
+grep -qx 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES' "$TMP/foreign-preflight-hold"
+grep -qx 'FOREIGN_CONNECTED=NOT_PROVEN' "$TMP/foreign-preflight-hold"
+! grep -q 'Install Complete' "$TMP/foreign-preflight-hold"
+! grep -q 'smi1_B' "$TMP/foreign-preflight-hold"
+SMITE_INSTALL_PROFILE=clean-rc
+
 # The selected Foreign core must return control to this SAME option, never
 # display a completed installation or claim Connected while enrollment is HOLD.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'

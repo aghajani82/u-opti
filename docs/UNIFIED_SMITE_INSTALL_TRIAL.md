@@ -1669,3 +1669,39 @@ This is an offline preparation only, NOT a successful or remotely
 connected installation. NEXT: reuse the signed pairing activation
 transaction and rollback after reviewed admission, then full
 two-direction Connected checks before exposing public option 2.
+
+## Consolidation checkpoint — Foreign option-2 early HOLD + audited existing RC7 rollback (2026-11-12)
+
+**User-impacting correction:** the public fresh option 2 previously
+installed the *official* RC7 paused Node, committed its core journal,
+then returned HOLD because the separate signed unified trial image
+could not be activated. This stranded partial installs without
+Sanaei/Gateway/Pairing and wasted a one-use Panel grant. It now emits
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` **before** Docker,
+prompting, packages, journaling, or filesystem mutations; it does not
+pretend that the one-choice Foreign workflow is ready. The explicitly
+selected older `clean-rc` offline/independent trial path remains
+unchanged; Iran option 1 is unchanged.
+
+**Reused existing transaction, no new engine:** both the existing
+`activate_foreign_node_field_trial` failure rollback and
+`rollback_node_to_paused_field_trial` now re-run
+`_rc7_foreign_compose_command()` **after** the rollback force-recreate
+and paused/strict, identity, replay, pinned-image proofs. The
+pre-recreate `rollback=True` command alone cannot prove that Docker
+relinquished the old security-candidate Compose overlay. A retained
+candidate/foreign Compose label is a HOLD for manual rollback, or a
+`CRITICAL` rollback-not-verified result when failed activation is
+being recovered. It does not claim Connected or rotate keys.
+
+The existing pairing and one-choice shell test suites cover a
+simulate-successful Docker command which leaves the wrong active
+Compose set behind, plus pre-install HOLD without host activity.
+The signed unified manifest still has `activation_allowed:false`;
+there is no trial image activation or any live host change.
+
+NEXT: integrate signed unified image admission + **reviewed**
+activation/rollback with the existing Pairing machinery, then
+complete the menu option-2 one-choice run on isolated two-server
+hosts. Only after independently confirmed bidirectional Connected
+and user acceptance may it advance to main.
