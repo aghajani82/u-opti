@@ -1319,3 +1319,77 @@ when both pass. Finally wire option 2, verify both hosts in
 disposable two-host tests, and request approval for real-host
 testing/merging to main. Keep FRP 20182, active Sanaei,
 existing Node, main and both hosts untouched.
+
+## Consolidation checkpoint — reuse existing one-choice Sanaei and Foreign Gateway (2026-11-12)
+
+The operator explicitly reiterated: **finish, combine and simplify the
+existing Smite/U-OPTI service**; do NOT add new features, standalone
+installers, parallel engines, or additional menu visits. Continue only on
+`trial/unified-smite-install`, do not touch `main` or either live host
+before full signed two-host evidence and final approval.
+
+**This stage changed only the existing install flow functions and their
+regression tests. No new runtime module, public API or installation
+feature was introduced.**
+
+- `modules/smite-foreign-gateway.sh`:
+  `smite_foreign_gateway_configure` now reuses the operator's already
+  approved **fresh option-2 installation** when the exact private
+  Panel-issued `smi1` JSON has passed existing scope/role/paused checks.
+  It no longer requests the *second redundant* "Configure Gateway? [y/N]"
+  confirmation. It does NOT skip the independent Panel source IPv4
+  allow-list prompt/validation (required to avoid trusting a CDN IP),
+  Domain/Node/Standard-mode checks, strict gate, signed packet, exact
+  32-hex path validation, original Nginx/LE TLS safeguards, or failure
+  returns. Standalone Gateway repair / menu option 6 still asks for
+  confirmation. Gateway's existing renderer, certificate installer,
+  Docker Compose and rollback code are not replaced.
+- The SAME Gateway entry does not `clear` the terminal while an owned
+  one-choice Foreign operation is continuing, preserving prior Node/
+  Sanaei output. Independent option 6 retains the original screen.
+- `modules/smite-install.sh`:
+  `smite_install_sanaei_foreign` keeps prior progress visible and
+  `smite_install_pause` no longer stops the caller with "Press Enter
+  to return" when `UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1` **and**
+  `SMITE_SELECTED_FRESH=1`. The isolated standalone Sanaei option 4,
+  unowned/nonfresh installations and ordinary menu behaviors retain
+  their original clear/pause semantics. Failure return codes remain
+  unchanged, so an interrupted/invalid mount remains HOLD rather
+  than reporting success.
+
+Existing regressions were extended rather than adding another testing
+framework: `tests/test-smite-unified-gateway-menu-boundary.sh`
+now checks that a valid signed fresh packet reaches only the first
+mocked package-boundary (no real mutation) without a second consent
+prompt, but invalid packet, private mode, nonfresh role, invalid Panel
+source IPv4 and independent Gateway cancellation all block safely.
+`tests/test-smite-unified-sanaei-continuation.sh` now exercises the
+ACTUAL Sanaei early-error and pause/clear functions to prove that
+fresh scoped option-2 continuation is uninterrupted while standalone
+option-4 menu/pause behavior is unchanged. The existing signed
+Cosign, host recovery, foreign identity HMAC, Sanaei RO schema,
+Nginx HTTPS/443 and Iran option-1 tests still run in CI.
+
+All changes: **trial branch only**. Green GitHub Actions:
+https://github.com/aghajani82/u-opti/actions/runs/43252907240
+(two jobs successful on the implementation and regression tests).
+No Smite source/UI changes, no new features, no `main` merge,
+no real server changes, no Node/FRP/Backhaul/Sanaei restarts.
+
+**Remaining acceptance HOLD:** the public option-2 `smite_install_selected_fresh
+foreign` still ends after RC7 core and is deliberately NOT wired
+to the incomplete unified Foreign post-core chain. Existing official
+RC7 and independently signed trial image digests are different, and
+the unified trial manifest still says `activation_allowed=false`.
+The actual runtime activation, shared crash-safe single host transaction
+through pairing, retained rollback, and BOTH real signed Connected
+directions still require proof. Do not bypass these gates or change
+`main` merely because the menu flow is simplified.
+
+NEXT WORK IS INTEGRATION, NOT NEW FEATURES: audit the already-existing
+`smite-node-pairing.py` signed runtime/rollback implementation against
+the exact independently signed trial image, reuse the existing journal
+and two-way verification functions with safe fresh-install ownership,
+and test the full option-2 sequencing in isolated two-host fixtures.
+Only after PASS and explicit user approval should final installation
+run on the servers and tested changes be merged to `main`.
