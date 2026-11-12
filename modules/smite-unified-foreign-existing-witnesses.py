@@ -293,7 +293,7 @@ class ExistingWitnesses:
             site_text = planner.safe_site(site)
             control = urlsplit(scope["control_url"]).path
             locations = re.findall(
-                r"(?m)^\\s*location\\s+\\^~\\s+(/smite-node/[^\\s{]+)/\\s*\\{",
+                r"(?m)^\s*location\s+\^~\s+(/smite-node/[^\s{]+)/\s*\{",
                 site_text or "")
             if (site_text is None or locations != [control]
                     or "proxy_pass http://127.0.0.1:8888/;" not in site_text
