@@ -246,6 +246,20 @@ class IdentityPhase(unittest.TestCase):
         self.assertFalse(self.calls)
         self.assertFalse(self.live.exists())
 
+    def test_rehearsal_requires_private_temp_ancestors(self):
+        try:
+            self.base.chmod(0o755)
+            with self.assertRaises(module.Hold):self.call()
+        finally:
+            self.base.chmod(0o700)
+        try:
+            self.base.parent.chmod(0o755)
+            with self.assertRaises(module.Hold):self.call()
+        finally:
+            self.base.parent.chmod(0o700)
+        self.assertFalse(self.calls)
+        self.assertFalse(self.live.exists())
+
     def test_cli_has_no_production_execution(self):
         executable=ROOT/"modules"/"smite-unified-foreign-identity-phase.py"
         result=subprocess.run([sys.executable,"-B",str(executable),"--status"],
