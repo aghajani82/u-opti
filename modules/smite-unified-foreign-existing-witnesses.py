@@ -285,6 +285,20 @@ class ExistingWitnesses:
                 return "ABSENT"
             if path.is_symlink() or not path.is_file():
                 return "DRIFT"
+            # The existing trial gateway planner refuses unsafe vhost
+            # symlinks and conflicting control locations without rewriting
+            # them. A saved Gateway state is not proof of an active route.
+            planner = load("uopti_witness_gateway_site",
+                           "smite-unified-foreign-gateway-plan.py")
+            site_text = planner.safe_site(site)
+            control = urlsplit(scope["control_url"]).path
+            locations = re.findall(
+                r"(?m)^\\s*location\\s+\\^~\\s+(/smite-node/[^\\s{]+)/\\s*\\{",
+                site_text or "")
+            if (site_text is None or locations != [control]
+                    or "proxy_pass http://127.0.0.1:8888/;" not in site_text
+                    or "deny all;" not in site_text):
+                return "DRIFT"
             if self.sanaei(scope) != "READY":
                 return "DRIFT"
             state = self._state(scope)
