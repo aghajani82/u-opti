@@ -2083,6 +2083,109 @@ smite_install_unified_foreign_sanaei() {
     return 0
 }
 
+# Option 2 unified-install composition boundary (trial branch ONLY).
+# Reuses existing Sanaei and Gateway; enrollment/activation are separate.
+# NOT connected to the public menu: the unified signed trial image manifest
+# explicitly says host_activation_allowed=false, and the existing RC7 runtime
+# activation module still pins the older published Node digest.
+smite_install_unified_signed_pair_review() {
+    local module_dir verifier manifest trust_root actual_cosign
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    verifier="$module_dir/smite-unified-trial-pair-admission.py"
+    manifest="$module_dir/smite-unified-trial-registry-pair.json"
+    trust_root="$module_dir/smite-rc7-sigstore-trusted-root.json"
+    for item in "$verifier" "$manifest" "$trust_root"; do
+        [ -f "$item" ] && [ ! -L "$item" ] || {
+            echo 'HOLD: Unified signed trial verification inputs missing.' >&2
+            return 2
+        }
+    done
+    command -v cosign >/dev/null 2>&1 || {
+        echo 'HOLD: Unified trial image signature verifier missing.' >&2
+        return 2
+    }
+    actual_cosign="$(command -v cosign)" || return 2
+    [ -f "$actual_cosign" ] && [ ! -L "$actual_cosign" ] || return 2
+    [ "$(sha256sum "$actual_cosign" | awk '{print $1}')" =       'c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74' ] || {
+        echo 'HOLD: Unified trial requires the exact reviewed Cosign v3.0.6 binary.' >&2
+        return 2
+    }
+    python3 -B "$verifier"         --manifest "$manifest"         --manifest-sha256 e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608         --source-sha b865be93e22153c60769f6329e6e55e781494ded         --trusted-root "$trust_root" || return 2
+    echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_READ_ONLY'
+}
+
+smite_install_unified_foreign_node_image_review() {
+    local image
+    # No --force-recreate or mutable tag; the effective running Node must
+    # exactly match the independently signed trial Node before ANY post-core
+    # Sanaei / Gateway edits.
+    image="$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" || return 2
+    [ "$image" =       'ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483' ] || {
+        echo 'HOLD: Foreign Node is not the exact signed unified trial image.' >&2
+        return 2
+    }
+    echo 'UNIFIED_FOREIGN_NODE_IMAGE=EXACT_SIGNED_DIGEST'
+}
+
+# Internal phase composition for future single-choice Foreign option 2.
+# Must never be called with an older RC7 image, a partially recovered node,
+# or from an existing host. Packet is a private 0600 file previously retained
+# from the Panel-issued install instructions, never passed as a secret argv.
+# No installed/connected success message is emitted here.
+smite_install_unified_foreign_after_core() {
+    local packet="$1" helper_dir admitted="" recorded=""
+    if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
+       [ ! -f "$SMITE_STATE_FILE" ] || [ -L "$SMITE_STATE_FILE" ] ||
+       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE" ||
+       ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: Unified Foreign post-core requires a fresh reviewed RC7 transaction.' >&2
+        return 2
+    fi
+    [ -n "$packet" ] || {
+        echo 'HOLD: Private, Panel-issued Foreign installation packet required.' >&2
+        return 2
+    }
+    helper_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$helper_dir/smite-unified-foreign-gateway-plan.py" ] &&
+    [ ! -L "$helper_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
+    declare -F smite_foreign_gateway_configure >/dev/null 2>&1 || {
+        echo 'HOLD: Existing Smite Foreign Gateway helper is not loaded.' >&2
+        return 2
+    }
+
+    # Complete read-only security preflight BEFORE running Sanaei or touching
+    # the Gateway. Both signatures are checked against trial workflow identity.
+    smite_install_unified_signed_pair_review || return 2
+    smite_install_unified_foreign_node_image_review || return 2
+    admitted="$(python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py"         --packet-file "$packet"         --state-file "$SMITE_STATE_FILE"         --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env")" || {
+        echo 'HOLD: Foreign installation packet is not bound to this fresh Node.' >&2
+        return 2
+    }
+    [[ "$admitted" =~ ^/smite-node/[0-9a-f]{32}$ ]] || return 2
+
+    # The existing option-4 Sanaei installer returns to this invocation and
+    # attaches its verified read-only database; no standalone menu reload.
+    smite_install_unified_foreign_sanaei || {
+        echo 'HOLD: Sanaei and Node inventory were not both verified.' >&2
+        return 2
+    }
+    UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet"       smite_foreign_gateway_configure || {
+        echo 'HOLD: Foreign SSL/443 Gateway incomplete; retain reviewed state.' >&2
+        return 2
+    }
+    # Do not declare Gateway readiness unless the persisted control path
+    # still matches the exact Panel issue; this never exposes the raw code.
+    recorded="$(smite_foreign_gateway_state_value         SMITE_FOREIGN_CONTROL_PATH "$SMITE_STATE_DIR/foreign-gateway.env")" || return 2
+    [ "$recorded" = "$admitted" ] || {
+        echo 'HOLD: Foreign Gateway path differs from the Panel-issued grant.' >&2
+        return 2
+    }
+    echo 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT'
+    echo 'UNIFIED_FOREIGN_CONNECTED=NOT_YET_VERIFIED'
+    return 0
+}
+
 smite_install_field_trial_patch_compose_image() {
     local compose_file="$1" old_image="$2" new_image="$3"
     python3 - "$compose_file" "$old_image" "$new_image" <<'PY_RC_UPGRADE_COMPOSE'
