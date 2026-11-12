@@ -150,23 +150,25 @@ class Integration(unittest.TestCase):
             node_env_path=env,directory=stage,live_identity=live,
             transport=transport,now=int(time.time()),
             disposable_capability=True)
-        self.assertEqual(phase.rehearse(**kwargs)['phase'],
+        self.assertEqual(phase.rehearse_transaction(**kwargs)['phase'],
                          'IDENTITY_PROMOTED_OFFLINE')
         self.assertEqual(calls,[c.REDEEM,c.STATUS,c.STATUS])
         original=live.read_bytes()
         self.assertEqual(json.loads(original)['node_id'],packet['node_id'])
         self.assertEqual(live.stat().st_mode & 0o777,0o600)
         calls.clear()
-        packet['expires_at']=int(time.time())-1
-        safe_write(target,json.dumps(packet))
+        # Once committed, the exact packet/operation journal stays sealed;
+        # a retry proves identity without issuing or re-consuming a code.
         settings.smite_foreign_install_enabled=False
-        self.assertEqual(phase.rehearse(**kwargs)['connected'],False)
+        self.assertEqual(phase.rehearse_transaction(**kwargs)['connected'],False)
+        self.assertEqual(json.loads((stage/'unified-foreign-transaction.json').read_text())['phase'],
+                         'IDENTITY_PROMOTED_OFFLINE')
         self.assertEqual(calls,[c.STATUS])
         self.assertEqual(original,live.read_bytes())
         from app.node_pairing_store import revoke_node
         revoke_node(fixture.db,node_id=fixture.node)
         with self.assertRaises(phase.Hold):
-            phase.rehearse(**kwargs)
+            phase.rehearse_transaction(**kwargs)
         self.assertEqual(original,live.read_bytes())
 
     def test_real_redemption_lost_reply_expired_recovery_and_revocation(self):
