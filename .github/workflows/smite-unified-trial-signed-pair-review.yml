@@ -1,0 +1,55 @@
+name: Verify Unified Smite Trial Signed Pair (read only)
+
+on:
+  push:
+    branches: [trial/unified-smite-install]
+    paths:
+      - 'modules/smite-unified-trial-registry-pair.json'
+      - 'modules/smite-unified-trial-pair-admission.py'
+      - 'modules/smite-rc7-sigstore-trusted-root.json'
+      - 'tests/test-smite-unified-trial-pair-admission.py'
+      - '.github/workflows/smite-unified-trial-signed-pair-review.yml'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  independent-ghcr-cosign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    if: github.repository == 'aghajani82/u-opti' && github.ref == 'refs/heads/trial/unified-smite-install' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate immutable U-OPTI source, manifest hash, and fail-closed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo 'e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
+          python3 -B tests/test-smite-unified-trial-pair-admission.py -v
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Independently verify BOTH registry signatures and branch OIDC claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B modules/smite-unified-trial-pair-admission.py \
+            --manifest modules/smite-unified-trial-registry-pair.json \
+            --manifest-sha256 e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608 \
+            --source-sha b865be93e22153c60769f6329e6e55e781494ded \
+            --trusted-root modules/smite-rc7-sigstore-trusted-root.json
+          echo HOST_INSTALL_ALLOWED=NO
+          echo OFFICIAL_RELEASE_APPROVED=NO
