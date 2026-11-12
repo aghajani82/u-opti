@@ -127,6 +127,10 @@ UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE=
 expect 2 no no
 
 
+# The earlier prewrite boundary deliberately mocked the recreate
+# function to detect unexpected mutation. Restore the REAL existing
+# gateway functions for the following retained-Node verification.
+source "$ROOT/modules/smite-foreign-gateway.sh"
 # Verify the REAL RC7 gateway runtime function retains the already
 # prebound, healthy paused Node during selected one-choice installation.
 # Independent option-6 repair keeps its existing recreation behavior.
