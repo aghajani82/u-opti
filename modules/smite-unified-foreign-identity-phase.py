@@ -244,62 +244,60 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
             packet, state_path=state_path, gateway_path=gateway_path,
             node_env_path=node_env_path, client=client)
         with promotion.private_directory(directory) as fd:
-            from contextlib import ExitStack
-            with ExitStack():
-                lock = os.open(_TX_LOCK, os.O_RDWR | os.O_CREAT |
-                               os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
+            lock = os.open(_TX_LOCK, os.O_RDWR | os.O_CREAT |
+                           os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
+            try:
+                client.private_file(lock)
                 try:
-                    client.private_file(lock)
-                    try:
-                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    deny()
+                # Verify exact raw packet under the transaction lock,
+                # not merely the parsed scope. Different code with the
+                # same Node/domain must never be silently adopted.
+                raw = promotion.read_optional(
+                    fd, "foreign-install-packet.json", client)
+                if raw is None or client.parse_packet(raw) != packet:
+                    deny()
+                fingerprint = hashlib.sha256(raw).hexdigest()
+                expected = {
+                    "schema": 1,
+                    "packet_sha256": fingerprint,
+                    "node_id": packet.scope["node_id"],
+                    "scope": packet.scope,
+                }
+                previous = promotion.read_optional(fd, _TX_JOURNAL, client)
+                if previous is not None:
+                    journal = client.decode(previous)
+                    if (set(journal) != set(expected) | {"phase"}
+                            or any(journal.get(k) != v for k, v in expected.items())
+                            or journal["phase"] not in
+                            ("INTENT", "IDENTITY_PROMOTED_OFFLINE")):
                         deny()
-                    # Verify exact raw packet under the transaction lock,
-                    # not merely the parsed scope. Different code with the
-                    # same Node/domain must never be silently adopted.
-                    raw = promotion.read_optional(
-                        fd, "foreign-install-packet.json", client)
-                    if raw is None or client.parse_packet(raw) != packet:
-                        deny()
-                    fingerprint = hashlib.sha256(raw).hexdigest()
-                    expected = {
-                        "schema": 1,
-                        "packet_sha256": fingerprint,
-                        "node_id": packet.scope["node_id"],
-                        "scope": packet.scope,
-                    }
-                    previous = promotion.read_optional(fd, _TX_JOURNAL, client)
-                    if previous is not None:
-                        journal = client.decode(previous)
-                        if (set(journal) != set(expected) | {"phase"}
-                                or any(journal.get(k) != v for k, v in expected.items())
-                                or journal["phase"] not in
-                                ("INTENT", "IDENTITY_PROMOTED_OFFLINE")):
-                            deny()
-                    else:
-                        _write_journal_once_locked(fd, {**expected, "phase": "INTENT"})
-                    # On lost ACK, process interruption or incomplete
-                    # promotion the existing client and promoter reconcile
-                    # with their *original* key, signed HMAC proof and
-                    # PREPARED/COMPLETED receipts.
-                    result = rehearse(
-                        packet_path=packet_path, state_path=state_path,
-                        gateway_path=gateway_path, node_env_path=node_env_path,
-                        directory=directory, live_identity=live_identity,
-                        transport=transport, now=now,
-                        disposable_capability=True)
-                    if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
-                            or result.get("connected") is not False):
-                        deny()
-                    _write_journal_once_locked(
-                        fd, {**expected, "phase": "IDENTITY_PROMOTED_OFFLINE"})
-                    return {
-                        **result,
-                        "journal": "IDENTITY_PROMOTED_OFFLINE",
-                        "activation_allowed": False,
-                    }
-                finally:
-                    os.close(lock)
+                else:
+                    _write_journal_once_locked(fd, {**expected, "phase": "INTENT"})
+                # On lost ACK, process interruption or incomplete
+                # promotion the existing client and promoter reconcile
+                # with their *original* key, signed HMAC proof and
+                # PREPARED/COMPLETED receipts.
+                result = rehearse(
+                    packet_path=packet_path, state_path=state_path,
+                    gateway_path=gateway_path, node_env_path=node_env_path,
+                    directory=directory, live_identity=live_identity,
+                    transport=transport, now=now,
+                    disposable_capability=True)
+                if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
+                        or result.get("connected") is not False):
+                    deny()
+                _write_journal_once_locked(
+                    fd, {**expected, "phase": "IDENTITY_PROMOTED_OFFLINE"})
+                return {
+                    **result,
+                    "journal": "IDENTITY_PROMOTED_OFFLINE",
+                    "activation_allowed": False,
+                }
+            finally:
+                os.close(lock)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()
 
