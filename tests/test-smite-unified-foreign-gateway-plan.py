@@ -151,6 +151,16 @@ class GatewayScope(unittest.TestCase):
         self.write(self.site,b"# BEGIN U-OPTI SMITE FOREIGN CONTROL\n",mode=0o644)
         with self.assertRaises(gateway.Hold):self.admit()
 
+    def test_writable_or_symlinked_site_parent_refused(self):
+        self.site.parent.chmod(0o777)
+        with self.assertRaises(gateway.Hold):self.admit()
+        self.site.parent.chmod(0o755)
+        self.site.parent.rmdir()
+        alternate=self.root/"other-sites"
+        alternate.mkdir()
+        self.site.parent.symlink_to(alternate, target_is_directory=True)
+        with self.assertRaises(gateway.Hold):self.admit()
+
     def test_no_code_or_secret_exposed_on_failure(self):
         self.scope["control_url"]="http://"+FOREIGN+PATH
         self.save_packet()
