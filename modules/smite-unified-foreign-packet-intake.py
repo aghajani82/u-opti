@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ import secrets
 import stat
 import sys
 import tempfile
+import termios
 from urllib.parse import urlsplit
 
 
@@ -145,6 +147,58 @@ def capture_disposable(reader, *, target, expected_panel, expected_domain,
                 "expires_at": packet.expires_at, "connected": False}
     except (OSError, UnicodeError, ValueError, TypeError, c.Hold):
         deny()
+
+
+
+def read_hidden_tty(stream, *, ready=None):
+    """Capture exactly one complete multiline paste with terminal echo off.
+
+    The caller must provide a true controlling TTY stream, never a shell
+    command-line argument or an environment variable with a bearer secret.
+    All terminal flags are restored on normal exit, invalid input and Ctrl-C.
+    The optional ready hook is only for an isolated PTY test harness.
+    """
+    try:
+        fd = stream.fileno()
+        if not os.isatty(fd):
+            deny()
+        saved = termios.tcgetattr(fd)
+        hidden = saved.copy()
+        hidden[3] &= ~(termios.ECHO | termios.ECHONL | termios.ECHOE | termios.ECHOK)
+        termios.tcsetattr(fd, termios.TCSADRAIN, hidden)
+    except (OSError, ValueError, termios.error):
+        deny()
+    try:
+        if ready is not None:
+            ready()
+        return read_multiline(stream)
+    finally:
+        # Restoring terminal state takes priority on malformed input and
+        # cancellation; never include private input in an exception.
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+def capture_disposable_hidden_tty(tty, *, confirm_scope,
+                                   ready=None, **kwargs):
+    """Reusable single-paste operator sequence, disposable fixture ONLY.
+
+    The callback receives only NONSECRET scope (name, Panel and Foreign
+    domains, exact control URL). The operator must confirm that destination
+    after terminal echo has been restored and BEFORE any private file is
+    staged. This function does not redeem, run Docker or activate a Node.
+    """
+    if (kwargs.get("disposable_capability") is not True
+            or not callable(confirm_scope)):
+        deny()
+    _private_fixture(kwargs.get("target"))
+    raw = read_hidden_tty(tty, ready=ready)
+    packet = client_module().parse_packet(raw)
+    scope = dict(packet.scope)
+    if confirm_scope(scope) is not True:
+        deny()
+    # The parser remains the single source of truth. It checks time and
+    # scope again and refuses a second write to an existing private packet.
+    return capture_disposable(io.StringIO(raw + "\n"), **kwargs)
 
 
 def main(argv=None):
