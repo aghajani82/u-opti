@@ -64,6 +64,19 @@ def safe_site(path):
     if not site.is_absolute() or '..' in site.parts:
         deny()
     try:
+        # Reject symlink ancestors to prevent a fake "absent site" or
+        # surprise alternate vhost. A missing Nginx directory is acceptable
+        # on a FRESH host; the later installer will prepare it separately.
+        for parent in reversed(site.parents):
+            if parent == Path('/'):
+                continue
+            if parent.is_symlink():
+                deny()
+            if parent.exists():
+                info = parent.lstat()
+                if (not stat.S_ISDIR(info.st_mode)
+                        or info.st_mode & 0o022):
+                    deny()
         # The ordinary gateway renderer selects /etc/nginx/sites-available,
         # including the shared 3xui-<domain> server. Keep this helper inert.
         if not site.exists() and not site.is_symlink():
