@@ -424,6 +424,11 @@ class PanelStage:
                 or set(journal.get("candidates",{})) !=
                     {"candidate-panel-env","candidate-panel-compose","candidate-nginx-backend"}):
             deny()
+        # Reject unreviewed extras/links, including a leftover SQLite WAL or
+        # a partially completed second attempt masquerading as one journal.
+        expected_names = set(journal["snapshots"]) | set(journal["candidates"]) | {"journal.json"}
+        if {entry.name for entry in self.staging.iterdir()} != expected_names:
+            deny()
         for group in ("snapshots","candidates"):
             for filename,digest in journal[group].items():
                 if not re.fullmatch("[a-f0-9]{64}",digest):
