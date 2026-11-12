@@ -144,7 +144,7 @@ sed -i 's/SMITE_ROLE=iran/SMITE_ROLE=foreign/' "$SMITE_STATE_FILE"
 
 # An exact nonmatching host/domain must HOLD BEFORE any Sanaei/Gateway calls.
 sed -i 's/SMITE_FOREIGN_DOMAIN=kh.example.org/SMITE_FOREIGN_DOMAIN=other.example.org/' "$SMITE_STATE_FILE"
-run 2 signed
+run 2 signed,paused,compose
 sed -i 's/SMITE_FOREIGN_DOMAIN=other.example.org/SMITE_FOREIGN_DOMAIN=kh.example.org/' "$SMITE_STATE_FILE"
 
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
