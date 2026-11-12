@@ -36,7 +36,8 @@ chmod 0600 "$PACKET"
 source "$ROOT/modules/smite-foreign-gateway.sh"
 SMITE_SELECTED_FRESH=1
 UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$PACKET"
-clear() { :; }
+CLEAR_CALLS=0
+clear() { CLEAR_CALLS=$((CLEAR_CALLS + 1)); }
 id() { echo 0; }
 sleep() { :; }
 smite_foreign_gateway_require_node() { :; }
@@ -53,6 +54,7 @@ smite_foreign_gateway_pause() { :; }
 expect() {
     local expected="$1" marker="$2" package_reached="$3" input="${4:-}" status=0
     rm -f -- "$TMP/mutations"
+    CLEAR_CALLS=0
     if [ -n "$input" ]; then
         smite_foreign_gateway_configure <<< "$input" > "$TMP/log" 2>&1 || status=$?
     else
@@ -76,6 +78,11 @@ expect() {
     else
         [ ! -e "$TMP/mutations" ]
         ! grep -q 'UNIFIED_FOREIGN_GATEWAY=CONTINUING_APPROVED_FRESH_INSTALL' "$TMP/log"
+    fi
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        [ "$CLEAR_CALLS" -eq 0 ] || { echo "FAIL: inline Gateway erased install progress"; exit 1; }
+    else
+        [ "$CLEAR_CALLS" -eq 1 ] || { echo "FAIL: independent Gateway menu clear changed"; exit 1; }
     fi
     ! grep -q 'smi1_B' "$TMP/log"
     ! grep -q 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/log"
