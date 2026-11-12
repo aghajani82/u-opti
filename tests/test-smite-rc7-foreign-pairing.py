@@ -789,6 +789,64 @@ class ForeignRC7Tests(unittest.TestCase):
             candidate.assert_not_called()
             run.assert_not_called()
 
+    def test_unified_trial_activation_failure_uses_same_pinned_rollback_contract(self):
+        state={
+            "SMITE_ROLE":"foreign","SMITE_MANAGED_VERSION":"2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE":"standard","SMITE_NODE_NAME":"node-kh",
+        }
+        retained=("node-12345678","a"*64)
+        commands=[]
+        modes={"signed":False}
+        def run(args, **kwargs):
+            commands.append(args)
+            if args[-2:]==["config","--quiet"]:
+                return ""
+            if "up" in args:
+                self.assertIn("--force-recreate",args)
+                modes["signed"]=not modes["signed"]
+                return ""
+            if args[:3]==["docker","inspect","-f"]:
+                self.assertIn("{{range .Config.Env}}",args[3])
+                return ("SMITE_NODE_PANEL_AUTH_MODE="+
+                        ("signed" if modes["signed"] else "paused")+"\n"
+                        "SMITE_AGENT_AUTH_MODE=strict\n"
+                        "SMITE_ENGINE_INVENTORY_MODE=managed\n")
+            raise AssertionError(args)
+        with patch.object(p,"_field_trial_gate"), \
+             patch.object(p,"_require_unified_foreign_release"), \
+             patch.object(p,"_require_no_active_engine_overlays"), \
+             patch.object(p,"_foreign_gateway_preflight",
+                          return_value=("iran.example.org","kh.example.org",
+                                        "https://kh.example.org:443/smite-node/"+"a"*32)) as gateway, \
+             patch.object(p,"_rc7_foreign_compose_command",
+                          return_value=["docker","compose","--project-name","existing"]) as compose, \
+             patch.object(p,"_rc7_foreign_pinned_image_verified") as image_pin, \
+             patch.object(p,"_identity_record",return_value=retained), \
+             patch.object(p,"_regular",return_value=b"owned"), \
+             patch.object(p,"_prepare_security_candidate"), \
+             patch.object(p,"_provision_replay_once"), \
+             patch.object(p,"_run",side_effect=run), \
+             patch.object(p,"_wait_container"), \
+             patch.object(p,"_local_signed_replay_probe",
+                          side_effect=p.WizardHold("synthetic signed proof failure")), \
+             patch.object(p,"_rc7_foreign_paused_rollback_verified") as recovered:
+            with self.assertRaisesRegex(p.WizardHold,"paused again"):
+                p.activate_foreign_node_field_trial(
+                    state, reviewed_unified_trial=True)
+            gateway.assert_called_once_with(state,review_unified_trial=True)
+            self.assertEqual(
+                [x.kwargs for x in image_pin.call_args_list],
+                [{"review_unified_trial":True},{"review_unified_trial":True}])
+            self.assertTrue(any(x.kwargs=={"rollback":True}
+                                for x in compose.call_args_list))
+            self.assertTrue(any(x.kwargs=={"verify_active_candidate":True}
+                                for x in compose.call_args_list))
+            recovered.assert_called_once_with(
+                expected_identity=retained,require_replay=True,
+                review_unified_trial=True)
+            self.assertFalse(modes["signed"])
+            self.assertEqual(sum("up" in args for args in commands),2)
+
     def test_rc7_activation_post_apply_compose_drift_triggers_verified_rollback(self):
         state = {
             "SMITE_ROLE": "foreign", "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
