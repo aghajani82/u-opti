@@ -390,10 +390,42 @@ class ForeignRC7Tests(unittest.TestCase):
              patch.object(p, "_regular", return_value=b""), \
              patch.object(p, "_run", side_effect=inspect), \
              patch.object(p, "_rc7_foreign_compose_command") as guarded:
-            with self.assertRaisesRegex(p.WizardHold, "does not admit"):
+            with self.assertRaisesRegex(p.WizardHold, "not the published signed digest"):
                 p.rollback_node_to_paused_field_trial(state)
             guarded.assert_not_called()
         self.assertEqual(len(commands), 1)
+
+    def test_rc7_activation_requires_actual_pinned_image_before_mutation(self):
+        state = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard",
+        }
+        image_id = "sha256:" + "d"*64
+        actual = {"id": "sha256:" + "e"*64}
+        commands = []
+        def probe(args, **kwargs):
+            commands.append(args)
+            if args[:3] == ["docker", "inspect", "-f"]:
+                if args[3] == "{{.Config.Image}}": return p._FOREIGN_NODE_IMAGE_RC7
+                if args[3] == "{{.Image}}": return actual["id"]
+            if args[:4] == ["docker", "image", "inspect", "-f"]:
+                return image_id
+            raise AssertionError("Unexpected mutation before pin: " + repr(args))
+        with patch.object(p, "_field_trial_gate"), \\
+             patch.object(p, "_require_no_active_engine_overlays"), \\
+             patch.object(p, "_foreign_gateway_preflight",
+                          return_value=("iran.example.org", "kh.example.org",
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \\
+             patch.object(p, "_rc7_foreign_compose_command", return_value=["docker","compose"]), \\
+             patch.object(p, "_run", side_effect=probe), \\
+             patch.object(p, "_prepare_security_candidate") as candidate, \\
+             patch.object(p, "_provision_replay_once") as replay:
+            with self.assertRaisesRegex(p.WizardHold, "image ID differs"):
+                p.activate_foreign_node_field_trial(state)
+            candidate.assert_not_called()
+            replay.assert_not_called()
+        self.assertEqual(len(commands), 3)
 
     def test_rc7_manual_rollback_proves_no_rekey_after_recreate(self):
         import contextlib
