@@ -51,14 +51,16 @@ NODE_ID="sha256:$(printf 'd%.0s' {1..64})"
 docker() {
     case "$*" in
         'inspect -f {{.Config.Image}} smite-node')
-            if [ "$MODE" = wrong_image ]; then
+            if [ "$MODE" = wrong_image ] ||
+               { [ "$MODE" = post_wrong_image ] && [ -f "$SMITE_STATE_DIR/foreign-gateway.env" ]; }; then
                 echo 'ghcr.io/aghajani82/smite-node:latest'
             else
                 echo 'ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483'
             fi
             ;;
         'inspect -f {{.Image}} smite-node')
-            if [ "$MODE" = wrong_runtime_id ]; then
+            if [ "$MODE" = wrong_runtime_id ] ||
+               { [ "$MODE" = post_wrong_runtime_id ] && [ -f "$SMITE_STATE_DIR/foreign-gateway.env" ]; }; then
                 printf 'sha256:%064d\n' 0
             else
                 printf '%s\n' "$NODE_ID"
@@ -72,11 +74,14 @@ docker() {
 }
 smite_foreign_gateway_require_rc_paused() {
     calls+=(paused)
-    [ "$MODE" != bad_paused ]
+    [ "$MODE" != bad_paused ] && [ "$MODE" != post_bad_paused ] ||
+    { [ "$MODE" = post_bad_paused ] && [ ! -f "$SMITE_STATE_DIR/foreign-gateway.env" ]; }
 }
 smite_foreign_gateway_rc7_compose() {
     calls+=(compose)
-    [ "$*" = 'config --quiet' ] && [ "$MODE" != bad_compose ]
+    [ "$*" = 'config --quiet' ] &&
+    { [ "$MODE" != bad_compose ] && [ "$MODE" != post_bad_compose ] ||
+      { [ "$MODE" = post_bad_compose ] && [ ! -f "$SMITE_STATE_DIR/foreign-gateway.env" ]; }; }
 }
 smite_install_unified_foreign_sanaei() {
     calls+=(sanaei)
@@ -121,7 +126,7 @@ run() {
     ! grep -q 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/output"
 }
 
-run 0 signed,paused,compose,sanaei,gateway
+run 0 signed,paused,compose,sanaei,gateway,paused,compose
 MODE=bad_signature; run 2 signed
 MODE=wrong_image; run 2 signed
 MODE=wrong_runtime_id; run 2 signed
@@ -130,6 +135,12 @@ MODE=bad_compose; run 2 signed,paused,compose
 MODE=failed_sanaei; run 2 signed,paused,compose,sanaei
 MODE=failed_gateway; run 2 signed,paused,compose,sanaei,gateway
 MODE=wrong_persisted_path; run 2 signed,paused,compose,sanaei,gateway
+# Even a successful Gateway callback may recreate/drift the exact Node.
+# A second read-only witness must HOLD, before reporting prepared.
+MODE=post_wrong_image; run 2 signed,paused,compose,sanaei,gateway
+MODE=post_wrong_runtime_id; run 2 signed,paused,compose,sanaei,gateway
+MODE=post_bad_paused; run 2 signed,paused,compose,sanaei,gateway,paused
+MODE=post_bad_compose; run 2 signed,paused,compose,sanaei,gateway,paused,compose
 
 MODE=ok
 SMITE_SELECTED_FRESH=0
@@ -185,4 +196,4 @@ assert 'smite_install_foreign_node || return 2' in src[start:end]
 assert 'smite_install_finish_local_ir || return 2' in src[start:end]
 PY
 
-echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (14 scenarios)'
+echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (18 scenarios)'

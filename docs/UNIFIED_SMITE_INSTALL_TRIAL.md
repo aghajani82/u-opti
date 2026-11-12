@@ -1529,3 +1529,21 @@ independently signed trial manifest remains activation_allowed=false:
 this checkpoint does not publish a runnable unified installer or
 authorize a live server trial. Do not merge main or change either
 server/FRP 20182/Backhaul/Sanaei before approved full end-to-end tests.
+
+## Consolidation checkpoint — keep same Foreign option-2 Node after Gateway (2026-11-12)
+
+Within the **existing** internal Foreign post-core composition function
+(`smite_install_unified_foreign_after_core`), the existing signed image-ID,
+strict paused Node and original RC7 Compose ownership checks now run both
+before Sanaei/Gateway and **after** the Gateway's existing paused Node
+recreation. A Gateway receipt or HTTPS success alone is not proof that
+the same reviewed paused Node remains. Any post-Gateway image/ID,
+paused mode or Compose drift returns HOLD without claiming enrollment.
+The existing Foreign choreography test covers four additional post-write
+drift scenarios, using only offline mock Docker/Gateway observations.
+
+No new installer, menu, pairing module or runtime feature. This is still
+an internal, non-public stage: it is NOT called from option 2 until the
+signed trial image activation/rollback and final connection checks are
+admitted. Main, operational hosts and existing FRP/Backhaul/Sanaei
+remain unchanged. No live Connected claim.

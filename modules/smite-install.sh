@@ -2234,6 +2234,23 @@ smite_install_unified_foreign_after_core() {
         echo 'HOLD: Foreign Gateway path differs from the Panel-issued grant.' >&2
         return 2
     }
+    # The existing Gateway may recreate the paused Node to apply its
+    # control address. Never advance from this phase based on an old
+    # pre-Gateway image/Compose check or a successful Nginx reload alone.
+    # Reuse the SAME signed-image, paused and Compose checks already
+    # performed before installing Sanaei/Gateway; no extra installer.
+    smite_install_unified_foreign_node_image_review || {
+        echo 'HOLD: Foreign Node image/runtime changed during Gateway setup.' >&2
+        return 2
+    }
+    smite_foreign_gateway_require_rc_paused || {
+        echo 'HOLD: Foreign Node is no longer paused/strict after Gateway setup.' >&2
+        return 2
+    }
+    smite_foreign_gateway_rc7_compose config --quiet || {
+        echo 'HOLD: Foreign Node Compose ownership changed during Gateway setup.' >&2
+        return 2
+    }
     echo 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT'
     echo 'UNIFIED_FOREIGN_CONNECTED=NOT_YET_VERIFIED'
     return 0
