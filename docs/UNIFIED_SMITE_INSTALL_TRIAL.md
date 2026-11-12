@@ -213,3 +213,50 @@ staged-to-runtime identity promotion with rollback and post-promotion resume; sc
 secret/replay snapshots; signed trial images and exact pins; combined Iran/Foreign
 orchestration and Sanaei return-to-caller; full fresh-host test before install command.
 All changes remain on trial/unified-smite-install; never merge main before user test.
+
+## Continuation checkpoint — Gateway-bound identity promotion (2026-11-12)
+Added trial-only `modules/smite-foreign-install-promotion.py`; it is a
+library, not a published install command or menu option. Existing
+`smite-foreign-install-client.py` and the companion Smite SHA
+`ef0e089dfede930817fa35df4f21dcb2f33a8e1e` remain unchanged.
+
+The promotion adapter checks exact Panel hostname, Foreign Gateway domain and
+control path against root-owned private U-OPTI state, Foreign Gateway state and
+paused/strict managed Node .env. It rejects mismatched Node name, alternate
+Gateway path, legacy/active Node or ambiguous/untrusted files. The .env's
+managed parent may be non-writable 0755; identity parents must remain 0700.
+
+A previously staged per-Node key is NEVER regenerated. A fresh signed
+installation-status proof and exact scope check precede a 0600 no-overwrite
+write of the Node's existing JSON identity schema (version/node_id/node_secret).
+A fsynced PREPARED journal precedes the live file; a fsynced COMPLETED journal
+follows it. Both remain private for crash recovery. Retries reconcile an exact
+owned file without replacing it; mismatched or pre-existing live credentials
+fail closed. A completed journal with a missing live identity is quarantined,
+not silently restored. Replay stores, existing identities, Compose, Nginx,
+FRP, Sanaei, Gateway and containers are untouched.
+
+The helper is deliberately NOT called by any installer yet: safe staging to
+identity does not establish replay continuity, runtime activation or
+Panel-to-Node connectivity. No new role/flag, host install command or server
+activation is enabled. Future orchestration must execute the signed trial
+Node replay provisioning and bidirectional connectivity checks after this
+boundary, preserving identity and replay upon any failure.
+
+Validation: 14 offline promotion tests (including loss between prepared/link
+and link/completed, live identity collisions, exact Gateway binding, tampered
+journal, expired grant, no-overwrite, unsafe paths and non-writable managed
+Node directory) added to push/PR trial CI. The workflow also runs the original
+15 client tests and the real cross-repository ASGI recovery integration test.
+First new CI result: workflow run 43193684660 PASS on
+`b32d0f277d532062d8ed9f649f1c4fe6bf8ce25a` (12 promotion tests at
+that SHA). Exact-head expanded CI after new tests is pending verification.
+No live TLS or two-host testing has been performed.
+
+NEXT EXACT WORK: create explicit, reversible, signed-trial Panel schema,
+trusted HTTPS/443 Nginx ingress for /api/foreign-install/redeem and the signed
+/api/node-control/installation-status; make sure ingress proof cannot be
+client-forged. Then integrate the promotion adapter with validated fresh KH
+installation and replay provisioning, retain FRP and standalone Sanaei,
+build/pin signed trial images and run two-host end-to-end tests. Never merge
+main or touch live hosts before operator approval.
