@@ -8,6 +8,8 @@ on:
       - modules/smite-unified-foreign-packet-intake.py
       - tests/test-smite-unified-foreign-packet-intake.py
       - modules/smite-unified-foreign-identity-phase.py
+      - modules/smite-unified-foreign-host-recovery.py
+      - tests/test-smite-unified-foreign-host-recovery.py
       - modules/smite-unified-foreign-activation-review.py
       - tests/test-smite-unified-foreign-activation-review.py
       - modules/smite-node-pairing.py
@@ -55,6 +57,7 @@ jobs:
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-foreign-packet-intake.py -v
       - run: python -B tests/test-smite-unified-foreign-identity-phase.py -v
+      - run: python -B tests/test-smite-unified-foreign-host-recovery.py -v
       - run: python -B tests/test-smite-unified-foreign-activation-review.py -v
       - run: python -B tests/test-smite-rc7-foreign-pairing.py -v
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
