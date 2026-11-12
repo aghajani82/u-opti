@@ -1735,3 +1735,43 @@ option 2 continues safe HOLD before host changes. Tests are offline,
 not evidence of real bidirectional Connected. Next remains
 release/admit signed unified Pairing/Compose via the SAME transaction
 and two-server test on disposable hosts, with user approval before main.
+
+
+## Consolidation checkpoint — same Foreign Pairing/rollback, signed trial image selected explicitly (2026-11-12)
+
+To avoid a parallel installer or activation engine, the **existing**
+`smite-node-pairing.py` `activate_foreign_node_field_trial` and
+`rollback_node_to_paused_field_trial` now accept a **private, keyword-only**
+`reviewed_unified_trial=True` selector. Default RC7 and RC.2 activation
+and manual rollback remain unchanged and use their original digests.
+
+The selector is gated **before** any host-changing action by the
+**existing** `smite-unified-trial-pair-admission.py` manifest, SHA,
+trusted-root and exact Panel+Node Cosign verification. It requires
+`host_activation_allowed is True` for the frozen pair. The current
+signed trial manifest explicitly says `activation_allowed:false` and
+`release_approved:false`, and its verifier returns False. The new
+selector therefore **always HOLDs today**, even when both image
+signatures are genuine. No CLI/menu action or environment bypass was
+introduced, and nobody should flip the manifest flag by hand.
+
+Once an independently approved and signed release exists, this
+same existing Pairing function is prepared to reuse the trial-only
+exact Node digest, Panel-issued HTTPS/443 scope, Compose
+base+security-candidate witnesses, replay/HMAC checks and failed
+activation rollback with identity preserved. Offline tests confirm:
+valid signatures plus an unapproved manifest HOLD **before Docker**;
+invalid and overlapping selectors HOLD; a simulated approved gate
+selects only the trial image review; and a simulated failed signed
+proof returns through the existing rollback with trial-specific pin
+and paused witness.
+
+The release path is still **NOT ready to run**. In particular, the
+Iran option 1 currently chooses the official RC7 source
+`9a1270b3...` while the signed trial Panel+Node pair comes from
+`b865be93...`. The signed install journal and both menu choices must
+be aligned to a separately approved exact pair before allowing
+any fresh host changes, followed by disposable two-server live
+recovery and bidirectional Connected verification. The Foreign
+public option 2 retains `HOLD_BEFORE_HOST_CHANGES`. Main,
+production servers and existing FRP/Sanaei/Backhaul are untouched.
