@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -26,7 +25,6 @@ NODE = ("ghcr.io/aghajani82/smite-node@sha256:"
         "587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483")
 PANEL = ("ghcr.io/aghajani82/smite-panel@sha256:"
          "1b03d0d865ba4abd6fe45899d2ccd6d34f300b4804acd2c6690a52b68fb26289")
-ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 
 
 class Hold(ValueError):
@@ -85,33 +83,14 @@ def review(*, signature_runner=subprocess.run, pairing=None):
         if (not node_id or not secret or not pairing._replay_artifacts_valid()):
             deny()
 
-        # The original preflight validated the Compose service image string.
-        # Also bind the ACTUAL runtime image ID to the locally pinned digest,
-        # and verify effective runtime auth values, not just on-disk env.
-        runtime = pairing._run(
-            ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
-            capture=True, timeout=10)
-        local = pairing._run(
-            ["docker", "image", "inspect", "-f", "{{.Id}}", NODE],
-            capture=True, timeout=10)
-        if (not isinstance(runtime, str) or not ID.fullmatch(runtime)
-                or runtime != local):
-            deny()
-        effective = pairing._run(
-            ["docker", "inspect", "-f",
-             "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],
-            capture=True, timeout=10)
-        if not isinstance(effective, str):
-            deny()
-        rows = effective.splitlines()
-        for label in (
-            "SMITE_NODE_PANEL_AUTH_MODE=paused",
-            "SMITE_AGENT_AUTH_MODE=strict",
-            "SMITE_ENGINE_INVENTORY_MODE=managed",
-        ):
-            key = label.split("=")[0] + "="
-            if len([r for r in rows if r.startswith(key)]) != 1 or label not in rows:
-                deny()
+        # Reuse the existing RC7 immutable-image and paused rollback
+        # witness. Only this read-only reviewer selects the trial image,
+        # after the independent two-image signature/source admission.
+        pairing._rc7_foreign_paused_rollback_verified(
+            expected_identity=(node_id, secret),
+            require_replay=True,
+            review_unified_trial=True,
+        )
         if current.get("SMITE_NODE_NAME") is None or not current["SMITE_NODE_NAME"]:
             deny()
 

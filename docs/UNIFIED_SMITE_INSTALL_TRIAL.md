@@ -1469,3 +1469,26 @@ test the full one-choice workflow and interrupted recovery on isolated
 two-host test hosts. Only after explicit user approval run live
 install tests and merge to main; leave existing clients, FRP 20182,
 Sanaei, Backhaul and running Nodes unchanged.
+
+## Consolidation checkpoint — shared immutable-image/paused witness (2026-11-12)
+
+The trial Foreign read-only reviewer now calls the pre-existing RC7
+`smite-node-pairing.py` immutable Docker image, paused/strict/managed,
+identity and replay witness instead of maintaining a duplicate verifier.
+The only trial-specific selector is `review_unified_trial=True`, passed
+from the inert reviewer AFTER independent Panel/Node Cosign/OIDC source
+verification. The original RC7 activation and rollback callers retain
+their default RC7 digest and cannot select the trial image.
+
+Existing RC7 and trial review tests now exercise this same witness using
+offline fake Docker observations: exact digest vs running image,
+paused auth uniqueness, original paired identity and signed replay.
+This must be confirmed by GitHub CI on the exact commit; it is NOT a
+Connected or live server test. No new menu, API, feature, installer,
+runtime activation authorization, or service change.
+
+NEXT: keep the signed candidate manifest `activation_allowed:false`
+until explicit trial runtime transition/rollback with existing Pairing
+and Compose is tested, then prove both authenticated Connected directions
+and interruption-safe single option-2 sequencing. Do not merge main
+or touch live servers, FRP 20182, Backhaul or Sanaei before approval.

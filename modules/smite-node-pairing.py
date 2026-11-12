@@ -1859,32 +1859,46 @@ def staged_foreign_sanaei_admission(
     print("NODE_RUNTIME=PAUSED_STRICT")
 
 
-def _rc7_foreign_pinned_image_verified() -> None:
-    """Existing signed RC7 image: require exact reference and effective bytes."""
+def _rc7_foreign_pinned_image_verified(
+    *, review_unified_trial: bool = False,
+) -> None:
+    """Existing immutable image witness; trial selection is read-only only."""
+    if type(review_unified_trial) is not bool:
+        raise WizardHold("Foreign signed image review selector invalid")
+    expected = (_FOREIGN_NODE_IMAGE_UNIFIED_TRIAL if review_unified_trial
+                else _FOREIGN_NODE_IMAGE_RC7)
+    lane = "unified trial" if review_unified_trial else "RC7"
     image = _run(
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
         timeout=10, capture=True,
     )
-    if image != _FOREIGN_NODE_IMAGE_RC7:
-        raise WizardHold("Foreign RC7 running image is not the published signed digest")
+    if image != expected:
+        raise WizardHold(f"Foreign {lane} running image is not the published signed digest")
     actual = _run(
         ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
         timeout=10, capture=True,
     )
     pinned = _run(
-        ["docker", "image", "inspect", "-f", "{{.Id}}", _FOREIGN_NODE_IMAGE_RC7],
+        ["docker", "image", "inspect", "-f", "{{.Id}}", expected],
         timeout=10, capture=True,
     )
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", actual) or actual != pinned:
-        raise WizardHold("Foreign RC7 effective image ID differs from pinned image")
+        raise WizardHold(f"Foreign {lane} effective image ID differs from pinned image")
 
 
 def _rc7_foreign_paused_rollback_verified(
     *, expected_identity: tuple[str, str] | None = None,
     require_replay: bool = False,
+    review_unified_trial: bool = False,
 ) -> None:
-    """Verify original RC7 rollback retains paused mode, identity and replay."""
-    _rc7_foreign_pinned_image_verified()
+    """Verify existing paused/identity/replay contract, including inert trial."""
+    if type(review_unified_trial) is not bool:
+        raise WizardHold("Foreign paused review selector invalid")
+    if review_unified_trial:
+        _rc7_foreign_pinned_image_verified(review_unified_trial=True)
+    else:
+        # Official RC7 runtime activation/rollback retains its pinned default.
+        _rc7_foreign_pinned_image_verified()
     environment = _run(
         ["docker", "inspect", "-f",
          "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],

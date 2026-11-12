@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,13 @@ spec = importlib.util.spec_from_file_location(
 reviewer = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = reviewer
 spec.loader.exec_module(reviewer)
+
+pairing_spec = importlib.util.spec_from_file_location(
+    "unified_readonly_existing_pairing",
+    ROOT / "modules" / "smite-node-pairing.py")
+pairing_core = importlib.util.module_from_spec(pairing_spec)
+sys.modules[pairing_spec.name] = pairing_core
+pairing_spec.loader.exec_module(pairing_core)
 
 
 class ForeignActivationReview(unittest.TestCase):
@@ -41,13 +49,14 @@ class ForeignActivationReview(unittest.TestCase):
         self.mode = "ok"
         self.fake = SimpleNamespace(
             _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL=reviewer.NODE,
-            WizardHold=RuntimeError,
+            WizardHold=pairing_core.WizardHold,
             state_values=self.state_values,
             _require_no_active_engine_overlays=self.overlays,
             _foreign_gateway_preflight=self.gateway,
             _identity_record=self.identity_record,
             _replay_artifacts_valid=self.replay_ready,
-            _run=self.mock_run,
+            _rc7_foreign_paused_rollback_verified=(
+                pairing_core._rc7_foreign_paused_rollback_verified),
         )
 
     def signer(self, command, **kw):
@@ -83,13 +92,13 @@ class ForeignActivationReview(unittest.TestCase):
     def overlays(self):
         self.pairing_calls.append("overlays")
         if self.mode == "overlay":
-            raise RuntimeError("active other engine")
+            raise pairing_core.WizardHold("active other engine")
 
     def gateway(self, state, **kwargs):
         self.pairing_calls.append("gateway")
         self.assertEqual(kwargs, {"review_unified_trial":True})
         if self.mode == "gateway":
-            raise RuntimeError("wrong 443 gateway")
+            raise pairing_core.WizardHold("wrong 443 gateway")
         return "iran.example.org","kh.example.org","https://kh.example.org/smite-node/"+"a"*32
 
     def identity_record(self):
@@ -107,6 +116,9 @@ class ForeignActivationReview(unittest.TestCase):
         self.assertNotIn("up",args)
         self.assertNotIn("run",args)
         self.assertNotIn("restart",args)
+        if args[-1] == "smite-node" and "{{.Config.Image}}" in args:
+            return (pairing_core._FOREIGN_NODE_IMAGE_RC7
+                    if self.mode == "wrong-ref" else reviewer.NODE)
         if args[-1] == "smite-node" and "{{.Image}}" in args:
             if self.mode == "running-id":
                 return "sha256:"+"e"*64
@@ -119,9 +131,14 @@ class ForeignActivationReview(unittest.TestCase):
         raise AssertionError("unexpected command "+str(args))
 
     def review(self):
-        return reviewer.review(
-            signature_runner=self.signer,
-            pairing=self.fake)
+        # Run the real shared verifier with an offline read-only Docker probe.
+        with patch.object(pairing_core, "_run", side_effect=self.mock_run), \
+             patch.object(pairing_core, "_identity_record",
+                          side_effect=self.identity_record), \
+             patch.object(pairing_core, "_replay_artifacts_valid",
+                          side_effect=self.replay_ready):
+            return reviewer.review(
+                signature_runner=self.signer, pairing=self.fake)
 
     def test_trusted_signed_pair_and_paused_runtime_admitted_read_only(self):
         report=self.review()
@@ -137,7 +154,8 @@ class ForeignActivationReview(unittest.TestCase):
         self.assertEqual(len(self.calls),2)
         self.assertEqual(self.pairing_calls,
                          ["state","overlays","gateway","identity","replay",
-                          "inspect","inspect","inspect"])
+                          "inspect","inspect","inspect","inspect",
+                          "identity","replay"])
 
     def test_invalid_signature_never_reaches_host_runtime(self):
         for reason in ("exit","digest","claim"):
@@ -181,6 +199,9 @@ class ForeignActivationReview(unittest.TestCase):
         with self.assertRaises(reviewer.Hold):self.review()
 
     def test_wrong_actual_image_id_refused(self):
+        self.mode="wrong-ref"
+        with self.assertRaises(reviewer.Hold):
+            self.review()
         self.mode="running-id"
         with self.assertRaises(reviewer.Hold):
             self.review()

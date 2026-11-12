@@ -372,6 +372,29 @@ class ForeignRC7Tests(unittest.TestCase):
                     probe[key] = saved
         self.assertTrue(all("up" not in cmd for cmd in calls))
 
+    def test_trial_pinned_image_read_only_uses_existing_rc7_witness(self):
+        image_id = "sha256:" + "d" * 64
+        observed = []
+        def inspect(args, **kwargs):
+            observed.append(args)
+            self.assertEqual(kwargs, {"timeout": 10, "capture": True})
+            if args[:3] == ["docker", "inspect", "-f"]:
+                if args[3] == "{{.Config.Image}}":
+                    return p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+                if args[3] == "{{.Image}}":
+                    return image_id
+            if args[:4] == ["docker", "image", "inspect", "-f"]:
+                self.assertEqual(args[-1], p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
+                return image_id
+            raise AssertionError("unexpected mutation: " + repr(args))
+        with patch.object(p, "_run", side_effect=inspect):
+            p._rc7_foreign_pinned_image_verified(review_unified_trial=True)
+            self.assertEqual(len(observed), 3)
+            with self.assertRaisesRegex(p.WizardHold, "published signed digest"):
+                p._rc7_foreign_pinned_image_verified()
+            with self.assertRaisesRegex(p.WizardHold, "selector invalid"):
+                p._rc7_foreign_pinned_image_verified(review_unified_trial="yes")
+
     def test_rc7_rollback_refuses_trial_image_before_any_recreate(self):
         state = {
             "SMITE_ROLE": "foreign",
