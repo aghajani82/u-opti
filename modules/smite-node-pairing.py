@@ -2062,6 +2062,15 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
         current.get("SMITE_ROLE") == "foreign"
         and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     )
+    if rc7_foreign:
+        # Never recreate an independently signed but NOT activation-approved
+        # unified trial image through the legacy RC7 rollback CLI.
+        current_image = _run(
+            ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
+            timeout=10, capture=True,
+        )
+        if current_image != _FOREIGN_NODE_IMAGE_RC7:
+            raise WizardHold("Legacy RC7 rollback does not admit a different signed trial image")
     # Capture original identity/replay before any possible recreation.
     # A missing identity is allowed for an unpaired recovery; an existing,
     # unsafe or partially provisioned identity must never be overwritten.
