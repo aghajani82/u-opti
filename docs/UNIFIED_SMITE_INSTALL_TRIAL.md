@@ -599,3 +599,83 @@ checks. All tests require no live server access.
 
 This is a user acceptance contract and **first composition step**, not
 a published install command. Live hosts and `main` remain unchanged.
+
+## Continuation checkpoint — exact Panel grant to Foreign Gateway/SSL (2026-11-12)
+
+The requested final menu semantics remain **one choice for all of Iran** and
+**one choice for all of Foreign**, reusing existing installers rather than
+building another parallel installer. This checkpoint closes a concrete
+Foreign blocker: the existing Gateway independently generated an 8-hex
+`/smite-node/<random>` path, whereas the signed Panel installation grant
+pins a separate **32-hex** `/smite-node/<path>`. The Node cannot be safely
+paired unless the Gateway uses the exact Panel-issued path.
+
+New `modules/smite-unified-foreign-gateway-plan.py` (read-only):
+- Reads the exact `smi1` installation packet from a secure 0600,
+  regular, owner-matched `foreign-install-packet.json` beneath a
+  non-symlink 0700 directory, via the existing
+  `smite-foreign-install-client.py` protocol validator.
+- Matches Panel domain, Foreign gateway domain, Node name, Standard role
+  and fresh reviewed RC7 installation state.
+- Rejects a mismatched already-installed Gateway state and any stale or
+  competing Smite control location in the selected shared 3xUI/Nginx site.
+  Refuses writable or symlinked site ancestors, forged packet contents,
+  alternate domain/name, bad path, missing state and unsafe credentials.
+- Returns **only the exact nonsecret control path**; it never prints the
+  installation code, imports a key, writes Nginx or contacts the Panel.
+
+The *existing* `smite_foreign_gateway_configure` now has a narrowly
+opt-in path when a future unified installer supplies
+`UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE`. It requires the existing
+`SMITE_SELECTED_FRESH=1` and RC7 role, calls this read-only
+admission **before any package/SSL/Nginx/Node writes**, and never
+generates a second control path. Wrong role, private transport, unknown
+site, malformed packet, and canceled configuration result in nonzero
+HOLD. In this opt-in mode it also requires successful certificate
+renewal hook and durable Gateway state write. Without the scoped
+variable, the ordinary standalone Foreign Gateway workflow and
+its historical warning-level handling remain available.
+
+The existing `smite_install_unified_foreign_sanaei` created in the
+previous checkpoint stays the planned option-2 Sanaei/RO-inventory
+building block. **Neither this packet/Gateway branch nor that Sanaei
+helper is wired to the public option-2 menu yet.** That must wait until
+the installer selects the verifiably signed unified trial image pair
+and the private code enrollment, signed replay promotion and Connected
+proof have a tested transactional coordinator. This is a read-only
+contract plus an opt-in Gateway integration hook, not a shipped
+one-command Foreign install or permission for live host execution.
+
+Validation: 10 offline tests in
+`tests/test-smite-unified-foreign-gateway-plan.py` (scope, name,
+domain, packet permissions, link/path conflicts, shared existing 3xUI
+site, secret-free failure), and four real-function pre-write/cancel
+scenarios in
+`tests/test-smite-unified-gateway-menu-boundary.sh`.
+Previous signed pair, durable Foreign client/promotion, real
+disposable Nginx HTTPS, isolated Panel staging/rollback, Iran flow,
+and Sanaei continuation tests remain in the same CI gate. GitHub
+Actions [43225971283](https://github.com/aghajani82/u-opti/actions/runs/43225971283)
+SUCCESS (both jobs) on code commit
+`22c396cf12d6d3467f308ee4d97c954b2ac82dc9`.
+
+NEXT EXACT WORK:
+1. Connect selected fresh option 2 to the **signed unified trial
+   images** and verify them independently at installation time. The
+   old official RC7 installer currently pins older tag-based images;
+   do not substitute trial digest without exact branch signing checks.
+2. Implement the single-choice Foreign coordinator using the
+   existing Node install, Sanaei-return/RO attachment and exact
+   Gateway path admission. Enter the installation code once, retain
+   private packet/key across interruption, consume the grant through
+   the existing authenticated Panel API, promote the same identity,
+   provision strict signed replay and prove two-way Connected.
+3. Fix any remaining status/error masking, first-boot recovery gates
+   and test fully in disposable two-host environments; preserve
+   FRP 20182, existing active Sanaei, XHTTP and signed Node identity.
+4. Run user-approved real Iran/Foreign tests; only after success and
+   explicit final user acceptance merge both trial branches into
+   `main`.
+
+No live host, `main`, Node identity, FRP, Backhaul or Sanaei container
+was changed by this checkpoint.
