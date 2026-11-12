@@ -1393,3 +1393,79 @@ and two-way verification functions with safe fresh-install ownership,
 and test the full option-2 sequencing in isolated two-host fixtures.
 Only after PASS and explicit user approval should final installation
 run on the servers and tested changes be merged to `main`.
+
+## Consolidation checkpoint — harden the existing signed RC7 activation/rollback (2026-11-12)
+
+User directive: **finish and combine the existing features**; no new
+Pairing engine, no new menu items, no extra UI or undocumented host
+operations. This stage edits ONLY the pre-existing
+`modules/smite-node-pairing.py`, its existing RC7 regression suite,
+and this handoff note. No production host, main branch, FRP tunnel,
+Backhaul, Sanaei or live Node was touched.
+
+Existing RC7 Foreign activation already had complete signed
+Foreign-to-Panel / Panel-to-Foreign probes, retained identity
+handling, guarded Compose ownership and a paused rollback.
+This checkpoint fixes a safety gap **within that existing path**:
+
+- Share one private read-only
+  `_rc7_foreign_pinned_image_verified()` check across pre-activation,
+  pre-manual-rollback and post-failed-activation rollback.
+  It compares the *effective running Docker image ID* against
+  `docker image inspect` for the exact previously released RC7
+  immutable digest, not just the text of `Config.Image`.
+  A substituted/removed/mismatched image fails BEFORE any replay
+  provisioning or Node recreation.
+- Strengthen the existing paused rollback verifier to require
+  exactly one of each effective `paused`, `strict`, and
+  `managed` Docker environment value, plus the original paired
+  `(node_id, node_secret)` and verified identity-bound Replay
+  artifacts when provisioned. A Docker Compose exit code and
+  two environment strings alone no longer prove safe rollback.
+- On a signed activation success path, verify the identity and Replay
+  binding again *after* the two signed communication checks; a
+  mismatch enters the existing guarded rollback path rather
+  than announcing Connected.
+- For manual rollback, retain the original identity/replay readiness
+  snapshot (when a valid paired identity exists) and check the
+  same bindings after recreation. Unpaired RC7 recovery retains the
+  prior behavior, but always requires exact running image and
+  paused+strict+managed verification.
+- An independently signed **unified trial** Node digest is NOT
+  admitted by the published RC7 activation/rollback function.
+  The trial manifest remains `activation_allowed:false`;
+  no alternate activation CLI, release approval or bypass was added.
+
+Extended the existing
+`tests/test-smite-rc7-foreign-pairing.py` to 13 tests, without a new
+test harness. Cases include exact effective image match, tampered
+image/digest, duplicated/insecure runtime auth values, replay or
+identity drift, refusing the different signed unified trial image
+before any legacy RC7 recreate, rejected pre-activation image ID drift
+before candidate/replay writes, simulated key rotation DURING
+recreation, and the existing activation's automatic rollback
+escalating to CRITICAL if a post-rollback identity check fails.
+The previous IR one-choice, signed image/OIDC, Foreign one-use code,
+signed HMAC replay, Sanaei RO and Gateway HTTPS/443 tests remain
+in the same Actions workflow.
+
+Verified green workflow on the code:
+https://github.com/aghajani82/u-opti/actions/runs/43255739390
+(2/2 jobs success). Previous trial image-pair signing source and
+manifest were not changed.
+
+**Still to close, no false completion claim:**
+The new signed unified-install Panel/Node pair is a different digest
+from published RC7 and is *review-only*. Its manifest still prohibits
+host activation. The public `2) Install Foreign Node` entry does not
+yet execute the complete combined Sanaei → Gateway → one-use Panel
+grant → identity → signed runtime sequence. Neither a complete
+disposable two-host install nor bidirectional live Connected has been
+proven. Next focus: use the **existing** pairing/Compose candidate and
+rollback implementation to reconcile new signed image/Panel identity
+admission through an explicitly reviewed and authorized trial
+release/activation boundary, without weakening official RC7. Then
+test the full one-choice workflow and interrupted recovery on isolated
+two-host test hosts. Only after explicit user approval run live
+install tests and merge to main; leave existing clients, FRP 20182,
+Sanaei, Backhaul and running Nodes unchanged.
