@@ -412,14 +412,14 @@ class ForeignRC7Tests(unittest.TestCase):
             if args[:4] == ["docker", "image", "inspect", "-f"]:
                 return image_id
             raise AssertionError("Unexpected mutation before pin: " + repr(args))
-        with patch.object(p, "_field_trial_gate"), \\
-             patch.object(p, "_require_no_active_engine_overlays"), \\
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
              patch.object(p, "_foreign_gateway_preflight",
                           return_value=("iran.example.org", "kh.example.org",
-                                        "https://kh.example.org/smite-node/"+"a"*32)), \\
-             patch.object(p, "_rc7_foreign_compose_command", return_value=["docker","compose"]), \\
-             patch.object(p, "_run", side_effect=probe), \\
-             patch.object(p, "_prepare_security_candidate") as candidate, \\
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \
+             patch.object(p, "_rc7_foreign_compose_command", return_value=["docker","compose"]), \
+             patch.object(p, "_run", side_effect=probe), \
+             patch.object(p, "_prepare_security_candidate") as candidate, \
              patch.object(p, "_provision_replay_once") as replay:
             with self.assertRaisesRegex(p.WizardHold, "image ID differs"):
                 p.activate_foreign_node_field_trial(state)
@@ -516,22 +516,22 @@ class ForeignRC7Tests(unittest.TestCase):
                     "SMITE_ENGINE_INVENTORY_MODE=managed\n"
                 )
             raise AssertionError(args)
-        with patch.object(p, "_field_trial_gate"), \\
-             patch.object(p, "_require_no_active_engine_overlays"), \\
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
              patch.object(p, "_foreign_gateway_preflight",
                           return_value=("iran.example.org","kh.example.org",
-                                        "https://kh.example.org/smite-node/"+"a"*32)), \\
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \
              patch.object(p, "_rc7_foreign_compose_command",
-                          return_value=["docker","compose","--project-name","test"]), \\
-             patch.object(p, "_rc7_foreign_pinned_image_verified"), \\
-             patch.object(p, "_identity_record", return_value=retained), \\
-             patch.object(p, "_regular", return_value=b"checked"), \\
-             patch.object(p, "_prepare_security_candidate"), \\
-             patch.object(p, "_provision_replay_once"), \\
-             patch.object(p, "_run", side_effect=mock_run), \\
-             patch.object(p, "_wait_container"), \\
+                          return_value=["docker","compose","--project-name","test"]), \
+             patch.object(p, "_rc7_foreign_pinned_image_verified"), \
+             patch.object(p, "_identity_record", return_value=retained), \
+             patch.object(p, "_regular", return_value=b"checked"), \
+             patch.object(p, "_prepare_security_candidate"), \
+             patch.object(p, "_provision_replay_once"), \
+             patch.object(p, "_run", side_effect=mock_run), \
+             patch.object(p, "_wait_container"), \
              patch.object(p, "_local_signed_replay_probe",
-                          side_effect=p.WizardHold("fake signed proof failure")), \\
+                          side_effect=p.WizardHold("fake signed proof failure")), \
              patch.object(p, "_rc7_foreign_paused_rollback_verified") as guard:
             with self.assertRaisesRegex(p.WizardHold, "paused again"):
                 p.activate_foreign_node_field_trial(state)
