@@ -6,6 +6,8 @@ on:
     paths:
       - modules/smite-foreign-install-client.py
       - tests/test-smite-foreign-install-client.py
+      - modules/smite-foreign-install-promotion.py
+      - tests/test-smite-foreign-install-promotion.py
       - tests/test-smite-foreign-install-integration.py
       - .github/workflows/foreign-install-client-trial.yml
 permissions:
@@ -26,6 +28,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r companion-smite/panel/requirements.txt
       - run: python -B tests/test-smite-foreign-install-client.py -v
+      - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-integration.py -v
         env:
           SMITE_SOURCE: companion-smite
