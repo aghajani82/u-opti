@@ -315,6 +315,140 @@ class ForeignRC7Tests(unittest.TestCase):
             self.assertIn(needle, body)
         self.assertNotIn('rm -f "$staged_identity_file"', body)
 
+    def test_rc7_paused_rollback_verifies_running_image_env_identity_replay(self):
+        retained = ("node-12345678", "a" * 64)
+        image_id = "sha256:" + "d" * 64
+        probe = {
+            "image": p._FOREIGN_NODE_IMAGE_RC7,
+            "runtime_id": image_id,
+            "local_id": image_id,
+            "environment": (
+                "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+                "SMITE_AGENT_AUTH_MODE=strict\n"
+                "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+            ),
+            "identity": retained,
+            "replay": True,
+        }
+        calls = []
+        def read_only_run(args, **kwargs):
+            calls.append(args)
+            self.assertEqual(kwargs, {"timeout": 10, "capture": True})
+            if args[:3] == ["docker", "inspect", "-f"]:
+                field = args[3]
+                if field == "{{.Config.Image}}": return probe["image"]
+                if field == "{{.Image}}": return probe["runtime_id"]
+                if field.startswith("{{range .Config.Env}}"): return probe["environment"]
+            if args[:4] == ["docker", "image", "inspect", "-f"]:
+                self.assertEqual(args[-1], p._FOREIGN_NODE_IMAGE_RC7)
+                return probe["local_id"]
+            raise AssertionError("Unexpected mutation: " + repr(args))
+        with patch.object(p, "_run", side_effect=read_only_run), \
+             patch.object(p, "_identity_record", side_effect=lambda: probe["identity"]), \
+             patch.object(p, "_replay_artifacts_valid", side_effect=lambda: probe["replay"]):
+            p._rc7_foreign_paused_rollback_verified(
+                expected_identity=retained, require_replay=True,
+            )
+            self.assertEqual(len(calls), 4)
+            for key, wrong in (
+                ("image", p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL),
+                ("runtime_id", "sha256:" + "e"*64),
+                ("local_id", "sha256:" + "e"*64),
+                ("environment", probe["environment"].replace("paused", "signed")),
+                ("environment", probe["environment"] + "SMITE_AGENT_AUTH_MODE=legacy\n"),
+                ("environment", probe["environment"].replace("managed", "disabled")),
+                ("identity", ("node-12345678", "b"*64)),
+                ("replay", False),
+            ):
+                saved = probe[key]
+                probe[key] = wrong
+                try:
+                    with self.subTest(key=key, wrong=str(wrong)[:25]), \
+                         self.assertRaises(p.WizardHold):
+                        p._rc7_foreign_paused_rollback_verified(
+                            expected_identity=retained, require_replay=True,
+                        )
+                finally:
+                    probe[key] = saved
+        self.assertTrue(all("up" not in cmd for cmd in calls))
+
+    def test_rc7_rollback_refuses_trial_image_before_any_recreate(self):
+        state = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard",
+        }
+        commands = []
+        def inspect(args, **kwargs):
+            commands.append(args)
+            self.assertEqual(args, [
+                "docker", "inspect", "-f", "{{.Config.Image}}", "smite-node",
+            ])
+            return p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
+             patch.object(p, "_regular", return_value=b""), \
+             patch.object(p, "_run", side_effect=inspect), \
+             patch.object(p, "_rc7_foreign_compose_command") as guarded:
+            with self.assertRaisesRegex(p.WizardHold, "does not admit"):
+                p.rollback_node_to_paused_field_trial(state)
+            guarded.assert_not_called()
+        self.assertEqual(len(commands), 1)
+
+    def test_rc7_manual_rollback_proves_no_rekey_after_recreate(self):
+        import contextlib
+        import io
+        state = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard",
+        }
+        original = ("node-12345678", "a"*64)
+        disk_id = "sha256:" + "d"*64
+        runtime = {"identity": original, "replay": True, "image_id": disk_id}
+        cmds = []
+        def command(args, **kwargs):
+            cmds.append(args)
+            if "up" in args:
+                self.assertIn("--force-recreate", args)
+                return ""
+            if args[:3] == ["docker", "inspect", "-f"]:
+                if args[3] == "{{.Config.Image}}": return p._FOREIGN_NODE_IMAGE_RC7
+                if args[3] == "{{.Image}}": return runtime["image_id"]
+                if "{{range .Config.Env}}" in args[3]:
+                    return (
+                        "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+                        "SMITE_AGENT_AUTH_MODE=strict\n"
+                        "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+                    )
+            if args[:4] == ["docker", "image", "inspect", "-f"]:
+                return disk_id
+            raise AssertionError(args)
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Path(tmp)/"node-identity.json"
+            identity.write_text("{}")
+            with patch.object(p, "_field_trial_gate"), \
+                 patch.object(p, "_require_no_active_engine_overlays"), \
+                 patch.object(p, "_regular", return_value=b""), \
+                 patch.object(p, "IDENTITY_FILE", identity), \
+                 patch.object(p, "_identity_record", side_effect=lambda: runtime["identity"]), \
+                 patch.object(p, "_replay_artifacts_valid", side_effect=lambda: runtime["replay"]), \
+                 patch.object(p, "_rc7_foreign_compose_command",
+                              return_value=["docker", "compose", "--project-name", "test"]), \
+                 patch.object(p, "_wait_container"), \
+                 patch.object(p, "_run", side_effect=command):
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    p.rollback_node_to_paused_field_trial(state)
+                self.assertIn("NODE_RUNTIME=PAUSED_STRICT", output.getvalue())
+                self.assertEqual(sum("up" in cmd for cmd in cmds), 1)
+                runtime["identity"] = ("node-12345678", "b"*64)
+                with self.assertRaisesRegex(p.WizardHold, "identity changed"):
+                    p.rollback_node_to_paused_field_trial(state)
+                runtime["identity"] = original
+                runtime["image_id"] = "sha256:" + "e"*64
+                with self.assertRaisesRegex(p.WizardHold, "image ID differs"):
+                    p.rollback_node_to_paused_field_trial(state)
+
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
         body = source.split("def activate_foreign_node_field_trial(", 1)[1].split(
