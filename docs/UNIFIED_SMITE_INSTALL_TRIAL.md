@@ -90,3 +90,15 @@ Validation: 19 new SQLite tests PASS; 17 existing pairing-store tests PASS; 6 re
 
 Next exact work: gated HTTP issuance/revocation/redeem adapters using existing administrator/MFA and trusted TLS ingress, capability/schema probe, generic secret-free failures; gated origin lookup with file/DB conflict and revocation checks; safe network DNS pinning. Then UI, client durable-secret persistence/signed lost-reply recovery, snapshots, signed trial images, and U-OPTI orchestration. Merely raising legacy TTL or trusting supplied metadata remains prohibited.
 No hosts touched. Main unchanged in both repositories. No installation command yet. Resume from this checkpoint rather than recreating grant storage.
+
+
+## Continuation checkpoint — authenticated HTTP adapters (2026-11-12)
+Companion Smite SHA: b0e9262ef15e337779ba0d6d46256f1940fbed85
+Implemented default-OFF /api/foreign-install capability, issue, revoke and redeem routes. Actual current admin JWT/auth-version/MFA checks protect admin operations. Redemption requires trusted TLS ingress proof plus grant; only a nonsecret acknowledgement is returned. Strict payloads, 8192-byte streamed body bound, no-store headers, sanitized validation and SQL failures. Schema probe uses read-only SQLite and never migrates or creates a missing DB. No network requests or origin-file writes occur in these routes.
+SMITE_FOREIGN_INSTALL_ENABLED remains false. New Nginx ingress routing, DB origin trust, UI, client and signed images are NOT enabled/implemented yet.
+
+Validation: 13 HTTP tests + 9 existing HTTP pairing + 3 MFA + 19 grant store + 17 legacy store + 6 recovery = 67 local tests PASS. Both latest-head GitHub jobs pairing-store and foreign-install-http SUCCESS on the exact companion SHA above.
+
+New verified finding: signed_agent_transport.py uses certificate validation, no redirects and trust_env=False, but still resolves DNS through httpx without public-IP pinning. The previous plan's assumption that a reusable reviewed DNS-pinning mechanism existed is not established. Add/test one for DB-approved Foreign origins before activation; syntax-only domain validation is insufficient.
+
+NEXT: gated DB-approved origin reader with consumed-grant/unrevoked-identity/name/role matching; deterministic denial on file/DB conflicts; retain existing file-origin behavior; public-IP DNS resolution pinning with original TLS SNI and hostname validation; negative private-IP/rebinding/redirect tests. After that UI and client durable-secret/lost-response handling, snapshots, signed image packaging and unified installer. Continue on the same branches, never main. No host install command yet.
