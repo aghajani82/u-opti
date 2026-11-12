@@ -1121,3 +1121,103 @@ authenticated live reachability proofs before wiring and advertising
 option 2 as one-choice installation complete. Retain the user-requested
 Iran→Panel→Foreign order; no changes to main or production hosts until
 explicitly approved real-host tests and final merge acceptance.
+
+## Checkpoint — crash-recovery stages for owned Foreign Node/Sanaei/Gateway (2026-11-12)
+
+The user's fixed operator journey remains:
+
+1. Smite Manager **option 1 on Iran** completes Panel + Iran Node + SSL/443
+   + local secure pairing and admin; the operator verifies Iran Node
+   **Connected** inside the Panel.
+2. In that Iran Panel the operator reserves the Foreign Node/domain,
+   issues the one-use **7200-second** grant and copies the full `smi1`
+   JSON.
+3. Smite Manager **option 2 on Foreign** must eventually accept the JSON
+   once and complete the already-existing signed Foreign Node, Sanaei
+   Docker/RO inventory, Gateway/SSL, no-rekey enrollment, signed replay,
+   and **both directions** of live Connected verification. No extra
+   standalone menu visits or secondary installers.
+
+New **rehearsal-only** component:
+`modules/smite-unified-foreign-host-recovery.py`.
+It is a narrow transaction envelope for the ALREADY reviewed Foreign
+host-stage helpers, not another Sanaei/Docker/SSL implementation.
+It does **not** execute a command against a real server. The only
+CLI supports inert `--status`; no `--install`/`--activate` action.
+
+Its internal callback contract is for *disposable owned 0700 fixture
+trees only*. A future integration must bind the callbacks to existing
+trusted read-only checks and approved installer actions:
+- `verify_core(scope)`: strictly verify **already installed** immutable
+  signed Foreign Node, Compose owner, paused+strict runtime and exact
+  name/domain; never create/recreate Node here.
+- `verify_sanaei(scope)`: independently verify existing registered
+  Sanaei instance, attached DB RO, Node inventory and paused state.
+- `verify_gateway(scope)`: independently verify current LE TLS,
+  managed Nginx HTTPS/443 and exactly the Panel-issued control path,
+  plus Node effective environment.
+- `install_sanaei`/`install_gateway`: in a future **explicitly
+  authorized fresh-host** coordinator only, call the EXISTING
+  approved U-OPTI functions. These are injectable test doubles now.
+
+The private 0600 file `unified-foreign-host-journal.json` records
+only schema, SHA256 of the exact private grant, nonsecret scope and a
+strict monotonic phase:
+`CORE_VERIFIED` ->
+`SANAEI_INTENT` ->
+`SANAEI_RO_VERIFIED` ->
+`GATEWAY_INTENT` ->
+`GATEWAY_443_VERIFIED`.
+It is fsynced and atomically replaced under the persistent 0600
+`unified-foreign-host.lock` (nonblocking flock). No code/secret,
+signed replay data, key or Connected claim is stored in this journal.
+
+Safety on interruption:
+- Pre-existing fully VERIFIED Sanaei/Gateway is **not reinstalled**,
+  even if the journal is absent/behind.
+- If a process dies *after* Sanaei/Gateway applied but *before* its
+  journal phase is committed, a retry verifies the REAL external
+  READY result and advances without repeating that operation.
+- If an INTENT is left behind while readiness is ABSENT/DRIFT/
+  ambiguous, the retry HOLDs. It never runs `--force-recreate`,
+  re-installs Sanaei, reloads Nginx, or rotates identity just to clear
+  a journal.
+- A completed journal is **never** treated as an authoritative health
+  result: independent core/Sanaei/Gateway checks rerun on every retry.
+- An invalid, changed, symlinked, hardlinked or insecure journal, an
+  unrelated/expired grant, non-owned test fixture, concurrent command,
+  wrong domain/Node or unknown witness blocks any stage mutation.
+
+Validation: 18 isolated recovery scenarios in
+`tests/test-smite-unified-foreign-host-recovery.py`, including
+interruptions after the external action, no-blind-repeat, drift after
+success, journal/credential tampering, expired/incorrect grant,
+contention, preexisting registered Sanaei and nonsecret permissions.
+The same workflow continues the previous genuine Panel ASGI grant
+redemption/HMAC proof, no-echo PTY paste, existing Sanaei/Gateway/IR
+path regressions and Nginx SSL/443 fixture tests.
+
+CI:
+https://github.com/aghajani82/u-opti/actions/runs/43248094754
+(two jobs SUCCESS, 18/18 new cases passed). Host activation remains
+`activation_allowed:false` in the signed trial manifest.
+
+**Status & next critical work:** This phase prepares a safe host-stage
+resume **contract**, not a production host-recovery feature. The
+already-built `smite_install_unified_foreign_after_core` remains
+internal/unwired, and does not yet use this envelope; the new
+callbacks have not been bound to actual read-only Docker/Sanaei/Nginx
+inventory. Even the existing legacy Foreign Gateway may recreate the
+Node during setup, so the future adapter must guarantee that this
+happens only on a newly owned/paused fresh Node and NEVER while
+clients/FRP are active or after signed pairing.
+
+Next step: attach audited, exact real read-only verifier adapters
+to this host-stage envelope, and simulate the existing Bash
+installer callbacks in isolated two-host fixtures. After proving
+interrupt/recovery, finish separate signed trial activation (currently
+HOLD), rollback-to-paused, and authenticated Foreign→Panel plus
+Panel→Foreign Connected probes. **Only then** wire the single option-2
+entrypoint and perform user-approved trial host deployment and merge.
+No modifications to main, IR, Foreign, FRP 20182, Backhaul, Sanaei,
+existing Node containers, keys or replay occurred here.
