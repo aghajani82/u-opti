@@ -2041,6 +2041,48 @@ smite_install_sanaei_foreign() {
 
 
 
+# Unified option-2 building block: reuse the existing Sanaei installer and
+# exact read-only DB attachment, without sending the caller back to the menu.
+# The complete Foreign enrollment/Gateway orchestration must explicitly call
+# this from its signed, fresh-host-only transaction AFTER the core install and
+# BEFORE any Foreign identity activation. This helper is not yet menu-wired.
+smite_install_unified_foreign_sanaei() {
+    local result=0
+
+    if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ ! -f "$SMITE_STATE_FILE" ] ||
+       [ -L "$SMITE_STATE_FILE" ] ||
+       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE" ||
+       ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: One-choice Sanaei continuation requires an owned fresh RC7 Foreign installation.' >&2
+        return 2
+    fi
+
+    # First call: 0 means previously attached/verified; 3 means new Sanaei
+    # installed and the *same* action must now attach its registered DB.
+    # A status of 2 or anything unknown is never considered success.
+    UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1 smite_install_sanaei_foreign || result=$?
+    case "$result" in
+        0) ;;
+        3)
+            echo 'UNIFIED_FOREIGN_SANAEI=INSTALLED_CONTINUE_READ_ONLY_ATTACHMENT'
+            result=0
+            UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1 smite_install_sanaei_foreign || result=$?
+            [ "$result" -eq 0 ] || {
+                echo 'HOLD: Sanaei installed but verified read-only attachment is incomplete. Retain state.' >&2
+                return 2
+            }
+            ;;
+        *)
+            echo 'HOLD: Sanaei installation/attachment did not succeed. Retain Node state.' >&2
+            return 2
+            ;;
+    esac
+
+    echo 'UNIFIED_FOREIGN_SANAEI=PASS_ATTACHED_READ_ONLY'
+    return 0
+}
+
 smite_install_field_trial_patch_compose_image() {
     local compose_file="$1" old_image="$2" new_image="$3"
     python3 - "$compose_file" "$old_image" "$new_image" <<'PY_RC_UPGRADE_COMPOSE'
