@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# One-choice Foreign option-2 post-core choreography, offline only.
+# No Docker, network, TLS, certificate issuance, Nginx or host writes.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+SMITE_STATE_DIR="$TMP/state"
+SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
+SMITE_NODE_DIR="$TMP/node"
+mkdir -p "$SMITE_STATE_DIR/staging" "$SMITE_NODE_DIR"
+chmod 0700 "$SMITE_STATE_DIR" "$SMITE_STATE_DIR/staging"
+cat > "$SMITE_STATE_FILE" <<'STATE'
+SMITE_ROLE=foreign
+SMITE_MANAGED_VERSION=2.0.0-rc.7
+SMITE_CONNECTION_MODE=standard
+SMITE_PANEL_DOMAIN=iran.example.org
+SMITE_FOREIGN_DOMAIN=kh.example.org
+SMITE_NODE_NAME=node-kh
+STATE
+chmod 0600 "$SMITE_STATE_FILE"
+PACKET="$SMITE_STATE_DIR/staging/foreign-install-packet.json"
+python3 - "$PACKET" <<'PY'
+import json,sys
+packet={
+  "protocol":"smi1",
+  "panel_url":"https://iran.example.org:443",
+  "node_id":"foreign-node-0001",
+  "node_name":"node-kh",
+  "origin":"https://kh.example.org:443",
+  "control_url":"https://kh.example.org:443/smite-node/"+"a"*32,
+  "installation_code":"smi1_"+"B"*43,
+  "expires_at":1799999999,
+}
+with open(sys.argv[1],"w") as handle:json.dump(packet,handle)
+PY
+chmod 0600 "$PACKET"
+
+source "$ROOT/modules/smite-install.sh"
+source "$ROOT/modules/smite-foreign-gateway.sh"
+
+SMITE_INSTALL_PROFILE=clean-rc
+SMITE_SELECTED_FRESH=1
+MODE=ok
+calls=()
+smite_install_unified_signed_pair_review() {
+    calls+=(signed)
+    [ "$MODE" != bad_signature ]
+}
+docker() {
+    if [ "$*" != "inspect -f {{.Config.Image}} smite-node" ]; then
+        return 99
+    fi
+    if [ "$MODE" = wrong_image ]; then
+        echo 'ghcr.io/aghajani82/smite-node:latest'
+    else
+        echo 'ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483'
+    fi
+}
+smite_install_unified_foreign_sanaei() {
+    calls+=(sanaei)
+    [ "$MODE" != failed_sanaei ]
+}
+smite_foreign_gateway_configure() {
+    calls+=(gateway)
+    [ "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" = "$PACKET" ] || return 2
+    if [ "$MODE" = failed_gateway ]; then
+        return 2
+    fi
+    local exact="/smite-node/$(printf 'a%.0s' {1..32})"
+    if [ "$MODE" = wrong_persisted_path ]; then exact="/smite-node/$(printf 'b%.0s' {1..32})"; fi
+    cat > "$SMITE_STATE_DIR/foreign-gateway.env" <<ENV
+SMITE_FOREIGN_GATEWAY_DOMAIN=kh.example.org
+SMITE_FOREIGN_PANEL_DOMAIN=iran.example.org
+SMITE_FOREIGN_CONTROL_PATH=$exact
+SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443
+SMITE_FOREIGN_GATEWAY_MODE=https-control-path
+ENV
+    chmod 0600 "$SMITE_STATE_DIR/foreign-gateway.env"
+}
+
+run() {
+    local expected="$1" stages="$2" result=0 actual
+    calls=()
+    rm -f "$SMITE_STATE_DIR/foreign-gateway.env"
+    smite_install_unified_foreign_after_core "$PACKET" > "$TMP/output" 2>&1 || result=$?
+    actual="$(IFS=,; echo "${calls[*]-}")"
+    if [ "$result" != "$expected" ] || [ "$actual" != "$stages" ]; then
+        cat "$TMP/output"
+        echo "FAIL: $MODE result=$result expected=$expected events=$actual expected_events=$stages"
+        exit 1
+    fi
+    if [ "$result" = 0 ]; then
+        grep -qx 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT' "$TMP/output"
+        grep -qx 'UNIFIED_FOREIGN_CONNECTED=NOT_YET_VERIFIED' "$TMP/output"
+    else
+        ! grep -q 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT' "$TMP/output"
+    fi
+    ! grep -q 'smi1_B' "$TMP/output"
+    ! grep -q 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/output"
+}
+
+run 0 signed,sanaei,gateway
+MODE=bad_signature; run 2 signed
+MODE=wrong_image; run 2 signed
+MODE=failed_sanaei; run 2 signed,sanaei
+MODE=failed_gateway; run 2 signed,sanaei,gateway
+MODE=wrong_persisted_path; run 2 signed,sanaei,gateway
+
+MODE=ok
+SMITE_SELECTED_FRESH=0
+run 2 ""
+SMITE_SELECTED_FRESH=1
+SMITE_INSTALL_PROFILE=stable
+run 2 ""
+SMITE_INSTALL_PROFILE=clean-rc
+sed -i 's/SMITE_ROLE=foreign/SMITE_ROLE=iran/' "$SMITE_STATE_FILE"
+run 2 ""
+sed -i 's/SMITE_ROLE=iran/SMITE_ROLE=foreign/' "$SMITE_STATE_FILE"
+
+# An exact nonmatching host/domain must HOLD BEFORE any Sanaei/Gateway calls.
+sed -i 's/SMITE_FOREIGN_DOMAIN=kh.example.org/SMITE_FOREIGN_DOMAIN=other.example.org/' "$SMITE_STATE_FILE"
+run 2 signed
+sed -i 's/SMITE_FOREIGN_DOMAIN=other.example.org/SMITE_FOREIGN_DOMAIN=kh.example.org/' "$SMITE_STATE_FILE"
+
+# No publicly-selected fresh Option-2 entry may use this incomplete phase
+# sequence until the signed trial runtime activation has been reviewed.
+python3 - "$ROOT/modules/smite-install.sh" <<'PY'
+from pathlib import Path
+import sys
+src=Path(sys.argv[1]).read_text()
+start=src.index('smite_install_selected_fresh() (')
+end=src.index('\nsmite_install_finish_local_ir() {',start)
+assert 'smite_install_unified_foreign_after_core' not in src[start:end]
+assert 'smite_install_foreign_node || return 2' in src[start:end]
+assert 'smite_install_finish_local_ir || return 2' in src[start:end]
+PY
+
+echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (11 scenarios)'
