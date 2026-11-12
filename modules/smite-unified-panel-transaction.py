@@ -289,11 +289,22 @@ class PanelTransaction:
                 current = live.execute("SELECT * FROM smite_node_identities ORDER BY node_id").fetchall()
                 if past != current:
                     return True
+                # A newly reserved Foreign Node may not yet have a grant or
+                # signed identity. Refuse rollback if its durable row exists.
+                if (old.execute("SELECT id,name FROM nodes ORDER BY id").fetchall()
+                        != live.execute("SELECT id,name FROM nodes ORDER BY id").fetchall()):
+                    return True
                 expected = {"smite_foreign_install_grants","smite_foreign_install_origins"}
                 names = {row[0] for row in live.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}
                 if names & expected not in (set(), expected):
                     return True
+                if names & expected:
+                    live.execute("""SELECT code_hash,node_id,node_name,origin,control_url,
+                        issued_by,issued_at,expires_at,consumed_at,revoked_at
+                        FROM smite_foreign_install_grants LIMIT 0""")
+                    live.execute("""SELECT node_id,node_name,origin,control_url,
+                        grant_hash,approved_at FROM smite_foreign_install_origins LIMIT 0""")
                 for name in names & expected:
                     if live.execute("SELECT COUNT(*) FROM " + name).fetchone()[0]:
                         return True
@@ -321,6 +332,12 @@ class PanelTransaction:
     def rollback_rehearsal(self, *, confirm: str):
         """Restore ONLY owned config files; never rewind DB, replay or identity."""
         self._check_fixture(confirm)
+        # The original staged SQLite snapshot and replay evidence must still
+        # match the sealed journal before ANY config restoration is attempted.
+        try:
+            self.stage.status()
+        except (OSError, ValueError, self.stage_mod.StageHold):
+            deny()
         journal = self._journal_read()
         if journal["phase"] == "ROLLED_BACK":
             return {"status":"ALREADY_ROLLED_BACK","schema":"PRESERVED"}
