@@ -1,6 +1,8 @@
 """Disposable, no-host-write tests for signed Iran Panel staged transaction."""
 import importlib.util
 import json
+import hashlib
+import hmac
 import os
 from pathlib import Path
 import sqlite3
@@ -103,6 +105,25 @@ class Prepare(unittest.TestCase):
             INSERT INTO smite_node_inbound_nonces VALUES('iran-node-1234','nonce',200);
             """)
         self.db.chmod(0o600)
+        replay = self.root/stage.REPLAY_DB_REL
+        replay.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(replay) as conn:
+            conn.execute("PRAGMA user_version=1")
+            conn.execute("CREATE TABLE replay_store_identity(node_id TEXT PRIMARY KEY)")
+            conn.execute("INSERT INTO replay_store_identity VALUES('iran-node-1234')")
+            conn.execute("CREATE TABLE agent_nonces(node_id TEXT, nonce TEXT, expires_at INTEGER)")
+            conn.execute("INSERT INTO agent_nonces VALUES('iran-node-1234','replay-nonce',2222)")
+        replay.chmod(0o600)
+        binding = hmac.new(NODE.encode(),
+                           b"smite-replay-key-binding-v1:iran-node-1234",
+                           hashlib.sha256).hexdigest()
+        marker = self.root/stage.REPLAY_MARKER_REL
+        marker.write_text(json.dumps({
+            "schema":1,"node_id":"iran-node-1234",
+            "replay_database":"/var/lib/smite-node/auth/agent-replay.sqlite3",
+            "status":"ENROLLMENT_STARTED", "key_binding":binding}))
+        marker.chmod(0o600)
+        self.original[stage.REPLAY_MARKER_REL]=marker.read_bytes()
         (self.root/"var/lib/u-opti").mkdir(parents=True,exist_ok=True)
 
     def assert_untouched(self):
@@ -143,6 +164,9 @@ class Prepare(unittest.TestCase):
         with sqlite3.connect(folder/"panel-db.sqlite3") as conn:
             self.assertEqual(conn.execute("SELECT nonce FROM smite_node_inbound_nonces").fetchone()[0],"nonce")
             self.assertEqual(conn.execute("SELECT encrypted_secret FROM smite_node_identities").fetchone()[0],"secret-ciphertext")
+        with sqlite3.connect(folder/"iran-replay.sqlite3") as conn:
+            self.assertEqual(conn.execute("SELECT nonce FROM agent_nonces").fetchone()[0],"replay-nonce")
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone(),(1,))
 
     def test_confirmation_required_without_any_snapshot(self):
         with self.assertRaises(stage.StageHold):
@@ -275,6 +299,38 @@ class Prepare(unittest.TestCase):
             conn.execute("DROP TABLE smite_node_inbound_nonces")
         with self.assertRaises(stage.StageHold):self.stage()
         self.assertFalse(self.panel.staging.exists())
+
+    def test_replay_marker_tamper_holds_before_staging(self):
+        marker = self.root/stage.REPLAY_MARKER_REL
+        original = marker.read_bytes()
+        marker.write_bytes(original.replace(b"replay-key-binding-v1",b"invalid-binding"))
+        # Corrupt the stored HMAC commitment, preserving JSON syntax.
+        marker.write_bytes(original.replace(
+            json.loads(original)["key_binding"].encode(), b"0"*64))
+        with self.assertRaises(stage.StageHold):self.stage()
+        self.assertFalse(self.panel.staging.exists())
+
+    def test_missing_replay_database_halts_before_staging(self):
+        (self.root/stage.REPLAY_DB_REL).unlink()
+        with self.assertRaises(stage.StageHold):self.stage()
+        self.assertFalse(self.panel.staging.exists())
+
+    def test_mismatched_replay_identity_prevents_stage(self):
+        with sqlite3.connect(self.root/stage.REPLAY_DB_REL) as conn:
+            conn.execute("UPDATE replay_store_identity SET node_id='wrong-node'")
+        with self.assertRaises(stage.StageHold):self.stage()
+        self.assertFalse(self.panel.staging.exists())
+
+    def test_replay_wal_snapshot_preserves_nonce(self):
+        replay = self.root/stage.REPLAY_DB_REL
+        with sqlite3.connect(replay) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("INSERT INTO agent_nonces VALUES('iran-node-1234','recent',3000)")
+        self.stage()
+        with sqlite3.connect(self.panel.staging/"iran-replay.sqlite3") as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM agent_nonces").fetchone()[0],2)
+        self.assertEqual((self.root/stage.REPLAY_MARKER_REL).read_bytes(),
+                         self.original[stage.REPLAY_MARKER_REL])
 
     def test_absent_iran_identity_prevents_foreign_grants_stage(self):
         (self.root/stage.IR_ID_REL).unlink()
