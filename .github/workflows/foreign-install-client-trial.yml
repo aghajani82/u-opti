@@ -6,6 +6,10 @@ on:
     paths:
       - modules/smite-foreign-install-client.py
       - modules/smite-unified-foreign-identity-phase.py
+      - modules/smite-unified-foreign-activation-review.py
+      - tests/test-smite-unified-foreign-activation-review.py
+      - modules/smite-node-pairing.py
+      - tests/test-smite-rc7-foreign-pairing.py
       - tests/test-smite-unified-foreign-identity-phase.py
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
@@ -48,6 +52,8 @@ jobs:
       - run: python -m pip install -r companion-smite/panel/requirements.txt
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-foreign-identity-phase.py -v
+      - run: python -B tests/test-smite-unified-foreign-activation-review.py -v
+      - run: python -B tests/test-smite-rc7-foreign-pairing.py -v
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
       - run: bash tests/test-smite-unified-sanaei-continuation.sh
