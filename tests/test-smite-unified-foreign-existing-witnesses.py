@@ -246,8 +246,8 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
         self.fail_signature="wrong"
         self.observer._signed_scope=None
         self.calls.clear()
-        with self.assertRaises(w.Hold):
-            self.observer.core(self.scope)
+        # Witnesses return False (never a READY claim) on invalid Cosign.
+        self.assertIs(self.observer.core(self.scope), False)
         self.assertFalse(any(x.startswith("docker") for x in self.calls))
 
     def test_exact_ro_sanaei_after_attach_and_drift_cases(self):
