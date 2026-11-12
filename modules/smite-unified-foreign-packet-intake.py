@@ -25,6 +25,7 @@ import stat
 import sys
 import tempfile
 import termios
+import time
 from urllib.parse import urlsplit
 
 
@@ -201,15 +202,73 @@ def capture_disposable_hidden_tty(tty, *, confirm_scope,
     return capture_disposable(io.StringIO(raw + "\n"), **kwargs)
 
 
+def capture_selected_hidden_tty(tty, *, target, now, confirm_scope,
+                                ready=None):
+    """Use the existing hidden reader and exclusive 0600 stager for one paste.
+
+    Only the operator-confirmed nonsecret scope supplies the three expected
+    core fields; the same JSON is parsed a second time before staging.
+    The caller's workspace must be the established 0700 disposable tree.
+    No Node, Panel, Gateway or enrollment mutation is possible here.
+    """
+    if type(now) is not int or not callable(confirm_scope):
+        deny()
+    _private_fixture(target)  # Validate before accepting secret input
+    raw = read_hidden_tty(tty, ready=ready)
+    packet = client_module().parse_packet(raw)
+    if not now < packet.expires_at <= now + 7200:
+        deny()
+    if confirm_scope(dict(packet.scope)) is not True:
+        deny()
+    return capture_disposable(
+        io.StringIO(raw + "\n"), target=target,
+        expected_panel=packet.scope["panel_url"],
+        expected_domain=packet.scope["origin"],
+        expected_node=packet.scope["node_name"],
+        now=now, disposable_capability=True)
+
+
+def _confirm_selected_scope(tty, scope):
+    # Called AFTER hidden reading restores terminal ECHO; never print code.
+    print("Confirm Iran Panel:", scope["panel_url"], file=sys.stderr)
+    print("Foreign Node:", scope["node_name"], file=sys.stderr)
+    print("Foreign Gateway:", scope["origin"], file=sys.stderr)
+    print("Node control:", scope["control_url"], file=sys.stderr)
+    print("Confirm this Panel-issued Node? [y/N]: ",
+          file=sys.stderr, end="", flush=True)
+    return tty.readline().strip().lower() in ("y", "yes")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status", action="store_true", required=True)
-    parser.parse_args(argv)
-    print("PANEL_FOREIGN_PACKET_INTAKE=DISPOSABLE_REHEARSAL_ONLY")
-    print("REAL_HOST_CAPTURE=NOT_AUTHORIZED")
-    print("NODE_ACTIVATION=NOT_PERFORMED")
-    print("FOREIGN_CONNECTED=NOT_PROVEN")
-    return 0
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument("--status", action="store_true")
+    actions.add_argument("--capture-selected-foreign", metavar="PRIVATE_WORKSPACE")
+    args = parser.parse_args(argv)
+    if args.status:
+        print("PANEL_FOREIGN_PACKET_INTAKE=DISPOSABLE_REHEARSAL_ONLY")
+        print("REAL_HOST_CAPTURE=NOT_AUTHORIZED")
+        print("NODE_ACTIVATION=NOT_PERFORMED")
+        print("FOREIGN_CONNECTED=NOT_PROVEN")
+        return 0
+    target = (Path(args.capture_selected_foreign) / "foreign-fixture" /
+              "foreign-staging" / "foreign-install-packet.json")
+    try:
+        _private_fixture(target)
+        print("Paste Iran Panel's complete Foreign installation JSON and"
+              " finish with an empty line. Input is hidden.",
+              file=sys.stderr, flush=True)
+        with open("/dev/tty", "r", encoding="utf-8", newline="") as tty:
+            capture_selected_hidden_tty(
+                tty, target=target, now=int(time.time()),
+                confirm_scope=lambda scope: _confirm_selected_scope(tty, scope))
+        print("FOREIGN_PACKET=STAGED_PRIVATE")
+        print("FOREIGN_CONNECTED=NOT_PROVEN")
+        return 0
+    except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError):
+        print("HOLD: Foreign Panel installation information not admitted",
+              file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

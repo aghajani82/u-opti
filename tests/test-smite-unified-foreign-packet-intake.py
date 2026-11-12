@@ -249,6 +249,66 @@ class OperatorPacketIntake(unittest.TestCase):
                 disposable_capability=True)
         self.assertFalse(self.file.exists())
 
+    def test_selected_hidden_single_paste_reuses_same_scope_no_echo(self):
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        scopes = []
+        try:
+            with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as tty:
+                def paste_after_echo_disabled():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master, (json.dumps(self.grant, indent=2)+"\n\n").encode())
+                result = module.capture_selected_hidden_tty(
+                    tty, target=self.file, now=self.now,
+                    confirm_scope=lambda s: scopes.append(dict(s)) or True,
+                    ready=paste_after_echo_disabled)
+            self.assertEqual(result["status"],"STAGED_PRIVATE")
+            self.assertFalse(result["connected"])
+            self.assertEqual(json.loads(self.file.read_text()),self.grant)
+            self.assertEqual(len(scopes),1)
+            self.assertEqual(scopes[0]["node_name"],"node-kh")
+            self.assertNotIn("installation_code",repr(scopes))
+            self.assertEqual(termios.tcgetattr(slave),original)
+            readable,_,_=select.select([master],[],[],0.05)
+            if readable:
+                self.assertNotIn(self.grant["installation_code"].encode(),
+                                 os.read(master,8192))
+        finally:
+            self.assertEqual(termios.tcgetattr(slave),original)
+            os.close(master);os.close(slave)
+
+    def test_selected_no_tty_expired_and_cancel_never_stage(self):
+        with self.assertRaises(module.Hold):
+            module.capture_selected_hidden_tty(
+                io.StringIO(json.dumps(self.grant)+"\n\n"),
+                target=self.file, now=self.now, confirm_scope=lambda _:True)
+        master,slave=pty.openpty()
+        try:
+            def attempt(confirmed,when):
+                with os.fdopen(os.dup(slave),"r",encoding="utf-8",newline="") as tty:
+                    def paste():
+                        self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                        os.write(master,(json.dumps(self.grant)+"\n\n").encode())
+                    return module.capture_selected_hidden_tty(
+                        tty,target=self.file,now=when,
+                        confirm_scope=lambda _:confirmed,ready=paste)
+            with self.assertRaises(module.Hold):attempt(False,self.now)
+            self.assertFalse(self.file.exists())
+            with self.assertRaises(module.Hold):attempt(True,self.now+7201)
+            self.assertFalse(self.file.exists())
+        finally:
+            os.close(master);os.close(slave)
+        # A CLI action without a real terminal may never stage credentials.
+        cmd=[sys.executable,"-B",
+             str(ROOT/"modules/smite-unified-foreign-packet-intake.py"),
+             "--capture-selected-foreign",str(self.root)]
+        check=subprocess.run(cmd,input="do not accept stdin\n",text=True,
+                             capture_output=True)
+        self.assertEqual(check.returncode,2)
+        self.assertFalse(self.file.exists())
+        self.assertNotIn(self.grant["installation_code"],
+                         check.stdout+check.stderr)
+
     def test_cli_status_only_and_never_activates(self):
         code=ROOT/"modules/smite-unified-foreign-packet-intake.py"
         check=subprocess.run([sys.executable,"-B",str(code),"--status"],

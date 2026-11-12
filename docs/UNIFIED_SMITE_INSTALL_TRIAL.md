@@ -1585,3 +1585,29 @@ The next work is connecting the existing secure hidden-terminal
 packet capture to this internal core branch in the single option-2
 orchestrator, then the signed runtime/rollback and two-way Connected
 checks. No main merge or live host change.
+
+## Consolidation checkpoint — single hidden Foreign packet paste, same option-2 helpers
+
+The existing private `smite-unified-foreign-packet-intake.py` now
+supports an internal `--capture-selected-foreign` invocation for the
+same fresh installer's 0700 temporary workspace. It reuses the original
+echo-disabled TTY reader, one-use `smi1` parser, 2-hour expiry check and
+exclusive 0600 staged packet. The operator confirms only nonsecret
+Panel/Foreign domain, node name and control URL after echo is restored.
+There is no separate installation wizard or newly generated credential.
+
+The existing `smite-install.sh` contains
+`smite_install_unified_foreign_capture_packet`, scoped to selected fresh
+Foreign installation. It passes the one private packet to the existing
+Gateway's pre-core parser, which supplies the three core values without
+duplicate questions. Real pseudo-terminal, cancellation, no-terminal,
+expiry and nonselected-host refusal tests were added to the existing
+suites. This change is code-only and is NOT called from the public
+option-2 entry while the signed-trial `activation_allowed:false` gate
+and runtime rollback are incomplete. Main/live hosts remain untouched.
+
+NEXT: sign and admit the exact unified trial runtime through the
+existing Pairing/Compose machinery (never RC7 fallback); then attach
+this helper to the selected one-choice Foreign transaction before core
+mutation, continue with the existing Sanaei/Gateway/redeem/promotion
+and require actual two-direction Connected.

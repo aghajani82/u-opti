@@ -2109,6 +2109,42 @@ smite_install_sanaei_foreign() {
 
 
 
+# Internal continuation for the existing selected Foreign option 2.
+# Uses this same fresh transaction's temporary workspace and the existing
+# hidden-TTY packet reader and Gateway scope parser. NOT yet dispatched by
+# the public menu while signed trial runtime activation remains forbidden.
+smite_install_unified_foreign_capture_packet() {
+    local workspace="${1:-}" module_dir packet
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] || {
+        echo 'HOLD: Foreign input belongs only to the selected fresh install.' >&2
+        return 2
+    }
+    [ -n "$workspace" ] && [ -d "$workspace" ] && [ ! -L "$workspace" ] &&
+    [ "$(stat -c '%a:%u' "$workspace" 2>/dev/null)" = "700:$(id -u)" ] || {
+        echo 'HOLD: A private installer-owned workspace is required.' >&2
+        return 2
+    }
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-packet-intake.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-packet-intake.py" ] &&
+    [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
+    mkdir -m 0700 -p -- "$workspace/foreign-fixture/foreign-staging" || return 2
+    packet="$workspace/foreign-fixture/foreign-staging/foreign-install-packet.json"
+    [ ! -e "$packet" ] && [ ! -L "$packet" ] || {
+        echo 'HOLD: Previously staged Panel information cannot be replaced.' >&2
+        return 2
+    }
+    python3 -B "$module_dir/smite-unified-foreign-packet-intake.py" \
+        --capture-selected-foreign "$workspace" || return 2
+    # The same immutable one-use packet supplies the core's three values.
+    python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" --precore-fields >/dev/null || return 2
+    echo 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED_PRIVATE_PANEL_PACKET'
+    return 0
+}
+
 # Unified option-2 building block: reuse the existing Sanaei installer and
 # exact read-only DB attachment, without sending the caller back to the menu.
 # The complete Foreign enrollment/Gateway orchestration must explicitly call

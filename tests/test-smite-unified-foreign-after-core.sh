@@ -245,6 +245,20 @@ smite_install_foreign_node > "$TMP/core-expired.log" 2>&1 || status=$?
 ! grep -q 'smi1_B' "$TMP/core-expired.log"
 unset -f read clear
 
+# The internal one-paste input cannot be invoked from a standalone or
+# non-interactive shell. It must never claim enrollment or create a Node.
+SMITE_SELECTED_FRESH=0
+result=0
+smite_install_unified_foreign_capture_packet "$TMP" > "$TMP/intake-not-selected" 2>&1 || result=$?
+[ "$result" = 2 ] && [ ! -d "$TMP/foreign-fixture" ]
+SMITE_SELECTED_FRESH=1
+result=0
+smite_install_unified_foreign_capture_packet "$TMP" > "$TMP/intake-no-tty" 2>&1 || result=$?
+[ "$result" = 2 ]
+[ ! -e "$TMP/foreign-fixture/foreign-staging/foreign-install-packet.json" ]
+! grep -q 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED' "$TMP/intake-no-tty"
+! grep -q 'smi1_B' "$TMP/intake-no-tty"
+
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
 # sequence until the signed trial runtime activation has been reviewed.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'
