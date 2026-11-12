@@ -44,15 +44,20 @@ smite_foreign_gateway_require_rc_paused() { :; }
 smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/site"; }
 smite_foreign_gateway_enabled_path() { printf '%s\n' "$TMP/enabled"; }
 smite_foreign_gateway_resolve_panel_ipv4() { printf '1.1.1.1\n'; }
-smite_foreign_gateway_ensure_packages() { echo BAD_PACKAGES >> "$TMP/mutations"; return 99; }
+smite_foreign_gateway_ensure_packages() { echo PACKAGE_PREP_REACHED >> "$TMP/mutations"; return 99; }
 smite_foreign_gateway_ensure_certificate() { echo BAD_CERT >> "$TMP/mutations"; return 99; }
 smite_foreign_gateway_write_site() { echo BAD_NGINX >> "$TMP/mutations"; return 99; }
 smite_foreign_gateway_recreate_node() { echo BAD_NODE >> "$TMP/mutations"; return 99; }
 smite_foreign_gateway_pause() { :; }
 
 expect() {
-    local expected="$1" marker="$2" output="" status=0
-    smite_foreign_gateway_configure <<< $'\nN\n' > "$TMP/log" 2>&1 || status=$?
+    local expected="$1" marker="$2" package_reached="$3" input="${4:-}" status=0
+    rm -f -- "$TMP/mutations"
+    if [ -n "$input" ]; then
+        smite_foreign_gateway_configure <<< "$input" > "$TMP/log" 2>&1 || status=$?
+    else
+        smite_foreign_gateway_configure <<< $'\nN\n' > "$TMP/log" 2>&1 || status=$?
+    fi
     if [ "$status" != "$expected" ]; then
         cat "$TMP/log"
         echo "FAIL: expected $expected, got $status"
@@ -63,13 +68,24 @@ expect() {
     else
         ! grep -q 'UNIFIED_FOREIGN_GATEWAY_PATH=VERIFIED_PANEL_SCOPE' "$TMP/log"
     fi
-    [ ! -e "$TMP/mutations" ]
+    if [ "$package_reached" = yes ]; then
+        # The already-confirmed option-2 installation reaches the SAME
+        # existing Gateway function's packages stage without a second Y/N.
+        [ "$(cat "$TMP/mutations")" = PACKAGE_PREP_REACHED ]
+        grep -qx 'UNIFIED_FOREIGN_GATEWAY=CONTINUING_APPROVED_FRESH_INSTALL' "$TMP/log"
+    else
+        [ ! -e "$TMP/mutations" ]
+        ! grep -q 'UNIFIED_FOREIGN_GATEWAY=CONTINUING_APPROVED_FRESH_INSTALL' "$TMP/log"
+    fi
     ! grep -q 'smi1_B' "$TMP/log"
+    ! grep -q 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/log"
 }
-# Valid scope, then user cancels before any file/SSL write. Must be failure.
-expect 2 yes
+# An explicitly selected fresh option 2 with a valid signed packet reaches
+# the EXISTING Gateway installer without an extra second confirmation.
+# The package mock fails before it can make a host change.
+expect 2 yes yes
 
-# A canceled or mismatched Panel credential never chooses a random path.
+# Wrong Panel-issued path is refused before any installation action.
 python3 - "$PACKET" <<'PY'
 import json,sys
 p=json.load(open(sys.argv[1]))
@@ -77,15 +93,31 @@ p["control_url"]="https://kh.example.org:443/smite-node/"+"e"*16
 with open(sys.argv[1],"w") as handle:json.dump(p,handle)
 PY
 chmod 0600 "$PACKET"
-expect 2 no
+expect 2 no no
 
-# A foreign IP / transport mismatch cannot silently bypass validation.
+# Private transport and unowned/existing Node are never admitted.
 sed -i 's/SMITE_CONNECTION_MODE=standard/SMITE_CONNECTION_MODE=private/' "$SMITE_STATE_FILE"
-expect 2 no
-
-# Never use the trial packet in an existing/non-owned Node install.
+expect 2 no no
 sed -i 's/SMITE_CONNECTION_MODE=private/SMITE_CONNECTION_MODE=standard/' "$SMITE_STATE_FILE"
 SMITE_SELECTED_FRESH=0
-expect 2 no
+expect 2 no no
 
-echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (4 scenarios)'
+# Repair the fixture packet and verify the source IPv4 validation still runs
+# BEFORE the unified flow can even reach the package/SSL stage.
+SMITE_SELECTED_FRESH=1
+python3 - "$PACKET" <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1]))
+p["control_url"]="https://kh.example.org:443/smite-node/"+"a"*32
+with open(sys.argv[1],"w") as handle:json.dump(p,handle)
+PY
+chmod 0600 "$PACKET"
+expect 2 yes no 'not-an-ip'
+
+# An independent Gateway repair still has its own Y/N confirmation.
+# It cannot inherit the option-2 install approval.
+UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE=
+expect 2 no no
+
+
+echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (6 scenarios)'
