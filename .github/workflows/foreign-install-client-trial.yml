@@ -8,6 +8,9 @@ on:
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
+      - modules/smite-install.sh
+      - modules/docker-3xui.sh
+      - tests/test-smite-unified-sanaei-continuation.sh
       - modules/smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-stage.py
@@ -39,6 +42,7 @@ jobs:
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
+      - run: bash tests/test-smite-unified-sanaei-continuation.sh
       - run: python -B tests/test-smite-unified-panel-transaction.py -v
       - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-panel-ingress.py -v
