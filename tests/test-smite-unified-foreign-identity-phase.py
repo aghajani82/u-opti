@@ -4,6 +4,7 @@ These tests make no network requests, never run Docker and never alter hosts.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import hmac
 import importlib.util
@@ -259,6 +260,119 @@ class IdentityPhase(unittest.TestCase):
             self.base.parent.chmod(0o700)
         self.assertFalse(self.calls)
         self.assertFalse(self.live.exists())
+
+    def tx(self, **overrides):
+        params = dict(packet_path=self.packet, state_path=self.state,
+                      gateway_path=self.gateway, node_env_path=self.env,
+                      directory=self.stage, live_identity=self.live,
+                      transport=self.mock_panel, now=self.now,
+                      disposable_capability=True)
+        params.update(overrides)
+        return module.rehearse_transaction(**params)
+
+    def journal(self):
+        return self.stage/"unified-foreign-transaction.json"
+
+    def test_operation_journal_commits_same_identity_without_secrets(self):
+        result=self.tx()
+        self.assertEqual(result["phase"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(result["journal"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertIs(result["activation_allowed"],False)
+        self.assertIs(result["connected"],False)
+        receipt=json.loads(self.journal().read_text())
+        self.assertEqual(receipt["phase"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(receipt["node_id"],self.doc["node_id"])
+        self.assertEqual(receipt["packet_sha256"],hashlib.sha256(
+            self.packet.read_bytes()).hexdigest())
+        self.assertNotIn("installation_code",self.journal().read_text())
+        self.assertNotIn("node_secret",self.journal().read_text())
+        self.assertNotIn(self.doc["installation_code"],self.journal().read_text())
+        self.assertEqual(self.journal().stat().st_mode & 0o777,0o600)
+        self.assertTrue((self.stage/"unified-foreign-transaction.lock").exists())
+        self.assertEqual((self.stage/"unified-foreign-transaction.lock").stat().st_mode & 0o777,0o600)
+
+    def test_completed_transaction_recheck_uses_signed_proof_only(self):
+        self.tx()
+        original=self.live.read_bytes()
+        self.calls.clear()
+        self.assertEqual(self.tx()["phase"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.calls,["/api/node-control/installation-status"])
+        self.assertEqual(original,self.live.read_bytes())
+        self.revoke=True
+        with self.assertRaises(module.Hold):self.tx()
+        self.assertEqual(original,self.live.read_bytes())
+        self.assertEqual(json.loads(self.journal().read_text())["phase"],
+                         "IDENTITY_PROMOTED_OFFLINE")
+
+    def test_process_interruption_leaves_intent_and_recovers_no_rekey(self):
+        def interrupted(panel,endpoint,body,headers):
+            result=self.mock_panel(panel,endpoint,body,headers)
+            if endpoint=="/api/foreign-install/redeem":
+                raise KeyboardInterrupt("simulated crash after server committed")
+            return result
+        with self.assertRaises(KeyboardInterrupt):
+            self.tx(transport=interrupted)
+        self.assertEqual(json.loads(self.journal().read_text())["phase"],"INTENT")
+        saved=json.loads((self.stage/"foreign-install-identity.json").read_text())["node_secret"]
+        self.calls.clear()
+        outcome=self.tx()
+        self.assertEqual(outcome["journal"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.secret,saved)
+        self.assertEqual(json.loads(self.live.read_text())["node_secret"],saved)
+        self.assertEqual(self.calls[0],"/api/foreign-install/redeem")
+
+    def test_failed_signed_proof_retains_intent_and_same_staged_key(self):
+        self.wrong_proof=True
+        with self.assertRaises(module.Hold):self.tx()
+        self.assertEqual(json.loads(self.journal().read_text())["phase"],"INTENT")
+        staged=(self.stage/"foreign-install-identity.json").read_bytes()
+        self.assertFalse(self.live.exists())
+        self.wrong_proof=False
+        self.calls.clear()
+        self.assertEqual(self.tx()["journal"],"IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual((self.stage/"foreign-install-identity.json").read_bytes(),staged)
+
+    def test_journal_corruption_refuses_any_new_proof_or_rekey(self):
+        self.tx()
+        original=self.live.read_bytes()
+        self.journal().write_text("{}")
+        self.journal().chmod(0o600)
+        self.calls.clear()
+        with self.assertRaises(module.Hold):self.tx()
+        self.assertEqual(self.calls,[])
+        self.assertEqual(original,self.live.read_bytes())
+
+    def test_changed_code_after_interruption_cannot_be_adopted(self):
+        self.wrong_proof=True
+        with self.assertRaises(module.Hold):self.tx()
+        self.wrong_proof=False
+        self.doc["installation_code"]="smi1_"+"c"*43
+        self.write_packet()
+        self.calls.clear()
+        with self.assertRaises(module.Hold):self.tx()
+        self.assertEqual(self.calls,[])
+        self.assertFalse(self.live.exists())
+
+    def test_parallel_transaction_lock_does_not_consume_a_code(self):
+        lock=self.stage/"unified-foreign-transaction.lock"
+        with open(lock,"wb") as handle:
+            handle.flush()
+            fcntl.flock(handle,fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(module.Hold):self.tx()
+            self.assertFalse(self.journal().exists())
+            self.assertFalse(self.calls)
+        self.assertEqual(self.tx()["journal"],"IDENTITY_PROMOTED_OFFLINE")
+
+    def test_unsafe_disposable_root_refuses_even_to_create_lock(self):
+        self.base.chmod(0o755)
+        try:
+            with self.assertRaises(module.Hold):self.tx()
+            self.assertFalse((self.stage/"unified-foreign-transaction.lock").exists())
+        finally:
+            self.base.chmod(0o700)
+        with self.assertRaises(module.Hold):
+            self.tx(directory=Path("/etc/u-opti/smite/foreign-staging"))
+        self.assertFalse(self.calls)
 
     def test_cli_has_no_production_execution(self):
         executable=ROOT/"modules"/"smite-unified-foreign-identity-phase.py"
