@@ -931,9 +931,12 @@ smite_foreign_gateway_configure() {
     fi
 
     if ! smite_foreign_gateway_write_renew_hook; then
-        echo 'HOLD: Foreign Gateway certificate renewal hook was not installed.' >&2
-        smite_foreign_gateway_pause
-        return 2
+        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+            echo 'HOLD: Foreign Gateway certificate renewal hook was not installed.' >&2
+            smite_foreign_gateway_pause
+            return 2
+        fi
+        echo 'WARNING: Could not install Nginx certificate renewal hook.'
     fi
     smite_foreign_gateway_verify_local "$domain" "$control_path" || { echo "ERROR: Local Foreign HTTPS/443 control verification failed."; smite_foreign_gateway_pause; return 2; }
     echo "Foreign local HTTPS/443 control: OK"
@@ -962,9 +965,12 @@ smite_foreign_gateway_configure() {
     fi
 
     if ! smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
-        echo 'HOLD: Foreign Gateway state could not be retained. Review backups before retry.' >&2
-        smite_foreign_gateway_pause
-        return 2
+        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+            echo 'HOLD: Foreign Gateway state could not be retained. Review backups before retry.' >&2
+            smite_foreign_gateway_pause
+            return 2
+        fi
+        echo 'WARNING: Foreign gateway state could not be saved.'
     fi
 
     if smite_foreign_gateway_is_clean_rc; then
