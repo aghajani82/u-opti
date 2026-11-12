@@ -98,11 +98,19 @@ def _candidate_env(raw: bytes) -> bytes:
             or original.get("SMITE_FOREIGN_INSTALL_ENABLED", "false") != "false"
             or original.get("SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED", "false") != "false"):
         deny()
-    lines = raw.decode("utf-8").splitlines()
-    lines += [
-        "SMITE_FOREIGN_INSTALL_ENABLED=true",
-        "SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true",
-    ]
+    updates = {
+        "SMITE_FOREIGN_INSTALL_ENABLED": "true",
+        "SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED": "true",
+    }
+    lines = []
+    for line in raw.decode("utf-8").splitlines():
+        key = line.partition("=")[0]
+        if key in updates:
+            lines.append(key + "=" + updates.pop(key))
+        else:
+            lines.append(line)
+    for key,value in updates.items():
+        lines.append(key + "=" + value)
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -113,11 +121,13 @@ def _candidate_compose(raw: bytes) -> bytes:
         deny()
     # Exact old RC7 image only, in the pinned Smite Panel service. Never
     # replace Node/FRP/Backhaul images or an unrecognized Compose project.
-    if (text.count("  smite-panel:\n") != 1 or
-            text.count("    image: " + OLD_PANEL + "\n") != 1 or
-            "    image: " + NEW_PANEL + "\n" in text):
-        deny()
-    if text.index("  smite-panel:\n") > text.index("    image: " + OLD_PANEL + "\n"):
+    service = re.search(
+        r"(?ms)^  smite-panel:\n(?P<body>.*?)(?=^  [a-zA-Z][a-zA-Z0-9_-]*:\n|\\Z)",
+        text)
+    if (not service or text.count("  smite-panel:\n") != 1
+            or service.group("body").count("    image: " + OLD_PANEL + "\n") != 1
+            or text.count("    image: " + OLD_PANEL + "\n") != 1
+            or "    image: " + NEW_PANEL + "\n" in text):
         deny()
     return text.replace("    image: " + OLD_PANEL + "\n",
                         "    image: " + NEW_PANEL + "\n", 1).encode("utf-8")
@@ -208,6 +218,22 @@ class PanelStage:
                 or receipt.get("host_activation_allowed") is not False):
             deny()
 
+    def _preflight_database(self):
+        db = self._at(DB_REL)
+        self._parents(db)
+        try:
+            st = db.lstat()
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_nlink != 1 or st.st_mode & 0o022):
+                deny()
+            with sqlite3.connect(db.absolute().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
+                for sql in BASE_SCHEMA:
+                    conn.execute(sql)
+                if conn.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                    deny()
+        except (OSError, sqlite3.Error):
+            deny()
+
     def _database_snapshot(self):
         db = self._at(DB_REL)
         self._parents(db)
@@ -261,11 +287,15 @@ class PanelStage:
                     ('proxy_set_header X-Smite-Pairing-Ingress "' +
                      pairing["ingress_token"] + '";\n').encode("ascii")):
             deny()
+        try:
+            rendered = _module("smite-foreign-install-panel-ingress").render(
+                records["nginx-backend"], domain)
+        except ValueError:
+            deny()
         live = {
             "panel-env": _candidate_env(records["panel-env"]),
             "panel-compose": _candidate_compose(records["panel-compose"]),
-            "nginx-backend": _module("smite-foreign-install-panel-ingress").render(
-                records["nginx-backend"], domain),
+            "nginx-backend": rendered,
         }
         return records, live
 
@@ -277,6 +307,8 @@ class PanelStage:
         if self.staging.exists() or self.staging.is_symlink():
             deny()
         originals, candidates = self._collect()
+        # Reject missing/drifted DB schema before creating ANY transaction state.
+        self._preflight_database()
         self._parents(self.staging)
         self.staging.mkdir(mode=0o700)
         try:
