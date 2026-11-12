@@ -704,6 +704,91 @@ class ForeignRC7Tests(unittest.TestCase):
         self.assertIn(("compose",False,False),events[-1:])
         self.assertEqual(sum("up" in e[1] for e in events if e[0]=="command"),2)
 
+    def test_unified_pair_release_refuses_even_valid_signed_trial_before_mutation(self):
+        import subprocess
+        source="b865be93e22153c60769f6329e6e55e781494ded"
+        commands=[]
+        def signed_trial(command, **kwargs):
+            commands.append(command)
+            role=("panel" if "smite_role=panel" in command else "node")
+            signed=[{
+                "critical":{
+                    "type":"cosign container image signature",
+                    "image":{"docker-manifest-digest":command[-1].rsplit("@",1)[1]}},
+                "optional":{
+                    "smite_source_sha":source,
+                    "smite_role":role,
+                    "smite_trial":"unified-install"},
+            }]
+            return subprocess.CompletedProcess(command,0,json.dumps(signed),"")
+        state={
+            "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE":"standard", "SMITE_NODE_NAME":"node-kh",
+        }
+        with patch("subprocess.run", side_effect=signed_trial), \
+             patch.object(p,"_field_trial_gate"), \
+             patch.object(p,"_require_no_active_engine_overlays") as overlays, \
+             patch.object(p,"_foreign_gateway_preflight") as gateway, \
+             patch.object(p,"_rc7_foreign_compose_command") as compose, \
+             patch.object(p,"_prepare_security_candidate") as candidate, \
+             patch.object(p,"_run") as run:
+            with self.assertRaisesRegex(p.WizardHold,"NOT released"):
+                p.activate_foreign_node_field_trial(
+                    state, reviewed_unified_trial=True)
+            with self.assertRaisesRegex(p.WizardHold,"NOT released"):
+                p.rollback_node_to_paused_field_trial(
+                    state, reviewed_unified_trial=True)
+            self.assertEqual(len(commands),4)
+            overlays.assert_not_called()
+            gateway.assert_not_called()
+            compose.assert_not_called()
+            candidate.assert_not_called()
+            run.assert_not_called()
+
+    def test_unified_release_selector_fails_closed_and_never_changes_default(self):
+        state={
+            "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE":"standard", "SMITE_NODE_NAME":"node-kh",
+        }
+        for selector in (None, "true", 1, 0, {}):
+            with self.subTest(selector=repr(selector)):
+                with self.assertRaisesRegex(p.WizardHold,"selector invalid"):
+                    p.activate_foreign_node_field_trial(
+                        state, reviewed_unified_trial=selector)
+                with self.assertRaisesRegex(p.WizardHold,"selector invalid"):
+                    p.rollback_node_to_paused_field_trial(
+                        state, reviewed_unified_trial=selector)
+        with self.assertRaisesRegex(p.WizardHold,"selector invalid"):
+            p.activate_foreign_node_field_trial(
+                state, reviewed_unified_trial=True, reviewed_rc2=True)
+        # An injected positive trial-release gate reaches the *existing*
+        # exact-image read-only witness. It may NOT use the old RC7 image.
+        observed=[]
+        def gateway(current, **kwargs):
+            observed.append(("gateway",kwargs))
+            return ("iran.example.org","kh.example.org",
+                    "https://kh.example.org:443/smite-node/"+"a"*32)
+        def pinned(**kwargs):
+            observed.append(("image",kwargs))
+            raise p.WizardHold("TRIAL_PIN_ONLY")
+        with patch.object(p,"_field_trial_gate"), \
+             patch.object(p,"_require_unified_foreign_release"), \
+             patch.object(p,"_require_no_active_engine_overlays"), \
+             patch.object(p,"_foreign_gateway_preflight",side_effect=gateway), \
+             patch.object(p,"_rc7_foreign_compose_command",return_value=["docker","compose"]), \
+             patch.object(p,"_rc7_foreign_pinned_image_verified",side_effect=pinned), \
+             patch.object(p,"_prepare_security_candidate") as candidate, \
+             patch.object(p,"_run") as run:
+            with self.assertRaisesRegex(p.WizardHold,"TRIAL_PIN_ONLY"):
+                p.activate_foreign_node_field_trial(
+                    state, reviewed_unified_trial=True)
+            self.assertEqual(observed,[
+                ("gateway",{"review_unified_trial":True}),
+                ("image",{"review_unified_trial":True}),
+            ])
+            candidate.assert_not_called()
+            run.assert_not_called()
+
     def test_rc7_activation_post_apply_compose_drift_triggers_verified_rollback(self):
         state = {
             "SMITE_ROLE": "foreign", "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
