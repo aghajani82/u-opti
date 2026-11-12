@@ -880,6 +880,15 @@ EOF
     echo
         echo "Installation completed successfully."
     echo
+    # The Smite unified installer must continue to the private DB
+    # attachment and Gateway/Pairing stages in the SAME menu choice.
+    # Only the scoped caller opts out of the legacy PTY relaunch.
+    # The ordinary standalone Docker/Sanaei installer remains unchanged.
+    if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" = 1 ]; then
+        echo "SANAEI_INSTALL=COMPLETE_RETURN_TO_SMITE"
+        return 0
+    fi
+
     echo "Press Enter to reload U-OPTI in a fresh terminal..."
     read -r
 
