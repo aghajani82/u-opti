@@ -306,3 +306,56 @@ reconciliation/rollback; then connect foreign installer to the staged
 identity promotion, signed replay, Gateway and Sanaei, verify Connected
 in both directions and test full fresh-host/expired-token/recovery cases.
 Never merge main or instruct live installation before Mohammad acceptance.
+
+## Continuation checkpoint — real signed trial Panel/Node digests (2026-11-12)
+
+Smite companion source SHA:
+`b865be93e22153c60769f6329e6e55e781494ded`.
+Completed Smite Actions run
+[43197803544](https://github.com/aghajani82/Smite/actions/runs/43197803544)
+SUCCESS, all 4 jobs. A separate branch-scoped workflow performed
+preflight, built linux/amd64 images, pushed ONLY two immutable untagged
+GHCR digests, signed each with keyless Cosign and verified the signatures.
+Neither the official tag release workflow nor `main` was modified.
+
+Exact published trial pair:
+- Panel: `ghcr.io/aghajani82/smite-panel@sha256:1b03d0d865ba4abd6fe45899d2ccd6d34f300b4804acd2c6690a52b68fb26289`
+- Node: `ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483`
+
+Archived candidate `registry-pair.json` SHA256 independently computed
+from artifact `13934051359` and matched to Smite CI output:
+`e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608`.
+The exact JSON is checked in at
+`modules/smite-unified-trial-registry-pair.json` (NOT an installer
+activation manifest or an official release candidate). Do not silently
+replace either digest with a newer trial branch image on retry or update.
+
+Independent tool
+`modules/smite-unified-trial-pair-admission.py` validates the separate
+operator-supplied manifest hash, source commit, exact branch, both images,
+Sigstore trusted-root SHA, OIDC issuer and workflow identity, role/commit
+annotations and the exact digest of each signature; no Docker or host write.
+The real public GHCR check (not a mock) passed U-OPTI workflow
+[43198492747](https://github.com/aghajani82/u-opti/actions/runs/43198492747)
+with `independent-ghcr-cosign=SUCCESS`. The existing standalone unit
+tests and Foreign enrollment workflow are also retained. The official
+tag-based release verifier remains deliberately incompatible with these
+experimental branch signatures.
+
+Scope: trial images are linux/amd64, no auto-deploy, no feature flags enabled,
+no Node/Panel recreate and no changes to live IR/Grandoptical/FRP/Sanaei.
+The existing U-OPTI installer still selects its previous reviewed RC7
+runtime; merely pinning this pair does NOT enable the new Foreign APIs.
+This checkpoint is a signed-image provenance proof, NOT first-boot or
+two-node Connected proof. Do not provide a trial host install command yet.
+
+NEXT EXACT WORK: add an opt-in, transactionally rollbackable
+Panel-side configuration executor that admits the exact digest pair,
+snapshots SQLite + replay + private keys, migrates Foreign grant schema,
+applies the reviewed Nginx 443 grant/proof routes, enables gated Panel
+config only after all checks, and verifies the new Panel runtime.
+Do not clobber the existing FRP/Backhaul 443 routes or restart unrelated
+containers. Then integrate Foreign install with strict signed replay,
+Gateway/Sanaei and full two-way Connected verification. Test from clean
+hosts and interrupted/rollback states before asking for Mohammad's
+approval to merge `main`.
