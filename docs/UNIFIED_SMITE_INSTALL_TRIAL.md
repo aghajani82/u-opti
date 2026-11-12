@@ -1051,3 +1051,74 @@ AND Panel→Foreign verified status before the Panel refresh can display
 Connected. Until the signed manifest and full recovery/dual-host tests
 permit activation, the public option 2 remains unchanged and HOLD
 must not be misreported as success. Merge only with final approval.
+
+## Checkpoint — crash-safe Foreign identity-phase operation lock and journal (2026-11-12)
+
+The user wants each Foreign Smite Manager option-2 invocation to finish from
+the already-issued **two-hour Panel code** to a genuine Connected Node,
+including a safe retry if SSH/network/process dies. The existing
+`smite-foreign-install-client.py` already has a locked, no-rekey staged
+secret and signed HMAC enrollment proof, and
+`smite-foreign-install-promotion.py` already records PREPARED/COMPLETED
+no-overwrite identity receipts. **Do not replace these components.**
+
+This checkpoint adds `rehearse_transaction` to the existing
+`modules/smite-unified-foreign-identity-phase.py`. It is **not a
+production entrypoint**. Only a precisely scoped 0700 disposable fixture
+may exercise it with injected Panel transport. Before touching the
+operation journal or consuming a code, it validates the same exact
+Panel-issued packet, managed Gateway and paused/strict Node state.
+
+The private Foreign staging directory retains:
+- `unified-foreign-transaction.lock` — owner-only 0600 persistent
+  file with nonblocking `flock`; simultaneous executions HOLD, while
+  a dead process automatically releases the kernel lock.
+- `unified-foreign-transaction.json` — 0600 atomic/fsynced record of
+  schema, nonsecret Node scope, SHA256 of the **exact private packet**
+  and one of `INTENT` / `IDENTITY_PROMOTED_OFFLINE`. The journal
+  NEVER includes the one-use code, HMAC secret or a Connected claim.
+
+When a process dies just after the Panel commits redemption, the
+`INTENT` journal and original staged identity survive. On restart, the
+existing HMAC status proof and identity promotion receipts recover the
+**same** key. After a successful promotion, the journal advances to
+`IDENTITY_PROMOTED_OFFLINE`, yet every retry **still requires a fresh
+signed proof**, even if the journal already says completed. A corrupt,
+replaced, symlinked or insecure journal, changed private packet, failed
+proof/revocation, missing private fixture, or concurrent invocation
+HOLD. Identity, replay, FRP and existing operational services are never
+rolled back, reset or overwritten by this transaction marker.
+
+Evidence: extended
+`tests/test-smite-unified-foreign-identity-phase.py` with real
+interrupted-process/lost-ACK, lock-contention, code-swap, journal
+corruption, revocation and no-rekey tests. The **actual** Smite ASGI
+grant→HMAC proof→no-overwrite promotion integration now exercises
+`rehearse_transaction` against a disposable SQLite database and
+checks the committed operation receipt. Prior hidden-PTY JSON capture,
+Iran one-choice path, Sanaei, SSL/443 and signed/replay checks remain
+in CI.
+
+Last verified code-run:
+https://github.com/aghajani82/u-opti/actions/runs/43246255073
+(2 of 2 jobs SUCCESS on source
+`a84c330800d94904692cc6df0308a0e3e92ecfa6`).
+A subsequent readability-only refactor is being rechecked under the
+same trial workflow; do not infer that as a deployment proof.
+
+**Scope of the journal:** it covers **identity redemption/promotion
+only**, not the earlier Node/Sanaei/SSL/443 host install or the
+later paused→signed activation/Connected verification. It does not
+issue recovery permission for real hosts. The trial manifest still
+explicitly has `activation_allowed: false`, and the public menu
+option 2 still uses its prior selected RC7 flow. No user needs to
+update U-OPTI on a live host for these tests.
+
+NEXT: review/implement an owner-bound host operation journal covering
+the existing core/Sanaei/SSL stages without duplicate service changes,
+a separately admitted exact-signed trial image runtime transition with
+rollback to Paused+Strict (never rekey or rewind replay), and the two
+authenticated live reachability proofs before wiring and advertising
+option 2 as one-choice installation complete. Retain the user-requested
+Iran→Panel→Foreign order; no changes to main or production hosts until
+explicitly approved real-host tests and final merge acceptance.
