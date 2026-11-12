@@ -4,6 +4,9 @@ import importlib.util
 import io
 import json
 import os
+import pty
+import select
+import termios
 from pathlib import Path
 import subprocess
 import sys
@@ -164,6 +167,87 @@ class OperatorPacketIntake(unittest.TestCase):
                 self.operator_paste({**self.grant, "node_name":"other"})
         self.assertNotIn(secret,output.getvalue()+str(err.exception))
         self.assertNotIn("node_secret",output.getvalue()+str(err.exception))
+
+    def _hidden_paste(self, packet, approve):
+        """Real Linux PTY: paste secrets AFTER echo has been disabled."""
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        scopes = []
+        def review(scope):
+            scopes.append(dict(scope))
+            return approve(scope)
+        try:
+            with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as stream:
+                data = (json.dumps(packet, indent=2) + "\n\n").encode("utf-8")
+                def send_after_echo_off():
+                    assert not (termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master, data)
+                result = module.capture_disposable_hidden_tty(
+                    stream, confirm_scope=review, ready=send_after_echo_off,
+                    target=self.file, expected_panel="https://panel.example.com",
+                    expected_domain="https://kh.example.com:443",
+                    expected_node="node-kh", now=self.now,
+                    disposable_capability=True)
+            self.assertEqual(termios.tcgetattr(slave), original)
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                # Nothing typed during the protected read may echo to terminal.
+                reflected = os.read(master, 8192)
+                self.assertNotIn(self.grant["installation_code"].encode(), reflected)
+                self.assertNotIn(b'"node_secret"', reflected)
+            return result, scopes
+        finally:
+            self.assertEqual(termios.tcgetattr(slave), original)
+            os.close(master)
+            os.close(slave)
+
+    def test_real_pty_single_hidden_paste_and_nonsecret_confirmation(self):
+        output, scopes = self._hidden_paste(self.grant, approve=lambda _: True)
+        self.assertEqual(output["status"], "STAGED_PRIVATE")
+        self.assertIs(output["connected"], False)
+        self.assertEqual(json.loads(self.file.read_text()), self.grant)
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len(scopes), 1)
+        self.assertNotIn("installation_code", scopes[0])
+        self.assertNotIn(self.grant["installation_code"], repr(scopes))
+        self.assertEqual(scopes[0]["node_name"], "node-kh")
+        self.assertEqual(scopes[0]["control_url"], self.grant["control_url"])
+
+    def test_real_pty_operator_denial_stages_nothing(self):
+        with self.assertRaises(module.Hold):
+            self._hidden_paste(self.grant, approve=lambda _: False)
+        self.assertFalse(self.file.exists())
+
+    def test_real_pty_wrong_packet_stages_nothing_and_restores_echo(self):
+        wrong = {**self.grant, "origin": "https://wrong.example.com:443",
+                 "control_url": "https://wrong.example.com:443/smite-node/"+"a"*32}
+        with self.assertRaises(module.Hold):
+            self._hidden_paste(wrong, approve=lambda _: True)
+        self.assertFalse(self.file.exists())
+
+    def test_terminal_restored_after_cancelled_keyboard_input(self):
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        class Interrupted:
+            def fileno(self): return slave
+            def readline(self, *_): raise KeyboardInterrupt()
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                module.read_hidden_tty(Interrupted())
+            self.assertEqual(termios.tcgetattr(slave), original)
+        finally:
+            os.close(master); os.close(slave)
+
+    def test_non_terminal_source_never_prompts_or_captures(self):
+        with self.assertRaises(module.Hold):
+            module.capture_disposable_hidden_tty(
+                io.StringIO(json.dumps(self.grant)+"\n\n"),
+                confirm_scope=lambda _: True,
+                target=self.file, expected_panel="https://panel.example.com",
+                expected_domain="https://kh.example.com:443",
+                expected_node="node-kh", now=self.now,
+                disposable_capability=True)
+        self.assertFalse(self.file.exists())
 
     def test_cli_status_only_and_never_activates(self):
         code=ROOT/"modules/smite-unified-foreign-packet-intake.py"
