@@ -898,3 +898,97 @@ current trial manifest explicitly has activation_allowed:false:
 do NOT bypass it. Actual host tests and merges to main still require
 the user's final approval, and live FRP 20182, Backhaul, Sanaei and
 both hosts must remain unchanged.
+
+## Operator journey agreement — IR first, then Panel-issued Foreign (2026-11-12)
+
+The user explicitly confirmed the final **two-stage user journey**. The two
+hosts still use only their respective Smite Manager menu choices. There is
+**one intentional Panel UI visit** between them:
+
+1. **Iran server:** choose Smite Manager **1) Install Panel + Iran Node** once.
+   Complete Panel, Nginx Gateway/SSL, local Iran Node, automatic signed
+   Pairing and admin creation. Sign in to the Iran Smite Panel, open the
+   **Iran Node** page and independently verify the Node was actually
+   created and is **Connected**, rather than trusting a completion banner.
+2. **Still in the Iran Panel:** open **Foreign Node**. Create/reserve the
+   new Foreign Node, enter its exact Node name and Foreign Gateway domain,
+   then request the existing one-use **smi1** installation information.
+   Copy its complete JSON packet. The issuance clock is **exactly 2 hours
+   (7200 seconds)**, and starts upon ISSUE on Iran, not at the beginning
+   or end of Foreign installation. Prefer issuance immediately before
+   moving to the Foreign terminal. Issuing a new unused code invalidates
+   the prior unused code; an already enrolled identity must never be
+   rotated on a retry or disconnected merely due to code expiry.
+3. **Foreign server:** choose Smite Manager **2) Install Foreign Node** once,
+   paste the JSON copied from Iran Panel in the same installation flow.
+   The packet already carries Panel URL, Foreign domain, Node ID and
+   name, exact 443 control path, one-use code and expiry; do not force
+   the operator to retype these independent values and risk mismatch.
+   Perform existing signed Node install, Nginx/LE SSL Gateway and Sanaei
+   Docker/RO DB attachment in a safe order, then redemption, no-rekey
+   promotion, replay and signed runtime check-in. No separate menus.
+4. **Back in Iran Panel:** refresh **Foreign Node**. Status may say
+   **Connected** ONLY after the foreign Node has genuinely completed
+   signed registration **and** the Panel's live authenticated request
+   to the Foreign Node succeeds over the exact HTTPS/443 route.
+   A valid code, initial reservation, successful redeem, active FRP,
+   old metadata or a stale heartbeat does NOT count. If the live probe
+   fails, show pending/failed/reconnecting and retain signed state for
+   recovery; never fake Connected.
+
+Implementation and test checkpoint (trial only, no live host changes):
+
+- Audited existing Smite frontend ForeignInstallDialog and
+  foreignInstallContract: they ALREADY issue a strictly scoped 7200-second
+  grant and render all 8 fields of a pretty-printed, multiline JSON packet
+  without writing it to browser storage. Updated the trial dialog's help
+  text to state the user sequence and issuance-based TTL; no UI redesign.
+- New `modules/smite-unified-foreign-packet-intake.py` uses the SAME
+  existing Foreign client packet parser, accepting the Panel's multiline
+  JSON up to 8192 bytes, ending with an empty line. It checks Node,
+  Panel, Foreign Gateway, path and remaining lifetime BEFORE a private,
+  fsynced, exclusive, no-overwrite 0600 packet is staged under a
+  0700 directory. Credential never appears in argv, stdout, or a log.
+  This is a **disposable-fixture API only**, not a public terminal
+  prompt or a production installer; the CLI exposes --status only,
+  and there is no live-write route. The real menu must implement an
+  echo-disabled input step before enabling the capture path on hosts.
+- `tests/test-smite-unified-foreign-packet-intake.py` proves 11
+  private intake scenarios: exact JSON, expiry, wrong Panel/Node/domain,
+  duplicate JSON fields, overflow, missing terminator, symlink/hardlink,
+  unsafe permissions, no-overwrite retry, no secret leakage and no
+  host capture command.
+- Extended `tests/test-smite-foreign-install-integration.py` to issue
+  an actual Smite Panel grant against isolated FastAPI/SQLite, transfer
+  its complete JSON through the SAME private Foreign intake API and
+  use the existing no-rekey signed client/promoter with lost-ACK,
+  expiry/retry and revocation tests.
+- Extended actual Smite Panel
+  `tests/test_signed_node_inbound_panel.py` with a focused **refresh
+  truth** regression: reserved/issued pending does not call the remote
+  probe or show Connected; signed check-in sets active/provisioning;
+  the refreshed list remains failed when its authenticated live probe
+  fails, shows Connected for a successful live response, and reverts to
+  reconnecting on a subsequent timeout. The existing
+  `/api/node-control/gateway-check` signed dual-direction test also
+  remains mandatory.
+- Trial U-OPTI CI:
+  https://github.com/aghajani82/u-opti/actions/runs/43242232991
+  (2/2 green); Smite HTTP and UI:
+  https://github.com/aghajani82/Smite/actions/runs/43242503985
+  and https://github.com/aghajani82/Smite/actions/runs/43242503734
+  (all 4 jobs green).
+
+**Remaining decisive HOLD:** the intake/identity function currently uses
+disposable fixture paths and is NOT called from menu option 2. The
+exact signed trial manifest still has `activation_allowed: false`;
+the paused-to-signed runtime transition, retained rollback journal,
+actual two-host installation, and final bidirectional live checks
+remain unproven. Do not bypass this to mark a live Node Connected.
+Next: design safe non-echo operator terminal input, admitted signed
+runtime activation/paused rollback without Node rekey, and connect
+the existing phases to the REAL Smite Manager option-2 choice only
+after tested transaction/recovery on disposable hosts. Preserve Iran
+option 1, FRP 20182, active Sanaei, current Node container and all
+signed replay data. Merge to main only following full host tests and
+explicit user acceptance.
