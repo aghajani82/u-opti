@@ -263,3 +263,46 @@ client-forged. Then integrate the promotion adapter with validated fresh KH
 installation and replay provisioning, retain FRP and standalone Sanaei,
 build/pin signed trial images and run two-host end-to-end tests. Never merge
 main or touch live hosts before operator approval.
+
+## Continuation checkpoint — explicit SQLite and tested Nginx 443 ingress (2026-11-12)
+
+Companion Smite SHA `a9a42982ffbfdf1c60c76bf4e08f277616761775`
+adds `panel/app/foreign_install_migration.py`: reviewed, explicit and
+confirm-required additive grant-table migration after the existing signed
+pairing/replay schema. Before first mutation an SQLite-online (WAL-aware)
+0600, no-overwrite private backup is fsynced. Partial/drifted structures,
+unsafe/symlink/hardlinked databases, ambiguous old backups or invalid
+confirmation HOLD. Re-running a verified completed migration is read-only.
+Relative `DB_PATH=./data/smite.db` works inside the real Panel working
+directory. Existing identities, replay rows and flags are unchanged.
+The backup alone is not an adequate restore of active enrollment: the
+Panel's independent encryption key and replay history must be preserved.
+
+New inert renderer `modules/smite-foreign-install-panel-ingress.py` admits
+only the exact U-OPTI HTTPS backend that already has trusted signed
+Pairing ingress. It builds exact, POST-only, 8-KiB, no-access-log locations
+for grant redeem and signed installation-status. Redeem injects the
+already-provisioned private Nginx pairing header; signed proof and general
+root proxy REMOVE client-supplied copies of that header. No wildcard
+approval, unpinned origin, unauthenticated registration or other public
+port is opened. Existing FRP, signed pairing and HTTP root behavior remain
+apart from stripping the otherwise untrusted ingress header. Unknown
+locations, partial markers and drift HOLD. No host write, Nginx reload,
+Panel restart or feature-flag enable is wired yet.
+
+Verification: 10 new offline renderer tests and one disposable Nginx TLS
+proxy test with a local mock backend plus existing 14 identity-promotion
+tests, 15 client tests and real cross-repository ASGI enrollment recovery.
+GitHub Actions run `43196231871` SUCCESS on exact U-OPTI SHA
+`e7ef316394bbf239cbc210c314075740421ea0c4`.
+Companion Smite 13 migration tests and existing HTTP/auth regressions
+SUCCESS on SHA above (Node Pairing Atomic Store run `43196483303`,
+Admin UI run `43196483549`). No real public TLS, signed image
+activation, production host or full two-node installation has been tested.
+
+NEXT EXACT WORK: build/pin verifiably signed trial Panel/Node images and
+implement authorized transactional host provisioning with safe config
+reconciliation/rollback; then connect foreign installer to the staged
+identity promotion, signed replay, Gateway and Sanaei, verify Connected
+in both directions and test full fresh-host/expired-token/recovery cases.
+Never merge main or instruct live installation before Mohammad acceptance.
