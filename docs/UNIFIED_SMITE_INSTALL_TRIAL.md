@@ -31,7 +31,7 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - [x] Persist this plan before implementation.
 - [x] Inventory current U-OPTI and Smite enrollment/origin/replay paths; record exact sources.
 - [x] First implementation checkpoint: explicit Sanaei attachment result codes and isolated regressions.
-- [ ] Define and test admin-authorized single-use enrollment bound to node UUID, foreign role, name and approved HTTPS domain/control path.
+- [x] Implement and test the inert installation-grant store: UUID/name/domain binding, 2-hour expiry and atomic identity/origin commit. HTTP administrator authorization is still pending integration.
 - [ ] Implement companion Smite trial branch: authenticated issuance/revocation, atomic redemption, safe origin authorization and UI.
 - [ ] Handle credential loss/retry/expired/revoked codes without duplicate identities or secret logging.
 - [ ] Build and verify signed trial images; bind installer to their exact digests.
@@ -77,3 +77,16 @@ Audited Smite fork main: 5e7a289071e446345ac27e4255994daf3446430a.
 Exact next step: design and test a separate Foreign installation grant with 7200-second default and bounded expiry, exact domain/node binding, and retry-safe identity delivery. Implement it on a companion Smite trial branch without changing existing RC7 pairing semantics. Specify migration and rollback for the new trusted-origin source. Then produce signed trial images and integrate the U-OPTI flow. Do not merely increase existing pairing TTL or bypass origin checks.
 
 No trial installation command is released: combined setup and its backend are not ready. Main and all live hosts remain unchanged.
+
+
+## Continuation checkpoint — Foreign grant store (2026-11-12)
+Companion branch: https://github.com/aghajani82/Smite/tree/trial/unified-smite-install
+Latest companion implementation SHA: 4cff129306b456ea4390c337f0bf293e9030d11f
+Detailed contract: https://github.com/aghajani82/Smite/blob/trial/unified-smite-install/docs/unified-install-trial.md
+
+Implemented separate inert grant store and explicit additive migration. New codes default to 7200 seconds with a 7200 maximum; old RC7 codes retain 900-second maximum. Grant binds UUID, exact Foreign name, approved normalized domain and generated /smite-node/<32-hex> path. Reissue preserves same pending Gateway path. Client persists a random secret BEFORE redemption; encrypted identity, origin and code consumption commit atomically. Exact retries acknowledge the same key even after signed check-in. Different-key retries, role/domain/name drift, expired or revoked codes fail. An enrolled identity outlives grant expiry. Concurrent contenders cannot rekey. No endpoint or runtime trusted-origin fallback enabled.
+
+Validation: 19 new SQLite tests PASS; 17 existing pairing-store tests PASS; 6 recovery-admission tests PASS; git diff --check PASS. Companion CI ran successfully on initial store commit eaacf68ed3fdf8c14071e69b6b00b86f0d18a1d7; check latest commit's CI separately before claiming latest-head success.
+
+Next exact work: gated HTTP issuance/revocation/redeem adapters using existing administrator/MFA and trusted TLS ingress, capability/schema probe, generic secret-free failures; gated origin lookup with file/DB conflict and revocation checks; safe network DNS pinning. Then UI, client durable-secret persistence/signed lost-reply recovery, snapshots, signed trial images, and U-OPTI orchestration. Merely raising legacy TTL or trusting supplied metadata remains prohibited.
+No hosts touched. Main unchanged in both repositories. No installation command yet. Resume from this checkpoint rather than recreating grant storage.
