@@ -759,3 +759,65 @@ disposable HTTPS and Iran/Sanaei regressions remain green. GitHub Actions
 
 Keep all changes on `trial/unified-smite-install` in both repos. FRP 20182,
 existing Node containers, active Sanaei and both live hosts remain unchanged.
+
+## Continuation checkpoint — one-use Foreign grant to retained identity (2026-11-12)
+
+The existing Foreign code path now has an **internal, disposable-only**
+composition phase. This does NOT add a second public installer and does
+NOT enable host activation. It reuses the previously validated modules
+smite-foreign-install-client.py, smite-foreign-install-promotion.py and
+smite-unified-foreign-gateway-plan.py in
+modules/smite-unified-foreign-identity-phase.py.
+
+Important order and invariants:
+1. Load a private, owner-only 0600 installation packet from a 0700 staging
+   directory; validate the exact Panel-issued node, domain and control path.
+2. Validate the already-registered managed Foreign state, Gateway settings
+   and paused/strict Node environment **before** consuming the single-use
+   grant. Wrong destination/configuration cannot consume a working code.
+3. Use the existing real Smite grant client to durably retain one node
+   secret, redeem against the authenticated Panel API and prove signed
+   enrollment. If the HTTP response is lost after the Panel commits, the
+   identical node secret is retained and a signed proof reconciles it.
+4. Use the existing no-overwrite promotion module with a fresh Panel
+   HMAC proof and its PREPARED/COMPLETED private receipts. Once promoted,
+   retries skip code redemption and verify only the existing signed proof
+   and durable identity receipts, even if the original 2-hour grant expired.
+   The grant TTL limits redemption, never the signed runtime identity.
+5. No Node startup, Compose recreate, Nginx reload, FRP, Backhaul, XHTTP,
+   Sanaei modification, replay reset or Connected claim in this phase.
+
+The Python executable exposes only inert --status. Its internal rehearsal
+entry requires an injected transport and an exact private OS temporary
+fixture hierarchy. Real host paths cannot be selected, even with the
+fixture switch; it is not a production installation/activation command.
+No one-time code or node secret is placed in argv, logs or public output.
+
+The 12 offline scenarios in
+tests/test-smite-unified-foreign-identity-phase.py cover successful HMAC
+proof/promotion, idempotent retry, lost receipt, expired credential,
+corrupt receipts, wrong state/Gateway/Node, inaccessible scope, missing
+grant, revocation, pre-existing identity and fixture ownership.
+The existing cross-repository integration test now additionally issues a
+**real Smite Panel grant in isolated ASGI/SQLite**, consumes it with a
+simulated lost HTTP acknowledgement, verifies exact signed HMAC replay,
+promotes the same Node secret, tests expiry/retry without redemption
+and proves revocation blocks another signed proof. It never uses
+production domains or live hosts.
+Green integration evidence:
+https://github.com/aghajani82/u-opti/actions/runs/43236069532
+
+CRITICAL: Do not attach this helper to public Smite Manager option 2 yet.
+The signed trial manifest still has activation_allowed=false, the older
+RC7 runtime verifier pins a different image, and a real retained-install
+replay/runtime activation plus bidirectional Connected probe/rollback is
+not implemented for this new signed trial pair. These are explicit HOLD
+conditions, not workarounds.
+
+NEXT EXACT WORK: audit and safely extend the exact trial image selection
+and Foreign signed runtime activation/replay gates without weakening the
+existing RC7 official release flow. Add a durable operation-level lock
+and crash recovery across the existing Sanaei/Gateway/enrollment phases,
+then connect option 2 and test both ends on disposable hosts. Keep option
+1 Iran auto-pairing semantics unchanged. Only after final user-approved
+Iran+Foreign host tests merge to main.
