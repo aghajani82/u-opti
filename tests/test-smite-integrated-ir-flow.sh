@@ -87,8 +87,12 @@ grep -qx 'FOREIGN_CORE_CONSENT=INHERITED_FROM_SELECTED_OPTION_2' "$TMP/foreign-c
 # An independent/unselected call retains its existing explicit consent.
 SMITE_SELECTED_FRESH=0
 : > "$PROMPTS"
-smite_install_foreign_node > "$TMP/foreign-independent" 2>&1
-grep -qx 'Install the Foreign Smite Node? [y/N]: ' "$PROMPTS"
+independent_result=0
+smite_install_foreign_node > "$TMP/foreign-independent" 2>&1 || independent_result=$?
+[ "$independent_result" -eq 2 ] || {
+    echo "FAIL: independent Foreign cancellation must retain its nonzero result"; exit 1;
+}
+grep -Fxq 'Install the Foreign Smite Node? [y/N]: ' "$PROMPTS"
 ! grep -q 'FOREIGN_CORE_CONSENT=INHERITED' "$TMP/foreign-independent"
 unset -f read clear
 echo 'SELECTED_IR_FOREIGN_SINGLE_APPROVAL=PASS'
