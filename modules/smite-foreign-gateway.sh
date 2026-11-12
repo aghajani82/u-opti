@@ -16,6 +16,11 @@ SMITE_FOREIGN_3XUI_MARKER="# U-OPTI-MANAGED-3XUI-NGINX"
 SMITE_FOREIGN_STANDALONE_MARKER="# Managed by U-OPTI - Smite Foreign HTTPS/443 gateway"
 
 smite_foreign_gateway_pause() {
+    # Only the explicitly selected one-choice Foreign flow may continue
+    # without a separate manual menu pause. Standalone behavior unchanged.
+    if [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:+yes}" = yes ]; then
+        return 0
+    fi
     echo
     read -rp "Press Enter to return..."
 }
@@ -796,7 +801,18 @@ smite_foreign_gateway_status() {
 smite_foreign_gateway_configure() {
     local role domain panel_domain node_name site enabled control_path control_url
     local detected_ip stored_ip panel_ip panel_ip_input confirm
-    local site_backup="" env_backup=""
+    local site_backup="" env_backup="" module_dir=""
+
+    # Never use an untrusted environment path to authorize the Gateway.
+    # This branch is opt-in for an owned FRESH RC7 install; it validates
+    # the private exact signed Panel packet before editing Nginx/Compose.
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+        [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] || {
+            echo 'HOLD: Unified Foreign Gateway requires a fresh signed RC7 Node.' >&2
+            return 2
+        }
+    fi
 
     clear
     echo "======================================"
@@ -804,14 +820,14 @@ smite_foreign_gateway_configure() {
     echo "======================================"
     echo
 
-    [ "$(id -u)" -eq 0 ] || { echo "ERROR: Run U-OPTI as root."; smite_foreign_gateway_pause; return; }
+    [ "$(id -u)" -eq 0 ] || { echo "ERROR: Run U-OPTI as root."; smite_foreign_gateway_pause; return 2; }
 
     role="$(smite_foreign_gateway_role)"
     if [ "$role" != "foreign" ]; then
         echo "ERROR: This server is not registered in U-OPTI state as a Foreign Smite node."
         echo "Detected role: ${role:-Not set}"
         smite_foreign_gateway_pause
-        return
+        return 2
     fi
 
     if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
@@ -819,20 +835,36 @@ smite_foreign_gateway_configure() {
         return
     fi
 
-    smite_foreign_gateway_require_node || { smite_foreign_gateway_pause; return; }
-    smite_foreign_gateway_require_rc_paused || { smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_require_node || { smite_foreign_gateway_pause; return 2; }
+    smite_foreign_gateway_require_rc_paused || { smite_foreign_gateway_pause; return 2; }
 
     domain="$(smite_foreign_gateway_domain)"
     panel_domain="$(smite_foreign_gateway_panel_domain)"
     node_name="$(smite_foreign_gateway_node_name)"
 
-    smite_foreign_gateway_validate_domain "$domain" || { echo "ERROR: Valid Foreign domain not detected."; smite_foreign_gateway_pause; return; }
-    smite_foreign_gateway_validate_domain "$panel_domain" || { echo "ERROR: Valid Panel domain not detected."; smite_foreign_gateway_pause; return; }
-    [ -n "$node_name" ] || { echo "ERROR: Foreign node name not detected."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_validate_domain "$domain" || { echo "ERROR: Valid Foreign domain not detected."; smite_foreign_gateway_pause; return 2; }
+    smite_foreign_gateway_validate_domain "$panel_domain" || { echo "ERROR: Valid Panel domain not detected."; smite_foreign_gateway_pause; return 2; }
+    [ -n "$node_name" ] || { echo "ERROR: Foreign node name not detected."; smite_foreign_gateway_pause; return 2; }
 
     site="$(smite_foreign_gateway_site_path "$domain")"
     enabled="$(smite_foreign_gateway_enabled_path "$domain")"
-    control_path="$(smite_foreign_gateway_control_path "$site")"
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+        [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
+        [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
+        control_path="$(python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" \
+            --state-file "$SMITE_STATE_FILE" \
+            --gateway-state-file "$SMITE_FOREIGN_GATEWAY_STATE_FILE" \
+            --site-file "$site")" || {
+                echo 'HOLD: Gateway path does not match the Panel-issued one-use grant.' >&2
+                return 2
+            }
+        [[ "$control_path" =~ ^/smite-node/[a-f0-9]{32}$ ]] || return 2
+        echo 'UNIFIED_FOREIGN_GATEWAY_PATH=VERIFIED_PANEL_SCOPE'
+    else
+        control_path="$(smite_foreign_gateway_control_path "$site")"
+    fi
     control_url="https://${domain}${control_path}"
 
     stored_ip="$(smite_foreign_gateway_state_value SMITE_FOREIGN_PANEL_SOURCE_IPV4 "$SMITE_FOREIGN_GATEWAY_STATE_FILE")"
@@ -849,7 +881,7 @@ smite_foreign_gateway_configure() {
     echo
     read -rp "Panel source IPv4 [${panel_ip:-none}]: " panel_ip_input
     panel_ip="${panel_ip_input:-$panel_ip}"
-    smite_foreign_gateway_validate_ipv4 "$panel_ip" || { echo "ERROR: A valid Panel source IPv4 is required."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_validate_ipv4 "$panel_ip" || { echo "ERROR: A valid Panel source IPv4 is required."; smite_foreign_gateway_pause; return 2; }
 
     if [ -f "$site" ]; then
         echo
@@ -871,41 +903,45 @@ smite_foreign_gateway_configure() {
     case "$confirm" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; sleep 1; return ;; esac
 
     echo
-    smite_foreign_gateway_ensure_packages || { echo "ERROR: Could not prepare Nginx/Certbot."; smite_foreign_gateway_pause; return; }
-    smite_foreign_gateway_ensure_certificate "$domain" || { echo "ERROR: Certificate preparation failed."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_ensure_packages || { echo "ERROR: Could not prepare Nginx/Certbot."; smite_foreign_gateway_pause; return 2; }
+    smite_foreign_gateway_ensure_certificate "$domain" || { echo "ERROR: Certificate preparation failed."; smite_foreign_gateway_pause; return 2; }
 
-    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return; }
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return 2; }
 
-    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return 2; }
 
     if [ -f "$site" ]; then
         site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
-        cp -a "$site" "$site_backup" || { echo "ERROR: Could not back up existing Foreign site."; smite_foreign_gateway_pause; return; }
+        cp -a "$site" "$site_backup" || { echo "ERROR: Could not back up existing Foreign site."; smite_foreign_gateway_pause; return 2; }
     fi
 
-    smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to update Foreign Nginx site without replacing existing content."; smite_foreign_gateway_pause; return; }
-    ln -sfn "$site" "$enabled" || { echo "ERROR: Failed to enable Foreign Nginx site."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to update Foreign Nginx site without replacing existing content."; smite_foreign_gateway_pause; return 2; }
+    ln -sfn "$site" "$enabled" || { echo "ERROR: Failed to enable Foreign Nginx site."; smite_foreign_gateway_pause; return 2; }
 
     if ! nginx -t || ! systemctl reload nginx; then
         echo "ERROR: Nginx validation/reload failed. Restoring previous Foreign site..."
         if [ -n "$site_backup" ]; then cp -a "$site_backup" "$site"; else rm -f "$site" "$enabled"; fi
         nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
         smite_foreign_gateway_pause
-        return
+        return 2
     fi
 
-    smite_foreign_gateway_write_renew_hook || echo "WARNING: Could not install Nginx certificate renewal hook."
-    smite_foreign_gateway_verify_local "$domain" "$control_path" || { echo "ERROR: Local Foreign HTTPS/443 control verification failed."; smite_foreign_gateway_pause; return; }
+    if ! smite_foreign_gateway_write_renew_hook; then
+        echo 'HOLD: Foreign Gateway certificate renewal hook was not installed.' >&2
+        smite_foreign_gateway_pause
+        return 2
+    fi
+    smite_foreign_gateway_verify_local "$domain" "$control_path" || { echo "ERROR: Local Foreign HTTPS/443 control verification failed."; smite_foreign_gateway_pause; return 2; }
     echo "Foreign local HTTPS/443 control: OK"
 
     if smite_foreign_gateway_is_clean_rc; then
         echo "FOREIGN_RC_LEGACY_METADATA_OVERLAY=SKIPPED"
     else
-        smite_foreign_gateway_patch_control_metadata || { echo "ERROR: Could not prepare control-address overlay."; smite_foreign_gateway_pause; return; }
+        smite_foreign_gateway_patch_control_metadata || { echo "ERROR: Could not prepare control-address overlay."; smite_foreign_gateway_pause; return 2; }
     fi
 
     env_backup="${SMITE_NODE_DIR}/.env.u-opti-before-foreign-gateway-$(date +%Y%m%d-%H%M%S).bak"
-    smite_foreign_gateway_set_node_control_address "$control_url" "$env_backup" || { echo "ERROR: Could not update node control address."; smite_foreign_gateway_pause; return; }
+    smite_foreign_gateway_set_node_control_address "$control_url" "$env_backup" || { echo "ERROR: Could not update node control address."; smite_foreign_gateway_pause; return 2; }
 
     echo "Applying Foreign Smite Node control metadata..."
     if ! smite_foreign_gateway_recreate_node; then
@@ -918,10 +954,14 @@ smite_foreign_gateway_configure() {
             docker compose -f "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node >/dev/null 2>&1 || true
         fi
         smite_foreign_gateway_pause
-        return
+        return 2
     fi
 
-    smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path" || echo "WARNING: Foreign gateway state could not be saved."
+    if ! smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
+        echo 'HOLD: Foreign Gateway state could not be retained. Review backups before retry.' >&2
+        smite_foreign_gateway_pause
+        return 2
+    fi
 
     if smite_foreign_gateway_is_clean_rc; then
         echo
@@ -930,7 +970,7 @@ smite_foreign_gateway_configure() {
         echo "FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING"
         echo "No signed HMAC or Panel registration has been claimed."
         smite_foreign_gateway_pause
-        return
+        return 0
     fi
 
     echo "Waiting for Panel registration and Panel -> Foreign control verification..."
@@ -938,7 +978,7 @@ smite_foreign_gateway_configure() {
         echo "ERROR: Panel could not verify the Foreign node through HTTPS/443."
         echo "Nginx and node configuration were kept for inspection/repair."
         smite_foreign_gateway_pause
-        return
+        return 2
     fi
 
     [ -n "$site_backup" ] && cmp -s "$site_backup" "$site" && rm -f "$site_backup"
@@ -958,6 +998,7 @@ smite_foreign_gateway_configure() {
     echo
     echo "Keep public TCP/8888 blocked by provider firewall or UFW."
     smite_foreign_gateway_pause
+    return 0
 }
 
 # Opt-in sharing of the *existing* managed Sanaei panel location.
