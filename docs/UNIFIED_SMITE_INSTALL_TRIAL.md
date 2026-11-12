@@ -248,9 +248,12 @@ and link/completed, live identity collisions, exact Gateway binding, tampered
 journal, expired grant, no-overwrite, unsafe paths and non-writable managed
 Node directory) added to push/PR trial CI. The workflow also runs the original
 15 client tests and the real cross-repository ASGI recovery integration test.
-First new CI result: workflow run 43193684660 PASS on
-`b32d0f277d532062d8ed9f649f1c4fe6bf8ce25a` (12 promotion tests at
-that SHA). Exact-head expanded CI after new tests is pending verification.
+Full expanded CI: workflow run 43194041014 SUCCESS at exact code commit
+`0e11dcf2aba63ef8931919dce2ef8785fc5611d9`; 14 promotion tests,
+15 existing client tests and the cross-repository ASGI recovery integration all
+passed. Intermediate failure was a fixture affected by GitHub runner umask;
+an unrelated pip network IncompleteRead was also observed on one earlier run.
+No production host or signed runtime test has been performed.
 No live TLS or two-host testing has been performed.
 
 NEXT EXACT WORK: create explicit, reversible, signed-trial Panel schema,
