@@ -294,6 +294,14 @@ class Prepare(unittest.TestCase):
         with self.assertRaises(stage.StageHold):self.panel.status()
         self.assert_untouched()
 
+    def test_extra_state_or_sqlite_wal_sidecar_halts_status(self):
+        self.stage()
+        sidecar=self.panel.staging/"panel-db.sqlite3-wal"
+        sidecar.write_bytes(b"unreviewed")
+        with self.assertRaises(stage.StageHold):self.panel.status()
+        sidecar.unlink()
+        self.assertEqual(self.panel.status()["state"],"PREPARED_ONLY")
+
     def test_existing_pairing_schema_required(self):
         with sqlite3.connect(self.db) as conn:
             conn.execute("DROP TABLE smite_node_inbound_nonces")
