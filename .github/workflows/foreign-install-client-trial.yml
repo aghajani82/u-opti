@@ -9,6 +9,9 @@ on:
       - modules/smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
       - modules/smite-install.sh
+      - modules/smite-foreign-gateway.sh
+      - modules/smite-unified-foreign-gateway-plan.py
+      - tests/test-smite-unified-foreign-gateway-plan.py
       - modules/docker-3xui.sh
       - tests/test-smite-unified-sanaei-continuation.sh
       - modules/smite-unified-panel-transaction.py
@@ -43,6 +46,8 @@ jobs:
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
       - run: bash tests/test-smite-unified-sanaei-continuation.sh
+      - run: python -B tests/test-smite-unified-foreign-gateway-plan.py -v
+      - run: bash -n modules/smite-foreign-gateway.sh
       - run: bash tests/test-smite-integrated-ir-flow.sh
       - run: bash tests/test-smite-sanaei-result.sh
       - run: python -B tests/test-smite-unified-panel-transaction.py -v
