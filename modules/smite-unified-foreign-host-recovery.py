@@ -12,6 +12,7 @@ retry, so a stale "success" journal can never declare Connected.
 """
 from __future__ import annotations
 
+import argparse
 import fcntl
 import hashlib
 import importlib.util
@@ -240,3 +241,18 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
                 os.close(lock)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--status", action="store_true", required=True)
+    parser.parse_args(argv)
+    print("UNIFIED_FOREIGN_HOST_RECOVERY=DISPOSABLE_REHEARSAL_ONLY")
+    print("HOST_STAGE_EXECUTION=NOT_AUTHORIZED")
+    print("ACTIVATION_ALLOWED=NO")
+    print("FOREIGN_CONNECTED=NOT_PROVEN")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
