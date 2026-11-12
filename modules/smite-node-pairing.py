@@ -1935,8 +1935,46 @@ def _rc7_foreign_paused_rollback_verified(
         raise WizardHold("Foreign RC7 rollback replay identity is not retained")
 
 
+def _require_unified_foreign_release() -> None:
+    """Reuse the existing exact signed Panel/Node trial-pair verifier.
+
+    This is a FAIL-CLOSED release boundary. The pinned trial manifest
+    explicitly says activation_allowed=false; no runtime write follows
+    until a separately reviewed signed release permits host activation.
+    """
+    import importlib.util
+    module_path = Path(__file__).with_name("smite-unified-trial-pair-admission.py")
+    manifest = Path(__file__).with_name("smite-unified-trial-registry-pair.json")
+    trust = Path(__file__).with_name("smite-rc7-sigstore-trusted-root.json")
+    if any(path.is_symlink() or not path.is_file()
+           for path in (module_path, manifest, trust)):
+        raise WizardHold("Unified signed release verification inputs unavailable")
+    spec = importlib.util.spec_from_file_location(
+        "uopti_existing_unified_pair_admission", module_path)
+    if spec is None or spec.loader is None:
+        raise WizardHold("Unified signed pair verifier unavailable")
+    signed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(signed)
+    try:
+        approved = signed.verify(
+            manifest=manifest,
+            manifest_sha256="e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608",
+            source_sha="b865be93e22153c60769f6329e6e55e781494ded",
+            trusted_root=trust)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            signed.Hold) as exc:
+        raise WizardHold("Unified signed pair release verification failed") from exc
+    if (approved.get("status") != "verified_trial_pair"
+            or approved.get("node") != _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+            or approved.get("panel") !=
+              "ghcr.io/aghajani82/smite-panel@sha256:1b03d0d865ba4abd6fe45899d2ccd6d34f300b4804acd2c6690a52b68fb26289"
+            or approved.get("host_activation_allowed") is not True):
+        raise WizardHold("Unified signed pair NOT released for host activation")
+
+
 def activate_foreign_node_field_trial(
     state: dict[str, str] | None = None, *, reviewed_rc2: bool = False,
+    reviewed_unified_trial: bool = False,
 ) -> None:
     """KH only; require IR approval + updated signed Panel image BEFORE use.
 
@@ -1944,7 +1982,12 @@ def activate_foreign_node_field_trial(
     unsigned fallback. A failed signed check-in returns Node to paused mode.
     Identity and Replay history are retained for operator reconciliation.
     """
+    if (type(reviewed_rc2) is not bool or type(reviewed_unified_trial) is not bool
+            or (reviewed_rc2 and reviewed_unified_trial)):
+        raise WizardHold("Foreign signed image selector invalid")
     _field_trial_gate()
+    if reviewed_unified_trial:
+        _require_unified_foreign_release()
     _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if reviewed_rc2:
@@ -1967,15 +2010,21 @@ def activate_foreign_node_field_trial(
         panel, _domain, control_url = _foreign_gateway_preflight(
             current, expected_image=_FOREIGN_NODE_IMAGE_RC2,
         )
+    elif reviewed_unified_trial:
+        panel, _domain, control_url = _foreign_gateway_preflight(
+            current, review_unified_trial=True)
     else:
         panel, _domain, control_url = _foreign_gateway_preflight(current)
     rc7 = current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
+    if reviewed_unified_trial and not rc7:
+        raise WizardHold("Unified signed pair requires exact RC7 Foreign baseline")
     if rc7:
         _rc7_foreign_compose_command()
-        # A pinned image REFERENCE alone does not prove the running
-        # container uses that image ID. Reject drift before replay/candidate
-        # files or any Node recreation are attempted.
-        _rc7_foreign_pinned_image_verified()
+        # The trial selector cannot silently adopt the old official RC7 image.
+        if reviewed_unified_trial:
+            _rc7_foreign_pinned_image_verified(review_unified_trial=True)
+        else:
+            _rc7_foreign_pinned_image_verified()
     node_id, node_secret = _identity_record()
     retained_identity = (node_id, node_secret)
     helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
@@ -2010,7 +2059,10 @@ def activate_foreign_node_field_trial(
             # live container labels, local pinned image and candidate file
             # AFTER it is recreated and BEFORE any signed proof is claimed.
             _rc7_foreign_compose_command(verify_active_candidate=True)
-            _rc7_foreign_pinned_image_verified()
+            if reviewed_unified_trial:
+                _rc7_foreign_pinned_image_verified(review_unified_trial=True)
+            else:
+                _rc7_foreign_pinned_image_verified()
         effective = _run([
             "docker", "inspect", "-f",
             "{{range .Config.Env}}{{println .}}{{end}}", "smite-node",
@@ -2046,7 +2098,10 @@ def activate_foreign_node_field_trial(
         # not a successful Connected report.
         if rc7:
             _rc7_foreign_compose_command(verify_active_candidate=True)
-            _rc7_foreign_pinned_image_verified()
+            if reviewed_unified_trial:
+                _rc7_foreign_pinned_image_verified(review_unified_trial=True)
+            else:
+                _rc7_foreign_pinned_image_verified()
         # A Connected result must not hide an identity rotation or lost
         # replay binding. Reuse the existing owner-only identity/replay checks.
         if _identity_record() != retained_identity or not _replay_artifacts_valid():
@@ -2073,10 +2128,14 @@ def activate_foreign_node_field_trial(
                     and "SMITE_AGENT_AUTH_MODE=strict" in effective
                 )
                 if rollback_ok and rc7:
-                    _rc7_foreign_paused_rollback_verified(
-                        expected_identity=retained_identity,
-                        require_replay=True,
-                    )
+                    if reviewed_unified_trial:
+                        _rc7_foreign_paused_rollback_verified(
+                            expected_identity=retained_identity,
+                            require_replay=True, review_unified_trial=True)
+                    else:
+                        _rc7_foreign_paused_rollback_verified(
+                            expected_identity=retained_identity,
+                            require_replay=True)
                     # Verify the *observed* post-recreate Compose owner now
                     # has ONLY the original base file. A pre-rollback
                     # command is not proof that Docker applied that file.
@@ -2101,8 +2160,14 @@ def activate_foreign_node_field_trial(
     print("PRODUCTION_ACTIVATION=NO")
 
 
-def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> None:
+def rollback_node_to_paused_field_trial(
+    state: dict[str, str] | None = None, *, reviewed_unified_trial: bool = False,
+) -> None:
+    if type(reviewed_unified_trial) is not bool:
+        raise WizardHold("Foreign rollback image selector invalid")
     _field_trial_gate()
+    if reviewed_unified_trial:
+        _require_unified_foreign_release()
     _require_no_active_engine_overlays()
     current = state_values() if state is None else state
     if current.get("SMITE_CONNECTION_MODE") != "standard":
@@ -2112,11 +2177,13 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
         current.get("SMITE_ROLE") == "foreign"
         and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     )
+    if reviewed_unified_trial and not rc7_foreign:
+        raise WizardHold("Unified rollback requires exact RC7 Foreign baseline")
     if rc7_foreign:
-        # This checks both the image reference AND actual immutable Docker
-        # image ID before the existing rollback may recreate anything.
-        # In particular, it NEVER admits the not-yet-authorized trial image.
-        _rc7_foreign_pinned_image_verified()
+        if reviewed_unified_trial:
+            _rc7_foreign_pinned_image_verified(review_unified_trial=True)
+        else:
+            _rc7_foreign_pinned_image_verified()
     # Capture original identity/replay before any possible recreation.
     # A missing identity is allowed for an unpaired recovery; an existing,
     # unsafe or partially provisioned identity must never be overwritten.
@@ -2141,9 +2208,15 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
     if "SMITE_NODE_PANEL_AUTH_MODE=paused" not in env or "SMITE_AGENT_AUTH_MODE=strict" not in env:
         raise WizardHold("Node did not return to paused+strict state")
     if rc7_foreign:
-        _rc7_foreign_paused_rollback_verified(
-            expected_identity=retained_identity, require_replay=retained_replay,
-        )
+        if reviewed_unified_trial:
+            _rc7_foreign_paused_rollback_verified(
+                expected_identity=retained_identity,
+                require_replay=retained_replay,
+                review_unified_trial=True)
+        else:
+            _rc7_foreign_paused_rollback_verified(
+                expected_identity=retained_identity,
+                require_replay=retained_replay)
         # This is a separate read-only *after* witness, not the prior
         # command selection. Never claim safe rollback while the failed
         # signed candidate/foreign Compose files remain active.
