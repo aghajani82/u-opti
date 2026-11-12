@@ -518,3 +518,84 @@ No Node recreate, FRP/Backhaul restart, existing 20182 route change,
 or Sanaei DB modifications. Then wire one-command foreign install,
 prove signed two-way Connected and operator-approve real host tests
 before merging `main`.
+
+## Explicit two-menu-choice acceptance and first Foreign continuation wiring (2026-11-12)
+
+The user clarified the *final menu semantics*:
+
+- **Option 1, Install Panel + Iran Node:** one selection on Iran installs
+  pinned Smite Panel and co-located Iran Node, prepares HTTPS/443 + SSL
+  Gateway, performs signed local pairing automatically, proves Iran Node
+  appears Connected, then creates the Panel administrator. No separate
+  Pairing option 2, no separate Gateway menu and no second install.
+- **Option 2, Install Foreign Node:** one selection on the foreign server
+  installs its signed Node and Nginx HTTPS/443/Let's Encrypt Gateway,
+  installs Sanaei 3x-UI Docker or selects an existing trusted instance,
+  attaches the Sanaei SQLite database read-only, consumes the *exact*
+  two-hour, one-use credential issued by the Panel for its Node/domain,
+  promotes and activates the existing staged key without rekey,
+  provisions signed replay and proves authenticated bidirectional
+  Connected. No return to a submenu and no manual SSH step on Iran.
+- Both selections must retain original configuration, signed keys,
+  FRP, Backhaul, XHTTP, Sanaei and existing instances. On failure,
+  leave a truthful HOLD/recovery record, never mark partial work done.
+  Do not use a second silent installation path alongside existing U-OPTI.
+
+Current audited reality: the selected fresh **Iran** entry already chains
+the existing `smite_install_panel_iran` and
+`smite_install_finish_local_ir` gateway, signed local enrollment and
+admin creation. Its regression is `tests/test-smite-integrated-ir-flow.sh`.
+The selected fresh **Foreign** entry currently ends after core Node
+installation (installed/paused), and its separate menu options 4
+(Sanaei) and 6 (Gateway) do not perform the new `smi1` Foreign
+grant redemption/runtime promotion. This is **not yet a one-choice
+Foreign installation**, even though all its principal components exist.
+The signed trial images are verified but not yet selected by the
+production installer, which still pins the prior RC7 release pair.
+
+First integration bridge committed **only on this trial branch**:
+`docker_3xui_install` recognizes the scoped
+`UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1` and returns successfully after
+the existing installation instead of replacing the U-OPTI shell with
+its historical Docker submenu. Without the variable, the standalone
+Sanaei installer keeps its original PTY reload behavior.
+`smite_install_unified_foreign_sanaei` in `modules/smite-install.sh`
+reuses the existing Foreign option-4 installer and verified read-only
+DB attachment: if there is no existing registered Sanaei instance,
+the first invocation installs it and the helper **automatically invokes
+the same attachment once more**, returning success only after verified
+attachment. A missing/partial/failed attachment, unknown return code,
+wrong role, old/legacy version or non-fresh transaction is HOLD. It
+does not rebuild or rekey a Node itself. The helper is intentionally
+**NOT YET CALLED** from option 2: actual integration must be conditional
+on signed trial image provenance and a validated secure Foreign
+Gateway + grant redemption + runtime promotion path before it is
+advertised as complete.
+
+Isolated regression `tests/test-smite-unified-sanaei-continuation.sh`
+exercises 8 success/cancellation/error cases and validates the scoped
+legacy PTY behavior. The trial workflow also runs the existing
+`test-smite-integrated-ir-flow.sh` and
+`test-smite-sanaei-result.sh`, plus the previous signed/ASGI/Nginx
+checks. All tests require no live server access.
+
+**NEXT (do not recreate components):**
+1. Bind selected fresh installer to exact signed unified trial Panel
+   and Node digests with branch-specific Cosign admission, preserving
+   official RC7 verifier and standard installer.
+2. Build a fail-closed Foreign menu **option-2-only coordinator** using
+   existing core, Sanaei continuation, HTTPS gateway, private `smi1`
+   packet enrollment, staged key promotion and strict signed Node
+   activation; persist journal phases and recover without duplicate
+   downloads or a second menu visit. Require exact
+   Panel-issued control path; Gateway must not generate an unrelated path.
+3. Upgrade the reusable Foreign Gateway and Sanaei helpers so errors
+   return nonzero in unified mode. Apply safe Nginx/Compose checks and
+   prove two-way Connected at completion; preserve existing traffic.
+4. Test the entire one-choice Iran and Foreign user journeys in
+   disposable isolated hosts, then on the two approved servers. Only
+   after full review and explicit final user approval merge both
+   trial branches into `main`.
+
+This is a user acceptance contract and **first composition step**, not
+a published install command. Live hosts and `main` remain unchanged.
