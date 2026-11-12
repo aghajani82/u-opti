@@ -1569,6 +1569,16 @@ extended to exercise matching input, no additional prompts, expired
 grant, unsafe private file, wrong origin/host, and wrong caller scope
 before the mocked preflight rejects installation.
 
+Verified implementation SHA: `5a9f0e24671a20cbcf7000bdf60666f02996056a`;
+final fixture correction SHA: `609a917f5cbd34fddee115a1062cef19b5285d94`.
+Full GitHub Actions `43288887582`: **2 of 2 jobs SUCCESS** on the
+final exact source, including existing foreign after-core, Gateway
+packet, IR local installation, Sanaei and cross-repository Panel ASGI
+tests. The first test attempt failed because the old standalone
+Gateway fixture had a deliberately far-future grant expiry; the fresh
+pre-core test now uses a realistic one-hour unredeemed Panel grant
+without weakening the actual two-hour check.
+
 **No public option-2 packet capture or activation was enabled.**
 The signed trial manifest still has `activation_allowed:false`.
 The next work is connecting the existing secure hidden-terminal
