@@ -200,11 +200,11 @@ class ExistingWitnesses:
                 for values in (file_env, env):
                     if values.get(key) != value:
                         deny()
-                if key in ("SMITE_NODE_PANEL_AUTH_MODE", "SMITE_AGENT_AUTH_MODE",
-                           "SMITE_ENGINE_INVENTORY_MODE"):
-                    if runtime.count(key + "=" + value) != 1 or sum(
-                        x.startswith(key + "=") for x in runtime) != 1:
-                        deny()
+                # Check ACTUAL container env, not only disk/Compose,
+                # for the original name, role and Panel binding too.
+                if runtime.count(key + "=" + value) != 1 or sum(
+                    x.startswith(key + "=") for x in runtime) != 1:
+                    deny()
             return True
         except (OSError, TypeError, ValueError, KeyError, AttributeError,
                 self.pairing.WizardHold):
@@ -226,6 +226,15 @@ class ExistingWitnesses:
                     and file_env.get("SMITE_SANAEI_INVENTORY_ENABLED") == "false"
                     and file_env.get("SMITE_SANAEI_DB_HOST_PATH") == empty
                     and source == empty):
+                # The original fresh installer creates a root-owned 0700,
+                # EMPTY placeholder. Anything else is drift, not absence.
+                placeholder = p.NODE_DIR / ".sanaei-empty"
+                status = placeholder.lstat()
+                if (not stat.S_ISDIR(status.st_mode)
+                        or status.st_uid != __import__("os").geteuid()
+                        or stat.S_IMODE(status.st_mode) != 0o700
+                        or any(placeholder.iterdir())):
+                    return "DRIFT"
                 return "ABSENT"
             if (env.get("SMITE_SANAEI_INVENTORY_ENABLED") != "true"
                     or file_env.get("SMITE_SANAEI_INVENTORY_ENABLED") != "true"
