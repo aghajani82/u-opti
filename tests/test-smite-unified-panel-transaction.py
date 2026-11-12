@@ -168,6 +168,29 @@ class OfflineRollout(unittest.TestCase):
         with self.assertRaises(trans.Hold):self._undo()
         self.assertEqual(self._ledger()["phase"],"REHEARSED")
 
+    def test_new_reserved_foreign_node_blocks_rollback_before_grant_issue(self):
+        self._invoke()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("INSERT INTO nodes VALUES ('new-reservation','node-foreign','{}')")
+        with self.assertRaises(trans.Hold):self._undo()
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+
+    def test_wrong_new_grant_schema_blocks_rollback(self):
+        self._invoke()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("DROP TABLE smite_foreign_install_grants")
+            conn.execute("CREATE TABLE smite_foreign_install_grants (node_id TEXT)")
+        with self.assertRaises(trans.Hold):self._undo()
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+
+    def test_tampered_stage_database_snapshot_blocks_rollback(self):
+        self._invoke()
+        backup=self.panel.staging/"panel-db.sqlite3"
+        with sqlite3.connect(backup) as conn:
+            conn.execute("INSERT INTO nodes VALUES ('unexpected','attacker','{}')")
+        with self.assertRaises(trans.Hold):self._undo()
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+
     def test_advanced_replay_nonce_blocks_rollback_without_rewind(self):
         self._invoke()
         replay=self.root / fixture.stage.REPLAY_DB_REL
