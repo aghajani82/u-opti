@@ -359,3 +359,86 @@ containers. Then integrate Foreign install with strict signed replay,
 Gateway/Sanaei and full two-way Connected verification. Test from clean
 hosts and interrupted/rollback states before asking for Mohammad's
 approval to merge `main`.
+
+## Continuation checkpoint — signed Iran Panel prepare-only transaction (2026-11-12)
+
+Added `modules/smite-unified-panel-stage.py` with dedicated offline/host
+fixture regressions in `tests/test-smite-unified-panel-stage.py`. This is
+**STAGING ONLY**. It is not connected to the installation menu and does not
+recreate Panel/Node, change an active Compose/Nginx, migrate SQLite schema,
+enable an API, alter FRP/Backhaul, or issue a Foreign installation code.
+Host activation and rollback have **not** been implemented.
+
+Exact reviewed Smite images remain pinned:
+- Panel: `ghcr.io/aghajani82/smite-panel@sha256:1b03d0d865ba4abd6fe45899d2ccd6d34f300b4804acd2c6690a52b68fb26289`
+- Node: `ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483`
+- Smite source: `b865be93e22153c60769f6329e6e55e781494ded`
+- Manifest SHA256: `e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608`.
+
+A real future host staging invocation requires root and an explicit
+`STAGE-SIGNED-UNIFIED-PANEL-TRIAL` confirmation. It re-runs the independent
+**real Cosign** verification of both digest signatures with the pinned
+Sigstore root *before* creating any private transaction directory. There is
+no CLI parameter to bypass image signature checking. The special mocked
+admission callable is exercised only by the isolated Python tests.
+
+The preflight requires exactly the existing signed/paired IR Panel in
+Standard mode, existing private Panel pairing master key, matching Nginx
+ingress token and matching Panel domain, exact reviewed RC7 Panel image in
+the existing Compose service, managed U-OPTI TLS backend, unmodified
+signed Pairing/FRP routing, and root-owned, non-writable configuration
+paths. It also requires the existing Iran Node identity and its persistent
+replay marker/HMAC key binding with the real replay SQLite store and a
+verified existing Panel pairing/replay schema. Missing, partially migrated,
+hardlinked, symlinked, forged or conflicting state causes a HOLD.
+
+Only after all preflights pass is a **new, never-overwritten, mode-0700**
+directory `/var/lib/u-opti/unified-panel-trial-stage` created. It holds
+0600/fsynced snapshots of Panel .env and Compose, U-OPTI role state,
+Nginx backend and pairing-header secret, pairing secrets, local Iran Node
+identity and replay enrollment marker. Online SQLite backups are created for
+both the Panel database and the Iran replay database, including committed
+WAL transactions and existing Node identities/nonces. The private copies'
+journal mode is normalized to DELETE and connections are closed before
+they are sealed. Candidate files separately contain the exact Panel digest,
+two Foreign installation feature flags and reviewed exact POST-only Nginx
+ingress. They remain inert; the running Node/Panel and live DBs are untouched.
+
+A terminal `PREPARED_ONLY` journal records file hashes, exact source and
+both signed images, explicitly setting `live_write=false`. The status
+verifier checks all private files and rejects extras, tampering, unknown
+SQLite sidecars and incomplete crash journals. Interrupted preparation is
+quarantined rather than silently retried or erased. It does not assume the
+live host is still unchanged at a later apply time. No secrets are printed.
+
+CI: 19 disposable stage/preflight/backup/replay/negative tests plus the
+existing 14 Foreign promotion tests, 15 Foreign enrollment tests, real
+cross-repository ASGI integration, reviewed Nginx template tests and a real
+disposable Nginx TLS header-injection check were all green at source commit
+`8e6ed177fa41c8eabada4b3beff7438ff3fa5912`: U-OPTI Actions
+[43200772845](https://github.com/aghajani82/u-opti/actions/runs/43200772845),
+both jobs SUCCESS. Tests mock the signed-review result only for isolated
+fixture runs; real GHCR signature checks were independently proven in run
+43198492747. No staged host invocation or server changes occurred.
+
+NEXT EXACT WORK:
+1. Implement a separately confirmed **apply/rollback executor** that
+   re-verifies the signed pair and stage, takes a fresh immediately
+   pre-apply Panel and Iran replay snapshot, detects live preimage drift,
+   uses isolated candidate Nginx syntax/Compose review, and performs
+   strictly ordered migration / exact Panel-only image & feature-flag
+   activation / Nginx reload with durable rollback checkpoints.
+2. On failure restore only operator-owned changes; never recreate the
+   Iran Node, rotate identity, reset replay, restart FRP or modify
+   the existing tunnel 20182. Any failure to prove a safe rollback
+   must quarantine state and HOLD for manual recovery.
+3. Then integrate the Foreign installer: consume Panel-issued two-hour
+   grants, securely persist same key across interruptions, configure
+   foreign Gateway/SSL/Sanaei database read-only inventory, provision
+   signed replay and prove bidirectional Connected status.
+4. Verify complete fresh-host and interrupted/recovery workflows on
+   disposable hosts and obtain Mohammad's approval before changing
+   `main` or any live Iran/Foreign server.
+
+The `main` branches of both repos remain unmodified. No installation
+or recovery commands are approved for production at this checkpoint.
