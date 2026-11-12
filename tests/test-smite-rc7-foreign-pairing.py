@@ -487,6 +487,69 @@ class ForeignRC7Tests(unittest.TestCase):
                 with self.assertRaisesRegex(p.WizardHold, "image ID differs"):
                     p.rollback_node_to_paused_field_trial(state)
 
+    def test_failed_signed_rc7_activation_checks_post_rollback_identity(self):
+        state = {
+            "SMITE_ROLE": "foreign",
+            "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard",
+            "SMITE_NODE_NAME": "node-kh",
+        }
+        retained = ("node-12345678", "a"*64)
+        commands = []
+        def mock_run(args, **kwargs):
+            commands.append(args)
+            if args[-2:] == ["config", "--quiet"]:
+                return ""
+            if "up" in args:
+                self.assertIn("--force-recreate", args)
+                return ""
+            if args[:3] == ["docker", "inspect", "-f"]:
+                self.assertIn("{{range .Config.Env}}", args[3])
+                env_probes = sum(
+                    cmd[:3] == ["docker", "inspect", "-f"]
+                    for cmd in commands
+                )
+                mode = "signed" if env_probes == 1 else "paused"
+                return (
+                    "SMITE_NODE_PANEL_AUTH_MODE=" + mode + "\n"
+                    "SMITE_AGENT_AUTH_MODE=strict\n"
+                    "SMITE_ENGINE_INVENTORY_MODE=managed\n"
+                )
+            raise AssertionError(args)
+        with patch.object(p, "_field_trial_gate"), \\
+             patch.object(p, "_require_no_active_engine_overlays"), \\
+             patch.object(p, "_foreign_gateway_preflight",
+                          return_value=("iran.example.org","kh.example.org",
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \\
+             patch.object(p, "_rc7_foreign_compose_command",
+                          return_value=["docker","compose","--project-name","test"]), \\
+             patch.object(p, "_rc7_foreign_pinned_image_verified"), \\
+             patch.object(p, "_identity_record", return_value=retained), \\
+             patch.object(p, "_regular", return_value=b"checked"), \\
+             patch.object(p, "_prepare_security_candidate"), \\
+             patch.object(p, "_provision_replay_once"), \\
+             patch.object(p, "_run", side_effect=mock_run), \\
+             patch.object(p, "_wait_container"), \\
+             patch.object(p, "_local_signed_replay_probe",
+                          side_effect=p.WizardHold("fake signed proof failure")), \\
+             patch.object(p, "_rc7_foreign_paused_rollback_verified") as guard:
+            with self.assertRaisesRegex(p.WizardHold, "paused again"):
+                p.activate_foreign_node_field_trial(state)
+            guard.assert_called_once_with(
+                expected_identity=retained, require_replay=True,
+            )
+            self.assertEqual(sum("up" in cmd for cmd in commands), 2)
+            # A failed post-rollback image/identity check must escalate
+            # to CRITICAL instead of advertising safe recovery.
+            commands.clear()
+            guard.reset_mock(side_effect=True)
+            guard.side_effect = p.WizardHold("fake identity drift")
+            with self.assertRaisesRegex(p.WizardHold, "CRITICAL"):
+                p.activate_foreign_node_field_trial(state)
+            guard.assert_called_once_with(
+                expected_identity=retained, require_replay=True,
+            )
+
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
         body = source.split("def activate_foreign_node_field_trial(", 1)[1].split(
