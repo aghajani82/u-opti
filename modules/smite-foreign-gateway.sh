@@ -814,7 +814,11 @@ smite_foreign_gateway_configure() {
         }
     fi
 
-    clear
+    # Keep prior Sanaei/Node progress visible in the same approved
+    # option-2 installation. Independent Gateway repair keeps its UI.
+    if [ -z "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        clear
+    fi
     echo "======================================"
     echo "   Configure Smite Foreign Gateway"
     echo "======================================"
