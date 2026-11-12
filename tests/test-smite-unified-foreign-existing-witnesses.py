@@ -39,6 +39,7 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
         self.stage.mkdir(mode=0o700)
         self.node = self.root/"node"
         self.node.mkdir(mode=0o700)
+        (self.node/".sanaei-empty").mkdir(mode=0o700)
         self.file = self.node/".env"
         self.state_root = self.root/"state"
         self.state_root.mkdir(mode=0o700)
@@ -241,6 +242,10 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
         self.container_env["SMITE_AGENT_AUTH_MODE"]="legacy"
         self.assertFalse(self.observer.core(self.scope))
         self.container_env["SMITE_AGENT_AUTH_MODE"]="strict"
+        # Effective container bindings cannot silently differ from disk.
+        self.container_env["NODE_NAME"]="wrong"
+        self.assertFalse(self.observer.core(self.scope))
+        self.container_env["NODE_NAME"]="node-kh"
 
     def test_bad_signed_pair_fails_before_host_commands(self):
         self.fail_signature="wrong"
@@ -249,6 +254,17 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
         # Witnesses return False (never a READY claim) on invalid Cosign.
         self.assertIs(self.observer.core(self.scope), False)
         self.assertFalse(any(x.startswith("docker") for x in self.calls))
+
+    def test_placeholder_is_absent_only_when_private_and_empty(self):
+        self.assertEqual(self.observer.sanaei(self.scope),"ABSENT")
+        placeholder=self.node/".sanaei-empty"
+        placeholder.chmod(0o755)
+        self.assertEqual(self.observer.sanaei(self.scope),"DRIFT")
+        placeholder.chmod(0o700)
+        (placeholder/"untrusted-data").write_text("not empty")
+        self.assertEqual(self.observer.sanaei(self.scope),"DRIFT")
+        (placeholder/"untrusted-data").unlink()
+        self.assertEqual(self.observer.sanaei(self.scope),"ABSENT")
 
     def test_exact_ro_sanaei_after_attach_and_drift_cases(self):
         self.attach()
