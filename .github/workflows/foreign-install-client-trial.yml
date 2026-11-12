@@ -1,0 +1,31 @@
+name: Foreign installation client trial
+on:
+  push:
+    branches: [trial/unified-smite-install]
+  pull_request:
+    paths:
+      - modules/smite-foreign-install-client.py
+      - tests/test-smite-foreign-install-client.py
+      - tests/test-smite-foreign-install-integration.py
+      - .github/workflows/foreign-install-client-trial.yml
+permissions:
+  contents: read
+jobs:
+  staged-client-and-panel-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: ef0e089dfede930817fa35df4f21dcb2f33a8e1e
+          path: companion-smite
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r companion-smite/panel/requirements.txt
+      - run: python -B tests/test-smite-foreign-install-client.py -v
+      - run: python -B tests/test-smite-foreign-install-integration.py -v
+        env:
+          SMITE_SOURCE: companion-smite

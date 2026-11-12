@@ -174,3 +174,42 @@ key after lost response; signed identity verification after grant expiry. Handle
 expired pending grants without reinstallation. Then explicit schema/ingress setup,
 snapshot/recovery, signed trial image pair and full unified installer wiring.
 Continue same trial branches; no main merge or host actions. No install command yet.
+
+## Continuation checkpoint — durable client and signed recovery (2026-11-12)
+Companion Smite SHA: ef0e089dfede930817fa35df4f21dcb2f33a8e1e
+Added modules/smite-foreign-install-client.py as an unexposed library: strict smi1
+packet validation, duplicate-JSON-key rejection, exact HTTPS DNS/443 scope, private
+staging directory, O_NOFOLLOW directory walk, owner/mode/hardlink checks, flock,
+fsynced complete temporary file + no-overwrite link + directory fsync before I/O.
+The grant code is memory-only. Persistent stage binds Panel/Node/name/Gateway/path
+and a random secret. Same-scope reissue/retry reuses it; a changed scope, unsafe or
+corrupt stage, existing live identity or expired fresh grant fails closed.
+
+HTTPS uses one vetted public DNS address, original TLS hostname/SNI, system CA
+verification, no environment proxy/redirect/automatic request retry, 8 KiB response
+cap. Ambiguous redemption is followed by a new HMAC proof request to the companion
+/api/node-control/installation-status endpoint. Existing expired stage uses proof
+only. Proof must match every scope field. Failure retains the staged key; no rekey.
+Panel proof checks the paired key, durable replay and committed grant/origin evidence,
+works with issuance disabled and after grant expiry, and refuses revoked identities.
+It does NOT activate/register the Node; only replay bookkeeping is written.
+
+Tests: 15 client unit/connection-boundary tests PASS, 6 companion signed recovery
+tests PASS, 1 cross-repository real ASGI/SQLite integration PASS. Integration commits
+redemption, deliberately loses acknowledgement, proves after expiry with the same
+key, then verifies revocation blocks recovery. Existing relevant HTTP/origin/inbound
+regressions also PASS locally. CI checks the exact pinned companion SHA above.
+No real public TLS or two-host deployment was exercised. DNS resolver timeout still
+uses the OS resolver; connect/read timeout is 15 seconds, not a whole-operation SLA.
+
+Boundaries: caller must run as root in production and provide a previously prepared
+private staging directory and the real runtime identity path. No CLI/menu/distribution
+manifest entry is enabled, no live identity is promoted, no compose/runtime change.
+The new library intentionally refuses any existing live identity; post-promotion
+resume requires a separate validated transaction. Existing legacy enrollment intact.
+
+NEXT EXACT WORK: explicit Panel migration and Nginx ingress for redeem/proof; safe
+staged-to-runtime identity promotion with rollback and post-promotion resume; schema/
+secret/replay snapshots; signed trial images and exact pins; combined Iran/Foreign
+orchestration and Sanaei return-to-caller; full fresh-host test before install command.
+All changes remain on trial/unified-smite-install; never merge main before user test.
