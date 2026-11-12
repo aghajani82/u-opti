@@ -9,6 +9,7 @@ on:
       - modules/smite-foreign-install-promotion.py
       - modules/smite-foreign-install-panel-ingress.py
       - tests/test-smite-foreign-install-panel-ingress.py
+      - tests/test-smite-foreign-install-real-nginx.py
       - tests/test-smite-foreign-install-promotion.py
       - tests/test-smite-foreign-install-integration.py
       - .github/workflows/foreign-install-client-trial.yml
@@ -35,3 +36,15 @@ jobs:
       - run: python -B tests/test-smite-foreign-install-integration.py -v
         env:
           SMITE_SOURCE: companion-smite
+
+  nginx-443-foreign-install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated Nginx and OpenSSL fixtures
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nginx openssl
+      - name: Exercise exact HTTPS POST admission and forged-header denial
+        run: python -B tests/test-smite-foreign-install-real-nginx.py -v
