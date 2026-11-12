@@ -75,7 +75,8 @@ def safe_site(path):
             if parent.exists():
                 info = parent.lstat()
                 if (not stat.S_ISDIR(info.st_mode)
-                        or info.st_mode & 0o022):
+                        or (info.st_mode & 0o022
+                            and not (info.st_mode & stat.S_ISVTX and info.st_uid == 0))):
                     deny()
         # The ordinary gateway renderer selects /etc/nginx/sites-available,
         # including the shared 3xui-<domain> server. Keep this helper inert.
