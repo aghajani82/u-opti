@@ -821,3 +821,80 @@ and crash recovery across the existing Sanaei/Gateway/enrollment phases,
 then connect option 2 and test both ends on disposable hosts. Keep option
 1 Iran auto-pairing semantics unchanged. Only after final user-approved
 Iran+Foreign host tests merge to main.
+
+## Continuation checkpoint — new signed Foreign runtime read-only gate (2026-11-12)
+
+Goal: bring the *already built* RC7 Foreign pairing/activation machinery
+toward the exact new signed Smite unified-install Node pair without
+introducing a second pairing stack, modifying production, or claiming
+Connected before a real proof. The existing RC7 activation method is
+not re-routed; its pinned old signed digest and rollback are unchanged.
+
+In modules/smite-node-pairing.py, the existing
+_foreign_gateway_preflight now supports a narrowly explicit
+review_unified_trial=True mode for **read-only review only**. It accepts
+the exact immutable separately signed trial Node digest
+ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483
+only when that mode is explicitly selected; default/old RC7 use
+continues rejecting it. The review uses the SAME existing RC7 security
+checks (exact paused+strict Node state, HTTPS/443 routing, managed
+Compose, local health and RO Sanaei mount). The trial review does not
+allow the special unattached-Sanaei recovery bypass.
+
+New modules/smite-unified-foreign-activation-review.py is a
+**read-only** caller, with CLI --review only. It independently
+re-verifies both trial Panel and Node Cosign/OIDC claims with the
+pinned Sigstore trusted root and SHA-bound manifest, requires
+activation_allowed=False, then calls the existing RC7 gateway
+security preflight with review_unified_trial=True. It validates the
+paired identity + durable replay marker and SQLite history, compares
+the *running* Node image ID with the locally pinned digest's image ID,
+and checks effective Docker environment contains exactly one each
+of paused, strict and managed settings. It returns
+READY_READ_ONLY with activation_allowed=False and
+bidirectional_connected=False. The remote Panel runtime is explicitly
+not proven by this check.
+
+The production CLI has no --activate, --apply, gateway mutation,
+Docker recreate, Node restart, migration, key rotation, or replay
+reset option. The prior official RC7 activation continues accepting
+only the previously signed RC7 image.
+
+Tests:
+- Extended tests/test-smite-rc7-foreign-pairing.py using its real
+  existing managed RC7 Compose/Gateway security fixtures: old image
+  still works by default; new image works ONLY with explicit read-only
+  flag; default and arbitrary expected_image override both refuse it;
+  wrong image/caps/devices/loopback/Sanaei RO fail closed.
+- New tests/test-smite-unified-foreign-activation-review.py:
+  nine isolated cases with the ACTUAL signed pair verifier (injecting
+  Cosign test responses), missing/bad signatures, image ID drift,
+  active overlays, missing replay/identity, invalid role/mode,
+  changed Nginx/Compose probe, duplicate/effective env flags and
+  denial of any activation CLI.
+- The same CI continues the previously green credential redemption,
+  HMAC signed proof, replay/recovery and Panel ASGI contract, Iran
+  one-choice ordering, existing foreign Gateway/Sanaei flows and
+  independent disposable HTTPS ingress tests.
+
+Full CI PASS:
+https://github.com/aghajani82/u-opti/actions/runs/43238825374
+(2/2 jobs green on source
+4ec0418774874fedc63510df72c295ea7c2eb698).
+No production or server tests have been executed.
+
+**NEXT EXACT WORK:** Complete a distinctly authorized signed
+trial-image activation/rollback path *without changing the old RC7
+activation default*. Preserve the same promoted Foreign identity
+and replay DB, use the existing managed strict/paused Compose
+candidate with image-specific verified matching and a durable lock
+and journal. Prove actual signed Foreign->Panel check-in and the
+Panel->Foreign /api/node-control/gateway-check = gateway_ready:true
+probe; false, missing and stale status must HOLD and the Node must
+return to paused+strict without rotating or rewinding keys/replay.
+Only then wire the full, uninterrupted single-choice Foreign
+option 2 and test it on disposable two-host infrastructure. The
+current trial manifest explicitly has activation_allowed:false:
+do NOT bypass it. Actual host tests and merges to main still require
+the user's final approval, and live FRP 20182, Backhaul, Sanaei and
+both hosts must remain unchanged.
