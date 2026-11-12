@@ -87,8 +87,21 @@ def read_env(path):
     path = Path(path)
     if not path.is_absolute() or ".." in path.parts:
         deny()
-    with private_directory(path.parent) as parent:
-        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    # Managed Node directory may be 0755; its state file stays private 0600.
+    # Verify every ancestor without enforcing identity-directory mode on Node.
+    parent = path.parent
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in parent.parts[1:]:
+            nxt = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                          dir_fd=directory)
+            os.close(directory)
+            directory = nxt
+        info = os.fstat(directory)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o022:
+            deny()
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                     dir_fd=directory)
         try:
             info = os.fstat(fd)
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
@@ -99,6 +112,8 @@ def read_env(path):
                 deny()
         finally:
             os.close(fd)
+    finally:
+        os.close(directory)
     try:
         lines = raw.decode("utf-8").splitlines()
         values = {}
