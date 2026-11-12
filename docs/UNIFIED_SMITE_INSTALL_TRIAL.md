@@ -442,3 +442,79 @@ NEXT EXACT WORK:
 
 The `main` branches of both repos remain unmodified. No installation
 or recovery commands are approved for production at this checkpoint.
+
+## Continuation checkpoint — isolated Panel transaction and rollback rehearsal (2026-11-12)
+
+Added `modules/smite-unified-panel-transaction.py` and
+`tests/test-smite-unified-panel-transaction.py` **only on
+`trial/unified-smite-install`**. This is deliberately a production
+**read-only review + disposable-root rehearsal**, NOT a privileged live
+apply or rollback command. Its exposed CLI accepts only `--review`,
+verifies the prepared stage, re-verifies the exact signed trial Panel/Node
+image pair with Cosign, requires all current private security/config
+files to match their original staged preimages, checks the paired Iran
+identity/replay store, rejects unexpected pre-existing Foreign grant
+tables and verifies all candidate bytes against the sealed preparation.
+A drifted file or unsafe stage yields HOLD without changes.
+
+Only a Python caller explicitly injecting a disposable root and a
+fixture capability may exercise `rehearse` or `rollback_rehearsal`;
+root `/` is hard-denied. No Docker, Nginx, firewall, systemd or host
+network commands are executed in either rehearsal. The tested sequence
+uses the exact staged Panel image/Compose candidate, a fixture-local
+additive SQLite schema migration, the two prepared Foreign feature flags,
+and the exact reviewed HTTPS ingress configuration. The simulation
+writes a **separate private, fsynced intent/completion journal** at
+`var/lib/u-opti/unified-panel-trial-rehearsal` within the disposable
+fixture root; it never writes into the sealed original staging
+directory. Abrupt failures after Compose, schema, flags and Nginx can
+be resumed for an explicit, repeatable offline rollback.
+
+Offline rollback restores **only** the exact three owned config
+preimages (Compose, Panel env, Nginx); the additive grant tables remain
+present and neither the Panel SQLite DB nor Iran replay DB, HMAC keys,
+signed identity or encrypted node identity is rewound. It refuses
+unknown config drift, changed sealed DB backups, new Foreign
+reservations, consumed/pending grant records, changed signed identity
+rows, changed grant table shapes and any new replay nonce. A broken
+journal or unexpected symlink yields HOLD. Rollback interruptions can
+be retried without overwriting the preserved source stage.
+
+**CI PASS:** 20 new offline transaction rehearsal/recovery/negative
+tests, alongside 19 prior stage tests, 14 promotion tests, 15 client
+tests, signed trial pair tests, real disposable Nginx HTTPS tests and
+cross-repository ASGI integration. The companion Smite checkout in
+this U-OPTI workflow is now pinned to the **exact previously published
+and independently signed image source**
+`b865be93e22153c60769f6329e6e55e781494ded`
+(instead of the older prototype commit). GitHub Actions
+[43203203311](https://github.com/aghajani82/u-opti/actions/runs/43203203311)
+SUCCESS, both jobs; last tested source
+`cf5a3949a6074f33a2caee50f5131b475c8eb290`.
+The independent real GHCR/Cosign check remains the verified
+[43198492747](https://github.com/aghajani82/u-opti/actions/runs/43198492747).
+
+CRITICAL SCOPE: No production executor, actual container rollout,
+running Panel/Node switch, real Nginx reload, host SQLite migration,
+real two-server connectivity test, or automatic production rollback
+exists yet. The fixture engine must NEVER be treated as permission
+to activate live services. All code and signed digest pins remain
+on trial branches; `main` and active hosts remain unchanged.
+
+NEXT EXACT WORK: implement and independently gate the **actual
+operator-confirmed Panel-side executor on two disposable hosts**.
+Before any live write it must inspect actual Compose active overlays,
+prove the current signed RC7 Panel image and Iran Node health,
+recheck signatures/current file preimages, take NEW online Panel and
+Iran replay/identity snapshots, validate candidate Nginx syntax and
+Docker Compose offline, and enforce an exclusive operation lock and
+durable recovery journal. The future executor must run the reviewed
+signed trial Panel image with Foreign grants OFF, migrate the Panel
+schema using the matching image source, verify it, enable flags and
+apply the 443 routes only after health checks. Failure must revert
+only operator-owned files and Panel image/flags, never rewind
+enrollment or replay, and HOLD if rollback cannot be proved safe.
+No Node recreate, FRP/Backhaul restart, existing 20182 route change,
+or Sanaei DB modifications. Then wire one-command foreign install,
+prove signed two-way Connected and operator-approve real host tests
+before merging `main`.
