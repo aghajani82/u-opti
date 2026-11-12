@@ -183,6 +183,19 @@ assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAI
 assert 'smite_install_finish_local_ir || return 2' in selected
 PY
 
+# The previous Gateway rehearsal permits a far-future expiry because
+# it tests scope, NOT initial enrollment. For this *pre-core* admission the
+# Panel grant must instead be genuinely fresh (at most two hours).
+python3 - "$PACKET" <<'PY'
+from pathlib import Path
+import json,sys,time
+path=Path(sys.argv[1])
+record=json.loads(path.read_text())
+record["expires_at"]=int(time.time())+3600
+path.write_text(json.dumps(record))
+PY
+chmod 0600 "$PACKET"
+
 # The existing Foreign core should take its three values from the SAME
 # private Panel packet without prompting separately, but it must still fail
 # at the preflight boundary in this disposable no-host test. No public
