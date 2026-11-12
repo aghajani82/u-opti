@@ -9,6 +9,7 @@ here; a later separately reviewed executor must validate this journal again.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import hmac
 import importlib.util
@@ -283,13 +284,17 @@ class PanelStage:
         source = self._at(REPLAY_DB_REL)
         destination = self.staging / "iran-replay.sqlite3"
         try:
-            with sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
-                                 uri=True, timeout=10) as existing:
-                with sqlite3.connect(destination, timeout=15) as copy:
+            with closing(sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
+                                         uri=True, timeout=10)) as existing:
+                with closing(sqlite3.connect(destination, timeout=15)) as copy:
                     existing.backup(copy)
+                    # WAL mode is copied from the live source; canonicalize
+                    # ONLY the private snapshot before closing its connection.
+                    if copy.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
+                        deny()
             os.chmod(destination, 0o600)
-            with sqlite3.connect(destination.absolute().as_uri() + "?mode=ro",
-                                 uri=True, timeout=8) as copy:
+            with closing(sqlite3.connect(destination.absolute().as_uri() + "?mode=ro",
+                                         uri=True, timeout=8)) as copy:
                 if (copy.execute("PRAGMA quick_check").fetchone() != ("ok",)
                         or copy.execute("PRAGMA user_version").fetchone() != (1,)):
                     deny()
@@ -314,15 +319,19 @@ class PanelStage:
         dest = self.staging / "panel-db.sqlite3"
         # Snapshot committed rows, WAL included; never raw-copy a live SQLite DB.
         try:
-            with sqlite3.connect(db.absolute().as_uri() + "?mode=ro", uri=True, timeout=10) as src:
+            with closing(sqlite3.connect(db.absolute().as_uri() + "?mode=ro",
+                                         uri=True, timeout=10)) as src:
                 for sql in BASE_SCHEMA:
                     src.execute(sql)
                 if src.execute("PRAGMA quick_check").fetchone() != ("ok",):
                     deny()
-                with sqlite3.connect(dest, timeout=15) as target:
+                with closing(sqlite3.connect(dest, timeout=15)) as target:
                     src.backup(target)
+                    if target.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
+                        deny()
             os.chmod(dest, 0o600)
-            with sqlite3.connect(dest.absolute().as_uri() + "?mode=ro", uri=True) as copy:
+            with closing(sqlite3.connect(dest.absolute().as_uri() + "?mode=ro",
+                                         uri=True)) as copy:
                 for sql in BASE_SCHEMA:
                     copy.execute(sql)
                 if copy.execute("PRAGMA quick_check").fetchone() != ("ok",):
