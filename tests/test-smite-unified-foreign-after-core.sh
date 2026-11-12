@@ -152,6 +152,26 @@ mv "$PACKET" "$PACKET.unavailable"
 run 2 signed,paused,compose
 mv "$PACKET.unavailable" "$PACKET"
 
+# The selected Foreign core must return control to this SAME option, never
+# display a completed installation or claim Connected while enrollment is HOLD.
+python3 - "$ROOT/modules/smite-install.sh" <<'PY'
+from pathlib import Path
+import sys
+src=Path(sys.argv[1]).read_text()
+core=src.split('smite_install_foreign_node() {',1)[1].split(
+    '\nsmite_install_sanaei_foreign() {',1)[0]
+assert 'FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION' in core
+assert core.index('FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION') < core.index(
+    'Foreign Node Install Complete')
+assert 'FOREIGN_CONNECTED=NOT_PROVEN' in core
+selected=src.split('smite_install_selected_fresh() (',1)[1].split(
+    '\nsmite_install_finish_local_ir() {',1)[0]
+assert 'FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE' in selected
+assert "echo 'FOREIGN_CONNECTED=NOT_PROVEN'" in selected
+assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE',1)[1]
+assert 'smite_install_finish_local_ir || return 2' in selected
+PY
+
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
 # sequence until the signed trial runtime activation has been reviewed.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'

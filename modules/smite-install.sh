@@ -1228,11 +1228,18 @@ smite_install_panel_iran() {
         echo "Smite version: $SMITE_UPSTREAM_VERSION"
     fi
     echo
-    read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm
-    case "$confirm" in
-        y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
-    esac
+    # Selected fresh option 1 was already explicitly approved before core
+    # installation began. Retain this prompt for independent/manual calls.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+       [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ]; then
+        echo 'IR_CORE_CONSENT=INHERITED_FROM_SELECTED_OPTION_1'
+    else
+        read -rp "Install Smite Panel + Iran Node? [y/N]: " confirm || return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        case "$confirm" in
+            y|Y|yes|YES) ;;
+            *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
+        esac
+    fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_preflight "panel-iran" "$connection_mode"; then
@@ -1605,11 +1612,19 @@ smite_install_foreign_node() {
     fi
 
     echo
-    read -rp "Install the Foreign Smite Node? [y/N]: " confirm
-    case "$confirm" in
-        y|Y|yes|YES) ;;
-        *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
-    esac
+    # The one-choice option-2 entry already received explicit fresh-install
+    # approval. Do not ask a second approval for this same core stage.
+    # Standalone/legacy Foreign installation keeps its original confirmation.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+       [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ]; then
+        echo 'FOREIGN_CORE_CONSENT=INHERITED_FROM_SELECTED_OPTION_2'
+    else
+        read -rp "Install the Foreign Smite Node? [y/N]: " confirm || return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        case "$confirm" in
+            y|Y|yes|YES) ;;
+            *) echo "Installation cancelled."; sleep 1; return "${SMITE_INSTALL_FAILURE_CODE:-0}" ;;
+        esac
+    fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
         if ! smite_install_clean_rc_preflight "foreign" "$connection_mode"; then
@@ -1742,6 +1757,16 @@ smite_install_foreign_node() {
         echo "WARNING: Smite installed, but U-OPTI state could not be saved."
         if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then return 2; fi
     }
+
+    # Selected option 2 is a continuous transaction, NOT a successful
+    # Foreign installation after core alone. Resume at Sanaei/Gateway/
+    # Panel-issued enrollment when the signed trial activation gate permits.
+    # Never present the standalone "Install Complete" banner here.
+    if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        echo 'FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+        return 0
+    fi
 
     echo
     echo "======================================"
@@ -2500,6 +2525,15 @@ smite_install_selected_fresh() (
             return 2
         }
         smite_install_finish_local_ir || return 2
+    else
+        # The official RC7 core is not the independently signed unified
+        # trial pair. Do not silently run trial post-core operations on it,
+        # or return success/Connected before Sanaei, SSL/443, identity,
+        # replay and bidirectional signed checks are integrated and proven.
+        echo 'HOLD: Foreign Node core is paused. One-choice Sanaei, Gateway and signed enrollment are not yet wired to the admitted runtime.'
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+        return 2
     fi
 )
 

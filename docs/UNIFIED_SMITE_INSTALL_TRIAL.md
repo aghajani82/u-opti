@@ -1495,3 +1495,37 @@ until explicit trial runtime transition/rollback with existing Pairing
 and Compose is tested, then prove both authenticated Connected directions
 and interruption-safe single option-2 sequencing. Do not merge main
 or touch live servers, FRP 20182, Backhaul or Sanaei before approval.
+
+## Consolidation checkpoint — retain one-choice consent and truthful Foreign core handoff (2026-11-12)
+
+This is a direct correction to the **existing option-1/option-2 install
+choreography**, not a new installer, menu, engine or feature. The selected
+fresh entry already asks for explicit install approval BEFORE mutation.
+Its own Iran or Foreign core function no longer repeats an identical
+approval, while keeping the existing Panel/Node/domain prompts, strict
+preflight and all standalone/manual confirmation behavior.
+
+The selected fresh Foreign core now returns immediately after its
+persisted state, with `FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION`
+and `FOREIGN_CONNECTED=NOT_PROVEN`; it does **not** print the old
+standalone `Foreign Node Install Complete` banner or the misleading
+option-4/6 next-menu instructions. Selected option 2 commits the core
+journal and then returns an explicit `HOLD`/nonzero while the signed
+trial image cannot yet be activated. This preserves already installed
+paused Node state for the existing recovery path without falsely
+reporting the whole Foreign cycle finished.
+
+A new section in the EXISTING Iran ordering regression calls the real
+Iran and Foreign core functions with fail-before-mutation preflight
+mocks: both keep their domain/name prompts, selected runs skip only
+duplicate consent, independent Foreign still asks. The existing
+Foreign phase-order regression also enforces the scoped core handoff
+and truthful terminal HOLD. No new test framework introduced.
+
+The required next work is still wiring the **same** Foreign option 2
+to existing Sanaei, Gateway, Panel-issued packet, identity promotion
+and signed runtime, then genuine dual-direction Connected. The
+independently signed trial manifest remains activation_allowed=false:
+this checkpoint does not publish a runnable unified installer or
+authorize a live server trial. Do not merge main or change either
+server/FRP 20182/Backhaul/Sanaei before approved full end-to-end tests.
