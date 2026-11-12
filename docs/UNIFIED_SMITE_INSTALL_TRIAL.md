@@ -689,21 +689,21 @@ single-use enrollment + signed runtime + bidirectional Connected in one invocati
 No parallel installer, no extra menu visits. This is a target, not a claim of
 current full-host readiness.
 
-Reused existing \`smite_install_unified_foreign_sanaei\` (the already-tested
-Sanaei installer/RO DB attachment), \`smite_foreign_gateway_configure\`
+Reused existing `smite_install_unified_foreign_sanaei` (the already-tested
+Sanaei installer/RO DB attachment), `smite_foreign_gateway_configure`
 (with exact Panel-issued 32-hex gateway-path admission), and the existing
 signed trial pair verifier in a new *internal* helper added directly to
-\`modules/smite-install.sh\`:
+`modules/smite-install.sh`:
 
-- \`smite_install_unified_signed_pair_review\` checks the independently pinned
+- `smite_install_unified_signed_pair_review` checks the independently pinned
   trial branch manifest, its SHA256 and both live GHCR Cosign identities/role
   claims against the pinned trusted root. Requires the SHA-reviewed Cosign
   binary. Does not treat a signed image as permission to activate a host.
-- \`smite_install_unified_foreign_node_image_review\` compares BOTH the
+- `smite_install_unified_foreign_node_image_review` compares BOTH the
   immutable signed trial Node image reference and the *effective running
   image ID* against the local digest image ID. Mismatched/stale digest is HOLD.
-- \`smite_install_unified_foreign_after_core(packet_path)\` requires
-  \`SMITE_SELECTED_FRESH=1\`, \`SMITE_INSTALL_PROFILE=clean-rc\`,
+- `smite_install_unified_foreign_after_core(packet_path)` requires
+  `SMITE_SELECTED_FRESH=1`, `SMITE_INSTALL_PROFILE=clean-rc`,
   exact fresh RC7 Foreign state, loaded existing Gateway helpers, healthy
   strict/paused Node, reviewed active Compose ownership and signed trial
   pair. It verifies the private Panel-issued packet before any additional
@@ -711,13 +711,13 @@ signed trial pair verifier in a new *internal* helper added directly to
   then existing Foreign Gateway/SSL setup with the *same exact* control path,
   and verifies the retained Gateway state path still matches the grant.
   Every step returns nonzero HOLD on failure. Even successful completion
-  reports only \`UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT\`
-  and \`UNIFIED_FOREIGN_CONNECTED=NOT_YET_VERIFIED\`.
+  reports only `UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT`
+  and `UNIFIED_FOREIGN_CONNECTED=NOT_YET_VERIFIED`.
 
 **Safety boundary:** This helper is NOT called from selected fresh option 2
 or from another public menu entry. It cannot be used on the existing RC7
 tag-pinned Node: its signed trial image preflight rejects that older digest.
-The current Smite trial pair manifest still has \`activation_allowed=false\`,
+The current Smite trial pair manifest still has `activation_allowed=false`,
 the old RC7 pairing/activation module pins the official old Node image, and
 the new Foreign grant enrollment, safe identity promotion, strict replay
 activation, recovery journal and dual-direction Connected check have not
@@ -725,7 +725,7 @@ yet been wired together. Do **not** substitute images or bypass this gate
 to force an installation. No real host has been changed.
 
 Validation: New isolated, no-Docker/no-network
-\`tests/test-smite-unified-foreign-after-core.sh\` exercises 14 scenarios:
+`tests/test-smite-unified-foreign-after-core.sh` exercises 14 scenarios:
 success ordering; signature failure; wrong image reference or effective
 image ID; paused state/Compose drift; incomplete Sanaei; canceled/failed
 Gateway; tampered persisted Gateway path; wrong role, mode and Foreign domain.
@@ -736,7 +736,7 @@ Existing signed pair, Foreign credential/identity, isolated Nginx, real
 disposable HTTPS and Iran/Sanaei regressions remain green. GitHub Actions
 [43232707642](https://github.com/aghajani82/u-opti/actions/runs/43232707642):
 **2/2 jobs SUCCESS** on tested source
-\`fb910734a8de849f306a58fc5ff84f6b717ea880\`.
+`fb910734a8de849f306a58fc5ff84f6b717ea880`.
 
 **NEXT EXACT WORK — do not recreate the existing installers:**
 1. Introduce a **trial-branch-only, operator-gated** signed image selector
@@ -744,9 +744,9 @@ disposable HTTPS and Iran/Sanaei regressions remain green. GitHub Actions
    exact immutable Panel/Node digests. Maintain the official RC7 selector and
    production default unchanged, and do not deploy until explicit trial
    server readiness and review.
-2. Connect the private \`smi1\` packet via an ephemeral 0700/0600 location
+2. Connect the private `smi1` packet via an ephemeral 0700/0600 location
    (prefer tmpfs; no code in arguments/logs); reuse
-   \`smite-foreign-install-client.enroll\` and the existing promotion helper,
+   `smite-foreign-install-client.enroll` and the existing promotion helper,
    retaining the same secret and proof across lost reply/restart.
 3. Extend exact signed replay and activation admission to the new trial
    digest **without weakening the existing RC7 gate**, retaining rollback
@@ -754,8 +754,8 @@ disposable HTTPS and Iran/Sanaei regressions remain green. GitHub Actions
    Connected. Only then wire the internal coordinator into menu option 2
    and test interrupted resumption on disposable hosts.
 4. Run the full two-host installation and recovery matrix; get the user's
-   approval for IR/Foreign test deployments, and merge to \`main\` only after
+   approval for IR/Foreign test deployments, and merge to `main` only after
    both hosts pass and the user explicitly approves.
 
-Keep all changes on \`trial/unified-smite-install\` in both repos. FRP 20182,
+Keep all changes on `trial/unified-smite-install` in both repos. FRP 20182,
 existing Node containers, active Sanaei and both live hosts remain unchanged.
