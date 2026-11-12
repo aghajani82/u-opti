@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -33,6 +34,8 @@ SECRET_REL = "etc/nginx/u-opti-smite-pairing-secret.conf"
 PAIRING_REL = "etc/u-opti/smite/pairing/panel-pairing-secrets.json"
 DB_REL = "opt/smite/panel/data/smite.db"
 IR_ID_REL = "etc/u-opti/smite/identities/node-identity.json"
+REPLAY_MARKER_REL = "etc/u-opti/smite/identities/replay-enrollment.json"
+REPLAY_DB_REL = "var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3"
 FILE_MAP = {
     "panel-env": (PANEL_REL, 0o600, 65536),
     "panel-compose": (COMPOSE_REL, None, 262144),
@@ -41,6 +44,7 @@ FILE_MAP = {
     "nginx-ingress-key": (SECRET_REL, 0o600, 4096),
     "pairing-secrets": (PAIRING_REL, 0o600, 4096),
     "iran-identity": (IR_ID_REL, 0o600, 4096),
+    "iran-replay-marker": (REPLAY_MARKER_REL, 0o600, 4096),
 }
 BASE_SCHEMA = (
     "SELECT id,name,metadata FROM nodes LIMIT 0",
@@ -234,6 +238,72 @@ class PanelStage:
         except (OSError, sqlite3.Error):
             deny()
 
+    def _preflight_replay(self):
+        """Verify replay history is bound to the existing immutable Iran key."""
+        try:
+            identity = json.loads(self._read(IR_ID_REL, mode=0o600, limit=4096))
+            marker = json.loads(self._read(REPLAY_MARKER_REL, mode=0o600, limit=4096))
+            node_id = identity.get("node_id")
+            secret = identity.get("node_secret")
+            if (not isinstance(node_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", node_id)
+                    or not isinstance(secret, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", secret)
+                    or marker.get("schema") != 1
+                    or marker.get("node_id") != node_id
+                    or marker.get("replay_database") !=
+                        "/var/lib/smite-node/auth/agent-replay.sqlite3"
+                    or marker.get("status") != "ENROLLMENT_STARTED"):
+                deny()
+            expected = hmac.new(
+                secret.encode("ascii"),
+                b"smite-replay-key-binding-v1:" + node_id.encode("ascii"),
+                hashlib.sha256).hexdigest()
+            if (not isinstance(marker.get("key_binding"), str)
+                    or not hmac.compare_digest(marker["key_binding"], expected)):
+                deny()
+            replay = self._at(REPLAY_DB_REL)
+            self._parents(replay)
+            st = replay.lstat()
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600):
+                deny()
+            with sqlite3.connect(replay.absolute().as_uri() + "?mode=ro",
+                                 uri=True, timeout=8) as conn:
+                if (conn.execute("PRAGMA quick_check").fetchone() != ("ok",)
+                        or conn.execute("PRAGMA user_version").fetchone() != (1,)
+                        or conn.execute("SELECT node_id FROM replay_store_identity").fetchall()
+                            != [(node_id,)]):
+                    deny()
+                conn.execute("SELECT node_id,nonce,expires_at FROM agent_nonces LIMIT 0")
+        except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
+            deny()
+
+    def _replay_snapshot(self):
+        source = self._at(REPLAY_DB_REL)
+        destination = self.staging / "iran-replay.sqlite3"
+        try:
+            with sqlite3.connect(source.absolute().as_uri() + "?mode=ro",
+                                 uri=True, timeout=10) as existing:
+                with sqlite3.connect(destination, timeout=15) as copy:
+                    existing.backup(copy)
+            os.chmod(destination, 0o600)
+            with sqlite3.connect(destination.absolute().as_uri() + "?mode=ro",
+                                 uri=True, timeout=8) as copy:
+                if (copy.execute("PRAGMA quick_check").fetchone() != ("ok",)
+                        or copy.execute("PRAGMA user_version").fetchone() != (1,)):
+                    deny()
+                expected = json.loads(self._read(IR_ID_REL, mode=0o600))["node_id"]
+                if copy.execute("SELECT node_id FROM replay_store_identity").fetchall() != [(expected,)]:
+                    deny()
+                copy.execute("SELECT node_id,nonce,expires_at FROM agent_nonces LIMIT 0")
+            with open(destination, "rb") as handle:
+                os.fsync(handle.fileno())
+            self._sync_dir()
+            return destination.read_bytes()
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            deny()
+
     def _database_snapshot(self):
         db = self._at(DB_REL)
         self._parents(db)
@@ -309,6 +379,7 @@ class PanelStage:
         originals, candidates = self._collect()
         # Reject missing/drifted DB schema before creating ANY transaction state.
         self._preflight_database()
+        self._preflight_replay()
         self._parents(self.staging)
         self.staging.mkdir(mode=0o700)
         try:
@@ -322,6 +393,8 @@ class PanelStage:
                 manifest["snapshots"][name] = _sha(content)
             database = self._database_snapshot()
             manifest["snapshots"]["panel-db.sqlite3"] = _sha(database)
+            replay = self._replay_snapshot()
+            manifest["snapshots"]["iran-replay.sqlite3"] = _sha(replay)
             for label,content in candidates.items():
                 name = "candidate-" + label
                 self._write(name, content)
@@ -347,7 +420,7 @@ class PanelStage:
                 or journal.get("node_image") != NEW_NODE
                 or journal.get("live_write") is not False
                 or set(journal.get("snapshots",{})) !=
-                    {"before-" + label for label in FILE_MAP} | {"panel-db.sqlite3"}
+                    {"before-" + label for label in FILE_MAP} | {"panel-db.sqlite3","iran-replay.sqlite3"}
                 or set(journal.get("candidates",{})) !=
                     {"candidate-panel-env","candidate-panel-compose","candidate-nginx-backend"}):
             deny()
