@@ -147,6 +147,11 @@ sed -i 's/SMITE_FOREIGN_DOMAIN=kh.example.org/SMITE_FOREIGN_DOMAIN=other.example
 run 2 signed,paused,compose
 sed -i 's/SMITE_FOREIGN_DOMAIN=other.example.org/SMITE_FOREIGN_DOMAIN=kh.example.org/' "$SMITE_STATE_FILE"
 
+# An interrupted/missing ephemeral grant packet cannot be silently rebuilt.
+mv "$PACKET" "$PACKET.unavailable"
+run 2 signed,paused,compose
+mv "$PACKET.unavailable" "$PACKET"
+
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
 # sequence until the signed trial runtime activation has been reviewed.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'
