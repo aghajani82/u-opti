@@ -429,6 +429,13 @@ smite_frp_verify_container() {
 }
 
 smite_install_pause() {
+    # A freshly selected, already-approved option-2 installation must
+    # continue through the existing Sanaei DB attachment without extra
+    # menu-return prompts. The standalone option-4 behavior is unchanged.
+    if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" = 1 ] &&
+       [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
+        return 0
+    fi
     echo
     read -rp "Press Enter to return..."
 }
@@ -1791,7 +1798,12 @@ smite_install_sanaei_foreign() {
     local pairing_helper="" recover_confirmation=""
     local -a instance_ids=() usable_ids=()
 
-    clear
+    # Preserve the same visible progress stream during one-choice
+    # fresh installation instead of clearing its terminal output.
+    if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" != 1 ] ||
+       [ "${SMITE_SELECTED_FRESH:-0}" != 1 ]; then
+        clear
+    fi
     echo "======================================"
     echo "    Sanaei 3x-UI for Smite Foreign"
     echo "======================================"
