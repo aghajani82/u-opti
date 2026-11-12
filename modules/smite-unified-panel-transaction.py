@@ -84,7 +84,11 @@ def checked_json(raw: bytes):
 
 class PanelTransaction:
     def __init__(self, root: Path = Path("/"), *, stager=None, fixture_capability=False):
-        self.stage_mod = load_stage()
+        # An injected disposable stager may have been imported with a
+        # distinct module name. Reuse ITS exact exception/constants rather
+        # than loading an unrelated duplicate of the same Python module.
+        self.stage_mod = (sys.modules[stager.__class__.__module__]
+                          if stager is not None else load_stage())
         self.stage = stager or self.stage_mod.PanelStage(root)
         self.root = self.stage.root
         self.rehearsal = self.root / REHEARSAL_REL
@@ -181,7 +185,10 @@ class PanelTransaction:
                 stat.S_IMODE(info.st_mode) != 0o700 or
                 {p.name for p in self.rehearsal.iterdir()} != {"journal.json"}):
             deny()
-        raw = self.stage._read(REHEARSAL_REL + "/journal.json", mode=0o600, limit=8192)
+        try:
+            raw = self.stage._read(REHEARSAL_REL + "/journal.json", mode=0o600, limit=8192)
+        except (OSError, self.stage_mod.StageHold):
+            deny()
         journal = checked_json(raw)
         phases = ({"REHEARSED", "ROLLED_BACK", "BEFORE_ROLLBACK"} |
                   {"BEFORE_" + x for x in STEPS} |
