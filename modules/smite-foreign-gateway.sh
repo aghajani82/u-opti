@@ -831,6 +831,10 @@ smite_foreign_gateway_configure() {
     fi
 
     if [ "$(smite_foreign_gateway_connection_mode)" = "private" ]; then
+        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+            echo 'HOLD: Unified signed Foreign enrollment requires Standard HTTPS/443.' >&2
+            return 2
+        fi
         smite_foreign_gateway_private_notice
         return
     fi
@@ -900,7 +904,7 @@ smite_foreign_gateway_configure() {
     echo "Public TCP/8888 must remain blocked after verification."
     echo
     read -rp "Configure / repair the Foreign 443 gateway? [y/N]: " confirm
-    case "$confirm" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; sleep 1; return ;; esac
+    case "$confirm" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; sleep 1; return 2 ;; esac
 
     echo
     smite_foreign_gateway_ensure_packages || { echo "ERROR: Could not prepare Nginx/Certbot."; smite_foreign_gateway_pause; return 2; }
