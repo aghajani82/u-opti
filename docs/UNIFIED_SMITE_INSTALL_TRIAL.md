@@ -139,3 +139,38 @@ lost-reply verification; explicit schema/ingress provisioning and snapshot/recov
 signed trial image pair + exact U-OPTI digest pins; unified installation orchestration.
 Do not recreate the grant store/HTTP/origin/DNS work. Continue these trial branches.
 No merge to main until Mohammad tests and approves. No host installation command yet.
+
+
+## Continuation checkpoint — installation information UI (2026-11-12)
+Companion Smite SHA: 9e4e9c4a6c21aab2d7e818075a922326b67aee2c
+Implemented Foreign installation dialog behind readiness capabilities (issuance +
+origin trust + browser HTTPS/443). New-node flow accepts name/domain, reserves the
+Foreign Node and issues a two-hour grant. Pending rows allow same-node code reissue;
+connected nodes do not offer new enrollment. Existing disabled/older Panel UI stays.
+
+Copyable packet contract: protocol=smi1, panel_url (browser HTTPS origin), node_id,
+node_name, origin, control_url, installation_code, expires_at. Validate identity,
+domain/path/code/expiry before display. Secret lives only in mounted component;
+expiry/close removes it. Explicit copy and pending-code revocation are supported.
+Closing does not revoke the code or erase clipboard copies. No executable installer
+command is displayed because client and signed images are still outstanding.
+
+Two-request behavior: reservation success + issue failure keeps the same reserved
+Node on retry. Unknown/lost reservation reply blocks blind retry and requires
+refresh/reconciliation from the Node list, preventing automatic duplicate nodes.
+If issuance succeeded but its reply was lost, reissue replaces the pending code.
+Server-side protections still forbid replacing an already paired identity.
+
+Validation: 9 offline React interaction tests PASS, strict scoped TypeScript PASS,
+production Vite build PASS, 13 HTTP + 6 reservation + 4 legacy UI tests PASS.
+All FOUR GitHub jobs SUCCESS on exact companion SHA above: frontend-compile,
+api-capabilities-and-ui-invariants, foreign-install-http, pairing-store.
+React tests are offline; no browser visual or live two-host installation test.
+Smite local checkout reconciled to the published commit; working tree clean.
+
+NEXT EXACT WORK: U-OPTI packet client with strict schema/endpoint validation,
+root-only durable secret staging and fsync before redemption; retry the exact same
+key after lost response; signed identity verification after grant expiry. Handle
+expired pending grants without reinstallation. Then explicit schema/ingress setup,
+snapshot/recovery, signed trial image pair and full unified installer wiring.
+Continue same trial branches; no main merge or host actions. No install command yet.
