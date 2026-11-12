@@ -1605,8 +1605,20 @@ print("FOREIGN_PIN=VERIFIED")
     print("PRODUCTION_ACTIVATION=NO")
 
 
-def _rc7_foreign_compose_command(*, staged_candidate: bool = False, rollback: bool = False) -> list[str]:
-    """Preserve the exact transaction project and active file set on KH RC7."""
+def _rc7_foreign_compose_command(
+    *, staged_candidate: bool = False, rollback: bool = False,
+    verify_active_candidate: bool = False,
+) -> list[str]:
+    """Preserve the existing RC7 Compose owner before and AFTER activation.
+
+    The post-apply witness is read-only and never authorizes a new trial
+    digest or alternative Compose project. An unexpected active file set
+    must enter the existing failed-activation rollback.
+    """
+    if (type(staged_candidate) is not bool or type(rollback) is not bool
+            or type(verify_active_candidate) is not bool
+            or (verify_active_candidate and (staged_candidate or rollback))):
+        raise WizardHold("Foreign RC7 Compose review selector invalid")
     project = _run(
         ["docker", "inspect", "-f",
          '{{index .Config.Labels "com.docker.compose.project"}}', "smite-node"],
@@ -1632,14 +1644,15 @@ def _rc7_foreign_compose_command(*, staged_candidate: bool = False, rollback: bo
     active = raw_files.split(",")
     if service != "smite-node" or active not in ([base], [base, candidate]):
         raise WizardHold("Foreign RC7 active Compose files are not reviewed")
-    if not rollback and active != [base]:
+    if verify_active_candidate:
+        if active != [base, candidate]:
+            raise WizardHold("Foreign RC7 signed candidate Compose was not actually applied")
+    elif not rollback and active != [base]:
         raise WizardHold("Foreign RC7 signed candidate is already active")
     if NODE_COMPOSE.is_symlink() or not NODE_COMPOSE.is_file():
         raise WizardHold("Foreign RC7 base Compose is unsafe or missing")
     command = ["docker", "compose", "--project-name", project, "-f", base]
-    if staged_candidate:
-        if rollback:
-            raise WizardHold("Foreign RC7 candidate and rollback cannot mix")
+    if staged_candidate or verify_active_candidate:
         _regular(NODE_SECURITY_CANDIDATE, mode=0o600, limit=128_000)
         command.extend(["-f", candidate])
     return command
@@ -1992,6 +2005,12 @@ def activate_foreign_node_field_trial(
             "--force-recreate", "smite-node",
         ], timeout=120)
         _wait_container("smite-node", 90)
+        if rc7:
+            # A successful compose up is insufficient: inspect the actual
+            # live container labels, local pinned image and candidate file
+            # AFTER it is recreated and BEFORE any signed proof is claimed.
+            _rc7_foreign_compose_command(verify_active_candidate=True)
+            _rc7_foreign_pinned_image_verified()
         effective = _run([
             "docker", "inspect", "-f",
             "{{range .Config.Env}}{{println .}}{{end}}", "smite-node",
@@ -2022,6 +2041,12 @@ def activate_foreign_node_field_trial(
                     time.sleep(4)
         if not verified:
             raise WizardHold("Foreign signed dual-direction verification incomplete")
+        # Keep evidence of the SAME pinned signed candidate at completion.
+        # A changed Compose label/image after the Panel probe is a failure,
+        # not a successful Connected report.
+        if rc7:
+            _rc7_foreign_compose_command(verify_active_candidate=True)
+            _rc7_foreign_pinned_image_verified()
         # A Connected result must not hide an identity rotation or lost
         # replay binding. Reuse the existing owner-only identity/replay checks.
         if _identity_record() != retained_identity or not _replay_artifacts_valid():

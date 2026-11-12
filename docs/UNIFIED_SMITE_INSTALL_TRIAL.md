@@ -1705,3 +1705,33 @@ activation/rollback with the existing Pairing machinery, then
 complete the menu option-2 one-choice run on isolated two-server
 hosts. Only after independently confirmed bidirectional Connected
 and user acceptance may it advance to main.
+
+## Consolidation checkpoint — verify actual signed Compose after RC7 pairing (2026-11-12)
+
+The EXISTING RC7 Foreign `activate_foreign_node_field_trial` now
+reuses the EXISTING `_rc7_foreign_compose_command` helper with a
+read-only `verify_active_candidate=True` selector after its signed
+Compose apply and again after the signed two-way Panel proof.
+The inspected, running Docker labels must show **exactly** the original
+transaction-owned base Compose **plus** its original signed security
+candidate; the same immutable image reference and local image ID
+must still match. A successful `docker compose up` alone does not
+establish this. Existing rollback handles any drift, and the
+previously added post-rollback check verifies return to base-only
+Compose, retained identity, replay and paused/strict runtime.
+
+The same helper still requires base-only before normal activation,
+permits [base,candidate] for reviewed rollback selection, and
+rejects unrelated Compose files, project changes, and inconsistent
+selector combinations. Existing tests now verify this exact
+post-apply state and deliberate wrong-container-label recovery,
+including that no signed HMAC/Connected claim is attempted when
+the Compose witness fails. No new menu, image, installer, Pairing
+endpoint, identity generation, or tunneling feature.
+
+**This does NOT enable the unified trial image.** The signed
+`activation_allowed:false` manifest remains enforced; the public
+option 2 continues safe HOLD before host changes. Tests are offline,
+not evidence of real bidirectional Connected. Next remains
+release/admit signed unified Pairing/Compose via the SAME transaction
+and two-server test on disposable hosts, with user approval before main.

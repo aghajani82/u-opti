@@ -52,7 +52,22 @@ class ForeignRC7Tests(unittest.TestCase):
                 active.append(str(candidate))
                 with self.assertRaises(p.WizardHold):
                     p._rc7_foreign_compose_command(staged_candidate=True)
+                # The verified post-up state may contain exactly base +
+                # original signed candidate, never base alone or unknown.
+                self.assertEqual(
+                    p._rc7_foreign_compose_command(verify_active_candidate=True),
+                    base_cmd + ["-f", str(candidate)])
+                for bad in (
+                    {"verify_active_candidate": True, "rollback": True},
+                    {"verify_active_candidate": True, "staged_candidate": True},
+                    {"verify_active_candidate": "yes"},
+                ):
+                    with self.subTest(bad=bad), self.assertRaises(p.WizardHold):
+                        p._rc7_foreign_compose_command(**bad)
                 self.assertEqual(p._rc7_foreign_compose_command(rollback=True), base_cmd)
+                active[:] = [str(base)]
+                with self.assertRaisesRegex(p.WizardHold, "not actually applied"):
+                    p._rc7_foreign_compose_command(verify_active_candidate=True)
                 active[:] = [str(base), "/tmp/untrusted.yml"]
                 with self.assertRaises(p.WizardHold):
                     p._rc7_foreign_compose_command(rollback=True)
@@ -688,6 +703,60 @@ class ForeignRC7Tests(unittest.TestCase):
                 p.activate_foreign_node_field_trial(state)
         self.assertIn(("compose",False,False),events[-1:])
         self.assertEqual(sum("up" in e[1] for e in events if e[0]=="command"),2)
+
+    def test_rc7_activation_post_apply_compose_drift_triggers_verified_rollback(self):
+        state = {
+            "SMITE_ROLE": "foreign", "SMITE_MANAGED_VERSION": "2.0.0-rc.7",
+            "SMITE_CONNECTION_MODE": "standard", "SMITE_NODE_NAME": "node-kh",
+        }
+        retained = ("node-12345678", "a" * 64)
+        observed = {"phase": "base", "drift": True, "probes": 0}
+        calls = []
+        def compose(*, staged_candidate=False, rollback=False,
+                    verify_active_candidate=False):
+            calls.append(("compose", staged_candidate, rollback,
+                          verify_active_candidate))
+            if verify_active_candidate and observed["drift"]:
+                raise p.WizardHold("Foreign signed candidate Compose was not actually applied")
+            return ["docker", "compose", "--project-name", "existing"]
+        def run(args, **kwargs):
+            calls.append(("run", args))
+            if args[-2:] == ["config", "--quiet"]:
+                return ""
+            if "up" in args:
+                observed["phase"] = "paused" if observed["phase"] == "signed" else "signed"
+                return ""
+            if args[:3] == ["docker", "inspect", "-f"] and \
+                    "{{range .Config.Env}}" in args[3]:
+                observed["probes"] += 1
+                return ("SMITE_NODE_PANEL_AUTH_MODE=" + observed["phase"] + "\n"
+                        "SMITE_AGENT_AUTH_MODE=strict\n"
+                        "SMITE_ENGINE_INVENTORY_MODE=managed\n")
+            raise AssertionError("unanticipated tool call: " + str(args))
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
+             patch.object(p, "_foreign_gateway_preflight",
+                          return_value=("iran.example.org", "kh.example.org",
+                                        "https://kh.example.org/smite-node/"+"a"*32)), \
+             patch.object(p, "_rc7_foreign_compose_command", side_effect=compose), \
+             patch.object(p, "_rc7_foreign_pinned_image_verified"), \
+             patch.object(p, "_identity_record", return_value=retained), \
+             patch.object(p, "_regular", return_value=b"owned"), \
+             patch.object(p, "_prepare_security_candidate"), \
+             patch.object(p, "_provision_replay_once"), \
+             patch.object(p, "_run", side_effect=run), \
+             patch.object(p, "_wait_container"), \
+             patch.object(p, "_local_signed_replay_probe") as replay_probe, \
+             patch.object(p, "_rc7_foreign_paused_rollback_verified") as rollback_witness:
+            with self.assertRaisesRegex(p.WizardHold, "paused again"):
+                p.activate_foreign_node_field_trial(state)
+            replay_probe.assert_not_called()
+            rollback_witness.assert_called_once_with(
+                expected_identity=retained, require_replay=True)
+        self.assertIn(("compose", False, False, True), calls)
+        self.assertEqual(observed["probes"], 1)
+        self.assertEqual(observed["phase"], "paused")
+        self.assertEqual(sum("up" in x[1] for x in calls if x[0] == "run"), 2)
 
     def test_activation_and_rollback_use_guarded_compose(self):
         source = (ROOT / "modules/smite-node-pairing.py").read_text()
