@@ -1483,9 +1483,12 @@ their default RC7 digest and cannot select the trial image.
 Existing RC7 and trial review tests now exercise this same witness using
 offline fake Docker observations: exact digest vs running image,
 paused auth uniqueness, original paired identity and signed replay.
-This must be confirmed by GitHub CI on the exact commit; it is NOT a
-Connected or live server test. No new menu, API, feature, installer,
-runtime activation authorization, or service change.
+Exact code checkpoint: `0dad06cdf5e2766a3947b513bc936122b1314069`.
+GitHub Actions `43258784694` SUCCESS (both jobs): all trial runtime
+read-only, actual shared-pairing, RC7, Panel grant, Foreign host recovery,
+Sanaei, Nginx and previous integration fixture tests passed. This is
+NOT a Connected or live two-server test. No new menu, API, feature,
+installer, runtime activation authorization, or service change.
 
 NEXT: keep the signed candidate manifest `activation_allowed:false`
 until explicit trial runtime transition/rollback with existing Pairing
