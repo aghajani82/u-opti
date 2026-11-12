@@ -2115,16 +2115,20 @@ smite_install_unified_signed_pair_review() {
 }
 
 smite_install_unified_foreign_node_image_review() {
-    local image
-    # No --force-recreate or mutable tag; the effective running Node must
-    # exactly match the independently signed trial Node before ANY post-core
-    # Sanaei / Gateway edits.
-    image="$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" || return 2
-    [ "$image" =       'ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483' ] || {
-        echo 'HOLD: Foreign Node is not the exact signed unified trial image.' >&2
+    local image running_id pinned_id
+    # Exact immutable reference AND effective running image ID must match.
+    image='ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483'
+    if [ "$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" != "$image" ]; then
+        echo 'HOLD: Foreign Node does not use the exact signed trial digest.' >&2
         return 2
-    }
-    echo 'UNIFIED_FOREIGN_NODE_IMAGE=EXACT_SIGNED_DIGEST'
+    fi
+    running_id="$(docker inspect -f '{{.Image}}' smite-node 2>/dev/null)" || return 2
+    pinned_id="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null)" || return 2
+    if [[ ! "$running_id" =~ ^sha256:[a-f0-9]{64}$ ]] || [ "$running_id" != "$pinned_id" ]; then
+        echo 'HOLD: Effective running Node image ID differs from the signed digest.' >&2
+        return 2
+    fi
+    echo 'UNIFIED_FOREIGN_NODE_IMAGE=EXACT_SIGNED_DIGEST_AND_RUNTIME_ID'
 }
 
 # Internal phase composition for future single-choice Foreign option 2.
@@ -2149,15 +2153,19 @@ smite_install_unified_foreign_after_core() {
     helper_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
     [ -f "$helper_dir/smite-unified-foreign-gateway-plan.py" ] &&
     [ ! -L "$helper_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
-    declare -F smite_foreign_gateway_configure >/dev/null 2>&1 || {
-        echo 'HOLD: Existing Smite Foreign Gateway helper is not loaded.' >&2
-        return 2
-    }
+    for required in smite_foreign_gateway_configure \
+        smite_foreign_gateway_require_rc_paused smite_foreign_gateway_rc7_compose; do
+        declare -F "$required" >/dev/null 2>&1 || {
+            echo 'HOLD: Existing signed Foreign Gateway or Compose helper unavailable.' >&2
+            return 2
+        }
+    done
 
-    # Complete read-only security preflight BEFORE running Sanaei or touching
-    # the Gateway. Both signatures are checked against trial workflow identity.
+    # All security review occurs before running Sanaei or touching Nginx.
     smite_install_unified_signed_pair_review || return 2
     smite_install_unified_foreign_node_image_review || return 2
+    smite_foreign_gateway_require_rc_paused || return 2
+    smite_foreign_gateway_rc7_compose config --quiet || return 2
     admitted="$(python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py"         --packet-file "$packet"         --state-file "$SMITE_STATE_FILE"         --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env")" || {
         echo 'HOLD: Foreign installation packet is not bound to this fresh Node.' >&2
         return 2
