@@ -1859,23 +1859,14 @@ def staged_foreign_sanaei_admission(
     print("NODE_RUNTIME=PAUSED_STRICT")
 
 
-def _rc7_foreign_paused_rollback_verified(
-    *, expected_identity: tuple[str, str] | None = None,
-    require_replay: bool = False,
-) -> None:
-    """Verify the EXISTING RC7 rollback without rotating identity or replay.
-
-    Only the previously published RC7 image is eligible. A signed unified
-    trial image remains explicitly unapproved for runtime activation.
-    Inspect the *actual* running image ID and effective environment, not
-    just a Compose file or a successful `docker compose up` exit code.
-    """
+def _rc7_foreign_pinned_image_verified() -> None:
+    """Existing signed RC7 image: require exact reference and effective bytes."""
     image = _run(
         ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
         timeout=10, capture=True,
     )
     if image != _FOREIGN_NODE_IMAGE_RC7:
-        raise WizardHold("Foreign RC7 rollback image is not the published signed digest")
+        raise WizardHold("Foreign RC7 running image is not the published signed digest")
     actual = _run(
         ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
         timeout=10, capture=True,
@@ -1885,7 +1876,15 @@ def _rc7_foreign_paused_rollback_verified(
         timeout=10, capture=True,
     )
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", actual) or actual != pinned:
-        raise WizardHold("Foreign RC7 rollback effective image ID differs from pinned image")
+        raise WizardHold("Foreign RC7 effective image ID differs from pinned image")
+
+
+def _rc7_foreign_paused_rollback_verified(
+    *, expected_identity: tuple[str, str] | None = None,
+    require_replay: bool = False,
+) -> None:
+    """Verify original RC7 rollback retains paused mode, identity and replay."""
+    _rc7_foreign_pinned_image_verified()
     environment = _run(
         ["docker", "inspect", "-f",
          "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],
@@ -1942,6 +1941,10 @@ def activate_foreign_node_field_trial(
     rc7 = current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     if rc7:
         _rc7_foreign_compose_command()
+        # A pinned image REFERENCE alone does not prove the running
+        # container uses that image ID. Reject drift before replay/candidate
+        # files or any Node recreation are attempted.
+        _rc7_foreign_pinned_image_verified()
     node_id, node_secret = _identity_record()
     retained_identity = (node_id, node_secret)
     helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
@@ -2063,14 +2066,10 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
         and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     )
     if rc7_foreign:
-        # Never recreate an independently signed but NOT activation-approved
-        # unified trial image through the legacy RC7 rollback CLI.
-        current_image = _run(
-            ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
-            timeout=10, capture=True,
-        )
-        if current_image != _FOREIGN_NODE_IMAGE_RC7:
-            raise WizardHold("Legacy RC7 rollback does not admit a different signed trial image")
+        # This checks both the image reference AND actual immutable Docker
+        # image ID before the existing rollback may recreate anything.
+        # In particular, it NEVER admits the not-yet-authorized trial image.
+        _rc7_foreign_pinned_image_verified()
     # Capture original identity/replay before any possible recreation.
     # A missing identity is allowed for an unpaired recovery; an existing,
     # unsafe or partially provisioned identity must never be overwritten.
