@@ -21,6 +21,8 @@ class ForeignRC7Tests(unittest.TestCase):
             "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8")
         self.assertEqual(p._FOREIGN_NODE_IMAGE_RC7,
             "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263")
+        self.assertEqual(p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL,
+            "ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483")
 
     def test_rc7_compose_preserves_owner_before_recreate_and_rollback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +146,7 @@ class ForeignRC7Tests(unittest.TestCase):
             }
             def mock_run(args, **kwargs):
                 if args[:2] == ["docker", "inspect"]:
-                    return p._FOREIGN_NODE_IMAGE_RC7 if ".Config.Image" in args[3] else "healthy"
+                    return service["image"] if ".Config.Image" in args[3] else "healthy"
                 if args[:2] == ["docker", "compose"]:
                     return json.dumps({"services": {"smite-node": service}})
                 if args[0] == "curl":
@@ -162,6 +164,24 @@ class ForeignRC7Tests(unittest.TestCase):
                  patch.object(p, "_run", side_effect=mock_run):
                 self.assertEqual(p._foreign_gateway_preflight(current),
                                  ("iran.grandoptical.ir", "grandoptical.ir", control))
+                # Exact unified trial digest is permitted for READ-ONLY
+                # review, never via legacy RC7 activation/default preflight.
+                service["image"] = p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current)
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current,
+                        expected_image=p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
+                self.assertEqual(p._foreign_gateway_preflight(
+                    current, review_unified_trial=True),
+                    ("iran.grandoptical.ir", "grandoptical.ir", control))
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current,
+                        review_unified_trial=True, allow_unattached_sanaei=True)
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current,
+                        review_unified_trial=True, expected_image=p._FOREIGN_NODE_IMAGE_RC7)
+                service["image"] = p._FOREIGN_NODE_IMAGE_RC7
                 # Exact pre-pairing Sanaei placeholder is accepted ONLY by
                 # explicit read-only recovery admission. Ordinary activation
                 # must continue refusing missing inventory.
