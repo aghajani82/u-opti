@@ -10,6 +10,35 @@ bash -n "$ROOT/modules/docker-3xui.sh"
 bash -n "$ROOT/modules/smite-install.sh"
 source "$ROOT/modules/smite-install.sh"
 
+# Exercise the ACTUAL pre-existing Sanaei menu/pause functions before
+# replacing the slow installer with isolated mocks. An owned option-2 call
+# must not clear the progress log or ask to return to a menu mid-install.
+CLEARS=0 READS=0
+clear() { CLEARS=$((CLEARS + 1)); }
+read() { READS=$((READS + 1)); return 0; }
+SMITE_STATE_FILE="$TMP/not-installed-yet.env"
+SMITE_SELECTED_FRESH=1
+UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1
+status=0
+smite_install_sanaei_foreign > "$TMP/scoped-pause.log" 2>&1 || status=$?
+[ "$status" -eq 2 ] && [ "$CLEARS" -eq 0 ] && [ "$READS" -eq 0 ] || {
+    echo "FAIL: scoped Sanaei failure must HOLD without clearing/prompting"; exit 1;
+}
+smite_install_pause
+[ "$READS" -eq 0 ] || { echo "FAIL: scoped option-2 paused unexpectedly"; exit 1; }
+
+# Standalone option 4 keeps the original clear and return prompt.
+unset UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER
+status=0
+smite_install_sanaei_foreign > "$TMP/standalone-pause.log" 2>&1 || status=$?
+[ "$status" -eq 2 ] && [ "$CLEARS" -eq 1 ] && [ "$READS" -eq 1 ] || {
+    echo "FAIL: ordinary Sanaei menu interaction changed"; exit 1;
+}
+# A flag alone on a NONFRESH transaction must not suppress the menu.
+SMITE_SELECTED_FRESH=0 UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER=1 smite_install_pause
+[ "$READS" -eq 2 ] || { echo "FAIL: nonfresh menu pause suppressed"; exit 1; }
+unset -f read clear
+
 SMITE_STATE_FILE="$TMP/state.env"
 SMITE_SELECTED_FRESH=1
 printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n' > "$SMITE_STATE_FILE"
@@ -75,4 +104,4 @@ assert body.index(guard) < body.index('return 0', body.index(guard)) < body.inde
 assert body.index(guard) > body.index('Installation completed successfully.')
 PY
 
-echo 'UNIFIED_SANAEI_RETURN_AND_ATTACHMENT=PASS (8 scenarios)'
+echo 'UNIFIED_SANAEI_RETURN_AND_ATTACHMENT=PASS (11 scenarios)'
