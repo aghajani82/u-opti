@@ -197,6 +197,7 @@ class Promotion(unittest.TestCase):
         self.stage()
         managed = self.root / "managed-node"
         managed.mkdir(mode=0o775)
+        managed.chmod(0o775)  # CI runner umask may otherwise create 0755.
         managed_env = managed / ".env"
         self.write(managed_env, self.env.read_text())
         with self.assertRaises(promoter.Hold):
