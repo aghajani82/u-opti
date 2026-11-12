@@ -18,6 +18,114 @@ spec=importlib.util.spec_from_file_location('trial_client',Path(__file__).resolv
 c=importlib.util.module_from_spec(spec);sys.modules[spec.name]=c;spec.loader.exec_module(c)
 
 class Integration(unittest.TestCase):
+    def test_real_panel_grant_to_promoted_foreign_identity_with_recovery(self):
+        """Actual Smite ASGI grant/replay + original U-OPTI client/promotion.
+
+        The only transport is FastAPI's in-process TestClient; no live host
+        or external HTTPS request. All persistent state is a disposable DB.
+        """
+        spec_phase=importlib.util.spec_from_file_location(
+            'trial_identity_integration',
+            Path(__file__).resolve().parents[1]/
+            'modules/smite-unified-foreign-identity-phase.py')
+        phase=importlib.util.module_from_spec(spec_phase)
+        sys.modules[spec_phase.name]=phase
+        spec_phase.loader.exec_module(phase)
+
+        fixture=http_fixture.ForeignInstallHTTP()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        settings.smite_foreign_install_origin_trust_enabled=True
+        trust=Path(fixture.tmp.name)/'trust'
+        trust.mkdir(mode=0o700)
+        previous=settings.smite_signed_node_origins_path
+        settings.smite_signed_node_origins_path=str(trust/'origins.json')
+        self.addCleanup(setattr,settings,'smite_signed_node_origins_path',previous)
+        initialize_replay_schema(fixture.db)
+        fixture.client.app.include_router(
+            signed_nodes.router,prefix='/api/node-control')
+        response=fixture.issue()
+        self.assertEqual(response.status_code,200)
+        packet=dict(protocol='smi1',panel_url='https://panel.example.com:443',
+                    **response.json())
+        base=Path(fixture.tmp.name)/'foreign-fixture'
+        base.mkdir(mode=0o700)
+        stage=base/'foreign-staging'
+        stage.mkdir(mode=0o700)
+        target=stage/'foreign-install-packet.json'
+        target.write_text(json.dumps(packet))
+        target.chmod(0o600)
+        state=base/'state.env'
+        gateway=base/'foreign-gateway.env'
+        env=base/'node.env'
+        live=base/'node-identity.json'
+        from urllib.parse import urlsplit
+        origin=urlsplit(packet['origin']).hostname
+        panel=urlsplit(packet['panel_url']).hostname
+        path=urlsplit(packet['control_url']).path
+        def safe_write(path,content):
+            path.write_text(content)
+            path.chmod(0o600)
+        safe_write(state,
+            'SMITE_ROLE=foreign\n'
+            'SMITE_MANAGED_VERSION=2.0.0-rc.7\n'
+            'SMITE_CONNECTION_MODE=standard\n'
+            'SMITE_NODE_NAME='+packet['node_name']+'\n'
+            'SMITE_PANEL_DOMAIN='+panel+'\n'
+            'SMITE_FOREIGN_DOMAIN='+origin+'\n')
+        safe_write(gateway,
+            'SMITE_FOREIGN_GATEWAY_DOMAIN='+origin+'\n'
+            'SMITE_FOREIGN_PANEL_DOMAIN='+panel+'\n'
+            'SMITE_FOREIGN_CONTROL_PATH='+path+'\n'
+            'SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\n'
+            'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\n')
+        safe_write(env,
+            'PANEL_ADDRESS='+panel+':443\n'
+            'SMITE_CONTROL_ADDRESS=https://'+origin+path+'\n'
+            'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
+            'SMITE_AGENT_AUTH_MODE=strict\n'
+            'SMITE_ENGINE_INVENTORY_MODE=managed\n')
+        calls=[]
+        lose_reply=True
+        def transport(panel_address,target,body,headers):
+            nonlocal lose_reply
+            calls.append(target)
+            if target==c.REDEEM:
+                headers={**headers,'X-Smite-Pairing-Ingress':fixture.ingress}
+            resp=fixture.client.post(
+                target,content=body,
+                headers={**headers,'Content-Type':'application/json'})
+            if resp.status_code!=200:
+                raise c.Hold('Panel rejected request')
+            if target==c.REDEEM and lose_reply:
+                # The real DB has committed, but the client sees a lost ACK.
+                lose_reply=False
+                raise TimeoutError('lost reply')
+            return resp.json()
+        kwargs=dict(
+            packet_path=target,state_path=state,gateway_path=gateway,
+            node_env_path=env,directory=stage,live_identity=live,
+            transport=transport,now=int(time.time()),
+            disposable_capability=True)
+        self.assertEqual(phase.rehearse(**kwargs)['phase'],
+                         'IDENTITY_PROMOTED_OFFLINE')
+        self.assertEqual(calls,[c.REDEEM,c.STATUS,c.STATUS])
+        original=live.read_bytes()
+        self.assertEqual(json.loads(original)['node_id'],packet['node_id'])
+        self.assertEqual(live.stat().st_mode & 0o777,0o600)
+        calls.clear()
+        packet['expires_at']=int(time.time())-1
+        safe_write(target,json.dumps(packet))
+        settings.smite_foreign_install_enabled=False
+        self.assertEqual(phase.rehearse(**kwargs)['connected'],False)
+        self.assertEqual(calls,[c.STATUS])
+        self.assertEqual(original,live.read_bytes())
+        from app.node_pairing_store import revoke_node
+        revoke_node(fixture.db,node_id=fixture.node)
+        with self.assertRaises(phase.Hold):
+            phase.rehearse(**kwargs)
+        self.assertEqual(original,live.read_bytes())
+
     def test_real_redemption_lost_reply_expired_recovery_and_revocation(self):
         fixture=http_fixture.ForeignInstallHTTP();fixture.setUp();self.addCleanup(fixture.doCleanups)
         settings.smite_foreign_install_origin_trust_enabled=True
