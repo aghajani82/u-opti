@@ -8,6 +8,8 @@ on:
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
+      - modules/smite-unified-panel-transaction.py
+      - tests/test-smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-stage.py
       - tests/test-smite-unified-trial-pair-admission.py
       - modules/smite-foreign-install-promotion.py
@@ -37,6 +39,7 @@ jobs:
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
+      - run: python -B tests/test-smite-unified-panel-transaction.py -v
       - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-panel-ingress.py -v
       - run: python -B tests/test-smite-foreign-install-integration.py -v
