@@ -15,10 +15,13 @@ Nginx, systemd, FRP, XHTTP, Sanaei, replay or runtime activation is performed.
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import secrets
 import stat
 import sys
 import tempfile
@@ -149,6 +152,155 @@ def rehearse(*, packet_path, state_path, gateway_path, node_env_path,
         }
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
             client.Hold, promotion.Hold, gateway_plan.Hold):
+        deny()
+
+
+# The pre-existing enrollment and promotion modules already own their
+# credential/identity receipts. This is ONLY an operation-level interruption
+# marker and lock; it must never become another source of truth for identity.
+_TX_LOCK = "unified-foreign-transaction.lock"
+_TX_JOURNAL = "unified-foreign-transaction.json"
+
+
+def _fixture_boundary(*, directory, live_identity, packet_path,
+                      state_path, gateway_path, node_env_path):
+    """Repeat the exact disposable root restriction BEFORE creating a lock."""
+    private, live = Path(directory), Path(live_identity)
+    packet = Path(packet_path)
+    paths = [private, live, packet, Path(state_path),
+             Path(gateway_path), Path(node_env_path)]
+    if any(not p.is_absolute() or ".." in p.parts for p in paths):
+        deny()
+    if (private.name != "foreign-staging"
+            or live.name != "node-identity.json"
+            or private.parent != live.parent
+            or private.parent.name != "foreign-fixture"
+            or packet != private / "foreign-install-packet.json"
+            or Path(state_path) != live.parent / "state.env"
+            or Path(gateway_path) != live.parent / "foreign-gateway.env"
+            or Path(node_env_path) != live.parent / "node.env"
+            or live.parent.parent.parent != Path(tempfile.gettempdir()).resolve()):
+        deny()
+    for folder in (live.parent.parent, live.parent, private):
+        if folder.is_symlink() or not folder.is_dir():
+            deny()
+        status = folder.stat()
+        if (status.st_uid != os.geteuid()
+                or not stat.S_ISDIR(status.st_mode)
+                or stat.S_IMODE(status.st_mode) != 0o700):
+            deny()
+
+
+def _write_journal_once_locked(fd, record):
+    """Atomic+fsynced journal update; no credentials, no identity mutation."""
+    data = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii")
+    temp = ".unified-journal-" + secrets.token_hex(16)
+    handle = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=fd)
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, _TX_JOURNAL, src_dir_fd=fd, dst_dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        try:
+            os.unlink(temp, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+
+
+def rehearse_transaction(*, packet_path, state_path, gateway_path,
+                         node_env_path, directory, live_identity, transport,
+                         now, disposable_capability=False):
+    """Run existing grant/promote steps once with a crash-recoverable lock.
+
+    The production CLI provides no entry to this function. The operation
+    journal only records INTENT/IDENTITY_PROMOTED_OFFLINE, never Connected.
+    Its scope includes the SHA256 of the private packet to reject code swaps
+    after partial enrollment. Re-running a completed journal *still* checks
+    fresh signed proof through the existing promotion module.
+    """
+    if (not disposable_capability or not callable(transport)
+            or type(now) is not int):
+        deny()
+    _fixture_boundary(
+        directory=directory, live_identity=live_identity,
+        packet_path=packet_path, state_path=state_path,
+        gateway_path=gateway_path, node_env_path=node_env_path)
+    client = load("uopti_journal_client", "smite-foreign-install-client.py")
+    promotion = load("uopti_journal_promotion", "smite-foreign-install-promotion.py")
+    gateway_plan = load("uopti_journal_gateway", "smite-unified-foreign-gateway-plan.py")
+
+    # Validate the exact signed Panel scope and the already prepared
+    # Gateway/Node before committing INTENT or consuming a one-use code.
+    try:
+        packet = gateway_plan.private_packet(packet_path, client, promotion)
+        gateway_plan.admit(
+            packet_path=packet_path, state_path=state_path,
+            gateway_state_path=gateway_path)
+        promotion.verify_gateway(
+            packet, state_path=state_path, gateway_path=gateway_path,
+            node_env_path=node_env_path, client=client)
+        with promotion.private_directory(directory) as fd:
+            from contextlib import ExitStack
+            with ExitStack():
+                lock = os.open(_TX_LOCK, os.O_RDWR | os.O_CREAT |
+                               os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
+                try:
+                    client.private_file(lock)
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        deny()
+                    # Verify exact raw packet under the transaction lock,
+                    # not merely the parsed scope. Different code with the
+                    # same Node/domain must never be silently adopted.
+                    raw = promotion.read_optional(
+                        fd, "foreign-install-packet.json", client)
+                    if raw is None or client.parse_packet(raw) != packet:
+                        deny()
+                    fingerprint = hashlib.sha256(raw).hexdigest()
+                    expected = {
+                        "schema": 1,
+                        "packet_sha256": fingerprint,
+                        "node_id": packet.scope["node_id"],
+                        "scope": packet.scope,
+                    }
+                    previous = promotion.read_optional(fd, _TX_JOURNAL, client)
+                    if previous is not None:
+                        journal = client.decode(previous)
+                        if (set(journal) != set(expected) | {"phase"}
+                                or any(journal.get(k) != v for k, v in expected.items())
+                                or journal["phase"] not in
+                                ("INTENT", "IDENTITY_PROMOTED_OFFLINE")):
+                            deny()
+                    else:
+                        _write_journal_once_locked(fd, {**expected, "phase": "INTENT"})
+                    # On lost ACK, process interruption or incomplete
+                    # promotion the existing client and promoter reconcile
+                    # with their *original* key, signed HMAC proof and
+                    # PREPARED/COMPLETED receipts.
+                    result = rehearse(
+                        packet_path=packet_path, state_path=state_path,
+                        gateway_path=gateway_path, node_env_path=node_env_path,
+                        directory=directory, live_identity=live_identity,
+                        transport=transport, now=now,
+                        disposable_capability=True)
+                    if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
+                            or result.get("connected") is not False):
+                        deny()
+                    _write_journal_once_locked(
+                        fd, {**expected, "phase": "IDENTITY_PROMOTED_OFFLINE"})
+                    return {
+                        **result,
+                        "journal": "IDENTITY_PROMOTED_OFFLINE",
+                        "activation_allowed": False,
+                    }
+                finally:
+                    os.close(lock)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()
 
 
