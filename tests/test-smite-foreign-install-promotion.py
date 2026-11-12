@@ -185,6 +185,24 @@ class Promotion(unittest.TestCase):
             self.promote(live_identity=link/"node-identity.json")
         self.assertFalse(self.live.exists())
 
+    def test_managed_node_directory_can_be_nonwritable_0755(self):
+        self.stage()
+        managed = self.root / "managed-node"
+        managed.mkdir(mode=0o755)
+        managed_env = managed / ".env"
+        self.write(managed_env, self.env.read_text())
+        self.assertEqual(self.promote(node_env_path=managed_env)["status"], "identity_promoted")
+
+    def test_managed_node_directory_must_not_be_group_writable(self):
+        self.stage()
+        managed = self.root / "managed-node"
+        managed.mkdir(mode=0o775)
+        managed_env = managed / ".env"
+        self.write(managed_env, self.env.read_text())
+        with self.assertRaises(promoter.Hold):
+            self.promote(node_env_path=managed_env)
+        self.assertFalse(self.live.exists())
+
     def test_promotion_scope_change_does_not_rotate(self):
         self.stage()
         self.promote()
