@@ -164,9 +164,15 @@ class ForeignRC7Tests(unittest.TestCase):
                  patch.object(p, "_run", side_effect=mock_run):
                 self.assertEqual(p._foreign_gateway_preflight(current),
                                  ("iran.grandoptical.ir", "grandoptical.ir", control))
-                # Exact unified trial digest is permitted for READ-ONLY
-                # review, never via legacy RC7 activation/default preflight.
+                # Exact unified trial digest AND explicit :443 are
+                # permitted together for READ-ONLY review, never legacy
+                # activation/default RC7. Keep the official lane unchanged.
                 service["image"] = p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+                trial_control = "https://grandoptical.ir:443" + path
+                original_node_env = (node / ".env").read_text()
+                (node / ".env").write_text(
+                    original_node_env.replace(control, trial_control))
+                service["environment"]["SMITE_CONTROL_ADDRESS"] = trial_control
                 with self.assertRaises(p.WizardHold):
                     p._foreign_gateway_preflight(current)
                 with self.assertRaises(p.WizardHold):
@@ -174,7 +180,20 @@ class ForeignRC7Tests(unittest.TestCase):
                         expected_image=p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
                 self.assertEqual(p._foreign_gateway_preflight(
                     current, review_unified_trial=True),
-                    ("iran.grandoptical.ir", "grandoptical.ir", control))
+                    ("iran.grandoptical.ir", "grandoptical.ir", trial_control))
+                # A missing :443 or drifted control address must HOLD in
+                # the trial lane, even if HTTPS would reach the same host.
+                (node / ".env").write_text(original_node_env)
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current,
+                        review_unified_trial=True)
+                (node / ".env").write_text(
+                    original_node_env.replace(control, trial_control))
+                service["environment"]["SMITE_CONTROL_ADDRESS"] = control
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(current,
+                        review_unified_trial=True)
+                service["environment"]["SMITE_CONTROL_ADDRESS"] = trial_control
                 with self.assertRaises(p.WizardHold):
                     p._foreign_gateway_preflight(current,
                         review_unified_trial=True, allow_unattached_sanaei=True)
@@ -182,6 +201,8 @@ class ForeignRC7Tests(unittest.TestCase):
                     p._foreign_gateway_preflight(current,
                         review_unified_trial=True, expected_image=p._FOREIGN_NODE_IMAGE_RC7)
                 service["image"] = p._FOREIGN_NODE_IMAGE_RC7
+                (node / ".env").write_text(original_node_env)
+                service["environment"]["SMITE_CONTROL_ADDRESS"] = control
                 # Exact pre-pairing Sanaei placeholder is accepted ONLY by
                 # explicit read-only recovery admission. Ordinary activation
                 # must continue refusing missing inventory.

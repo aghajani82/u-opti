@@ -921,7 +921,14 @@ smite_foreign_gateway_configure() {
     else
         control_path="$(smite_foreign_gateway_control_path "$site")"
     fi
-    control_url="https://${domain}${control_path}"
+    # The exact, already-validated Panel grant uses an explicit :443.
+    # Preserve it byte-for-byte in the one-choice path. Standalone
+    # Gateway repair keeps its historic unqualified spelling.
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        control_url="https://${domain}:443${control_path}"
+    else
+        control_url="https://${domain}${control_path}"
+    fi
 
     stored_ip="$(smite_foreign_gateway_state_value SMITE_FOREIGN_PANEL_SOURCE_IPV4 "$SMITE_FOREIGN_GATEWAY_STATE_FILE")"
     detected_ip="$(smite_foreign_gateway_resolve_panel_ipv4 "$panel_domain")"

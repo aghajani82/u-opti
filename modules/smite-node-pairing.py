@@ -1693,7 +1693,11 @@ def _foreign_gateway_preflight(
     except ValueError as exc:
         raise WizardHold("Foreign Panel IPv4 allow-list is invalid") from exc
     env = _env_map(_regular(NODE_DIR / ".env", mode=0o600, limit=64_000))
-    url = f"https://{domain}{path}"
+    # Exact Panel-issued smi1 scope explicitly pins HTTPS/443. Admit
+    # that spelling ONLY for signed trial read-only review; official RC7
+    # activation/rollback keeps the established Gateway URL contract.
+    url = (f"https://{domain}:443{path}" if review_unified_trial
+           else f"https://{domain}{path}")
     if (
         env.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
         or env.get("SMITE_AGENT_AUTH_MODE") != "strict"

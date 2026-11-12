@@ -99,7 +99,7 @@ class ForeignActivationReview(unittest.TestCase):
         self.assertEqual(kwargs, {"review_unified_trial":True})
         if self.mode == "gateway":
             raise pairing_core.WizardHold("wrong 443 gateway")
-        return "iran.example.org","kh.example.org","https://kh.example.org/smite-node/"+"a"*32
+        return "iran.example.org","kh.example.org","https://kh.example.org:443/smite-node/"+"a"*32
 
     def identity_record(self):
         self.pairing_calls.append("identity")

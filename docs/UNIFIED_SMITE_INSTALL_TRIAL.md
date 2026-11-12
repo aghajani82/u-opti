@@ -1643,3 +1643,29 @@ Backhaul, Sanaei and prior identities remain unchanged. NEXT: reconcile
 the existing signed Pairing/Compose runtime admission with the exact
 unified trial image and test full retained rollback and two-way
 Connected before public wiring and live install.
+
+## Consolidation checkpoint — align exact Panel-issued control URL between Gateway and existing signed Pairing (2026-11-12)
+
+Found a direct one-choice blocker: the Panel `smi1` JSON includes an
+explicit `:443` in its `control_url`, and the existing fresh Foreign
+Node now writes that exact address **before first boot**. The existing
+Gateway formatter and the RC7 signed pairing preflight previously
+formed an equivalent but **different string without `:443`**. That
+would fail strict scope matching in the same option-2 lifecycle.
+
+The existing `smite_foreign_gateway_configure` now keeps explicit
+`:443` *only* for the selected fresh/private Panel-packet path.
+The existing `smite-node-pairing.py` `_foreign_gateway_preflight`
+checks the exact same spelling *only* in its previously read-only
+`review_unified_trial` lane; default RC7 activation/rollback and
+standalone Gateway repair preserve their prior checks and spelling.
+The original immutable signed runtime gate remains unchanged,
+`activation_allowed:false` and no new public option or activation
+is introduced. Tests assert exact admission of explicit :443 and
+rejection of alias spelling/drift with the correct signed trial image,
+while the historical RC7 lane stays intact.
+
+This is an offline preparation only, NOT a successful or remotely
+connected installation. NEXT: reuse the signed pairing activation
+transaction and rollback after reviewed admission, then full
+two-direction Connected checks before exposing public option 2.
