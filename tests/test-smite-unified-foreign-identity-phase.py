@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -356,6 +357,7 @@ class IdentityPhase(unittest.TestCase):
     def test_parallel_transaction_lock_does_not_consume_a_code(self):
         lock=self.stage/"unified-foreign-transaction.lock"
         with open(lock,"wb") as handle:
+            os.fchmod(handle.fileno(), 0o600)
             handle.flush()
             fcntl.flock(handle,fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(module.Hold):self.tx()
