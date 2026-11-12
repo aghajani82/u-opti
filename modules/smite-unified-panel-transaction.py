@@ -294,13 +294,30 @@ class PanelTransaction:
         except sqlite3.Error:
             return True
 
+    def _replay_drift(self):
+        """Avoid automatic rollback if fresh signed commands consumed nonces."""
+        live = self.root / self.stage_mod.REPLAY_DB_REL
+        original = self.stage.staging / "iran-replay.sqlite3"
+        try:
+            with closing(sqlite3.connect(live.absolute().as_uri() + "?mode=ro",
+                                         uri=True, timeout=5)) as current, closing(
+                sqlite3.connect(original.absolute().as_uri() + "?mode=ro",
+                                uri=True, timeout=5)) as previous:
+                for table in ("replay_store_identity", "agent_nonces"):
+                    rows = "SELECT * FROM " + table + " ORDER BY 1,2,3" if table == "agent_nonces" else "SELECT * FROM " + table + " ORDER BY 1"
+                    if current.execute(rows).fetchall() != previous.execute(rows).fetchall():
+                        return True
+            return False
+        except sqlite3.Error:
+            return True
+
     def rollback_rehearsal(self, *, confirm: str):
         """Restore ONLY owned config files; never rewind DB, replay or identity."""
         self._check_fixture(confirm)
         journal = self._journal_read()
         if journal["phase"] == "ROLLED_BACK":
             return {"status":"ALREADY_ROLLED_BACK","schema":"PRESERVED"}
-        if self._new_enrollment():
+        if self._new_enrollment() or self._replay_drift():
             deny()
         # Refuse to restore any old config if security identities or replay
         # history drifted; a new grant or key must never be disconnected.
