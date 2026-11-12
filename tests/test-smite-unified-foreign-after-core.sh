@@ -259,6 +259,29 @@ smite_install_unified_foreign_capture_packet "$TMP" > "$TMP/intake-no-tty" 2>&1 
 ! grep -q 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED' "$TMP/intake-no-tty"
 ! grep -q 'smi1_B' "$TMP/intake-no-tty"
 
+# Core must provide the exact Panel 443 path to the existing
+# smite_install_node_files BEFORE Docker is started (no post-Gateway rekey).
+python3 - "$PACKET" <<'PY'
+from pathlib import Path
+import json,sys,time
+p=Path(sys.argv[1])
+data=json.loads(p.read_text())
+data["expires_at"]=int(time.time())+3600
+p.write_text(json.dumps(data))
+PY
+chmod 0600 "$PACKET"
+smite_install_clean_rc_preflight() { return 0; }
+smite_install_node_files() {
+    printf '%s\n' "$5" > "$TMP/prebound-control"
+    return 2  # intentional stop before any real Docker/image operation
+}
+status=0
+smite_install_foreign_node > "$TMP/core-prebound" 2>&1 || status=$?
+[ "$status" = 2 ]
+[ "$(cat "$TMP/prebound-control")" = "https://kh.example.org:443/smite-node/$(printf 'a%.0s' {1..32})" ]
+! grep -q 'smi1_B' "$TMP/core-prebound"
+unset -f smite_install_node_files
+
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
 # sequence until the signed trial runtime activation has been reviewed.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'

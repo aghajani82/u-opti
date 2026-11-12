@@ -69,14 +69,14 @@ class GatewayScope(unittest.TestCase):
     def test_precore_uses_same_private_packet_and_never_exposes_code(self):
         self.assertEqual(
             gateway.precore_fields(self.packet, now=1799999000),
-            (PANEL, FOREIGN, NODE))
+            (PANEL, FOREIGN, NODE, 'https://'+FOREIGN+':443'+PATH))
         import contextlib, io
         output=io.StringIO()
         with patch.object(gateway.time,'time',return_value=1799999000), \
              contextlib.redirect_stdout(output):
             self.assertEqual(gateway.main([
                 '--packet-file',str(self.packet),'--precore-fields']),0)
-        self.assertEqual(output.getvalue().splitlines(),[PANEL,FOREIGN,NODE])
+        self.assertEqual(output.getvalue().splitlines(),[PANEL,FOREIGN,NODE,'https://'+FOREIGN+':443'+PATH])
         self.assertNotIn(CODE,output.getvalue())
         self.assertNotIn('node_id',output.getvalue())
         with self.assertRaises(gateway.Hold):

@@ -1525,10 +1525,16 @@ smite_install_foreign_node() {
             return 2
         }
         mapfile -t issued_fields <<< "$core_fields"
-        [ "${#issued_fields[@]}" -eq 3 ] || return 2
+        [ "${#issued_fields[@]}" -eq 4 ] || return 2
         panel_domain="${issued_fields[0]}"
         foreign_domain="${issued_fields[1]}"
         node_name="${issued_fields[2]}"
+        # The existing smite_install_node_files already accepts this
+        # address as its fifth parameter. Bind the Panel-issued path
+        # BEFORE the first paused Node boot; do not recreate it at Gateway.
+        control_address="${issued_fields[3]}"
+        [[ "$control_address" =~ ^https://[a-z0-9.-]+:443/smite-node/[a-f0-9]{32}$ ]] &&
+        [ "${control_address#https://${foreign_domain}:443/smite-node/}" != "$control_address" ] &&
         smite_install_validate_domain "$panel_domain" &&
         smite_install_validate_domain "$foreign_domain" &&
         smite_install_validate_name "$node_name" || return 2

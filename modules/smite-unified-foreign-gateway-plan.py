@@ -162,7 +162,9 @@ def precore_fields(packet_path, *, now=None):
     name = packet.scope['node_name']
     if panel == foreign:
         deny()
-    return panel, foreign, name
+    # The already-validated exact 443 control URL is set before first
+    # Node boot, so the Gateway can verify it without recreating the Node.
+    return panel, foreign, name, packet.scope['control_url']
 
 
 def main(argv=None):
@@ -177,7 +179,7 @@ def main(argv=None):
         if args.precore_fields:
             if args.state_file or args.gateway_state_file or args.site_file:
                 deny()
-            # Three already-validated, newline-free fields. Never include
+            # Four already-validated nonsecret fields; never include
             # node_id, installation_code, private HMAC secret or packet JSON.
             result = precore_fields(args.packet_file)
             for field in result:

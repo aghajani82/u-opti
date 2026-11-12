@@ -1611,3 +1611,35 @@ existing Pairing/Compose machinery (never RC7 fallback); then attach
 this helper to the selected one-choice Foreign transaction before core
 mutation, continue with the existing Sanaei/Gateway/redeem/promotion
 and require actual two-direction Connected.
+
+## Consolidation checkpoint — prebind exact Foreign 443 control URL, retain Node (2026-11-12)
+
+In the existing **internal** one-choice option-2 flow, the Panel packet
+pre-core scope now supplies the existing Node writer's fifth argument:
+the exact, already-validated `https://foreign:443/smite-node/<32hex>`
+control URL. This sets `SMITE_CONTROL_ADDRESS` before the very first
+paused Node start. It eliminates the later need to force-recreate the
+Node just to install the same metadata; no new installer/module/menu.
+
+The existing `smite_foreign_gateway_recreate_node` now verifies the
+prebound runtime control URL, paused/strict/managed flags, healthy Node,
+and RC7 Compose ownership in the signed, selected **private-packet**
+path. It returns `RETAINED_NO_RECREATE` without Docker mutation on an
+exact match; on drift, it returns HOLD **without** fallback recreation.
+The existing Gateway failure branch likewise refuses legacy force-
+recreate rollback only in this scoped unified mode. Standalone Gateway
+option 6 and historical/RC7 repair semantics remain unchanged.
+
+Existing gateway and Foreign core regression suites now cover the
+pre-boot address argument, no redundant env rewrite, no-recreate
+success, unexpected running address, duplicate Docker env and
+unchanged independent repair. Tests are offline fixtures, NOT evidence
+of a live two-server installation or Connected status.
+
+The public option 2 still pins official RC7 core and does not enable
+the separately signed unified runtime: `activation_allowed:false`
+continues to prohibit trial host activation. Main/live hosts, FRP,
+Backhaul, Sanaei and prior identities remain unchanged. NEXT: reconcile
+the existing signed Pairing/Compose runtime admission with the exact
+unified trial image and test full retained rollback and two-way
+Connected before public wiring and live install.

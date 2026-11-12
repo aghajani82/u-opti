@@ -127,4 +127,66 @@ UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE=
 expect 2 no no
 
 
-echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (6 scenarios)'
+# Verify the REAL RC7 gateway runtime function retains the already
+# prebound, healthy paused Node during selected one-choice installation.
+# Independent option-6 repair keeps its existing recreation behavior.
+SMITE_NODE_DIR="$TMP/node"
+mkdir -p "$SMITE_NODE_DIR"
+CONTROL_URL="https://kh.example.org:443/smite-node/$(printf 'a%.0s' {1..32})"
+cat > "$SMITE_NODE_DIR/.env" <<EOF
+SMITE_CONTROL_ADDRESS=$CONTROL_URL
+SMITE_NODE_PANEL_AUTH_MODE=paused
+SMITE_AGENT_AUTH_MODE=strict
+SMITE_ENGINE_INVENTORY_MODE=managed
+EOF
+RUNTIME_URL="$CONTROL_URL"
+RUNTIME_DUPLICATE=0
+docker() {
+    [ "$*" = 'inspect -f {{range .Config.Env}}{{println .}}{{end}} smite-node' ] || return 99
+    printf 'SMITE_CONTROL_ADDRESS=%s\n' "$RUNTIME_URL"
+    if [ "$RUNTIME_DUPLICATE" = 1 ]; then
+        printf 'SMITE_CONTROL_ADDRESS=%s\n' "$RUNTIME_URL"
+    fi
+    printf 'SMITE_NODE_PANEL_AUTH_MODE=paused\nSMITE_AGENT_AUTH_MODE=strict\nSMITE_ENGINE_INVENTORY_MODE=managed\n'
+}
+: > "$TMP/compose-calls"
+smite_foreign_gateway_rc7_compose() {
+    printf '%s\n' "$*" >> "$TMP/compose-calls"
+    return 0
+}
+smite_foreign_gateway_wait_healthy() { return 0; }
+SMITE_SELECTED_FRESH=1
+UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$PACKET"
+status=0
+smite_foreign_gateway_recreate_node > "$TMP/retain.log" 2>&1 || status=$?
+[ "$status" = 0 ]
+grep -qx 'UNIFIED_FOREIGN_GATEWAY_NODE=RETAINED_NO_RECREATE' "$TMP/retain.log"
+[ "$(cat "$TMP/compose-calls")" = 'config --quiet' ]
+# Actual runtime mismatch or duplicate must HOLD without Compose restart.
+for RUNTIME_URL in "https://wrong.example.org:443/smite-node/$(printf 'b%.0s' {1..32})" "$CONTROL_URL"; do
+    [ "$RUNTIME_URL" = "$CONTROL_URL" ] && RUNTIME_DUPLICATE=1
+    : > "$TMP/compose-calls"
+    status=0
+    smite_foreign_gateway_recreate_node > "$TMP/drift.log" 2>&1 || status=$?
+    [ "$status" -eq 2 ]
+    [ "$(cat "$TMP/compose-calls")" = 'config --quiet' ]
+    ! grep -q 'UNIFIED_FOREIGN_GATEWAY_NODE=RETAINED' "$TMP/drift.log"
+done
+RUNTIME_DUPLICATE=0
+RUNTIME_URL="$CONTROL_URL"
+# The same existing setter should not rewrite a correct env under option 2.
+before="$(sha256sum "$SMITE_NODE_DIR/.env" | cut -d' ' -f1)"
+smite_foreign_gateway_set_node_control_address "$CONTROL_URL" "$TMP/env-backup" > "$TMP/env-log"
+[ "$(sha256sum "$SMITE_NODE_DIR/.env" | cut -d' ' -f1)" = "$before" ]
+grep -q 'UNIFIED_FOREIGN_CONTROL_ADDRESS=PREBOUND_UNCHANGED' "$TMP/env-log"
+status=0
+smite_foreign_gateway_set_node_control_address 'https://other.example.org:443/smite-node/no' "$TMP/env-mismatch" > "$TMP/set-failure" 2>&1 || status=$?
+[ "$status" = 2 ]
+[ "$(sha256sum "$SMITE_NODE_DIR/.env" | cut -d' ' -f1)" = "$before" ]
+# Standalone Gateway keeps its established recreate step.
+UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE=
+: > "$TMP/compose-calls"
+smite_foreign_gateway_recreate_node > "$TMP/standalone-recreate.log"
+grep -q -- '--force-recreate smite-node' "$TMP/compose-calls"
+
+echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (6 scenarios + no-recreate witness)'

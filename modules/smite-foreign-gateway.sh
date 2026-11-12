@@ -594,6 +594,20 @@ smite_foreign_gateway_set_node_control_address() {
     [ -f "$env_file" ] || { echo "ERROR: Smite Node environment file was not found: $env_file"; return 1; }
 
     cp -a "$env_file" "$backup" || return 1
+    # On the selected one-choice path, the exact Panel-issued control URL
+    # was prebound by the existing node-files writer before its first boot.
+    # Do not rewrite an unchanged env file, append a duplicate setting or
+    # silently rotate the Node/Gateway scope. Independent repair unchanged.
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+        [ "$(grep -c '^SMITE_CONTROL_ADDRESS=' "$env_file")" = 1 ] &&
+        grep -Fxq "SMITE_CONTROL_ADDRESS=$control_url" "$env_file" || {
+            echo 'HOLD: Prebound Foreign Node control URL does not match the Panel issue.' >&2
+            return 2
+        }
+        echo 'UNIFIED_FOREIGN_CONTROL_ADDRESS=PREBOUND_UNCHANGED'
+        return 0
+    fi
     if grep -q '^SMITE_CONTROL_ADDRESS=' "$env_file"; then
         sed -i "s|^SMITE_CONTROL_ADDRESS=.*|SMITE_CONTROL_ADDRESS=${control_url}|" "$env_file" || return 1
     else
@@ -602,6 +616,40 @@ smite_foreign_gateway_set_node_control_address() {
 }
 
 smite_foreign_gateway_recreate_node() {
+    # The one-choice fresh Foreign Node is already running with the exact
+    # Panel-issued control URL. The existing Gateway need only verify the
+    # running runtime (no --force-recreate and no key/identity churn).
+    # An unexpected mismatch is a HOLD, never a fallback to recreation.
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+        [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] &&
+        smite_foreign_gateway_require_rc_paused &&
+        smite_foreign_gateway_rc7_compose config --quiet || {
+            echo 'HOLD: Existing selected Foreign Node is not owned/paused.' >&2
+            return 2
+        }
+        local expected runtime expected_line
+        expected="$(awk -F= '$1=="SMITE_CONTROL_ADDRESS" {print substr($0,index($0,"=")+1)}' "$SMITE_NODE_DIR/.env")"
+        [[ "$expected" =~ ^https://[a-z0-9.-]+:443/smite-node/[a-f0-9]{32}$ ]] &&
+        [ "$(grep -c '^SMITE_CONTROL_ADDRESS=' "$SMITE_NODE_DIR/.env")" = 1 ] || {
+            echo 'HOLD: Foreign Node prebound control URL missing or duplicated.' >&2
+            return 2
+        }
+        runtime="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" || return 2
+        for expected_line in "SMITE_CONTROL_ADDRESS=$expected" \
+            "SMITE_NODE_PANEL_AUTH_MODE=paused" \
+            "SMITE_AGENT_AUTH_MODE=strict" \
+            "SMITE_ENGINE_INVENTORY_MODE=managed"; do
+            [ "$(printf '%s\n' "$runtime" | grep -Fxc "$expected_line")" = 1 ] || {
+                echo 'HOLD: Running Foreign Node differs from the original paused control settings.' >&2
+                return 2
+            }
+        done
+        [ "$(printf '%s\n' "$runtime" | grep -c '^SMITE_CONTROL_ADDRESS=')" = 1 ] || return 2
+        smite_foreign_gateway_wait_healthy 90 || return 2
+        echo 'UNIFIED_FOREIGN_GATEWAY_NODE=RETAINED_NO_RECREATE'
+        return 0
+    fi
     if smite_foreign_gateway_is_clean_rc; then
         # Never install legacy panel_client.py overlay into the signed RC image.
         smite_foreign_gateway_require_rc_paused || return 1
@@ -964,8 +1012,15 @@ smite_foreign_gateway_configure() {
 
     echo "Applying Foreign Smite Node control metadata..."
     if ! smite_foreign_gateway_recreate_node; then
-        echo "ERROR: Foreign node recreation failed; restoring previous node environment."
-        cp -a "$env_backup" "$SMITE_NODE_DIR/.env"
+        echo "ERROR: Foreign node control application failed; restoring previous node environment."
+        cp -a "$env_backup" "$SMITE_NODE_DIR/.env" || return 2
+        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+            # A failed NO-RECREATE verification must NEVER trigger the
+            # legacy forced-recreate rollback. Existing Node/keys retained.
+            echo 'HOLD: Foreign Node runtime differs; no Node recreation attempted.' >&2
+            smite_foreign_gateway_pause
+            return 2
+        fi
         if [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ]; then
             smite_foreign_gateway_rc7_compose up -d --no-build --force-recreate smite-node >/dev/null 2>&1 ||
                 echo "CRITICAL: RC7 foreign gateway Node rollback could not be verified." >&2
