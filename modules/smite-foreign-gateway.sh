@@ -903,8 +903,16 @@ smite_foreign_gateway_configure() {
     echo "U-OPTI does not enable or modify UFW automatically."
     echo "Public TCP/8888 must remain blocked after verification."
     echo
-    read -rp "Configure / repair the Foreign 443 gateway? [y/N]: " confirm
-    case "$confirm" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; sleep 1; return 2 ;; esac
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        # The fresh one-choice selection was already explicitly approved.
+        # The exact private Panel grant, role, paused Node and source IPv4
+        # were validated above. Do not ask for a SECOND menu confirmation.
+        # Independent option-6 Gateway repair keeps its original prompt.
+        echo 'UNIFIED_FOREIGN_GATEWAY=CONTINUING_APPROVED_FRESH_INSTALL'
+    else
+        read -rp "Configure / repair the Foreign 443 gateway? [y/N]: " confirm
+        case "$confirm" in y|Y|yes|YES) ;; *) echo "Foreign gateway configuration cancelled."; sleep 1; return 2 ;; esac
+    fi
 
     echo
     smite_foreign_gateway_ensure_packages || { echo "ERROR: Could not prepare Nginx/Certbot."; smite_foreign_gateway_pause; return 2; }
