@@ -47,7 +47,7 @@ class ForeignActivationReview(unittest.TestCase):
             _foreign_gateway_preflight=self.gateway,
             _identity_record=self.identity_record,
             _replay_artifacts_valid=self.replay_ready,
-            _run=self.run,
+            _run=self.mock_run,
         )
 
     def signer(self, command, **kw):
@@ -100,7 +100,7 @@ class ForeignActivationReview(unittest.TestCase):
         self.pairing_calls.append("replay")
         return self.replay
 
-    def run(self, args, **kwargs):
+    def mock_run(self, args, **kwargs):
         self.pairing_calls.append("inspect")
         self.assertEqual(kwargs["capture"],True)
         self.assertEqual(kwargs["timeout"],10)
