@@ -54,6 +54,42 @@ MANIFEST_SHA = "e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608
 IMAGE_ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 
 
+def bind_existing(*, pairing=None, signature_runner=subprocess.run):
+    """Bind existing read-only RC7 verifiers; never an installation entry."""
+    signed = load("uopti_witness_trial_signatures",
+                  "smite-unified-trial-pair-admission.py")
+    mount = load("uopti_witness_sanaei_mount",
+                 "smite-rc5-xhttp-sanaei-mount.py")
+    plan = load("uopti_witness_gateway_plan",
+                "smite-unified-foreign-gateway-plan.py")
+    if pairing is None:
+        pairing = load("uopti_witness_pairing", "smite-node-pairing.py")
+
+    def verify_signed():
+        return signed.verify(
+            manifest=Path(__file__).with_name("smite-unified-trial-registry-pair.json"),
+            manifest_sha256=MANIFEST_SHA, source_sha=SOURCE,
+            trusted_root=Path(__file__).with_name("smite-rc7-sigstore-trusted-root.json"),
+            runner=signature_runner)
+
+    def site_for(scope):
+        domain = urlsplit(scope["origin"]).hostname
+        shared = Path("/etc/nginx/sites-available") / ("3xui-" + domain)
+        standalone = Path("/etc/nginx/sites-available") / domain
+        if shared.exists() or shared.is_symlink():
+            data = plan.safe_site(shared)
+            if data is None:
+                deny()
+            if "# U-OPTI-MANAGED-3XUI-NGINX" in data:
+                return shared
+        return standalone
+
+    return ExistingWitnesses(
+        pairing=pairing, verify_signed=verify_signed,
+        validate_db=mount._validate_instance_db,
+        gateway_site=site_for)
+
+
 class ExistingWitnesses:
     def __init__(self, *, pairing, verify_signed, validate_db, gateway_site):
         """All injected functions read only. No CLI can instantiate these."""
@@ -160,14 +196,8 @@ class ExistingWitnesses:
                 ("NODE_ROLE", "foreign"),
                 ("NODE_NAME", state["SMITE_NODE_NAME"]),
             ):
-                if key in ("NODE_ROLE", "NODE_NAME"):
-                    checks = (file_env, env)
-                    # The effective container may store NODE_NAME/ROLE in
-                    # Compose only; these keys still must match the signed
-                    # scope in the active effective Compose and local env.
-                else:
-                    checks = (file_env, env)
-                for values in checks:
+                # Disk config and effective Compose must both match.
+                for values in (file_env, env):
                     if values.get(key) != value:
                         deny()
                 if key in ("SMITE_NODE_PANEL_AUTH_MODE", "SMITE_AGENT_AUTH_MODE",
