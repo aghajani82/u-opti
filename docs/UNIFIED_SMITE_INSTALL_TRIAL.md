@@ -1099,12 +1099,11 @@ checks the committed operation receipt. Prior hidden-PTY JSON capture,
 Iran one-choice path, Sanaei, SSL/443 and signed/replay checks remain
 in CI.
 
-Last verified code-run:
-https://github.com/aghajani82/u-opti/actions/runs/43246255073
+Latest verified code and documentation CI run:
+https://github.com/aghajani82/u-opti/actions/runs/43246611431
 (2 of 2 jobs SUCCESS on source
-`a84c330800d94904692cc6df0308a0e3e92ecfa6`).
-A subsequent readability-only refactor is being rechecked under the
-same trial workflow; do not infer that as a deployment proof.
+`1091615f343843e9bf2f0515795d2d68768fa305`).
+This is isolated test evidence, NOT a deployment proof.
 
 **Scope of the journal:** it covers **identity redemption/promotion
 only**, not the earlier Node/Sanaei/SSL/443 host install or the
