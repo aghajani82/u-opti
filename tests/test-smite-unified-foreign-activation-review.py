@@ -114,7 +114,7 @@ class ForeignActivationReview(unittest.TestCase):
         if args[:3] == ["docker","image","inspect"]:
             self.assertEqual(args[-1],reviewer.NODE)
             return self.id
-        if "{{range .Config.Env}}" in args:
+        if any("{{range .Config.Env}}" in part for part in args):
             return self.env
         raise AssertionError("unexpected command "+str(args))
 
