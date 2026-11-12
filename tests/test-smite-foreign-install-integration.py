@@ -1,5 +1,6 @@
 """Cross-repository offline ASGI contract; SMITE_SOURCE must name pinned checkout."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -52,9 +53,25 @@ class Integration(unittest.TestCase):
         base.mkdir(mode=0o700)
         stage=base/'foreign-staging'
         stage.mkdir(mode=0o700)
+        # Copy exactly what the Panel's ForeignInstallDialog exposes as
+        # multiline JSON. The Foreign terminal intake must accept this
+        # without printing the one-use code or retyping domains/Node name.
+        intake_spec=importlib.util.spec_from_file_location(
+            'trial_foreign_packet_intake',
+            Path(__file__).resolve().parents[1]/
+            'modules/smite-unified-foreign-packet-intake.py')
+        intake=importlib.util.module_from_spec(intake_spec)
+        sys.modules[intake_spec.name]=intake
+        intake_spec.loader.exec_module(intake)
         target=stage/'foreign-install-packet.json'
-        target.write_text(json.dumps(packet))
-        target.chmod(0o600)
+        received=intake.capture_disposable(
+            io.StringIO(json.dumps(packet, indent=2)+'\n\n'),
+            target=target, expected_panel='https://panel.example.com',
+            expected_domain=packet['origin'], expected_node=packet['node_name'],
+            now=int(time.time()), disposable_capability=True)
+        self.assertEqual(received['status'],'STAGED_PRIVATE')
+        self.assertIs(received['connected'],False)
+        self.assertEqual(target.stat().st_mode & 0o777,0o600)
         state=base/'state.env'
         gateway=base/'foreign-gateway.env'
         env=base/'node.env'
