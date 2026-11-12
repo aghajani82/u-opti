@@ -51,14 +51,14 @@ class TrialPair(unittest.TestCase):
                             "smite_trial":"unified-install"}}
         return subprocess.CompletedProcess(argv,0,json.dumps([record]),"")
 
-    def run(self, **kw):
+    def check_admission(self, **kw):
         args={"manifest":self.manifest,"manifest_sha256":self.sha,
               "source_sha":SOURCE,"trusted_root":ROOT_FILE,"runner":self.fake_signer}
         args.update(kw)
         return v.verify(**args)
 
     def test_exact_success_and_immutable_workflow_identity(self):
-        out=self.run()
+        out=self.check_admission()
         self.assertEqual(out["status"],"verified_trial_pair")
         self.assertFalse(out["host_activation_allowed"])
         self.assertEqual(len(self.issued),2)
@@ -73,11 +73,11 @@ class TrialPair(unittest.TestCase):
             self.assertIn(self.values["images"][role],command)
 
     def test_modified_manifest_or_outside_pin_refused_before_cosign(self):
-        with self.assertRaises(v.Hold):self.run(manifest_sha256="0"*64)
+        with self.assertRaises(v.Hold):self.check_admission(manifest_sha256="0"*64)
         self.assertEqual(self.issued,[])
         self.values["release_approved"]=True
         self.write()
-        with self.assertRaises(v.Hold):self.run()
+        with self.assertRaises(v.Hold):self.check_admission()
         self.assertEqual(self.issued,[])
 
     def test_wrong_role_branch_version_and_legacy_claims_hold(self):
@@ -95,43 +95,43 @@ class TrialPair(unittest.TestCase):
             self.values[key]=wrong
             self.write()
             with self.subTest(key=key, wrong=wrong),self.assertRaises(v.Hold):
-                self.run()
+                self.check_admission()
             self.values[key]=old
         self.assertEqual(self.issued,[])
 
     def test_duplicate_image_and_wrong_repository_denied(self):
         self.values["images"]["node"]=self.values["images"]["panel"]
         self.write()
-        with self.assertRaises(v.Hold):self.run()
+        with self.assertRaises(v.Hold):self.check_admission()
         self.values["images"]["node"]="ghcr.io/other/smite-node@"+NODE
         self.write()
-        with self.assertRaises(v.Hold):self.run()
+        with self.assertRaises(v.Hold):self.check_admission()
         self.assertEqual(self.issued,[])
 
     def test_duplicate_json_keys_rejected(self):
         self.manifest.write_text(self.manifest.read_text().rstrip()[:-1]+',"schema":1}')
         self.sha=hashlib.sha256(self.manifest.read_bytes()).hexdigest()
-        with self.assertRaises(v.Hold):self.run()
+        with self.assertRaises(v.Hold):self.check_admission()
         self.assertEqual(self.issued,[])
 
     def test_tampered_or_missing_trusted_root_denied(self):
         bad=Path(self.tmp.name)/"root.json"
         bad.write_bytes(ROOT_FILE.read_bytes()+b"x")
-        with self.assertRaises(v.Hold):self.run(trusted_root=bad)
+        with self.assertRaises(v.Hold):self.check_admission(trusted_root=bad)
         bad.unlink()
-        with self.assertRaises(v.Hold):self.run(trusted_root=bad)
+        with self.assertRaises(v.Hold):self.check_admission(trusted_root=bad)
         self.assertEqual(self.issued,[])
 
     def test_nonzero_cosign_and_wrong_digest_or_claim_refused(self):
         def fail(argv,**kw):return subprocess.CompletedProcess(argv,5,"","")
-        with self.assertRaises(v.Hold):self.run(runner=fail)
+        with self.assertRaises(v.Hold):self.check_admission(runner=fail)
         def forged(argv,**kw):
             record={"critical":{"type":"cosign container image signature",
                                 "image":{"docker-manifest-digest":"sha256:"+"e"*64}},
                     "optional":{"smite_source_sha":SOURCE,"smite_role":"panel",
                                 "smite_trial":"unified-install"}}
             return subprocess.CompletedProcess(argv,0,json.dumps([record]),"")
-        with self.assertRaises(v.Hold):self.run(runner=forged)
+        with self.assertRaises(v.Hold):self.check_admission(runner=forged)
 
     def test_existing_official_release_verifier_does_not_accept_trial(self):
         official=(ROOT/"modules"/"smite-registry-pair-admission.py").read_text()
