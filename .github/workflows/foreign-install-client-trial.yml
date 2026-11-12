@@ -6,6 +6,8 @@ on:
     paths:
       - modules/smite-foreign-install-client.py
       - tests/test-smite-foreign-install-client.py
+      - modules/smite-unified-trial-pair-admission.py
+      - tests/test-smite-unified-trial-pair-admission.py
       - modules/smite-foreign-install-promotion.py
       - modules/smite-foreign-install-panel-ingress.py
       - tests/test-smite-foreign-install-panel-ingress.py
@@ -31,6 +33,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r companion-smite/panel/requirements.txt
       - run: python -B tests/test-smite-foreign-install-client.py -v
+      - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-panel-ingress.py -v
       - run: python -B tests/test-smite-foreign-install-integration.py -v
