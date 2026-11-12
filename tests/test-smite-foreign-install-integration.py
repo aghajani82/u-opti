@@ -1,8 +1,10 @@
 """Cross-repository offline ASGI contract; SMITE_SOURCE must name pinned checkout."""
 import importlib.util
-import io
 import json
 import os
+import pty
+import select
+import termios
 from pathlib import Path
 import sys
 import tempfile
@@ -64,11 +66,35 @@ class Integration(unittest.TestCase):
         sys.modules[intake_spec.name]=intake
         intake_spec.loader.exec_module(intake)
         target=stage/'foreign-install-packet.json'
-        received=intake.capture_disposable(
-            io.StringIO(json.dumps(packet, indent=2)+'\n\n'),
-            target=target, expected_panel='https://panel.example.com',
-            expected_domain=packet['origin'], expected_node=packet['node_name'],
-            now=int(time.time()), disposable_capability=True)
+        master, slave = pty.openpty()
+        flags_before = termios.tcgetattr(slave)
+        try:
+            with os.fdopen(os.dup(slave), 'r', encoding='utf-8',
+                           newline='') as tty:
+                def after_echo_disabled():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master, (json.dumps(packet, indent=2)+'\n\n').encode())
+                def confirm(scope):
+                    # The operator sees only the nonsecret destinations,
+                    # not the bearer code or freshly generated Node key.
+                    self.assertNotIn('installation_code', scope)
+                    self.assertEqual(scope['node_name'], packet['node_name'])
+                    self.assertEqual(scope['control_url'],packet['control_url'])
+                    return True
+                received=intake.capture_disposable_hidden_tty(
+                    tty, ready=after_echo_disabled, confirm_scope=confirm,
+                    target=target, expected_panel='https://panel.example.com',
+                    expected_domain=packet['origin'],
+                    expected_node=packet['node_name'], now=int(time.time()),
+                    disposable_capability=True)
+            self.assertEqual(termios.tcgetattr(slave), flags_before)
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                self.assertNotIn(packet['installation_code'].encode(),
+                                 os.read(master, 8192))
+        finally:
+            os.close(master)
+            os.close(slave)
         self.assertEqual(received['status'],'STAGED_PRIVATE')
         self.assertIs(received['connected'],False)
         self.assertEqual(target.stat().st_mode & 0o777,0o600)
