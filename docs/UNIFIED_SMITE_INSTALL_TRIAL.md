@@ -1547,3 +1547,31 @@ an internal, non-public stage: it is NOT called from option 2 until the
 signed trial image activation/rollback and final connection checks are
 admitted. Main, operational hosts and existing FRP/Backhaul/Sanaei
 remain unchanged. No live Connected claim.
+
+## Consolidation checkpoint — reuse one Panel-issued input for Foreign core (2026-11-12)
+
+The **existing** `smite_install_foreign_node` now supports an **internal
+fresh/trial-only** private packet input branch: when the future one-choice
+coordinator supplies the same 0600 `smi1` file already used by Gateway,
+the three core values (Iran Panel domain, Foreign domain, Node name)
+come from the signed Panel packet **without three redundant manual
+prompts**. It calls the existing Gateway packet parser and private
+file guards, with an explicit pre-core expiration check and fail-closed
+no-fallback behavior. Neither the installation code nor Node ID/secret
+is echoed; independent installs keep their old manual prompts.
+
+The previously existing `smite-unified-foreign-gateway-plan.py`
+exposes a read-only `--precore-fields` selection (three nonsecret
+validated lines only). It never redeems the credential or modifies
+a server. Existing gateway/status and runtime functions remain the
+same. Both existing Gateway and Foreign choreography test suites were
+extended to exercise matching input, no additional prompts, expired
+grant, unsafe private file, wrong origin/host, and wrong caller scope
+before the mocked preflight rejects installation.
+
+**No public option-2 packet capture or activation was enabled.**
+The signed trial manifest still has `activation_allowed:false`.
+The next work is connecting the existing secure hidden-terminal
+packet capture to this internal core branch in the single option-2
+orchestrator, then the signed runtime/rollback and two-way Connected
+checks. No main merge or live host change.

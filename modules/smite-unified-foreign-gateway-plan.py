@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 import sys
 from urllib.parse import urlsplit
 
@@ -142,23 +143,57 @@ def admit(*, packet_path, state_path, gateway_state_path=None, site_path=None):
     return path
 
 
+def precore_fields(packet_path, *, now=None):
+    """Return only pre-validated nonsecret Node/domain fields for SAME option 2.
+
+    The privately staged packet is the single authority for fresh Foreign
+    core prompts; the grant must be fresh before any host installation.
+    This does not redeem a code, issue origin trust or permit activation.
+    """
+    client = load_module('uopti_unified_precore_client', 'smite-foreign-install-client.py')
+    promotion = load_module('uopti_unified_precore_promotion', 'smite-foreign-install-promotion.py')
+    packet = private_packet(packet_path, client, promotion)
+    moment = int(time.time()) if now is None else now
+    if type(moment) is not int or not moment < packet.expires_at <= moment + 7200:
+        deny()
+    from urllib.parse import urlsplit as split
+    panel = split(packet.scope['panel_url']).hostname
+    foreign = split(packet.scope['origin']).hostname
+    name = packet.scope['node_name']
+    if panel == foreign:
+        deny()
+    return panel, foreign, name
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--packet-file', required=True)
-    parser.add_argument('--state-file', required=True)
+    parser.add_argument('--state-file')
     parser.add_argument('--gateway-state-file')
     parser.add_argument('--site-file')
+    parser.add_argument('--precore-fields', action='store_true')
     args = parser.parse_args(argv)
     try:
-        result = admit(
-            packet_path=args.packet_file,
-            state_path=args.state_file,
-            gateway_state_path=args.gateway_state_file,
-            site_path=args.site_file)
-        print(result)
+        if args.precore_fields:
+            if args.state_file or args.gateway_state_file or args.site_file:
+                deny()
+            # Three already-validated, newline-free fields. Never include
+            # node_id, installation_code, private HMAC secret or packet JSON.
+            result = precore_fields(args.packet_file)
+            for field in result:
+                print(field)
+        else:
+            if not args.state_file:
+                deny()
+            result = admit(
+                packet_path=args.packet_file,
+                state_path=args.state_file,
+                gateway_state_path=args.gateway_state_file,
+                site_path=args.site_file)
+            print(result)
         return 0
     except (Hold, OSError, ValueError, TypeError, KeyError):
-        print('HOLD: Panel-issued Foreign control path was not admitted', file=sys.stderr)
+        print('HOLD: Panel-issued Foreign control scope was not admitted', file=sys.stderr)
         return 2
 
 

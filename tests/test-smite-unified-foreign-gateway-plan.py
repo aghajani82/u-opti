@@ -66,6 +66,43 @@ class GatewayScope(unittest.TestCase):
             packet_path=self.packet, state_path=self.state,
             gateway_state_path=self.status, site_path=self.site)
 
+    def test_precore_uses_same_private_packet_and_never_exposes_code(self):
+        self.assertEqual(
+            gateway.precore_fields(self.packet, now=1799999000),
+            (PANEL, FOREIGN, NODE))
+        import contextlib, io
+        output=io.StringIO()
+        with patch.object(gateway.time,'time',return_value=1799999000), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(gateway.main([
+                '--packet-file',str(self.packet),'--precore-fields']),0)
+        self.assertEqual(output.getvalue().splitlines(),[PANEL,FOREIGN,NODE])
+        self.assertNotIn(CODE,output.getvalue())
+        self.assertNotIn('node_id',output.getvalue())
+        with self.assertRaises(gateway.Hold):
+            gateway.precore_fields(self.packet,now=1800000000)
+        with self.assertRaises(gateway.Hold):
+            gateway.precore_fields(self.packet,now=1799980000)
+        with patch.object(gateway.time,'time',return_value=1799999000), \
+             contextlib.redirect_stderr(output):
+            self.assertEqual(gateway.main([
+                '--packet-file',str(self.packet),'--precore-fields',
+                '--state-file',str(self.state)]),2)
+
+    def test_precore_wrong_scope_and_unsafe_private_packet_denied(self):
+        self.scope['origin']='https://'+PANEL+':443'
+        self.scope['control_url']='https://'+PANEL+':443'+PATH
+        self.save_packet()
+        with self.assertRaises(gateway.Hold):
+            gateway.precore_fields(self.packet,now=1799999000)
+        self.scope['origin']='https://'+FOREIGN+':443'
+        self.scope['control_url']='https://'+FOREIGN+':443'+PATH
+        self.save_packet()
+        self.packet.chmod(0o644)
+        with self.assertRaises(gateway.Hold):
+            gateway.precore_fields(self.packet,now=1799999000)
+        self.packet.chmod(0o600)
+
     def test_exact_panel_issued_path_no_random_replacement(self):
         self.assertEqual(self.admit(),PATH)
         self.assertFalse(self.status.exists())

@@ -183,6 +183,55 @@ assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAI
 assert 'smite_install_finish_local_ir || return 2' in selected
 PY
 
+# The existing Foreign core should take its three values from the SAME
+# private Panel packet without prompting separately, but it must still fail
+# at the preflight boundary in this disposable no-host test. No public
+# installation route is enabled by this internal scoped branch.
+smite_install_require_tools() { :; }
+smite_install_ensure_docker() { :; }
+smite_container_exists() { return 1; }
+smite_install_clean_rc_preflight() { return 2; }
+smite_install_pause() { :; }
+clear() { :; }
+read() { echo 'FAIL: retyped Panel packet scope' >&2; return 99; }
+SMITE_FRP_TRIAL_ONLY=0
+SMITE_INSTALL_FAILURE_CODE=2
+SMITE_RC_SIGNED_REGISTRY=1
+UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$PACKET"
+SMITE_NODE_COMPOSE="$TMP/nonexistent-node-compose.yml"
+: > "$TMP/core-input.log"
+status=0
+smite_install_foreign_node > "$TMP/core-input.log" 2>&1 || status=$?
+[ "$status" = 2 ]
+grep -qx 'FOREIGN_CORE_INPUT=VERIFIED_PANEL_PACKET' "$TMP/core-input.log"
+grep -qx 'Panel domain   : iran.example.org' "$TMP/core-input.log"
+grep -qx 'Foreign domain : kh.example.org' "$TMP/core-input.log"
+grep -qx 'Node name      : node-kh' "$TMP/core-input.log"
+! grep -q 'smi1_B' "$TMP/core-input.log"
+# No silent fallback to old manual three-field prompts on malformed
+# or expired grants, or on a nonfresh standalone invocation.
+SMITE_SELECTED_FRESH=0
+status=0
+smite_install_foreign_node > "$TMP/core-invalid.log" 2>&1 || status=$?
+[ "$status" = 2 ]
+! grep -q '^FOREIGN_CORE_INPUT=VERIFIED_PANEL_PACKET' "$TMP/core-invalid.log"
+SMITE_SELECTED_FRESH=1
+python3 - "$PACKET" <<'PY'
+from pathlib import Path
+import json,sys
+p=Path(sys.argv[1])
+data=json.loads(p.read_text())
+data["expires_at"]=1
+p.write_text(json.dumps(data))
+PY
+chmod 0600 "$PACKET"
+status=0
+smite_install_foreign_node > "$TMP/core-expired.log" 2>&1 || status=$?
+[ "$status" = 2 ]
+! grep -q '^FOREIGN_CORE_INPUT=VERIFIED_PANEL_PACKET' "$TMP/core-expired.log"
+! grep -q 'smi1_B' "$TMP/core-expired.log"
+unset -f read clear
+
 # No publicly-selected fresh Option-2 entry may use this incomplete phase
 # sequence until the signed trial runtime activation has been reviewed.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'

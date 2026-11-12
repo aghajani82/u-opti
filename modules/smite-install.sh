@@ -1504,28 +1504,59 @@ smite_install_foreign_node() {
     local control_address=""
     local ca_url=""
 
-    read -rp "Panel domain (example: ir.example.com): " panel_domain
-    panel_domain="${panel_domain,,}"
-    if ! smite_install_validate_domain "$panel_domain"; then
-        echo "ERROR: Invalid panel domain."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
+    # When the private Iran-Panel packet has already been captured by the
+    # one-choice coordinator, use its exact nonsecret scope. Never ask
+    # the operator to retype three values that the Panel already issued.
+    # This branch is internal/trial only: public option 2 does not yet
+    # capture the packet or enable signed trial runtime activation.
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+           [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ]; then
+            echo 'HOLD: Foreign Panel packet is not approved for standalone installation.' >&2
+            return 2
+        fi
+        local module_dir core_fields
+        local -a issued_fields=()
+        module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+        core_fields="$(python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" \
+            --precore-fields)" || {
+            echo 'HOLD: Panel-issued Foreign information is invalid or expired.' >&2
+            return 2
+        }
+        mapfile -t issued_fields <<< "$core_fields"
+        [ "${#issued_fields[@]}" -eq 3 ] || return 2
+        panel_domain="${issued_fields[0]}"
+        foreign_domain="${issued_fields[1]}"
+        node_name="${issued_fields[2]}"
+        smite_install_validate_domain "$panel_domain" &&
+        smite_install_validate_domain "$foreign_domain" &&
+        smite_install_validate_name "$node_name" || return 2
+        echo 'FOREIGN_CORE_INPUT=VERIFIED_PANEL_PACKET'
+    else
+        read -rp "Panel domain (example: ir.example.com): " panel_domain
+        panel_domain="${panel_domain,,}"
+        if ! smite_install_validate_domain "$panel_domain"; then
+            echo "ERROR: Invalid panel domain."
+            smite_install_pause
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        fi
 
-    read -rp "This foreign server domain (example: kh.example.com): " foreign_domain
-    foreign_domain="${foreign_domain,,}"
-    if ! smite_install_validate_domain "$foreign_domain"; then
-        echo "ERROR: Invalid foreign-server domain."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
+        read -rp "This foreign server domain (example: kh.example.com): " foreign_domain
+        foreign_domain="${foreign_domain,,}"
+        if ! smite_install_validate_domain "$foreign_domain"; then
+            echo "ERROR: Invalid foreign-server domain."
+            smite_install_pause
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        fi
 
-    read -rp "Foreign node name [node-kh]: " node_name
-    node_name="${node_name:-node-kh}"
-    if ! smite_install_validate_name "$node_name"; then
-        echo "ERROR: Invalid node name."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        read -rp "Foreign node name [node-kh]: " node_name
+        node_name="${node_name:-node-kh}"
+        if ! smite_install_validate_name "$node_name"; then
+            echo "ERROR: Invalid node name."
+            smite_install_pause
+            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
+        fi
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
