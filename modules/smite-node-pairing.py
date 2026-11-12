@@ -1859,6 +1859,52 @@ def staged_foreign_sanaei_admission(
     print("NODE_RUNTIME=PAUSED_STRICT")
 
 
+def _rc7_foreign_paused_rollback_verified(
+    *, expected_identity: tuple[str, str] | None = None,
+    require_replay: bool = False,
+) -> None:
+    """Verify the EXISTING RC7 rollback without rotating identity or replay.
+
+    Only the previously published RC7 image is eligible. A signed unified
+    trial image remains explicitly unapproved for runtime activation.
+    Inspect the *actual* running image ID and effective environment, not
+    just a Compose file or a successful `docker compose up` exit code.
+    """
+    image = _run(
+        ["docker", "inspect", "-f", "{{.Config.Image}}", "smite-node"],
+        timeout=10, capture=True,
+    )
+    if image != _FOREIGN_NODE_IMAGE_RC7:
+        raise WizardHold("Foreign RC7 rollback image is not the published signed digest")
+    actual = _run(
+        ["docker", "inspect", "-f", "{{.Image}}", "smite-node"],
+        timeout=10, capture=True,
+    )
+    pinned = _run(
+        ["docker", "image", "inspect", "-f", "{{.Id}}", _FOREIGN_NODE_IMAGE_RC7],
+        timeout=10, capture=True,
+    )
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", actual) or actual != pinned:
+        raise WizardHold("Foreign RC7 rollback effective image ID differs from pinned image")
+    environment = _run(
+        ["docker", "inspect", "-f",
+         "{{range .Config.Env}}{{println .}}{{end}}", "smite-node"],
+        timeout=10, capture=True,
+    ).splitlines()
+    for key, value in (
+        ("SMITE_NODE_PANEL_AUTH_MODE", "paused"),
+        ("SMITE_AGENT_AUTH_MODE", "strict"),
+        ("SMITE_ENGINE_INVENTORY_MODE", "managed"),
+    ):
+        matched = [line for line in environment if line.startswith(key + "=")]
+        if matched != [key + "=" + value]:
+            raise WizardHold("Foreign RC7 rollback effective auth is not paused+strict+managed")
+    if expected_identity is not None and _identity_record() != expected_identity:
+        raise WizardHold("Foreign RC7 rollback paired identity changed")
+    if require_replay and not _replay_artifacts_valid():
+        raise WizardHold("Foreign RC7 rollback replay identity is not retained")
+
+
 def activate_foreign_node_field_trial(
     state: dict[str, str] | None = None, *, reviewed_rc2: bool = False,
 ) -> None:
@@ -1896,7 +1942,8 @@ def activate_foreign_node_field_trial(
     rc7 = current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     if rc7:
         _rc7_foreign_compose_command()
-    node_id, _ = _identity_record()
+    node_id, node_secret = _identity_record()
+    retained_identity = (node_id, node_secret)
     helper = Path(__file__).with_name("smite-foreign-gateway-signed-check.py")
     if not helper.is_file() or helper.is_symlink():
         raise WizardHold("Reviewed signed Gateway check helper is unavailable")
@@ -1954,6 +2001,10 @@ def activate_foreign_node_field_trial(
                     time.sleep(4)
         if not verified:
             raise WizardHold("Foreign signed dual-direction verification incomplete")
+        # A Connected result must not hide an identity rotation or lost
+        # replay binding. Reuse the existing owner-only identity/replay checks.
+        if _identity_record() != retained_identity or not _replay_artifacts_valid():
+            raise WizardHold("Foreign signed proof did not retain identity and replay")
     except Exception as exc:
         rollback_ok = not recreated
         if recreated:
@@ -1975,6 +2026,11 @@ def activate_foreign_node_field_trial(
                     "SMITE_NODE_PANEL_AUTH_MODE=paused" in effective
                     and "SMITE_AGENT_AUTH_MODE=strict" in effective
                 )
+                if rollback_ok and rc7:
+                    _rc7_foreign_paused_rollback_verified(
+                        expected_identity=retained_identity,
+                        require_replay=True,
+                    )
             except Exception:
                 rollback_ok = False
         if not rollback_ok:
@@ -2002,10 +2058,21 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
     if current.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Signed rollback is Standard mode only")
     _regular(NODE_COMPOSE, limit=256_000)
+    rc7_foreign = (
+        current.get("SMITE_ROLE") == "foreign"
+        and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
+    )
+    # Capture original identity/replay before any possible recreation.
+    # A missing identity is allowed for an unpaired recovery; an existing,
+    # unsafe or partially provisioned identity must never be overwritten.
+    retained_identity = None
+    retained_replay = False
+    if rc7_foreign and (IDENTITY_FILE.exists() or IDENTITY_FILE.is_symlink()):
+        retained_identity = _identity_record()
+        retained_replay = _replay_artifacts_valid()
     command = (
         _rc7_foreign_compose_command(rollback=True)
-        if current.get("SMITE_ROLE") == "foreign"
-        and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
+        if rc7_foreign
         else ["docker", "compose", "-f", str(NODE_COMPOSE)]
     )
     _run(command + [
@@ -2018,6 +2085,10 @@ def rollback_node_to_paused_field_trial(state: dict[str, str] | None = None) -> 
     ).splitlines()
     if "SMITE_NODE_PANEL_AUTH_MODE=paused" not in env or "SMITE_AGENT_AUTH_MODE=strict" not in env:
         raise WizardHold("Node did not return to paused+strict state")
+    if rc7_foreign:
+        _rc7_foreign_paused_rollback_verified(
+            expected_identity=retained_identity, require_replay=retained_replay,
+        )
     print("NODE_RUNTIME=PAUSED_STRICT")
     print("PAIRING_IDENTITY=PRESERVED")
     print("REPLAY_HISTORY=PRESERVED")
