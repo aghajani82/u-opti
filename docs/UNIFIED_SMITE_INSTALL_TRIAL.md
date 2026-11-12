@@ -1221,3 +1221,101 @@ Panel→Foreign Connected probes. **Only then** wire the single option-2
 entrypoint and perform user-approved trial host deployment and merge.
 No modifications to main, IR, Foreign, FRP 20182, Backhaul, Sanaei,
 existing Node containers, keys or replay occurred here.
+
+## Checkpoint — existing RC7 signed host witnesses bound to recovery rehearsal (2026-11-12)
+
+The user's accepted **one-choice Iran / one-choice Foreign** flow remains:
+finish IR Panel + Gateway/SSL + local Iran Node signed Connected with
+option 1; verify the Iran Node in the Panel; reserve Foreign in that Panel
+and copy the exactly 7200-second one-use `smi1` JSON; paste it once
+in Foreign option 2, which must eventually install Node, Sanaei Docker,
+RO DB mount, SSL/443 and signed dual-direction Connected.
+
+This checkpoint adds **the read-only evidence adapters** that the
+previous host-stage transaction still lacked:
+`modules/smite-unified-foreign-existing-witnesses.py`. It is a
+Python library with a status-only inert CLI, never a host installer.
+`bind_existing()` binds to the EXISTING verified
+`smite-unified-trial-pair-admission.py` (exact immutable Panel/Node
+Cosign/OIDC source SHA and trusted-root manifest;
+activation_allowed=false), existing `smite-node-pairing.py`
+RC7 Compose ownership/paused-strict helpers and Gateway/443
+preflight, existing `smite-rc5-xhttp-sanaei-mount.py` registered
+database validator and the existing safe Foreign Nginx site planner.
+
+The three witness results support the existing
+`modules/smite-unified-foreign-host-recovery.py` callback contract:
+
+- **core(scope):** TRUE only if the exact signed unified-trial
+  image reference AND running Docker image ID match, RC7 is still
+  the owned Compose project, host-network Node binds API to loopback,
+  CapAdd/device baseline is unmodified, engine overlays inactive,
+  Node is healthy and actual Docker env, Compose env and protected
+  on-disk env have the same paused+strict+managed mode, Node name,
+  Foreign role and Panel address. A changed signature, domain,
+  Node name, runtime ID, health or access mode returns FALSE.
+- **sanaei(scope):** ABSENT only for the exact fresh
+  `.sanaei-empty` 0700 owner-only empty placeholder and a
+  disabled read-only mount. READY only when the existing managed
+  instance **01** database directory is rooted in
+  `/opt/3x-ui/instances/01/db`, its Compose mount is RO, the
+  old registered database-file validator accepts it, and the
+  original *read-only* container-side mountinfo + SQLite
+  `mode=ro` schema proof succeeds. Otherwise DRIFT; no client
+  records are queried or exported.
+- **gateway(scope):** ABSENT only if there is no Gateway
+  receipt, no Node control address and no existing Smite
+  control location. READY only if the exact state and managed
+  Nginx location use the Panel-issued 32-hex path with local
+  127.0.0.1:8888 backend, deny-all and the existing full
+  read-only RC7 `_foreign_gateway_preflight(...,
+  review_unified_trial=True)` succeeds. That existing preflight
+  validates the exact Paused/Strict Compose and the real
+  certificate-verifying local HTTPS/443 response. Otherwise
+  DRIFT, never assume absence or overwrite unrelated Nginx.
+  This is a **local** readiness witness, not a signed live
+  Panel→Foreign Connected claim.
+
+In the new isolated test
+`tests/test-smite-unified-foreign-existing-witnesses.py`,
+the real signed pair admission code runs with synthetic Cosign
+replies; the existing pairing read-only command interface is
+mocked. Scenarios include signed-ready core, invalid signature,
+image/env/Compose/health drift, exact empty Sanaei placeholder,
+untrusted RO DB/schema, missing or competing Nginx control
+locations, bad HTTPS response, and a full restart/recheck
+transaction through the PREVIOUS host recovery envelope.
+This verifies integration of the witnesses with the existing
+recovery state machine without running Docker on the actual hosts.
+Previous 18 host recovery, 20 identity recovery, no-echo PTY,
+Smite API, IR one-choice ordering and Nginx real fixture
+regressions remain in the same CI workflow.
+
+CI: https://github.com/aghajani82/u-opti/actions/runs/43250694673
+(two jobs PASS; new witnesses and prior tests green).
+**No production activation, no host writes, no Node recreation.**
+
+IMPORTANT: `bind_existing` is not called by the public Smite
+Manager option 2, and the existing full Foreign host transaction
+still accepts explicit injected installer callbacks ONLY under its
+disposable fixture capability. This stage validates the REAL
+read-only contract in an isolated harness; it does not constitute
+a real two-host connected install or evidence that the host is
+fully recoverable. Legacy published RC7 image continues to be
+the only one accepted for legacy activation; the unified trial
+manifest continues to explicitly deny host activation.
+
+NEXT EXACT WORK: finish signed **runtime activation and rollback
+admission** for the new immutable trial pair under an explicit
+operator authorization, while preserving the old RC7 default.
+Use a durable single ownership/lock/phase journal across
+core→Sanaei→Gateway→grant redemption→identity promotion→replay
+→signed runtime. Prove that an interrupted Gateway or Node
+recreate on a *fresh paused-owned Node* can be reconciled
+without rewinding keys, replay, saved tunnels or Sanaei state.
+Then require actual Foreign→Panel signed check-in plus
+Panel→Foreign signed live health checks and show Connected only
+when both pass. Finally wire option 2, verify both hosts in
+disposable two-host tests, and request approval for real-host
+testing/merging to main. Keep FRP 20182, active Sanaei,
+existing Node, main and both hosts untouched.
