@@ -2106,11 +2106,16 @@ smite_install_unified_signed_pair_review() {
     }
     actual_cosign="$(command -v cosign)" || return 2
     [ -f "$actual_cosign" ] && [ ! -L "$actual_cosign" ] || return 2
-    [ "$(sha256sum "$actual_cosign" | awk '{print $1}')" =       'c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74' ] || {
+    [ "$(sha256sum "$actual_cosign" | awk '{print $1}')" = \
+      'c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74' ] || {
         echo 'HOLD: Unified trial requires the exact reviewed Cosign v3.0.6 binary.' >&2
         return 2
     }
-    python3 -B "$verifier"         --manifest "$manifest"         --manifest-sha256 e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608         --source-sha b865be93e22153c60769f6329e6e55e781494ded         --trusted-root "$trust_root" || return 2
+    python3 -B "$verifier" \
+        --manifest "$manifest" \
+        --manifest-sha256 e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608 \
+        --source-sha b865be93e22153c60769f6329e6e55e781494ded \
+        --trusted-root "$trust_root" || return 2
     echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_READ_ONLY'
 }
 
@@ -2166,7 +2171,10 @@ smite_install_unified_foreign_after_core() {
     smite_install_unified_foreign_node_image_review || return 2
     smite_foreign_gateway_require_rc_paused || return 2
     smite_foreign_gateway_rc7_compose config --quiet || return 2
-    admitted="$(python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py"         --packet-file "$packet"         --state-file "$SMITE_STATE_FILE"         --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env")" || {
+    admitted="$(python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" \
+        --state-file "$SMITE_STATE_FILE" \
+        --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env")" || {
         echo 'HOLD: Foreign installation packet is not bound to this fresh Node.' >&2
         return 2
     }
