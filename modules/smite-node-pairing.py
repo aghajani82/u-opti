@@ -1348,6 +1348,12 @@ _FOREIGN_PANEL_IMAGE_RC2 = (
 )
 _FOREIGN_PANEL_IMAGE_RC7 = "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8"
 _FOREIGN_NODE_IMAGE_RC7 = "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
+# Branch-signed candidate for explicit *read-only* admission only. This image
+# is not accepted by the existing foreign runtime activation or rollback path.
+_FOREIGN_NODE_IMAGE_UNIFIED_TRIAL = (
+    "ghcr.io/aghajani82/smite-node@sha256:"
+    "587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483"
+)
 _FOREIGN_RC2_COMPOSE_SHA = "8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e"
 _FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
 
@@ -1642,19 +1648,30 @@ def _rc7_foreign_compose_command(*, staged_candidate: bool = False, rollback: bo
 def _foreign_gateway_preflight(
     current: dict[str, str], *, expected_image: str | None = None,
     allow_unattached_sanaei: bool = False,
+    review_unified_trial: bool = False,
 ) -> tuple[str, str, str]:
-    """Read only managed Gateway metadata; RC.2 requires additional admission."""
+    """Read-only managed Gateway metadata; unified trial never activates."""
     version = current.get("SMITE_MANAGED_VERSION")
     if current.get("SMITE_ROLE") != "foreign" or version not in ("2.0.0-rc.1", "2.0.0-rc.7"):
         raise WizardHold("Foreign activation requires an exact reviewed signed Node")
-    if version == "2.0.0-rc.7":
+    if review_unified_trial:
+        if (type(review_unified_trial) is not bool
+                or version != "2.0.0-rc.7"
+                or expected_image not in (None, _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
+                or allow_unattached_sanaei):
+            raise WizardHold("Unified Foreign image review is exact RC7 read-only only")
+        expected_image = _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+    elif version == "2.0.0-rc.7":
         if expected_image not in (None, _FOREIGN_NODE_IMAGE_RC7):
             raise WizardHold("RC7 cannot activate using an earlier Foreign image")
         expected_image = _FOREIGN_NODE_IMAGE_RC7
     elif expected_image is None:
         expected_image = _FOREIGN_NODE_IMAGE
-    if expected_image not in (_FOREIGN_NODE_IMAGE, _FOREIGN_NODE_IMAGE_RC2, _FOREIGN_NODE_IMAGE_RC7):
+    if expected_image not in (_FOREIGN_NODE_IMAGE, _FOREIGN_NODE_IMAGE_RC2,
+                              _FOREIGN_NODE_IMAGE_RC7, _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL):
         raise WizardHold("Foreign activation image not reviewed")
+    if expected_image == _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL and not review_unified_trial:
+        raise WizardHold("Unified signed trial image not authorized for legacy activation")
     gateway = STATE.parent / "foreign-gateway.env"
     data = _env_map(_regular(gateway, mode=0o600, limit=8192))
     domain = data.get("SMITE_FOREIGN_GATEWAY_DOMAIN", "")
@@ -1697,7 +1714,7 @@ def _foreign_gateway_preflight(
         _require_stage15_foreign_compose(url, panel)
     elif running != expected_image:
         raise WizardHold("Foreign Node image differs from the exact approved digest")
-    if expected_image == _FOREIGN_NODE_IMAGE_RC7:
+    if expected_image in (_FOREIGN_NODE_IMAGE_RC7, _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL):
         base_command = _rc7_foreign_compose_command()
         raw = _run(base_command + ["config", "--format", "json"], timeout=30, capture=True)
         try:
@@ -1725,7 +1742,7 @@ def _foreign_gateway_preflight(
                 and environment.get("SMITE_SANAEI_INVENTORY_ENABLED") == expected_sanaei
             )
             if (
-                service.get("image") != _FOREIGN_NODE_IMAGE_RC7
+                service.get("image") != expected_image
                 or service.get("network_mode") != "host"
                 or service.get("ports") or service.get("privileged")
                 # Exact immutable RC7 upstream Compose baseline. These
