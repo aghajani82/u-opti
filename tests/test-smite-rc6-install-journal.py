@@ -259,6 +259,37 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(ir.load()['ir_phase'],'COMPLETE')
         self.assert_no_stop()
 
+    def test_pending_gateway_recovery_admitted_even_if_paused_node_stopped(self):
+        ir,root,project=self.prepare_retained_ir()
+        node=self.objects['a'*64]
+        node['State']['Running']=False
+        # An unclean stop during Gateway cannot pass full Node health,
+        # but the same original journal may admit a private snapshot
+        # rollback BEFORE any Node is repaired or next stage attempted.
+        self.assertEqual(ir.ir_gateway_recovery_plan(),('CORE_COMMITTED',project))
+        with self.assertRaises(m.Hold):
+            ir.ir_resume()
+        node['State']['Running']=True
+        ir.ir_advance('GATEWAY_VERIFIED')
+        self.assertEqual(ir.ir_gateway_recovery_plan(),('GATEWAY_VERIFIED',project))
+        self.assert_no_stop()
+
+    def test_pending_gateway_recovery_rejects_active_or_legacy_owner(self):
+        ir,root,project=self.prepare_retained_ir()
+        doc=ir.load()
+        doc['installer_pid']=123
+        doc['installer_start']='same-process'
+        ir.save(doc)
+        with patch.object(m,'process_start',return_value='same-process'):
+            with self.assertRaisesRegex(m.Hold,'STILL_RUNNING'):
+                ir.ir_gateway_recovery_plan()
+        doc=ir.load()
+        doc.pop('ir_resumable_version')
+        ir.save(doc)
+        with self.assertRaisesRegex(m.Hold,'NOT_ADMITTED'):
+            ir.ir_gateway_recovery_plan()
+        self.assert_no_stop()
+
     def test_ir_resume_holds_on_drift_and_does_not_recreate_node(self):
         ir,root,_=self.prepare_retained_ir()
         node=self.objects['a'*64]
