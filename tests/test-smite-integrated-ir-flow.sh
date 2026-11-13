@@ -58,7 +58,10 @@ smite_install_create_admin() {
     [ "${FAIL_STAGE:-}" != admin ] || return 1
     ADMIN_EXISTS=1
 }
-smite_install_ir_admin_present() { [ "$ADMIN_EXISTS" = 1 ]; }
+smite_install_ir_admin_present() {
+    [ "${ADMIN_DB_UNSAFE:-0}" != 1 ] || return 2
+    [ "$ADMIN_EXISTS" = 1 ] || return 3
+}
 SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=CORE_COMMITTED
 : > "$TMP/events"
@@ -79,6 +82,18 @@ ADMIN_EXISTS=1
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-admin"
 [ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nui\ncheckpoint:COMPLETE' ]
+# An unreadable/unknown Panel DB must NEVER be treated as an empty
+# admin table: it is an unsafe state, and no new admin may be created.
+SMITE_IR_STAGE=PAIRING_VERIFIED
+ADMIN_DB_UNSAFE=1
+ADMIN_EXISTS=0
+: > "$TMP/events"
+if smite_install_finish_local_ir > "$TMP/resume-db-unsafe"; then
+    echo 'FAIL: unverified DB incorrectly prompted for admin creation'; exit 1
+fi
+[ "$(cat "$TMP/events")" = $'tls\npairing' ]
+unset ADMIN_DB_UNSAFE
+ADMIN_EXISTS=1
 SMITE_IR_STAGE=COMPLETE
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-finished"
