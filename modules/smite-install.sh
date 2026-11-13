@@ -2194,10 +2194,10 @@ smite_install_unified_foreign_sanaei() {
 }
 
 # Option 2 unified-install composition boundary (trial branch ONLY).
-# Reuses existing Sanaei and Gateway; enrollment/activation are separate.
-# NOT connected to the public menu: the unified signed trial image manifest
-# explicitly says host_activation_allowed=false, and the existing RC7 runtime
-# activation module still pins the older published Node digest.
+# Reuses the existing signed Pairing RELEASE gate, Sanaei and Gateway.
+# NOT connected to the public menu: the immutable trial image manifest
+# explicitly says host_activation_allowed=false, so this guard must HOLD
+# before either Sanaei or Gateway can change the Foreign host.
 smite_install_unified_signed_pair_review() {
     local module_dir verifier manifest trust_root actual_cosign
     module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
@@ -2221,12 +2221,38 @@ smite_install_unified_signed_pair_review() {
         echo 'HOLD: Unified trial requires the exact reviewed Cosign v3.0.6 binary.' >&2
         return 2
     }
-    python3 -B "$verifier" \
-        --manifest "$manifest" \
-        --manifest-sha256 e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608 \
-        --source-sha b865be93e22153c60769f6329e6e55e781494ded \
-        --trusted-root "$trust_root" || return 2
-    echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_READ_ONLY'
+    # Reuse the EXISTING signed Pairing release admission. The old code
+    # only proved genuine TRIAL signatures and then allowed Sanaei/Gateway
+    # changes, even though the immutable trial manifest says activation is
+    # forbidden. The single Pairing gate verifies both signatures AND the
+    # explicit release decision before any Foreign host mutation.
+    local pairing="$module_dir/smite-node-pairing.py"
+    [ -f "$pairing" ] && [ ! -L "$pairing" ] || return 2
+    python3 -B - "$pairing" <<'PY_UNIFIED_FOREIGN_RELEASE'
+import importlib.util
+from pathlib import Path
+import sys
+path=Path(sys.argv[1])
+if path.is_symlink() or not path.is_file():
+    raise SystemExit(2)
+try:
+    spec=importlib.util.spec_from_file_location(
+        "uopti_selected_existing_pairing_release",path)
+    if spec is None or spec.loader is None:
+        raise ValueError("Missing approved Pairing controller")
+    pairing=importlib.util.module_from_spec(spec)
+    sys.modules[spec.name]=pairing
+    spec.loader.exec_module(pairing)
+    pairing._require_unified_foreign_release()
+except Exception:
+    # No raw manifest, secrets, certificate evidence or user token in logs.
+    print("HOLD: Unified Smite signed pair not approved for host activation",
+          file=sys.stderr)
+    raise SystemExit(2)
+PY_UNIFIED_FOREIGN_RELEASE
+    local result=$?
+    [ "$result" -eq 0 ] || return 2
+    echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_RELEASE_APPROVED'
 }
 
 smite_install_unified_foreign_node_image_review() {
