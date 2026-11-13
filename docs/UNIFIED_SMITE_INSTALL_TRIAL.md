@@ -16,6 +16,71 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+## Resume/checkpoint design — Iran selected option 1 (2026-11-13)
+
+Operator intent: **press the same option 1 again**, just like resuming a
+paused video. Do not reinstall the Panel/Node, reset identity or replay,
+or jump ahead when a preceding stage has not been VERIFIED.
+
+The existing `smite-rc6-install-journal.py` now records `ir_resumable_version=1`
+ONLY for **new selected** official signed RC7 Iran installs. After the
+*original* core-install journal commits, it initializes a monotonic
+`ir_phase` cursor. Exactly these stages are admitted:
+
+1. `CORE_COMMITTED`: Panel + Iran Node signed image references, original
+   Compose project/role and local core are transaction-owned.
+2. `GATEWAY_VERIFIED`: the existing Gateway configured and TLS-verified
+   `https://<panel-domain>:443/api/status`.
+3. `PAIRING_VERIFIED`: the existing root-only local Iran Pairing confirms
+   signed HMAC **in both directions** and retains the original Node ID.
+4. `ADMIN_CREATED`: the existing CLI created an administrator, and the
+   installed Panel's original SQLite database contains a valid admin row.
+5. `COMPLETE`: the existing static UI update was attempted (optional, not
+   a prerequisite of signed Node enrollment); the mandatory prior stages
+   already verified. A pending static appearance remains available at
+   existing menu option 8.
+
+On reselecting option 1, the first action is a read-only `resume-ir`
+admission under the original operation lock. It validates the 0600
+root-owned journal, original source/version, exact Docker image references,
+project and service/Compose labels, running container state, and original
+Iran role/state before accepting a cursor. **No new Docker project, Node
+recreate, reinstall, rekey, FRP restart or manual Pairing choice.**
+A returned checkpoint is NEVER trusted alone: a retained Gateway is
+reverified by strict local HTTPS; existing signed Pairing/identity is
+reverified using the original idempotent `--complete-local-ir-install`;
+an admin is verified by a read-only database query. A changed completed
+stage HOLDs instead of silently overwriting a live service.
+
+Safe crash boundaries:
+- After core committed, before Gateway → resume at Gateway.
+- Between Gateway and signed Pairing → reverify Gateway, retry only Pairing
+  with retained identity (never issue a second Node on an existing receipt).
+- During/after admin creation → check actual admin record before running
+  `smite admin create`; distinguish **absent** (eligible to create) from
+  **unreadable/invalid DB** (HOLD). Never reset a password on retry.
+- After completion → verify Gateway/Pairing/Admin and report already
+  complete; never needlessly repeat the cosmetic UI patch.
+- **Before core COMMIT** (download, Docker, first core image/install):
+  previously interrupted ownership is insufficiently proven. This
+  version **HOLDs** and leaves all data untouched for reviewed recovery,
+  rather than guessing and destructively replaying half of a Docker
+  transaction. Existing old `COMMITTED` journals without explicit
+  `ir_resumable_version=1` are NOT auto-adopted as new resumable installs.
+- Foreign option 2 is still intentionally `HOLD_BEFORE_HOST_CHANGES`
+  pending a separately approved signed unified release. Apply the
+  SAME journal principle to that existing path only after its complete
+  identity/Pairing/rollback transaction has been released and tested.
+
+Verification: `tests/test-smite-integrated-ir-flow.sh` exercises all
+stage/error paths with zero host changes, and the **existing**
+`tests/test-smite-rc6-install-journal.py` checks durable cursor order,
+Docker/Compose/role drift refusal, legacy/foreign exclusion, active
+installer refusal, retained identity and SQLite admin proof. The latter
+now runs in the existing trial CI with sudo on a disposable filesystem.
+This is not evidence of real two-server Connected, nor permission to
+install on production.
+
 ## Iran → Panel → Foreign: one-choice audit, exact existing integration points (2026-11-13)
 
 This section overrides old historical "next step" notes below. It records what
