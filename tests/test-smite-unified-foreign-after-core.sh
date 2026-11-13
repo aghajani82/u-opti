@@ -38,6 +38,10 @@ chmod 0600 "$PACKET"
 
 source "$ROOT/modules/smite-install.sh"
 source "$ROOT/modules/smite-foreign-gateway.sh"
+# Preserve the ACTUAL release admission before replacing it with a scoped
+# rehearsal success/failure stub. Only the mock may reach Sanaei/Gateway.
+REAL_UNIFIED_RELEASE_REVIEW="$(declare -f smite_install_unified_signed_pair_review)"
+[[ "$REAL_UNIFIED_RELEASE_REVIEW" == *'pairing._require_unified_foreign_release()'* ]]
 
 SMITE_INSTALL_PROFILE=clean-rc
 SMITE_SELECTED_FRESH=1
@@ -311,4 +315,21 @@ assert 'smite_install_foreign_node || return 2' in src[start:end]
 assert 'smite_install_finish_local_ir || return 2' in src[start:end]
 PY
 
-echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (18 scenarios)'
+# The REAL signed-pair gate refuses the current unapproved trial
+# before Sanaei, Gateway, enrollment or identity mutation. Preserve all
+# mock service stubs while restoring only this single real gate.
+(
+    eval "$REAL_UNIFIED_RELEASE_REVIEW"
+    MODE=ok
+    calls=()
+    rm -f "$SMITE_STATE_DIR/foreign-gateway.env"
+    status=0
+    smite_install_unified_foreign_after_core "$PACKET" > "$TMP/release-hold" 2>&1 || status=$?
+    [ "$status" = 2 ]
+    [ "${#calls[@]}" -eq 0 ]
+    [ ! -e "$SMITE_STATE_DIR/foreign-gateway.env" ]
+    ! grep -q 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_RELEASE_APPROVED' "$TMP/release-hold"
+    ! grep -q 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED' "$TMP/release-hold"
+    ! grep -q 'smi1_B' "$TMP/release-hold"
+)
+echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (19 scenarios)'
