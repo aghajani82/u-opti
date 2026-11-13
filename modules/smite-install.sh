@@ -2852,10 +2852,19 @@ smite_install_finish_local_ir() {
     if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         if smite_install_ir_admin_present; then
             echo 'IR_ADMIN=EXISTING_VERIFIED'
-        elif [ "$phase" = ADMIN_CREATED ] || [ "$phase" = COMPLETE ]; then
-            echo 'HOLD: completed admin checkpoint no longer verifies.' >&2
-            return 2
         else
+            local admin_status=$?
+            # A missing admin (3) is recoverable; an unsafe DB, wrong
+            # schema, missing Node or Docker drift (2) is NOT. Never run
+            # the interactive creation CLI against an unverified DB.
+            if [ "$admin_status" -ne 3 ]; then
+                echo 'HOLD: Panel admin database cannot be safely verified.' >&2
+                return 2
+            fi
+            if [ "$phase" = ADMIN_CREATED ] || [ "$phase" = COMPLETE ]; then
+                echo 'HOLD: completed admin checkpoint no longer verifies.' >&2
+                return 2
+            fi
             echo 'Iran Node verified active. Create the Panel administrator account:'
             smite_install_create_admin || return 2
             smite_install_ir_admin_present || {
