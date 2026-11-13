@@ -1068,6 +1068,119 @@ EOF_STATE
     chmod 0600 "$SMITE_GATEWAY_STATE_FILE"
 }
 
+# INTERNAL to a newly installed, still-unpaired RC7 Iran option 1.
+# Its retained step snapshot is owned by the SAME installation journal.
+smite_gateway_ir_stage_paths() {
+    local domain="$1"
+    printf '%s\n' \
+        "$SMITE_GATEWAY_BACKEND_CONF" \
+        "$SMITE_GATEWAY_STREAM_CONF" \
+        "$SMITE_GATEWAY_MAP_FILE" \
+        "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" \
+        "$SMITE_GATEWAY_STATE_FILE" \
+        "$SMITE_GATEWAY_RENEW_HOOK" \
+        "${SMITE_GATEWAY_ACME_CONF_DIR:-/etc/nginx/conf.d}/u-opti-acme-${domain}.conf" \
+        "$SMITE_NODE_DIR/.env"
+}
+
+smite_gateway_ir_stage_guard() {
+    local snapshot="$1" project="$2" domain="$3"
+    [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 1
+    smite_gateway_validate_domain "$domain" || return 1
+    [ -d "$snapshot" ] && [ ! -L "$snapshot" ] &&
+    [ "$(stat -c '%u:%a' "$snapshot" 2>/dev/null)" = "0:700" ] &&
+    [ -f "$snapshot/project" ] && [ ! -L "$snapshot/project" ] &&
+    [ -f "$snapshot/domain" ] && [ ! -L "$snapshot/domain" ] &&
+    [ "$(cat "$snapshot/project")" = "$project" ] &&
+    [ "$(cat "$snapshot/domain")" = "$domain" ]
+}
+
+smite_gateway_ir_stage_snapshot() {
+    local snapshot="$1" project="$2" domain="$3" candidate="" path i=0
+    [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 1
+    smite_gateway_validate_domain "$domain" || return 1
+    [ ! -e "$snapshot" ] && [ ! -L "$snapshot" ] || return 1
+    [ -d "$(dirname "$snapshot")" ] && [ ! -L "$(dirname "$snapshot")" ] &&
+    [ "$(stat -c '%u:%a' "$(dirname "$snapshot")")" = "0:700" ] || return 1
+    candidate="$(mktemp -d "${snapshot}.tmp.XXXXXX")" || return 1
+    chmod 0700 "$candidate" || return 1
+    printf '%s\n' "$project" > "$candidate/project" || return 1
+    printf '%s\n' "$domain" > "$candidate/domain" || return 1
+    while IFS= read -r path; do
+        [ -n "$path" ] && [[ "$path" != *$'\n'* ]] || return 1
+        if [ -L "$path" ]; then return 1; fi
+        if [ -e "$path" ]; then
+            [ -f "$path" ] || return 1
+            cp -a -- "$path" "$candidate/file-$i" || return 1
+        else
+            : > "$candidate/absent-$i" || return 1
+        fi
+        i=$((i + 1))
+    done < <(smite_gateway_ir_stage_paths "$domain")
+    [ "$i" -eq 8 ] || return 1
+    mv -T -- "$candidate" "$snapshot" || return 1
+    echo 'IR_GATEWAY_STAGE=SNAPSHOT_RETAINED'
+}
+
+smite_gateway_ir_stage_restore() {
+    local snapshot="$1" project="$2" domain="$3" path i=0
+    local expected_node="" effective="" node_project=""
+    smite_gateway_ir_stage_guard "$snapshot" "$project" "$domain" || return 1
+    while IFS= read -r path; do
+        [ -n "$path" ] && [ ! -L "$path" ] || return 1
+        if [ -f "$snapshot/file-$i" ] && [ ! -L "$snapshot/file-$i" ]; then
+            [ ! -e "$snapshot/absent-$i" ] || return 1
+        elif [ -f "$snapshot/absent-$i" ] && [ ! -L "$snapshot/absent-$i" ]; then
+            [ ! -e "$snapshot/file-$i" ] || return 1
+        else
+            return 1
+        fi
+        if [ -e "$path" ] && [ ! -f "$path" ]; then return 1; fi
+        i=$((i + 1))
+    done < <(smite_gateway_ir_stage_paths "$domain")
+    [ "$i" -eq 8 ] || return 1
+    # Never reset a signed Node; this stage can only hold a paused one.
+    effective="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" || return 1
+    printf '%s\n' "$effective" | grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' || return 1
+    printf '%s\n' "$effective" | grep -qx 'SMITE_AGENT_AUTH_MODE=strict' || return 1
+    node_project="$(smite_gateway_node_compose_project)" || return 1
+    [ "$node_project" = "$project" ] || return 1
+    [ -f "$snapshot/file-7" ] && [ ! -L "$snapshot/file-7" ] || return 1
+    expected_node="$(sed -n 's/^PANEL_ADDRESS=//p' "$snapshot/file-7")" || return 1
+    [ -n "$expected_node" ] || return 1
+
+    i=0
+    while IFS= read -r path; do
+        if [ -f "$snapshot/file-$i" ]; then
+            cp -a -- "$snapshot/file-$i" "$path" || return 1
+            cmp -s -- "$snapshot/file-$i" "$path" || return 1
+        else
+            rm -f -- "$path" || return 1
+            [ ! -e "$path" ] && [ ! -L "$path" ] || return 1
+        fi
+        i=$((i + 1))
+    done < <(smite_gateway_ir_stage_paths "$domain")
+    nginx -t >/dev/null 2>&1 || return 1
+    systemctl reload nginx >/dev/null 2>&1 || return 1
+    if ! printf '%s\n' "$effective" | grep -Fxq "PANEL_ADDRESS=$expected_node"; then
+        # Only the initial paused Node of this verified install project.
+        docker compose --project-name "$project" -f "$SMITE_NODE_COMPOSE" \
+            up -d --no-build --force-recreate smite-node || return 1
+        smite_gateway_wait_healthy smite-node 90 || return 1
+    fi
+    effective="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" || return 1
+    printf '%s\n' "$effective" | grep -Fxq "PANEL_ADDRESS=$expected_node" || return 1
+    printf '%s\n' "$effective" | grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' || return 1
+    echo 'IR_GATEWAY_STAGE=ROLLED_BACK_VERIFIED'
+}
+
+smite_gateway_ir_stage_discard() {
+    local snapshot="$1" project="$2" domain="$3"
+    smite_gateway_ir_stage_guard "$snapshot" "$project" "$domain" || return 1
+    rm -rf -- "$snapshot" || return 1
+    [ ! -e "$snapshot" ] || return 1
+}
+
 smite_gateway_status() {
     local domain
     domain="$(smite_gateway_panel_domain)"
