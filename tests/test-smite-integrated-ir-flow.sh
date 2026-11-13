@@ -62,6 +62,15 @@ smite_install_ir_admin_present() {
     [ "${ADMIN_DB_UNSAFE:-0}" != 1 ] || return 2
     [ "$ADMIN_EXISTS" = 1 ] || return 3
 }
+# Stage boundary only: the real snapshot/restore functions run in the
+# separate disposable Gateway failure-injection suite.
+smite_install_ir_gateway_stage() {
+    smite_gateway_configure_panel || return 2
+    local domain
+    domain="$(smite_gateway_panel_domain)" || return 2
+    smite_gateway_verify_443 "$domain" || return 2
+    smite_install_ir_advance GATEWAY_VERIFIED || return 2
+}
 SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=CORE_COMMITTED
 : > "$TMP/events"
