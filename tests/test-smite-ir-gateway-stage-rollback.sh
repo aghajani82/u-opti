@@ -95,7 +95,6 @@ verify_baseline() {
 }
 inject_partial_gateway() {
     printf 'backend=partial\n' > "$SMITE_GATEWAY_BACKEND_CONF"
-    printf 'frp-preserve=partial\n' > "$SMITE_GATEWAY_FRP_SNI_MAP_FILE"
     printf 'partial\n' > "$SMITE_GATEWAY_STREAM_CONF"
     printf 'partial\n' > "$SMITE_GATEWAY_MAP_FILE"
     printf 'partial\n' > "$SMITE_GATEWAY_STATE_FILE"
@@ -117,6 +116,23 @@ verify_baseline
 grep -qx 'docker-compose-same-project' "$EVENTS"
 smite_gateway_ir_stage_discard "$SNAPSHOT" "$PROJECT" "$DOMAIN"
 [ ! -e "$SNAPSHOT" ]
+
+# FRP SNI rules are independently owned. The Gateway stage itself
+# never rewrites a preexisting allowlist, so unexpected edits cannot be
+# overwritten by a rollback.
+smite_gateway_ir_stage_snapshot "$SNAPSHOT" "$PROJECT" "$DOMAIN" >/dev/null
+inject_partial_gateway
+printf 'frp-third-party=changed\n' > "$SMITE_GATEWAY_FRP_SNI_MAP_FILE"
+if smite_gateway_ir_stage_restore "$SNAPSHOT" "$PROJECT" "$DOMAIN"; then
+    echo 'FAIL: unrelated FRP SNI change was silently reverted'; exit 1
+fi
+[ "$(cat "$SMITE_GATEWAY_FRP_SNI_MAP_FILE")" = frp-third-party=changed ]
+[ "$(cat "$SMITE_GATEWAY_BACKEND_CONF")" = backend=partial ]
+[ -d "$SNAPSHOT" ]
+printf 'frp-preserve=original\n' > "$SMITE_GATEWAY_FRP_SNI_MAP_FILE"
+smite_gateway_ir_stage_restore "$SNAPSHOT" "$PROJECT" "$DOMAIN" >/dev/null
+smite_gateway_ir_stage_discard "$SNAPSHOT" "$PROJECT" "$DOMAIN"
+verify_baseline
 
 # If signed enrollment occurred out of band, rollback must REFUSE before
 # any file can be overwritten and must leave the snapshot for review.
