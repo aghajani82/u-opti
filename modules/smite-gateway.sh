@@ -1160,8 +1160,24 @@ smite_gateway_ir_stage_restore() {
         fi
         i=$((i + 1))
     done < <(smite_gateway_ir_stage_paths "$domain")
-    nginx -t >/dev/null 2>&1 || return 1
-    systemctl reload nginx >/dev/null 2>&1 || return 1
+    # An error while apt was preparing Nginx may leave no Nginx binary
+    # or service at all. Returning to that exact (no-Gateway) baseline
+    # must be retryable using the SAME menu option, not a permanent HOLD.
+    local fresh_without_gateway=1
+    for i in 0 1 2 3 6; do
+        if [ ! -f "$snapshot/absent-$i" ]; then
+            fresh_without_gateway=0
+            break
+        fi
+    done
+    if command -v nginx >/dev/null 2>&1 &&
+       systemctl is-active --quiet nginx >/dev/null 2>&1; then
+        nginx -t >/dev/null 2>&1 || return 1
+        systemctl reload nginx >/dev/null 2>&1 || return 1
+    elif [ "$fresh_without_gateway" -ne 1 ]; then
+        # Never assume an existing or shared FRP/Nginx gateway is down.
+        return 1
+    fi
     if ! printf '%s\n' "$effective" | grep -Fxq "PANEL_ADDRESS=$expected_node"; then
         # Only the initial paused Node of this verified install project.
         docker compose --project-name "$project" -f "$SMITE_NODE_COMPOSE" \
@@ -1402,8 +1418,20 @@ smite_gateway_configure_panel() {
         return 1
     fi
 
-    smite_gateway_write_renew_hook || echo "WARNING: Could not install the Nginx certificate renewal hook."
-    smite_gateway_write_state "$domain" || echo "WARNING: Gateway state could not be saved."
+    if ! smite_gateway_write_renew_hook; then
+        if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" = 1 ]; then
+            echo "ERROR: Gateway renewal hook incomplete; stage rollback required." >&2
+            return 1
+        fi
+        echo "WARNING: Could not install the Nginx certificate renewal hook."
+    fi
+    if ! smite_gateway_write_state "$domain"; then
+        if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" = 1 ]; then
+            echo "ERROR: Gateway state receipt incomplete; stage rollback required." >&2
+            return 1
+        fi
+        echo "WARNING: Gateway state could not be saved."
+    fi
     if [ "${SMITE_GATEWAY_INSTALL_FLOW:-0}" != 1 ] && declare -F smite_frp_xhttp_install_timer >/dev/null; then
         smite_frp_xhttp_install_timer || echo "WARNING: FRP XHTTP automatic route timer could not be activated."
     fi
