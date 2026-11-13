@@ -1171,6 +1171,7 @@ smite_gateway_ir_stage_restore() {
     effective="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node 2>/dev/null)" || return 1
     printf '%s\n' "$effective" | grep -Fxq "PANEL_ADDRESS=$expected_node" || return 1
     printf '%s\n' "$effective" | grep -qx 'SMITE_NODE_PANEL_AUTH_MODE=paused' || return 1
+    smite_gateway_container_healthy smite-node || return 1
     echo 'IR_GATEWAY_STAGE=ROLLED_BACK_VERIFIED'
 }
 
