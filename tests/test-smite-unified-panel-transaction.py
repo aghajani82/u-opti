@@ -160,6 +160,43 @@ class OfflineRollout(unittest.TestCase):
         self.assertEqual((self.root / trans.CONFIG["panel-env"]).read_bytes(),before)
         self.assertEqual(self._ledger()["phase"],"REHEARSED")
 
+    def test_new_pending_pairing_code_blocks_panel_rollback(self):
+        self._invoke()
+        # Real Panel may issue a signed pairing code BEFORE the Node uses it.
+        # No new Node/identity/grant exists yet, but reverting the Panel
+        # signing settings would invalidate a live pending handshake.
+        original=(self.root / trans.CONFIG["panel-compose"]).read_bytes()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO smite_node_pairing_codes "
+                "(code_hash,node_id,consumed_at) VALUES (?,?,NULL)",
+                ("f"*64,"iran-node-1234"))
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(
+            (self.root / trans.CONFIG["panel-compose"]).read_bytes(),original)
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM smite_node_pairing_codes").fetchone()[0],1)
+
+    def test_new_signed_panel_inbound_nonce_blocks_rollback(self):
+        self._invoke()
+        original=(self.root / trans.CONFIG["panel-env"]).read_bytes()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO smite_node_inbound_nonces "
+                "(node_id,nonce,expires_at) VALUES (?,?,?)",
+                ("iran-node-1234","fresh-panel-nonce",2000))
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(
+            (self.root / trans.CONFIG["panel-env"]).read_bytes(),original)
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM smite_node_inbound_nonces").fetchone()[0],2)
+
     def test_new_signed_identity_blocks_rollback(self):
         self._invoke()
         with sqlite3.connect(self.db) as conn:
