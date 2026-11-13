@@ -2653,6 +2653,9 @@ smite_install_selected_fresh() (
     # resumable, signed RC7 core journal owned by this same installation.
     # The signed legacy/foreign paths never auto-adopt an existing host.
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
+    # Never inherit a caller-supplied recovery destination on real hosts.
+    local SMITE_GATEWAY_IR_STAGE_ROOT=/var/lib/u-opti/rc6-install-journal
+    local SMITE_GATEWAY_ACME_CONF_DIR=/etc/nginx/conf.d
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
     local SMITE_FIELD_TRIAL_SOURCE_SHA=9a1270b31e8d44f13d09b71ab6b9798410b09c12
@@ -2694,7 +2697,7 @@ smite_install_selected_fresh() (
             recovery_stage="${recovery_lines[0]#IR_GATEWAY_RECOVERY_STAGE=}"
             recovery_project="${recovery_lines[1]#IR_GATEWAY_RECOVERY_PROJECT=}"
             [[ "$recovery_project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
-            gateway_snapshot="/var/lib/u-opti/rc6-install-journal/gateway-$recovery_project"
+            gateway_snapshot="${SMITE_GATEWAY_IR_STAGE_ROOT:-/var/lib/u-opti/rc6-install-journal}/gateway-$recovery_project"
             if [ -e "$gateway_snapshot" ] || [ -L "$gateway_snapshot" ]; then
                 domain="$(smite_gateway_panel_domain)" || return 2
                 if [ "$recovery_stage" = CORE_COMMITTED ]; then
@@ -2843,7 +2846,7 @@ smite_install_ir_gateway_stage() {
     [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
     domain="$(smite_gateway_panel_domain)" || return 2
     smite_gateway_validate_domain "$domain" || return 2
-    snapshot="/var/lib/u-opti/rc6-install-journal/gateway-$project"
+    snapshot="${SMITE_GATEWAY_IR_STAGE_ROOT:-/var/lib/u-opti/rc6-install-journal}/gateway-$project"
     if [ -e "$snapshot" ] || [ -L "$snapshot" ]; then
         # Repeated call in the same session, before checkpoint commit:
         # restore exactly the previous attempt first.
