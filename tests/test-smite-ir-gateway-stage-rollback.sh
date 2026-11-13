@@ -203,4 +203,34 @@ grep -qx 'IR_GATEWAY=COMPLETE' "$TMP/recovered"
 [ "$IR_PHASE" = GATEWAY_VERIFIED ]
 [ ! -e "$SNAPSHOT" ]
 [ "$(cat "$SMITE_GATEWAY_BACKEND_CONF")" = backend=partial ]
+# First-time Nginx installation may fail before the binary exists.
+# Returning to the original no-Gateway baseline MUST be recoverable
+# without an unrelated repair command or touching other services.
+reset_baseline
+rm -f "$SMITE_GATEWAY_BACKEND_CONF" "$SMITE_GATEWAY_FRP_SNI_MAP_FILE"
+smite_gateway_ir_stage_snapshot "$SNAPSHOT" "$PROJECT" "$DOMAIN" >/dev/null
+inject_partial_gateway
+# Simulate the apt step never having installed Nginx at all.
+command() {
+    if [ "$1" = -v ] && [ "$2" = nginx ]; then return 1; fi
+    builtin command "$@"
+}
+smite_gateway_ir_stage_restore "$SNAPSHOT" "$PROJECT" "$DOMAIN" >/dev/null
+smite_gateway_ir_stage_discard "$SNAPSHOT" "$PROJECT" "$DOMAIN"
+unset -f command
+[ ! -e "$SMITE_GATEWAY_BACKEND_CONF" ]
+[ ! -e "$SMITE_GATEWAY_FRP_SNI_MAP_FILE" ]
+[ "$NODE_RUNTIME_ADDRESS" = panel.example.org:8000 ]
+
+# A symlink at the original Gateway target is not a safe retained file
+# and cannot be silently adopted as a pre-stage backup.
+reset_baseline
+rm -f "$SMITE_GATEWAY_BACKEND_CONF"
+ln -s "$TMP/unknown-backend" "$SMITE_GATEWAY_BACKEND_CONF"
+if smite_gateway_ir_stage_snapshot "$SNAPSHOT" "$PROJECT" "$DOMAIN"; then
+    echo 'FAIL: symlink backed up as a safe Gateway target'; exit 1
+fi
+[ ! -e "$SNAPSHOT" ]
+rm -f "$SMITE_GATEWAY_BACKEND_CONF"
+reset_baseline
 echo 'IR_GATEWAY_STAGE_ROLLBACK_AND_SAME_OPTION_RETRY=PASS'
