@@ -196,7 +196,9 @@ sed -i 's/SMITE_FOREIGN_DOMAIN=other.example.org/SMITE_FOREIGN_DOMAIN=kh.example
 
 # An interrupted/missing ephemeral grant packet cannot be silently rebuilt.
 mv "$PACKET" "$PACKET.unavailable"
-run 2 signed,paused,compose
+# The same early fresh-packet check now rejects absence before touching
+# Docker ownership probes, Sanaei or Gateway.
+run 2 signed
 mv "$PACKET.unavailable" "$PACKET"
 
 # A publicly selected fresh Foreign option must now fail BEFORE any host
