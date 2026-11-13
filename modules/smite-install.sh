@@ -2473,6 +2473,83 @@ smite_install_selected_paths() {
     [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
 }
 
+# Check that the chosen signed RC7 Panel/Node source matches the ORIGINAL
+# fresh-install rollback journal before Docker or any install transaction.
+# The separately signed unified trial is NOT an admitted release.
+smite_install_selected_pair_journal_review() {
+    local module_dir="$1"
+    python3 -B - "$module_dir/smite-rc6-install-journal.py" \
+        "$module_dir/smite-rc7-registry-pair.json" \
+        "$module_dir/smite-unified-trial-registry-pair.json" \
+        "$SMITE_FIELD_TRIAL_SOURCE_SHA" "$SMITE_FIELD_TRIAL_VERSION" \
+        "$SMITE_FIELD_TRIAL_PUBLISH_REF" "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" <<'PY_SOURCE_JOURNAL'
+import hashlib, importlib.util, json, pathlib, re, sys
+
+def hold():
+    raise ValueError("signed selected source/rollback journal mismatch")
+
+def unique(items):
+    result={}
+    for key,value in items:
+        if key in result: hold()
+        result[key]=value
+    return result
+
+try:
+    journal, official, trial = map(pathlib.Path,sys.argv[1:4])
+    source, version, ref, pin = sys.argv[4:8]
+    for path in (journal,official,trial):
+        if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 150000:
+            hold()
+    raw_official=official.read_bytes()
+    raw_trial=trial.read_bytes()
+    if (not re.fullmatch("[a-f0-9]{40}",source)
+            or not re.fullmatch("[a-f0-9]{64}",pin)
+            or hashlib.sha256(raw_official).hexdigest()!=pin
+            or hashlib.sha256(raw_trial).hexdigest()!=
+                "e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608"):
+        hold()
+    expected=json.loads(raw_official,object_pairs_hook=unique)
+    separate=json.loads(raw_trial,object_pairs_hook=unique)
+    spec=importlib.util.spec_from_file_location(
+        "uopti_rc7_existing_install_journal_review",journal)
+    if spec is None or spec.loader is None: hold()
+    mod=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if (source!="9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+            or version!="2.0.0-rc.7" or ref!="refs/tags/v2.0.0-rc.7"
+            or expected.get("source_repo")!="aghajani82/Smite"
+            or expected.get("kind")!="smite_signed_registry_pair_candidate"
+            or expected.get("source_commit")!=source
+            or expected.get("version")!=version or expected.get("publish_ref")!=ref
+            or expected.get("activation_allowed") is not False
+            or expected.get("release_approved") is not False
+            or not isinstance(expected.get("images"),dict)
+            or set(expected["images"])!={"panel","node"}
+            or mod.SOURCE!=source or mod.VERSION!=version
+            or mod.IMAGES!={"smite-panel":expected["images"]["panel"],
+                            "smite-node":expected["images"]["node"]}
+            or mod.CANDIDATES.get(source)!=(version,mod.IMAGES)):
+        hold()
+    if (separate.get("source_commit")!="b865be93e22153c60769f6329e6e55e781494ded"
+            or separate.get("kind")!="smite_unified_install_signed_trial_candidate"
+            or separate.get("publish_ref")!="refs/heads/trial/unified-smite-install"
+            or separate.get("release_approved") is not False
+            or separate.get("activation_allowed") is not False
+            or not isinstance(separate.get("images"),dict)
+            or set(separate["images"])!={"panel","node"}
+            or separate["images"]==expected["images"]
+            or separate["source_commit"] in mod.CANDIDATES):
+        hold()
+except (OSError,ValueError,TypeError,AttributeError,KeyError,ImportError):
+    print("HOLD: Signed Smite source and existing rollback journal disagree",
+          file=sys.stderr)
+    sys.exit(2)
+print("SELECTED_RC7_PAIR_JOURNAL=EXACT_MATCH")
+print("UNIFIED_TRIAL_JOURNAL=SEPARATE_NOT_ADMITTED")
+PY_SOURCE_JOURNAL
+}
+
 # Selected RC7 needs the exact official v3.0.6 Cosign asset before any
 # host transaction. A blocked github.com release URL must never hang silently:
 # both official retrieval paths are bounded and every candidate is SHA-pinned.
@@ -2553,15 +2630,6 @@ smite_install_selected_fresh() (
     echo 'Existing installations and live tunnels are not migrated by this entry.'
     read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
     case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
-    smite_install_require_tools || return 2
-    smite_install_ensure_docker || return 2
-    containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
-        echo 'HOLD: local Docker state unavailable'; return 2;
-    }
-    if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
-        echo 'HOLD: existing Smite container; fresh installation refused'; return 2
-    fi
-    docker() { command docker --host unix:///var/run/docker.sock "$@"; }
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
@@ -2577,6 +2645,199 @@ smite_install_selected_fresh() (
     local SMITE_UPSTREAM_VERSION=2.0.0-rc.7
     local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    # Exact pair, selected source and existing journal must agree first.
+    smite_install_selected_pair_journal_review "$module_dir" || return 2
+    smite_install_require_tools || return 2
+    smite_install_ensure_docker || return 2
+    containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
+        echo 'HOLD: local Docker state unavailable'; return 2;
+    }
+    if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)
+    trap 'rm -rf -- "$workdir"' EXIT
+    # Private verifier only. No install proceeds before exact digest validation.
+    smite_install_rc7_verified_cosign "$workdir/cosign" "$SMITE_FIELD_TRIAL_COSIGN_SHA256" || return 2
+    chmod 0700 "$workdir/cosign" || return 2
+    # Reviewed Sigstore public-good TrustedRoot snapshot, pinned in this U-OPTI
+    # release. The normal TUF CDN returns HTTP 403 on some Iranian networks.
+    # This is an explicit, SHA-pinned trust anchor, NOT online TUF validation.
+    local SMITE_SELECTED_TRUSTED_ROOT="$workdir/trusted_root.json"
+    echo 'RC7: downloading reviewed Sigstore trusted-root snapshot...'
+    curl -fsSL --proto '=https' --proto-redir '=https' \
+        --connect-timeout 10 --max-time 60 --retry 2 \
+        "https://raw.githubusercontent.com/sigstore/root-signing/c9aa2600c1492365922f1b3f351a208aa17d0e64/targets/trusted_root.json" \
+        -o "$SMITE_SELECTED_TRUSTED_ROOT" || {
+            echo 'HOLD: reviewed Sigstore trusted-root download failed' >&2
+            return 2
+        }
+    [ "$(sha256sum "$SMITE_SELECTED_TRUSTED_ROOT" | awk '{print $1}')" = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66" ] || {
+        echo 'HOLD: reviewed Sigstore trusted-root SHA256 mismatch' >&2
+        return 2
+    }
+    echo 'RC7_TRUSTED_ROOT=PINNED_SHA256_VERIFIED'
+    local PATH="$workdir:$PATH"
+    smite_install_clean_rc_preflight "$role" standard || return 2
+    if [ "$role" = panel-iran ]; then
+        [ -f "$module_dir/smite-clean-rc-preflight.sh" ] && [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || return 2
+        source "$module_dir/smite-clean-rc-preflight.sh" || return 2
+        if ! smite_clean_rc_nginx_paths_ready; then
+            smite_clean_rc_prepare_gateway_packages || return 2
+        fi
+    fi
+    local installer_pid="$BASHPID" transaction
+    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid")" || return 2
+    [[ "$transaction" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+    # Inherited lock stays held by installer children if the menu shell dies.
+    local rc6_lock
+    exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+    flock -n "$rc6_lock" || return 2
+    export COMPOSE_PROJECT_NAME="$transaction"
+    if [ "$role" = panel-iran ]; then
+        smite_install_panel_iran || return 2
+    else
+        smite_install_foreign_node || return 2
+    fi
+    python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
+    if [ "$role" = panel-iran ]; then
+        smite_install_ui_action apply || {
+            echo 'HOLD: RC7 runtime installed; UI update pending. Use Install / Lifecycle option 8; do not reinstall.'
+            return 2
+        }
+        smite_install_finish_local_ir || return 2
+    else
+        # The official RC7 core is not the independently signed unified
+        # trial pair. Do not silently run trial post-core operations on it,
+        # or return success/Connected before Sanaei, SSL/443, identity,
+        # replay and bidirectional signed checks are integrated and proven.
+        echo 'HOLD: Foreign Node core is paused. One-choice Sanaei, Gateway and signed enrollment are not yet wired to the admitted runtime.'
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+        return 2
+    fi
+)
+
+# Core transaction is committed before enrollment: fresh-install rollback must
+# never delete a paired identity. Each enrollment stage keeps its own recovery.
+smite_install_finish_local_ir() {
+    local module_dir domain
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    local SMITE_GATEWAY_INSTALL_FLOW=1
+    declare -F smite_gateway_configure_panel >/dev/null || {
+        echo 'HOLD: HTTPS gateway module is unavailable'; return 2;
+    }
+    echo 'Preparing Panel HTTPS/443 and secure Iran Node enrollment...'
+    smite_gateway_configure_panel || return 2
+    domain="$(smite_gateway_panel_domain)" || return 2
+    smite_gateway_verify_443 "$domain" || return 2
+    UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B \
+        "$module_dir/smite-node-pairing.py" --complete-local-ir-install || {
+        echo 'HOLD: local Iran enrollment incomplete; retain installation and identity. Do not reinstall.'
+        return 2
+    }
+    echo 'Iran Node verified active. Create the Panel administrator account:'
+    smite_install_create_admin || return 2
+    echo 'PANEL_AND_IR_INSTALL=COMPLETE'
+    echo "Panel URL: https://$domain"
+    echo 'Sign in: Iran Nodes contains the authenticated local Node.'
+    smite_install_pause
+    return 0
+}
+
+smite_install_selected_rollback() (
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+    local module_dir answer
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" status || return 2
+    echo 'Only an interrupted fresh RC6/RC7 install can be rolled back.'
+    echo 'Completed installs, pairing, grants, routes and foreign containers are refused.'
+    echo 'Files, containers and volumes are retained. Packages/images are not uninstalled.'
+    read -rp 'Type ROLLBACK-RC6 to quarantine the interrupted install: ' answer || return 2
+    [ "$answer" = ROLLBACK-RC6 ] || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" rollback --confirm "$answer" || return 2
+    echo 'Rollback complete. Retry Install Components 1 (IR) or 2 (KH).'
+    smite_install_pause
+)
+
+# The reviewed static UI is bundled with U-OPTI; never fetch mutable UI assets.
+smite_install_ui_action() {
+    local action="$1" module_dir
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-panel-ui.py" ] && [ ! -L "$module_dir/smite-panel-ui.py" ] || {
+        echo 'HOLD: update U-OPTI first; UI helper is missing'; return 2;
+    }
+    python3 -B "$module_dir/smite-panel-ui.py" "$action"
+}
+
+smite_install_ui_menu_action() {
+    local action="$1" answer
+    echo 'Static Panel UI only. Backend, nodes, pairing and tunnels stay unchanged. No restart.'
+    echo 'A private durable backup is retained for rollback. Update U-OPTI first to obtain the newest reviewed UI.'
+    if [ "$action" = rollback ]; then
+        read -rp 'Restore the previous Panel UI? [y/N]: ' answer || return 2
+    else
+        read -rp 'Back up and apply the bundled reviewed Panel UI? [y/N]: ' answer || return 2
+    fi
+    case "$answer" in y|Y|yes|YES) ;; *) return 2 ;; esac
+    smite_install_ui_action "$action" || { echo 'HOLD: UI operation incomplete; backup retained.'; smite_install_pause; return 2; }
+    echo 'Refresh the Panel with Ctrl+F5.'
+    smite_install_pause
+}
+
+show_smite_install_menu() {
+    while true; do
+        clear
+        echo "======================================"
+        echo "      Smite Install / Lifecycle"
+        echo "======================================"
+        echo
+        echo "1) Install Panel + Iran Node"
+        echo "2) Install Foreign Node"
+        echo "3) Installation State"
+        echo "4) Install Sanaei 3x-UI on Foreign Node"
+        echo "5) Upgrade signed Field Trial candidate (existing IR)"
+        echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
+        echo
+        echo "7) Recover interrupted RC6/RC7 install (retain data / rollback)"
+        echo "8) Update Panel appearance (UI only / backup first)"
+        echo "9) Roll back previous Panel appearance (UI only)"
+        echo "0) Back"
+        echo
+
+        read -rp "Please enter your selection [0-9]: " smite_install_choice
+        smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
+        smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
+        case "$smite_install_choice" in
+            1)
+                if ! smite_install_selected_fresh panel-iran; then
+                    echo 'HOLD: Panel + Iran Node installation did not complete. Review error above.'
+                    smite_install_pause
+                fi
+                ;;
+            2)
+                if ! smite_install_selected_fresh foreign; then
+                    echo 'HOLD: Foreign Node installation did not complete. Review error above.'
+                    smite_install_pause
+                fi
+                ;;
+            3) smite_show_installation_state ;;
+            4) smite_install_sanaei_foreign ;;
+            5) smite_install_upgrade_signed_field_trial ;;
+            6) smite_foreign_gateway_configure ;;
+            7) smite_install_selected_rollback ;;
+            8) smite_install_ui_menu_action apply ;;
+            9) smite_install_ui_menu_action rollback ;;
+            0) break ;;
+            *)
+                echo
+                echo "Invalid selection!"
+                sleep 2
+                ;;
+        esac
+    done
+}
+; then
+        echo 'HOLD: existing Smite container; fresh installation refused'; return 2
+    fi
+    docker() { command docker --host unix:///var/run/docker.sock "$@"; }
     umask 077
     workdir="$(mktemp -d)" || return 2
     trap 'rm -rf -- "$workdir"' EXIT
