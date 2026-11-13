@@ -16,6 +16,40 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+## Iran → Panel → Foreign: one-choice audit, exact existing integration points (2026-11-13)
+
+This section overrides old historical "next step" notes below. It records what
+is **actually wired** versus what is only tested offline; do not infer a release
+from green CI.
+
+| Phase | Existing function/code | Current admission and tested outcome |
+| --- | --- | --- |
+| Iran selected option 1, fresh host | `smite_install_selected_fresh panel-iran` and `smite-rc6-install-journal.py` | Official RC7 source, pinned Panel+Node signed digests and exact commit journal; all verified before Docker. Refuses an existing/partial host |
+| Iran Gateway and local Node | `smite_install_finish_local_ir` → `smite_gateway_configure_panel`, `smite-node-pairing.py --complete-local-ir-install` | HTTPS/443 and signed bidirectional IR check before administrator creation. No extra Pairing menu action. Failures HOLD and preserve identity |
+| Iran admin and appearance | `smite_install_create_admin` → existing `smite_install_ui_action apply` | Admin after signed IR check; optional static-only appearance now occurs last. UI failure points to existing menu 8 without abandoning connected Node |
+| Administrator reserves Foreign Node | Companion Smite `ForeignInstallDialog`, signed grant store and explicitly migrated SQLite tables | Tested real Smite admin-issued `smi1` code, scoped 2-hour grant, exact origin/path and durable one-key redemption **in offline ASGI/DB tests**. New Panel image is NOT in official IR option 1 |
+| Foreign selected option 2 | `smite_install_selected_fresh foreign` | **HOLD_BEFORE_HOST_CHANGES**: the companion signed trial image is not an approved release; cannot run the combined option on a live host |
+| Foreign private intake / core | Existing `smite_install_unified_foreign_capture_packet` and `smite_install_foreign_node` | Same single hidden packet supplies panel domain, foreign domain, name and exact :443 control URL before first paused boot. Tests only; not menu-wired |
+| Foreign post-core Sanaei + Gateway | `smite_install_unified_foreign_after_core` → existing Sanaei attach and Gateway configure | Now uses existing signed Pairing **release decision first**, then rechecks 2-hour grant freshness BEFORE Sanaei/Gateway. Wrong/expired/missing packet, unknown image/Compose or TLS state HOLD. No Node recreation on exact retained state; tests only |
+| Foreign identity, signed activation and recovery | Existing `smite-foreign-install-client.py`, `smite-foreign-install-promotion.py`, `smite-node-pairing.py` | Private HMAC proof/identity/rollback verified offline, but **production Foreign promotion/activation and recovery are not yet menu-wired**; no real Connected claim |
+| Backhaul and FRP 20182 | Pre-existing independent U-OPTI/Smite engines | No new tunnel, no restart or modifications by this project |
+
+Verified trial CI for this audit: https://github.com/aghajani82/u-opti/actions/runs/43384638985
+(two jobs green at `eeb720e9e36664ccdd8168cb4aeff1cbfe407b36`).
+Companion Smite trial has independently green tests; its signed trial-pair
+manifest still explicitly denies production activation.
+
+**Remaining release-critical tasks, not repeated code redesign:** independently
+approve a new exact signed Panel/Node pair that supports Foreign grants;
+update the original install journal/source/image pins in both choices;
+review and implement production-safe Panel schema/config transaction with
+identity-preserving rollback (current Panel executor is fixture-only);
+wire the existing full Foreign client/promotion/signed activation to option 2
+with a retained recovery contract; verify fresh and interrupted IR/Foreign
+setups on isolated hosts, including two-way Connected, RO Sanaei DB, FRP
+20182 and other services untouched; then obtain operator acceptance and
+merge. There is no approved one-command combined installation yet.
+
 ## User-approved outcome
 - Iran: one installation entry installs Panel, HTTPS/443 Gateway and Iran Node; complete only after authenticated local Node enrollment and bidirectional checks, then administrator sign-in.
 - Panel: administrator creates a Foreign Node, specifies its name and gateway domain, and obtains a single-use installation credential, proposed default validity 2 hours.
@@ -71,7 +105,7 @@ Fresh IR; fresh KH with new Sanaei; KH with existing Sanaei; multiple Sanaei sel
 6. Do not publish an install command while dependency images or end-to-end verification are missing.
 7. Do not claim work continues when no session is running; this record enables the next session to resume.
 
-## Latest checkpoint
+## Historical checkpoint — initial implementation
 First implementation checkpoint (trial only): Sanaei attachment returns 2 for refusal/failure/cancellation, 3 when installation returned but attachment is pending, and 0 only after verified attachment in the signed lane. Legacy non-signed installer result is preserved. A UI pause no longer masks failure, including successful rollback after an unsuccessful attachment. No new combined installation entry is enabled yet.
 
 Validation: 10 isolated result-code scenarios PASS; existing integrated IR ordering/failure suite PASS; 8 RC7 Foreign pairing tests PASS; shell syntax PASS. The new test is wired into integrated-ir-install CI. Full remote CI and real host installation are not yet proven.
