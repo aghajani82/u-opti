@@ -179,53 +179,59 @@ def read_hidden_tty(stream, *, ready=None):
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
-def capture_disposable_hidden_tty(tty, *, confirm_scope,
-                                   ready=None, **kwargs):
-    """Reusable single-paste operator sequence, disposable fixture ONLY.
+def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
+                         expected_panel=None, expected_domain=None,
+                         expected_node=None):
+    """One verified hidden paste for BOTH existing intake callers.
 
-    The callback receives only NONSECRET scope (name, Panel and Foreign
-    domains, exact control URL). The operator must confirm that destination
-    after terminal echo has been restored and BEFORE any private file is
-    staged. This function does not redeem, run Docker or activate a Node.
+    Always validate the private destination and grant expiry BEFORE showing
+    the nonsecret scope. Only the single original stager writes the 0600
+    packet. The optional expected scope preserves independent trial tests;
+    the selected one-choice caller instead uses the Panel-issued scope.
     """
-    if (kwargs.get("disposable_capability") is not True
-            or not callable(confirm_scope)):
+    if type(now) is not int or not callable(confirm_scope):
         deny()
-    _private_fixture(kwargs.get("target"))
+    _private_fixture(target)
     raw = read_hidden_tty(tty, ready=ready)
     packet = client_module().parse_packet(raw)
-    scope = dict(packet.scope)
-    if confirm_scope(scope) is not True:
+    scope = packet.scope
+    if not now < packet.expires_at <= now + 7200:
         deny()
-    # The parser remains the single source of truth. It checks time and
-    # scope again and refuses a second write to an existing private packet.
-    return capture_disposable(io.StringIO(raw + "\n"), **kwargs)
+    # Legacy disposable harnesses can additionally pin their destination.
+    c = client_module()
+    if ((expected_panel is not None and c.origin(expected_panel) != scope["panel_url"])
+            or (expected_domain is not None and c.origin(expected_domain) != scope["origin"])
+            or (expected_node is not None and expected_node != scope["node_name"])):
+        deny()
+    if confirm_scope(dict(scope)) is not True:
+        deny()
+    # Reuse original no-overwrite, fsynced, 0600 stager and parser. No second
+    # grant/Node identity, alternate code format, or host write is created.
+    return capture_disposable(
+        io.StringIO(raw + "\n"), target=target,
+        expected_panel=scope["panel_url"],
+        expected_domain=scope["origin"],
+        expected_node=scope["node_name"],
+        now=now, disposable_capability=True)
+
+
+def capture_disposable_hidden_tty(tty, *, confirm_scope, ready=None, **kwargs):
+    """Existing disposable harness; now delegates to the same hidden intake."""
+    if kwargs.get("disposable_capability") is not True:
+        deny()
+    return _capture_hidden_once(
+        tty, target=kwargs.get("target"), now=kwargs.get("now"),
+        confirm_scope=confirm_scope, ready=ready,
+        expected_panel=kwargs.get("expected_panel"),
+        expected_domain=kwargs.get("expected_domain"),
+        expected_node=kwargs.get("expected_node"))
 
 
 def capture_selected_hidden_tty(tty, *, target, now, confirm_scope,
                                 ready=None):
-    """Use the existing hidden reader and exclusive 0600 stager for one paste.
-
-    Only the operator-confirmed nonsecret scope supplies the three expected
-    core fields; the same JSON is parsed a second time before staging.
-    The caller's workspace must be the established 0700 disposable tree.
-    No Node, Panel, Gateway or enrollment mutation is possible here.
-    """
-    if type(now) is not int or not callable(confirm_scope):
-        deny()
-    _private_fixture(target)  # Validate before accepting secret input
-    raw = read_hidden_tty(tty, ready=ready)
-    packet = client_module().parse_packet(raw)
-    if not now < packet.expires_at <= now + 7200:
-        deny()
-    if confirm_scope(dict(packet.scope)) is not True:
-        deny()
-    return capture_disposable(
-        io.StringIO(raw + "\n"), target=target,
-        expected_panel=packet.scope["panel_url"],
-        expected_domain=packet.scope["origin"],
-        expected_node=packet.scope["node_name"],
-        now=now, disposable_capability=True)
+    """Existing selected option-2 intake using the SAME hidden/staging path."""
+    return _capture_hidden_once(
+        tty, target=target, now=now, confirm_scope=confirm_scope, ready=ready)
 
 
 def _confirm_selected_scope(tty, scope):

@@ -277,6 +277,44 @@ class OperatorPacketIntake(unittest.TestCase):
             self.assertEqual(termios.tcgetattr(slave),original)
             os.close(master);os.close(slave)
 
+    def test_expired_grant_never_offers_operator_confirmation(self):
+        master,slave=pty.openpty()
+        confirms=[]
+        try:
+            with os.fdopen(os.dup(slave),"r",encoding="utf-8",newline="") as tty:
+                def send():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master,(json.dumps(self.grant)+"\n\n").encode())
+                with self.assertRaises(module.Hold):
+                    module.capture_selected_hidden_tty(
+                        tty,target=self.file,now=self.now+7201,
+                        confirm_scope=lambda scope:confirms.append(scope) or True,
+                        ready=send)
+            self.assertEqual(confirms,[])
+            self.assertFalse(self.file.exists())
+        finally:
+            os.close(master);os.close(slave)
+
+    def test_wrong_fixed_disposable_scope_rejects_before_confirmation(self):
+        master,slave=pty.openpty()
+        confirms=[]
+        try:
+            with os.fdopen(os.dup(slave),"r",encoding="utf-8",newline="") as tty:
+                def send():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master,(json.dumps(self.grant)+"\n\n").encode())
+                with self.assertRaises(module.Hold):
+                    module.capture_disposable_hidden_tty(
+                        tty,target=self.file,now=self.now,ready=send,
+                        expected_panel="https://other.example.org:443",
+                        expected_domain="https://kh.example.com:443",
+                        expected_node="node-kh",disposable_capability=True,
+                        confirm_scope=lambda scope:confirms.append(scope) or True)
+            self.assertEqual(confirms,[])
+            self.assertFalse(self.file.exists())
+        finally:
+            os.close(master);os.close(slave)
+
     def test_selected_no_tty_expired_and_cancel_never_stage(self):
         with self.assertRaises(module.Hold):
             module.capture_selected_hidden_tty(

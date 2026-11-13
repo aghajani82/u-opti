@@ -81,12 +81,11 @@ class Integration(unittest.TestCase):
                     self.assertEqual(scope['node_name'], packet['node_name'])
                     self.assertEqual(scope['control_url'],packet['control_url'])
                     return True
-                received=intake.capture_disposable_hidden_tty(
+                # Use EXACTLY the selected installer intake, not a
+                # separate test-only capture routine.
+                received=intake.capture_selected_hidden_tty(
                     tty, ready=after_echo_disabled, confirm_scope=confirm,
-                    target=target, expected_panel='https://panel.example.com',
-                    expected_domain=packet['origin'],
-                    expected_node=packet['node_name'], now=int(time.time()),
-                    disposable_capability=True)
+                    target=target, now=int(time.time()))
             self.assertEqual(termios.tcgetattr(slave), flags_before)
             readable, _, _ = select.select([master], [], [], 0.05)
             if readable:
@@ -98,13 +97,26 @@ class Integration(unittest.TestCase):
         self.assertEqual(received['status'],'STAGED_PRIVATE')
         self.assertIs(received['connected'],False)
         self.assertEqual(target.stat().st_mode & 0o777,0o600)
+        # The SAME file now drives the existing pre-core fields and later
+        # Gateway/redeem/identity checks. Neither domains nor a Node ID is
+        # retyped by the installer, and no bearer credential is emitted.
+        gateway_spec=importlib.util.spec_from_file_location(
+            'uopti_foreign_gateway_exact_packet',
+            Path(__file__).resolve().parents[1]/
+            'modules/smite-unified-foreign-gateway-plan.py')
+        gateway_plan=importlib.util.module_from_spec(gateway_spec)
+        sys.modules[gateway_spec.name]=gateway_plan
+        gateway_spec.loader.exec_module(gateway_plan)
+        from urllib.parse import urlsplit
+        origin=urlsplit(packet['origin']).hostname
+        panel=urlsplit(packet['panel_url']).hostname
+        self.assertEqual(
+            gateway_plan.precore_fields(target,now=int(time.time())),
+            (panel,origin,packet['node_name'],packet['control_url']))
         state=base/'state.env'
         gateway=base/'foreign-gateway.env'
         env=base/'node.env'
         live=base/'node-identity.json'
-        from urllib.parse import urlsplit
-        origin=urlsplit(packet['origin']).hostname
-        panel=urlsplit(packet['panel_url']).hostname
         path=urlsplit(packet['control_url']).path
         def safe_write(path,content):
             path.write_text(content)
@@ -150,6 +162,18 @@ class Integration(unittest.TestCase):
             node_env_path=env,directory=stage,live_identity=live,
             transport=transport,now=int(time.time()),
             disposable_capability=True)
+        # The old no-:443 alias must HOLD *before* writing a journal or
+        # consuming the actual Panel grant. Restore the same source packet.
+        exact_env=env.read_text()
+        env.write_text(exact_env.replace(
+            'SMITE_CONTROL_ADDRESS=https://'+origin+':443',
+            'SMITE_CONTROL_ADDRESS=https://'+origin))
+        with self.assertRaises(phase.Hold):
+            phase.rehearse_transaction(**kwargs)
+        self.assertEqual(calls,[])
+        self.assertFalse(live.exists())
+        self.assertFalse((stage/'unified-foreign-transaction.json').exists())
+        env.write_text(exact_env)
         self.assertEqual(phase.rehearse_transaction(**kwargs)['phase'],
                          'IDENTITY_PROMOTED_OFFLINE')
         self.assertEqual(calls,[c.REDEEM,c.STATUS,c.STATUS])
