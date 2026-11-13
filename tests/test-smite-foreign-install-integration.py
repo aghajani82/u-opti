@@ -195,6 +195,55 @@ class Integration(unittest.TestCase):
             phase.rehearse_transaction(**kwargs)
         self.assertEqual(original,live.read_bytes())
 
+    def test_unified_panel_rehearsal_grant_schema_matches_actual_smite(self):
+        """One DB contract for Panel schema rehearsal and real Smite grant store.
+
+        Prevent separate U-OPTI CREATE TABLE statements drifting from the
+        pinned real Smite migration (columns/PK/unique indexes).
+        """
+        import sqlite3
+        from app import foreign_install_grants
+        tx_spec=importlib.util.spec_from_file_location(
+            'uopti_existing_panel_transaction_contract',
+            Path(__file__).resolve().parents[1]/
+            'modules/smite-unified-panel-transaction.py')
+        transaction=importlib.util.module_from_spec(tx_spec)
+        sys.modules[tx_spec.name]=transaction
+        tx_spec.loader.exec_module(transaction)
+        with tempfile.TemporaryDirectory() as root:
+            base=Path(root)
+            real=base/'smite-schema.db'
+            rehearsed=base/'uopti-schema.db'
+            # Use actual Smite pairing migration on the real side.
+            from app import node_pairing_store
+            node_pairing_store.initialize_schema(real)
+            foreign_install_grants.initialize_schema(real)
+            with sqlite3.connect(rehearsed) as conn:
+                for ddl in transaction.GRANT_DDL:
+                    conn.execute(ddl)
+            tables=('smite_foreign_install_grants',
+                    'smite_foreign_install_origins')
+            with sqlite3.connect(real) as a, sqlite3.connect(rehearsed) as b:
+                for table in tables:
+                    # Compare columns + constraints, not formatting of DDL.
+                    self.assertEqual(
+                        a.execute('PRAGMA table_info('+table+')').fetchall(),
+                        b.execute('PRAGMA table_info('+table+')').fetchall(),
+                        table)
+                    real_indexes=a.execute(
+                        'PRAGMA index_list('+table+')').fetchall()
+                    trial_indexes=b.execute(
+                        'PRAGMA index_list('+table+')').fetchall()
+                    self.assertEqual(
+                        [(i[2],i[3],i[4]) for i in real_indexes],
+                        [(i[2],i[3],i[4]) for i in trial_indexes],
+                        table)
+                    for ci,cj in zip(real_indexes,trial_indexes):
+                        self.assertEqual(
+                            a.execute('PRAGMA index_info('+ci[1]+')').fetchall(),
+                            b.execute('PRAGMA index_info('+cj[1]+')').fetchall(),
+                            table)
+
     def test_real_redemption_lost_reply_expired_recovery_and_revocation(self):
         fixture=http_fixture.ForeignInstallHTTP();fixture.setUp();self.addCleanup(fixture.doCleanups)
         settings.smite_foreign_install_origin_trust_enabled=True

@@ -291,8 +291,14 @@ class PanelTransaction:
                     return True
                 # A newly reserved Foreign Node may not yet have a grant or
                 # signed identity. Refuse rollback if its durable row exists.
-                if (old.execute("SELECT id,name FROM nodes ORDER BY id").fetchall()
-                        != live.execute("SELECT id,name FROM nodes ORDER BY id").fetchall()):
+                # The existing check compared only id/name and missed
+                # changes to Pairing/Connected status, role, fingerprint or
+                # reserved Node metadata on an unchanged row. A rollback
+                # must not disconnect an already-progressing existing Node.
+                # Compare the entire original row, including future columns
+                # the real Smite Panel schema may add.
+                if (old.execute("SELECT * FROM nodes ORDER BY id").fetchall()
+                        != live.execute("SELECT * FROM nodes ORDER BY id").fetchall()):
                     return True
                 expected = {"smite_foreign_install_grants","smite_foreign_install_origins"}
                 names = {row[0] for row in live.execute(

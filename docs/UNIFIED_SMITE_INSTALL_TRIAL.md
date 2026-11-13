@@ -1813,3 +1813,25 @@ Existing promotion, crash-recovery identity-phase, and *real companion Smite ASG
 Eliminated two divergent internal no-echo intake implementations: the pre-existing disposable reader and the selected fresh option-2 reader now delegate to **one** `_capture_hidden_once` implementation inside the already existing `smite-unified-foreign-packet-intake.py`. Both retain 0700 owner-only workspace, exclusive fsynced 0600 packet, exact `smi1` parser, 2-hour TTL, secret-free scope review, no overwrites and terminal echo restoration. Expired or wrong-scope grants fail **before** offering operator confirmation, never generating an identity or network request.
 
 The existing cross-repository Smite ASGI integration test now exercises `capture_selected_hidden_tty` (the same function the real option-2 helper invokes), then the existing `precore_fields` and actual Panel grant redemption, HMAC signed recovery and identity promotion using the SAME private packet. It additionally asserts that a no-`:443` Node env alias aborts BEFORE consuming the grant or writing the identity transaction; the exact Panel-issued scope then completes the disposable enrollment. No menu, panel API, runtime image, credential format or installer feature was added. Signed trial activation remains false; public Foreign option 2 remains HOLD before any host changes, main/live hosts unchanged.
+
+## Consolidation checkpoint — no Panel rollback across changed existing Node state (2026-11-13)
+
+The existing `PanelTransaction._new_enrollment()` used to compare
+only `nodes.id` and `nodes.name` between its private SQLite online
+snapshot and the current Panel database. This missed changes to
+`metadata`, Pairing/provisioning/Connected fields or added schema
+columns on an existing Node whose ID/name stayed identical. The
+**same existing offline rollback** now compares complete Node rows,
+failing closed *before touching any Panel/Nginx config* if anything
+about a registered Node changed. It still never rewinds a database,
+replay nonce or identity, and remains unreachable as a live host apply.
+
+The existing panel-transaction suite tests metadata-only signed
+check-in drift and a new Node column after the staged snapshot.
+The existing cross-repository Smite ASGI integration suite additionally
+compares the U-OPTI rehearsal's additive Foreign grant/origin SQLite
+columns and unique/PK constraints to the **actual** pinned Smite
+`foreign_install_grants.initialize_schema` output. This prevents a
+separately maintained rehearsal schema silently differing from the
+Panel release source. No new migration, flag, option, API or installer;
+trial `activation_allowed:false` and the public option-2 HOLD remain.

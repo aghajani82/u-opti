@@ -168,6 +168,47 @@ class OfflineRollout(unittest.TestCase):
         with self.assertRaises(trans.Hold):self._undo()
         self.assertEqual(self._ledger()["phase"],"REHEARSED")
 
+    def test_existing_foreign_node_metadata_pairing_change_blocks_rollback(self):
+        self._invoke()
+        # A new reservation/change of Pairing state can update an
+        # EXISTING row without adding an ID or issuing a grant yet.
+        # The original id+name-only check missed this and could revert
+        # Panel config after another node started signed enrollment.
+        before=(self.root / trans.CONFIG["panel-env"]).read_bytes()
+        original_row=None
+        with sqlite3.connect(self.db) as conn:
+            original_row=conn.execute(
+                "SELECT id,name,metadata FROM nodes WHERE id='iran-node-1234'"
+            ).fetchone()
+            self.assertIsNotNone(original_row)
+            conn.execute(
+                "UPDATE nodes SET metadata=? WHERE id=?",
+                ('{"role":"foreign","provisioning":"signed_checkin"}',original_row[0]))
+            self.assertEqual(conn.execute(
+                "SELECT id,name FROM nodes WHERE id=?",(original_row[0],)
+            ).fetchone(),original_row[:2])
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(
+            (self.root / trans.CONFIG["panel-env"]).read_bytes(),before)
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT metadata FROM nodes WHERE id=?",(original_row[0],)
+            ).fetchone()[0],
+                '{"role":"foreign","provisioning":"signed_checkin"}')
+
+    def test_node_schema_drift_blocks_rollback_without_config_change(self):
+        self._invoke()
+        before=(self.root / trans.CONFIG["panel-compose"]).read_bytes()
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("ALTER TABLE nodes ADD COLUMN pairing_status TEXT")
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(
+            (self.root / trans.CONFIG["panel-compose"]).read_bytes(),before)
+        self.assertEqual(self._ledger()["phase"],"REHEARSED")
+
     def test_new_reserved_foreign_node_blocks_rollback_before_grant_issue(self):
         self._invoke()
         with sqlite3.connect(self.db) as conn:
