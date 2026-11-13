@@ -40,12 +40,18 @@ ONLY for **new selected** official signed RC7 Iran installs. After the
    already verified. A pending static appearance remains available at
    existing menu option 8.
 
-On reselecting option 1, the first action is a read-only `resume-ir`
-admission under the original operation lock. It validates the 0600
-root-owned journal, original source/version, exact Docker image references,
-project and service/Compose labels, running container state, and original
-Iran role/state before accepting a cursor. **No new Docker project, Node
-recreate, reinstall, rekey, FRP restart or manual Pairing choice.**
+On reselecting option 1, the first action is a read-only journal
+recovery admission under the **original operation lock**. If a Gateway
+snapshot is pending while the cursor is still `CORE_COMMITTED`, the SAME
+option compensates the interrupted stage **before** requiring healthy
+Docker/Compose state. Normal `resume-ir` then validates the 0600 root-owned
+journal, original source/version, exact image references, project and
+service/Compose labels, running containers and original Iran role/state.
+There is **no new Docker project, Panel reinstall, rekey, FRP restart or
+separate Pairing/rollback menu**. Only a still-paused, transaction-owned
+Iran Node may be recreated to restore its prior environment after a
+failed Gateway attempt; previously signed/paired Nodes are never
+automatically reverted.
 A returned checkpoint is NEVER trusted alone: a retained Gateway is
 reverified by strict local HTTPS; existing signed Pairing/identity is
 reverified using the original idempotent `--complete-local-ir-install`;
@@ -80,6 +86,55 @@ installer refusal, retained identity and SQLite admin proof. The latter
 now runs in the existing trial CI with sudo on a disposable filesystem.
 This is not evidence of real two-server Connected, nor permission to
 install on production.
+
+## Gateway stage-local rollback without another menu (2026-11-13)
+
+**Implemented and tested in the SAME selected option 1.** The existing
+`smite-gateway.sh` is reused; its internal stage snapshot helper now
+lives behind `smite_install_ir_gateway_stage`. The snapshot is taken
+*before* starting Gateway package/certificate/Nginx work, in a root-only
+directory under the **existing** RC7 install journal. Original file
+contents/modes and absence markers are synced before publishing the
+receipt. No separate wizard, option or parallel Gateway engine exists.
+
+When any part of the Gateway step fails (early package/Nginx preparation,
+write, invalid TLS, final HTTPS health witness, Node address switch,
+renewal hook, state receipt or checkpoint write), the original owned
+Gateway config and ACME file, FRP SNI allowlist, TLS stream/backend/map,
+renewal hook and Gateway state are restored. Nginx is validated and
+reloaded if it existed. The original **paused, unpaired** Node's
+`PANEL_ADDRESS` and running state are verified; if Gateway changed that
+runtime, only the SAME journal-owned fresh Node may be recreated to
+restore the pre-stage configuration, never a signed production Node.
+`IR_GATEWAY=ROLLED_BACK_RETRY_OPTION_1` is printed only after the
+compensation is observed, and `GATEWAY_VERIFIED` is NOT recorded.
+
+If rollback itself fails, `CRITICAL`/HOLD is shown, the private
+snapshot remains and **no later stage starts**. After interruption,
+the same option 1 calls the existing journal's `gateway-recover-ir`
+admission before the healthy Node witness; a pending CORE snapshot is
+restored first, whereas a snapshot left behind after a *committed*
+Gateway checkpoint is discarded only after matching the exact owner.
+An unexpected signed Node, different Compose owner, unsafe snapshot or
+independently modified existing FRP SNI allowlist refuses compensation
+instead of overwriting user data or breaking an active tunnel.
+
+**Scope/limitations:** this compensates the Gateway's owned runtime
+configuration, NOT automatic removal of downloaded apt packages or a
+Let's Encrypt certificate already issued. Those are safely reusable
+preparatory artifacts. It does not yet automate cleanup/retry of an
+uncommitted initial CORE, or promise rollback of an interrupted signed
+identity/admin operation: existing Pairing uses verified identity-safe
+rollback and Admin uses a read-only existing-row check to avoid rekeying
+or duplicate creation. Foreign option 2 remains signed-release gated.
+The current proof is **disposable offline failure injection**, not a
+real production power-loss or two-host Connected test.
+
+CI: `tests/test-smite-ir-gateway-stage-rollback.sh` runs with root-owned
+temporary Nginx/Node/journal fixtures and deliberately fails in the
+middle, at final TLS verification, at checkpoint write, during reload,
+and with unexpected signed Node/FRP changes. The existing Iran stage
+and original journal recovery tests also run. No live hosts touched.
 
 ## Iran → Panel → Foreign: one-choice audit, exact existing integration points (2026-11-13)
 
