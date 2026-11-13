@@ -51,6 +51,13 @@ smite_install_ir_advance() {
     SMITE_IR_STAGE="$next"
 }
 ADMIN_EXISTS=0
+# Model the durable admin row appearing only after a successful CLI create.
+# An explicit read-only witness still gates checkpoint advancement.
+smite_install_create_admin() {
+    echo admin >> "$TMP/events"
+    [ "${FAIL_STAGE:-}" != admin ] || return 1
+    ADMIN_EXISTS=1
+}
 smite_install_ir_admin_present() { [ "$ADMIN_EXISTS" = 1 ]; }
 SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=CORE_COMMITTED
