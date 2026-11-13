@@ -2679,6 +2679,41 @@ smite_install_selected_fresh() (
             echo 'HOLD: another Smite installation is still running.' >&2
             return 2
         }
+        # On an interrupted Gateway attempt, the original step snapshot
+        # is rolled back BEFORE requiring the Node to be healthy again.
+        # This uses the original journal owner and the same option 1.
+        local recovery recovery_stage recovery_project gateway_snapshot domain
+        recovery="$(python3 -B "$module_dir/smite-rc6-install-journal.py" gateway-recover-ir)" || {
+            echo 'HOLD: no verified Iran Gateway recovery owner.' >&2
+            return 2
+        }
+        if [ "$recovery" != 'IR_GATEWAY_RECOVERY_STAGE=FRESH_ALLOWED' ]; then
+            local -a recovery_lines=()
+            mapfile -t recovery_lines <<< "$recovery"
+            [ "${#recovery_lines[@]}" -eq 2 ] || return 2
+            recovery_stage="${recovery_lines[0]#IR_GATEWAY_RECOVERY_STAGE=}"
+            recovery_project="${recovery_lines[1]#IR_GATEWAY_RECOVERY_PROJECT=}"
+            [[ "$recovery_project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+            gateway_snapshot="/var/lib/u-opti/rc6-install-journal/gateway-$recovery_project"
+            if [ -e "$gateway_snapshot" ] || [ -L "$gateway_snapshot" ]; then
+                domain="$(smite_gateway_panel_domain)" || return 2
+                if [ "$recovery_stage" = CORE_COMMITTED ]; then
+                    smite_gateway_ir_stage_restore "$gateway_snapshot" "$recovery_project" "$domain" || {
+                        echo 'CRITICAL: pending Gateway rollback could not be verified. Retained snapshot; no later stage will run.' >&2
+                        return 2
+                    }
+                    echo 'IR_GATEWAY=ROLLED_BACK_AFTER_INTERRUPTION'
+                else
+                    # The journal already advanced past Gateway: do not
+                    # rewind it or a possibly paired identity.
+                    smite_gateway_ir_stage_guard "$gateway_snapshot" "$recovery_project" "$domain" || return 2
+                fi
+                smite_gateway_ir_stage_discard "$gateway_snapshot" "$recovery_project" "$domain" || {
+                    echo 'HOLD: verified Gateway recovery snapshot cleanup failed.' >&2
+                    return 2
+                }
+            fi
+        fi
         resumed="$(python3 -B "$module_dir/smite-rc6-install-journal.py" resume-ir)" || {
             echo 'HOLD: existing installation is not a verified resumable Iran RC7 transaction.' >&2
             return 2
@@ -2789,6 +2824,53 @@ smite_install_selected_fresh() (
     fi
 )
 
+# Gateway is its own retained transaction, inside the existing Iran
+# option-1 journal and original operation lock. Roll back ONLY this step,
+# then the next option-1 run will start it from the same clean baseline.
+smite_install_ir_gateway_stage_rollback() {
+    local snapshot="$1" project="$2" domain="$3"
+    if smite_gateway_ir_stage_restore "$snapshot" "$project" "$domain" &&
+       smite_gateway_ir_stage_discard "$snapshot" "$project" "$domain"; then
+        echo 'IR_GATEWAY=ROLLED_BACK_RETRY_OPTION_1'
+    else
+        echo 'CRITICAL: Iran Gateway could not be restored and witnessed; snapshot retained. Stop, do not advance.' >&2
+        return 2
+    fi
+}
+
+smite_install_ir_gateway_stage() {
+    local project="${COMPOSE_PROJECT_NAME:-}" domain snapshot
+    [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+    domain="$(smite_gateway_panel_domain)" || return 2
+    smite_gateway_validate_domain "$domain" || return 2
+    snapshot="/var/lib/u-opti/rc6-install-journal/gateway-$project"
+    if [ -e "$snapshot" ] || [ -L "$snapshot" ]; then
+        # Repeated call in the same session, before checkpoint commit:
+        # restore exactly the previous attempt first.
+        smite_install_ir_gateway_stage_rollback "$snapshot" "$project" "$domain" || return 2
+    fi
+    smite_gateway_ir_stage_snapshot "$snapshot" "$project" "$domain" || {
+        echo 'HOLD: Gateway pre-stage snapshot could not be safely retained.' >&2
+        return 2
+    }
+    if ! smite_gateway_configure_panel ||
+       ! smite_gateway_verify_443 "$domain"; then
+        smite_install_ir_gateway_stage_rollback "$snapshot" "$project" "$domain" || return 2
+        return 2
+    fi
+    # A stage is COMPLETE only if both its health witness and durable
+    # checkpoint succeed. On journal failure revert this stage as well.
+    if ! smite_install_ir_advance GATEWAY_VERIFIED; then
+        smite_install_ir_gateway_stage_rollback "$snapshot" "$project" "$domain" || return 2
+        return 2
+    fi
+    smite_gateway_ir_stage_discard "$snapshot" "$project" "$domain" || {
+        echo 'HOLD: Gateway committed, but private step snapshot cleanup failed. Retry option 1 for verified cleanup.' >&2
+        return 2
+    }
+    echo 'IR_GATEWAY=COMPLETE'
+}
+
 # Use the SAME signed-install journal for verified checkpoints. These
 # helpers never create a Node or infer success from a stored phase alone.
 smite_install_ir_advance() {
@@ -2829,11 +2911,14 @@ smite_install_finish_local_ir() {
             return 2
         }
         echo 'IR_GATEWAY=VERIFIED_RETAINED'
+    elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
+        smite_install_ir_gateway_stage || return 2
+        domain="$(smite_gateway_panel_domain)" || return 2
     else
+        # The independent old/clean-rc path retains its original behavior.
         smite_gateway_configure_panel || return 2
         domain="$(smite_gateway_panel_domain)" || return 2
         smite_gateway_verify_443 "$domain" || return 2
-        smite_install_ir_advance GATEWAY_VERIFIED || return 2
         echo 'IR_GATEWAY=COMPLETE'
     fi
     # The existing signed Iran bootstrap supports retained-identity retries
