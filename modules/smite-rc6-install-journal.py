@@ -39,6 +39,13 @@ TARGETS = (
     'etc/systemd/system/u-opti-smite-xhttp-broker.service',
 )
 SERVICE = 'u-opti-smite-xhttp-broker.service'
+# Option 1 uses the EXISTING fresh-install journal as its durable resume
+# cursor. Only NEW explicitly opted-in Iran installs may use these stages:
+# legacy COMMITTED and all foreign journals are never adopted automatically.
+IR_PHASES = (
+    'CORE_COMMITTED', 'GATEWAY_VERIFIED', 'PAIRING_VERIFIED',
+    'ADMIN_CREATED', 'COMPLETE',
+)
 
 class Hold(RuntimeError):
     pass
@@ -104,7 +111,9 @@ class Journal:
             raise Hold('INVALID_JOURNAL')
         return d
 
-    def begin(self, role, installer_pid=None):
+    def begin(self, role, installer_pid=None, *, resumable_ir=False):
+        if type(resumable_ir) is not bool or (resumable_ir and role != 'panel-iran'):
+            raise Hold('INVALID_RESUMABLE_INSTALL_ROLE')
         if self.path.exists():
             old = self.load()
             if old['state'] != 'ROLLED_BACK':
@@ -135,6 +144,8 @@ class Journal:
         d = dict(schema=1, source=SOURCE, id='uopti_rc6_' + uuid.uuid4().hex,
                  role=role, state='INSTALLING', installer_pid=installer_pid,
                  installer_start=process_start(installer_pid))
+        if resumable_ir:
+            d['ir_resumable_version'] = 1
         self.save(d)
         return d['id']
 
@@ -292,14 +303,122 @@ class Journal:
             'SMITE_MANAGED_VERSION=' + CANDIDATES[d['source']][0] not in lines or
             'SMITE_ROLE=' + d['role'] not in lines):
             raise Hold('STATE_MISMATCH')
-        d['state'] = 'COMMITTED'; self.save(d)
+        d['state'] = 'COMMITTED'
+        if d.get('ir_resumable_version') == 1:
+            d['ir_phase'] = 'CORE_COMMITTED'
+        self.save(d)
         return 'RC6_INSTALL_TRANSACTION=COMMITTED'
+
+    def _ir_witness(self, d):
+        """Read-only retained-install proof; never start/recreate containers."""
+        if (d.get('state') != 'COMMITTED'
+                or d.get('role') != 'panel-iran'
+                or d.get('source') != SOURCE
+                or d.get('ir_resumable_version') != 1
+                or d.get('ir_phase') not in IR_PHASES):
+            raise Hold('IR_RESUME_NOT_OWNED_BY_THIS_INSTALL')
+        state = self.root / 'etc/u-opti/smite/state.env'
+        trusted(state)
+        values = {}
+        for line in state.read_text().splitlines():
+            if not line or line.startswith('#'):
+                continue
+            key, sep, value = line.partition('=')
+            if not sep or key in values:
+                raise Hold('IR_RESUME_STATE_INVALID')
+            values[key] = value
+        if (values.get('SMITE_ROLE') != 'panel-iran'
+                or values.get('SMITE_CONNECTION_MODE') != 'standard'
+                or values.get('SMITE_MANAGED_VERSION') != VERSION
+                or values.get('SMITE_UPSTREAM_REF') != SOURCE):
+            raise Hold('IR_RESUME_STATE_DRIFT')
+        names = set(self.docker('ps', '-a', '--format', '{{.Names}}').splitlines())
+        if not {'smite-panel', 'smite-node'} <= names:
+            raise Hold('IR_RESUME_CONTAINERS_MISSING')
+        for name, ref in IMAGES.items():
+            obj = json.loads(self.docker('inspect', name))[0]
+            config = obj.get('Config') or {}
+            labels = config.get('Labels') or {}
+            if (config.get('Image') != ref
+                    or labels.get('com.docker.compose.project') != d['id']
+                    or labels.get('com.docker.compose.service') != name
+                    or not (obj.get('State') or {}).get('Running')
+                    or (obj.get('State') or {}).get('Health', {}).get('Status') == 'unhealthy'):
+                raise Hold('IR_RESUME_CONTAINER_DRIFT')
+            files = labels.get('com.docker.compose.project.config_files')
+            base = '/opt/smite/docker-compose.yml' if name == 'smite-panel' else '/opt/smite-node/docker-compose.yml'
+            overlay = ('/opt/smite/docker-compose.signed-control.yml' if name == 'smite-panel'
+                       else '/opt/smite-node/docker-compose.security-candidate.yml')
+            if files not in (base, base + ',' + overlay):
+                raise Hold('IR_RESUME_COMPOSE_DRIFT')
+            if name == 'smite-node':
+                env = dict(line.split('=', 1) for line in config.get('Env', []) if '=' in line)
+                auth = env.get('SMITE_NODE_PANEL_AUTH_MODE')
+                if auth not in ('paused', 'signed'):
+                    raise Hold('IR_RESUME_UNKNOWN_NODE_AUTH')
+                if (d['ir_phase'] in IR_PHASES[2:] and auth != 'signed'
+                        or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
+                    raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
+
+    def ir_resume(self):
+        d = self.load()
+        if d['state'] == 'ROLLED_BACK':
+            return 'FRESH_ALLOWED', None
+        if (d.get('installer_start')
+                and process_start(d.get('installer_pid')) == d['installer_start']):
+            raise Hold('INSTALLER_STILL_RUNNING')
+        self._ir_witness(d)
+        return d['ir_phase'], d['id']
+
+    def ir_advance(self, phase):
+        if phase not in IR_PHASES:
+            raise Hold('INVALID_IR_STAGE')
+        d = self.load()
+        self._ir_witness(d)
+        previous = d['ir_phase']
+        if phase == previous:
+            return phase
+        if IR_PHASES.index(phase) != IR_PHASES.index(previous) + 1:
+            raise Hold('IR_STAGE_OUT_OF_ORDER')
+        if phase in IR_PHASES[2:]:
+            # Completed pairing must be visible in the running Node before
+            # a journal claim can be advanced. Existing signed probes occur
+            # at the installer boundary, not here.
+            obj = json.loads(self.docker('inspect', 'smite-node'))[0]
+            env = (obj.get('Config') or {}).get('Env') or []
+            if 'SMITE_NODE_PANEL_AUTH_MODE=signed' not in env or 'SMITE_AGENT_AUTH_MODE=strict' not in env:
+                raise Hold('IR_PAIRING_RUNTIME_NOT_SIGNED')
+        if phase in IR_PHASES[3:]:
+            self.ir_admin_present()
+        d['ir_phase'] = phase
+        self.save(d)
+        return phase
+
+    def ir_admin_present(self):
+        """Read-only admin witness: a saved cursor is not proof of an admin."""
+        db = self.root / 'opt/smite/panel/data/smite.db'
+        if db.is_symlink() or not db.is_file():
+            raise Hold('IR_ADMIN_DATABASE_MISSING')
+        con = sqlite3.connect(db.absolute().as_uri() + '?mode=ro', uri=True, timeout=2)
+        try:
+            if con.execute(
+                "SELECT count(*) FROM admins WHERE length(username)>0 AND length(password_hash)>0"
+            ).fetchone()[0] < 1:
+                raise Hold('IR_ADMIN_NOT_CREATED')
+        except sqlite3.Error as exc:
+            raise Hold('IR_ADMIN_SCHEMA_MISMATCH') from exc
+        finally:
+            con.close()
+        return True
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback'))
+    ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback',
+                                       'resume-ir', 'advance-ir', 'admin-present'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
+    ap.add_argument('--resumable-ir', action='store_true')
+    ap.add_argument('--phase', choices=IR_PHASES)
     ap.add_argument('--confirm', default='')
     ap.add_argument('--installer-pid', type=int)
     a = ap.parse_args()
@@ -323,11 +442,26 @@ def main():
                 if not a.role: raise Hold('ROLE_REQUIRED')
                 if not a.installer_pid or not process_start(a.installer_pid):
                     raise Hold('INSTALLER_PROCESS_REQUIRED')
-                print(j.begin(a.role, a.installer_pid))
+                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir))
             elif a.action == 'status':
-                print('RC6_INSTALL_TRANSACTION=' + j.load()['state'])
+                d=j.load()
+                print('RC6_INSTALL_TRANSACTION=' + d['state'])
+                if d.get('ir_resumable_version') == 1:
+                    print('IR_OPTION_1_STAGE=' + d.get('ir_phase','CORE_NOT_VERIFIED'))
             elif a.action == 'commit':
                 print(j.commit())
+            elif a.action == 'resume-ir':
+                stage, project = j.ir_resume()
+                print('IR_INSTALL_STAGE=' + stage)
+                if project is not None:
+                    print('IR_INSTALL_PROJECT=' + project)
+            elif a.action == 'advance-ir':
+                if a.phase is None: raise Hold('IR_STAGE_REQUIRED')
+                print('IR_INSTALL_STAGE=' + j.ir_advance(a.phase))
+            elif a.action == 'admin-present':
+                j._ir_witness(j.load())
+                j.ir_admin_present()
+                print('IR_ADMIN_PRESENT=VERIFIED_READ_ONLY')
             else:
                 if a.confirm != 'ROLLBACK-RC6': raise Hold('CONFIRMATION_REQUIRED')
                 operation = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
