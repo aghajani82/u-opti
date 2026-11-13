@@ -388,8 +388,8 @@ class Journal:
             env = (obj.get('Config') or {}).get('Env') or []
             if 'SMITE_NODE_PANEL_AUTH_MODE=signed' not in env or 'SMITE_AGENT_AUTH_MODE=strict' not in env:
                 raise Hold('IR_PAIRING_RUNTIME_NOT_SIGNED')
-        if phase in IR_PHASES[3:]:
-            self.ir_admin_present()
+        if phase in IR_PHASES[3:] and not self.ir_admin_present():
+            raise Hold('IR_ADMIN_NOT_CREATED')
         d['ir_phase'] = phase
         self.save(d)
         return phase
@@ -401,15 +401,14 @@ class Journal:
             raise Hold('IR_ADMIN_DATABASE_MISSING')
         con = sqlite3.connect(db.absolute().as_uri() + '?mode=ro', uri=True, timeout=2)
         try:
-            if con.execute(
+            found = con.execute(
                 "SELECT count(*) FROM admins WHERE length(username)>0 AND length(password_hash)>0"
-            ).fetchone()[0] < 1:
-                raise Hold('IR_ADMIN_NOT_CREATED')
+            ).fetchone()[0]
         except sqlite3.Error as exc:
             raise Hold('IR_ADMIN_SCHEMA_MISMATCH') from exc
         finally:
             con.close()
-        return True
+        return found > 0
 
 
 def main():
@@ -460,8 +459,11 @@ def main():
                 print('IR_INSTALL_STAGE=' + j.ir_advance(a.phase))
             elif a.action == 'admin-present':
                 j._ir_witness(j.load())
-                j.ir_admin_present()
-                print('IR_ADMIN_PRESENT=VERIFIED_READ_ONLY')
+                if j.ir_admin_present():
+                    print('IR_ADMIN_PRESENT=VERIFIED_READ_ONLY')
+                else:
+                    print('IR_ADMIN_PRESENT=ABSENT_READ_ONLY')
+                    return 3
             else:
                 if a.confirm != 'ROLLBACK-RC6': raise Hold('CONFIRMATION_REQUIRED')
                 operation = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
