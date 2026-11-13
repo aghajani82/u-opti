@@ -302,6 +302,10 @@ class RecoveryTests(unittest.TestCase):
             self.j.ir_advance('GATEWAY_VERIFIED')
         with self.assertRaisesRegex(m.Hold,'INVALID_RESUMABLE'):
             self.j.begin('foreign',resumable_ir=True)
+        # Isolate the second simulated fresh host from the foreign Docker
+        # fixture: a real host must never begin with existing containers.
+        self.objects.clear()
+        self.calls.clear()
         ir,_,_=self.prepare_retained_ir()
         d=ir.load();d.pop('ir_resumable_version');d.pop('ir_phase');ir.save(d)
         with self.assertRaisesRegex(m.Hold,'NOT_OWNED'):
