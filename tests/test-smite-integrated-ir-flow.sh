@@ -97,3 +97,50 @@ grep -Fxq 'Install the Foreign Smite Node? [y/N]: ' "$PROMPTS"
 unset -f read clear
 echo 'SELECTED_IR_FOREIGN_SINGLE_APPROVAL=PASS'
 
+
+
+# The selected official RC7 images, source and original rollback journal
+# are one exact pinned transaction. The signed unified trial has a distinct
+# unapproved source and may not be substituted by a manual flag change.
+unset -f python3
+PAIR_ROOT="$TMP/selected-rc7-source"
+mkdir -p "$PAIR_ROOT"
+for file in smite-rc6-install-journal.py smite-rc7-registry-pair.json \
+            smite-unified-trial-registry-pair.json; do
+    cp "$ROOT/modules/$file" "$PAIR_ROOT/$file"
+done
+SMITE_FIELD_TRIAL_SOURCE_SHA=9a1270b31e8d44f13d09b71ab6b9798410b09c12
+SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.7
+SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.7
+SMITE_FIELD_TRIAL_MANIFEST_SHA256=58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
+smite_install_selected_pair_journal_review "$PAIR_ROOT" > "$TMP/pair-review"
+grep -qx 'SELECTED_RC7_PAIR_JOURNAL=EXACT_MATCH' "$TMP/pair-review"
+grep -qx 'UNIFIED_TRIAL_JOURNAL=SEPARATE_NOT_ADMITTED' "$TMP/pair-review"
+sed -i 's/^SOURCE = .*/SOURCE = "0000000000000000000000000000000000000000"/' \
+    "$PAIR_ROOT/smite-rc6-install-journal.py"
+status=0
+smite_install_selected_pair_journal_review "$PAIR_ROOT" >/dev/null 2>&1 || status=$?
+[ "$status" -eq 2 ]
+cp "$ROOT/modules/smite-rc6-install-journal.py" "$PAIR_ROOT/"
+sed -i 's/"release_approved":false/"release_approved":true/' \
+    "$PAIR_ROOT/smite-unified-trial-registry-pair.json"
+status=0
+smite_install_selected_pair_journal_review "$PAIR_ROOT" >/dev/null 2>&1 || status=$?
+[ "$status" -eq 2 ]
+cp "$ROOT/modules/smite-unified-trial-registry-pair.json" "$PAIR_ROOT/"
+status=0
+SMITE_FIELD_TRIAL_SOURCE_SHA=b865be93e22153c60769f6329e6e55e781494ded \
+    smite_install_selected_pair_journal_review "$PAIR_ROOT" >/dev/null 2>&1 || status=$?
+[ "$status" -eq 2 ]
+python3 - "$ROOT/modules/smite-install.sh" <<'PY_REVIEW_ORDER'
+from pathlib import Path
+import sys
+s=Path(sys.argv[1]).read_text()
+selected=s.split("smite_install_selected_fresh() (",1)[1].split(
+    "\n# Core transaction is committed before enrollment:",1)[0]
+review='smite_install_selected_pair_journal_review "$module_dir"'
+assert selected.index(review) < selected.index('smite_install_ensure_docker || return 2')
+assert selected.index(review) < selected.index('smite-rc6-install-journal.py" begin')
+assert selected.index('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES') < selected.index(review)
+PY_REVIEW_ORDER
+echo 'SELECTED_SIGNED_RC7_JOURNAL_COHERENCE=PASS'
