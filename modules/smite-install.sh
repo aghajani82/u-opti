@@ -2649,19 +2649,9 @@ smite_install_selected_fresh() (
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
     [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC7 images qualify amd64 only'; return 2; }
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
-    # The guarded Compose helper chooses the local socket itself and rejects
-    # all ambient Docker overrides. Read-only inventory below pins it too.
-    # Even an incomplete installation is preserved. This is not an upgrader.
-    for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
-        if [ -e "$path" ] || [ -L "$path" ]; then
-            echo 'HOLD: existing/partial Smite state; use reviewed recovery, never reinstall'
-            return 2
-        fi
-    done
-    echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
-    echo 'Existing installations and live tunnels are not migrated by this entry.'
-    read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
-    case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
+    # Selected Iran phase resume is allowed ONLY for an explicitly
+    # resumable, signed RC7 core journal owned by this same installation.
+    # The signed legacy/foreign paths never auto-adopt an existing host.
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
@@ -2670,14 +2660,62 @@ smite_install_selected_fresh() (
     local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.7
     local SMITE_FIELD_TRIAL_MANIFEST_SHA256=58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
     local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
-    # Templates and CLI are from the very same immutable application source.
-    # Template image names stay upstream-shaped until strict digest replacement.
     local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
     local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
     local SMITE_UPSTREAM_VERSION=2.0.0-rc.7
     local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     smite_install_selected_pair_journal_review "$module_dir" || return 2
+    local journal_file=/var/lib/u-opti/rc6-install-journal/current.json
+    if [ -e "$journal_file" ] || [ -L "$journal_file" ]; then
+        [ "$role" = panel-iran ] && [ -f "$journal_file" ] &&
+        [ ! -L "$journal_file" ] || {
+            echo 'HOLD: an existing/foreign/untrusted Smite journal cannot be resumed automatically.' >&2
+            return 2
+        }
+        local rc6_lock resumed stage project
+        exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+        flock -n "$rc6_lock" || {
+            echo 'HOLD: another Smite installation is still running.' >&2
+            return 2
+        }
+        resumed="$(python3 -B "$module_dir/smite-rc6-install-journal.py" resume-ir)" || {
+            echo 'HOLD: existing installation is not a verified resumable Iran RC7 transaction.' >&2
+            return 2
+        }
+        if [ "$resumed" = 'IR_INSTALL_STAGE=FRESH_ALLOWED' ]; then
+            # A previously reviewed/rolled-back fresh install can begin a
+            # NEW transaction, but never reuse the old project/Node.
+            exec {rc6_lock}>&-
+        else
+            local -a resume_lines=()
+            mapfile -t resume_lines <<< "$resumed"
+            [ "${#resume_lines[@]}" -eq 2 ] || return 2
+            stage="${resume_lines[0]#IR_INSTALL_STAGE=}"
+            project="${resume_lines[1]#IR_INSTALL_PROJECT=}"
+            [[ "$stage" =~ ^(CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED|ADMIN_CREATED|COMPLETE)$ ]] &&
+            [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+            echo "Iran installation: retained checkpoint $stage; Node will NOT be reinstalled."
+            read -rp 'Continue the verified Iran install from this checkpoint? [y/N]: ' confirm || return 2
+            case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
+            export COMPOSE_PROJECT_NAME="$project"
+            local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE="$stage"
+            smite_install_finish_local_ir || return 2
+            return 0
+        fi
+    fi
+    # An uncommitted, interrupted CORE has no verified safe resume
+    # cursor. Never reuse its paths or implicitly run the fresh installer.
+    for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            echo 'HOLD: unverified/partial Smite core; use reviewed recovery, never reinstall.' >&2
+            return 2
+        fi
+    done
+    echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
+    echo 'Existing installations and live tunnels are not migrated by this entry.'
+    read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
+    case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
     smite_install_require_tools || return 2
     smite_install_ensure_docker || return 2
     containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
@@ -2720,7 +2758,7 @@ smite_install_selected_fresh() (
         fi
     fi
     local installer_pid="$BASHPID" transaction
-    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid")" || return 2
+    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid" --resumable-ir)" || return 2
     [[ "$transaction" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
     # Inherited lock stays held by installer children if the menu shell dies.
     local rc6_lock
@@ -2737,6 +2775,7 @@ smite_install_selected_fresh() (
         # Core signed enrollment and administrator credentials are the
         # installation transaction; static appearance cannot leave them
         # half-applied. Apply UI only AFTER both are verified.
+        local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE=CORE_COMMITTED
         smite_install_finish_local_ir || return 2
     else
         # The official RC7 core is not the independently signed unified
@@ -2750,34 +2789,100 @@ smite_install_selected_fresh() (
     fi
 )
 
-# Core transaction is committed before enrollment: fresh-install rollback must
-# never delete a paired identity. Each enrollment stage keeps its own recovery.
+# Use the SAME signed-install journal for verified checkpoints. These
+# helpers never create a Node or infer success from a stored phase alone.
+smite_install_ir_advance() {
+    local phase="$1" module_dir
+    [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] || return 0
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" advance-ir --phase "$phase" || return 2
+    SMITE_IR_STAGE="$phase"
+}
+
+smite_install_ir_admin_present() {
+    local module_dir
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    python3 -B "$module_dir/smite-rc6-install-journal.py" admin-present >/dev/null 2>&1
+}
+
+# Core is committed BEFORE any Gateway/Pairing writes. On an explicitly
+# resumable Iran install the first incomplete stage is retried in place;
+# completed stages are RE-VERIFIED before being skipped.
 smite_install_finish_local_ir() {
-    local module_dir domain
+    local module_dir domain phase="${SMITE_IR_STAGE:-CORE_COMMITTED}"
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     local SMITE_GATEWAY_INSTALL_FLOW=1
     declare -F smite_gateway_configure_panel >/dev/null || {
         echo 'HOLD: HTTPS gateway module is unavailable'; return 2;
     }
-    echo 'Preparing Panel HTTPS/443 and secure Iran Node enrollment...'
-    smite_gateway_configure_panel || return 2
-    domain="$(smite_gateway_panel_domain)" || return 2
-    smite_gateway_verify_443 "$domain" || return 2
+    case "$phase" in
+        CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED|ADMIN_CREATED|COMPLETE) ;;
+        *) echo 'HOLD: invalid retained Iran phase' >&2; return 2 ;;
+    esac
+    echo "Iran installation checkpoint: $phase"
+    if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] && [ "$phase" != CORE_COMMITTED ]; then
+        domain="$(smite_gateway_panel_domain)" || return 2
+        # A completed Gateway is never silently rewritten: fail closed
+        # if real local HTTPS/443 verification has subsequently drifted.
+        smite_gateway_verify_443 "$domain" || {
+            echo 'HOLD: completed Gateway drifted; manual reviewed repair required.' >&2
+            return 2
+        }
+        echo 'IR_GATEWAY=VERIFIED_RETAINED'
+    else
+        smite_gateway_configure_panel || return 2
+        domain="$(smite_gateway_panel_domain)" || return 2
+        smite_gateway_verify_443 "$domain" || return 2
+        smite_install_ir_advance GATEWAY_VERIFIED || return 2
+        echo 'IR_GATEWAY=COMPLETE'
+    fi
+    # The existing signed Iran bootstrap supports retained-identity retries
+    # and performs both direction probes before returning success.
     UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B \
         "$module_dir/smite-node-pairing.py" --complete-local-ir-install || {
-        echo 'HOLD: local Iran enrollment incomplete; retain installation and identity. Do not reinstall.'
+        echo 'HOLD: local Iran signed enrollment unverified. Identity retained; retry option 1.' >&2
         return 2
     }
-    echo 'Iran Node verified active. Create the Panel administrator account:'
-    smite_install_create_admin || return 2
-    # Cosmetic UI is independent of signed Node identity and Gateway.
-    # Its own existing private backup/rollback remains available at
-    # menu 8/9; a static update issue cannot undo verified pairing.
-    if smite_install_ui_action apply; then
-        echo 'IR_PANEL_STATIC_UI=APPLIED'
+    if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] && [ "$phase" = GATEWAY_VERIFIED ]; then
+        smite_install_ir_advance PAIRING_VERIFIED || return 2
+    elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] && [ "$phase" = CORE_COMMITTED ]; then
+        smite_install_ir_advance PAIRING_VERIFIED || return 2
+    fi
+    echo 'IR_SIGNED_PAIRING=VERIFIED'
+    if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
+        if smite_install_ir_admin_present; then
+            echo 'IR_ADMIN=EXISTING_VERIFIED'
+        elif [ "$phase" = ADMIN_CREATED ] || [ "$phase" = COMPLETE ]; then
+            echo 'HOLD: completed admin checkpoint no longer verifies.' >&2
+            return 2
+        else
+            echo 'Iran Node verified active. Create the Panel administrator account:'
+            smite_install_create_admin || return 2
+            smite_install_ir_admin_present || {
+                echo 'HOLD: admin creation not confirmed in Panel database; retry option 1.' >&2
+                return 2
+            }
+        fi
+        case "$phase" in
+            CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED)
+                smite_install_ir_advance ADMIN_CREATED || return 2 ;;
+        esac
     else
-        echo 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8'
-        echo 'NOTICE: Panel and Iran Node are connected. Optional appearance update remains pending; do not reinstall.'
+        echo 'Iran Node verified active. Create the Panel administrator account:'
+        smite_install_create_admin || return 2
+    fi
+    if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
+        echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
+    else
+        # Cosmetic UI is independent; the existing backup/rollback at menu
+        # 8/9 remains intact, without a second appearance system.
+        if smite_install_ui_action apply; then
+            echo 'IR_PANEL_STATIC_UI=APPLIED'
+        else
+            echo 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8'
+            echo 'NOTICE: signed Node/Admin are verified; optional UI can be retried from menu 8.'
+        fi
+        smite_install_ir_advance COMPLETE || return 2
     fi
     echo 'PANEL_AND_IR_INSTALL=COMPLETE'
     echo "Panel URL: https://$domain"
