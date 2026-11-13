@@ -1843,3 +1843,7 @@ columns and unique/PK constraints to the **actual** pinned Smite
 separately maintained rehearsal schema silently differing from the
 Panel release source. No new migration, flag, option, API or installer;
 trial `activation_allowed:false` and the public option-2 HOLD remain.
+
+## Installation integration checkpoint — Iran critical sequence before static UI (2026-11-13)
+
+Reviewed Iran option 1 from the actual selected installer through TLS/443, RC7 image/journal verification, Panel+Iran Node core, signed local Node Pairing and admin creation. Previously the bundled optional static UI update ran **before** Iran signed Pairing and a static asset failure held the Node half-installed. The same `smite_install_finish_local_ir` now completes **Gateway → verified Iran signed Pairing → admin** before using the existing static UI updater. A cosmetic UI failure prints `IR_PANEL_STATIC_UI=REVIEW_OPTION_8` but does not misreport Pairing or require reinstall; existing UI options 8/9 provide backup/repair. Pairing/admin failures still HOLD and never produce `PANEL_AND_IR_INSTALL=COMPLETE`. Offline installer tests exercise every failure boundary and success order. No GUI redesign, new menu action, Node recreation or public host change.

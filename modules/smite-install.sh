@@ -2702,10 +2702,9 @@ smite_install_selected_fresh() (
     fi
     python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
     if [ "$role" = panel-iran ]; then
-        smite_install_ui_action apply || {
-            echo 'HOLD: RC7 runtime installed; UI update pending. Use Install / Lifecycle option 8; do not reinstall.'
-            return 2
-        }
+        # Core signed enrollment and administrator credentials are the
+        # installation transaction; static appearance cannot leave them
+        # half-applied. Apply UI only AFTER both are verified.
         smite_install_finish_local_ir || return 2
     else
         # The official RC7 core is not the independently signed unified
@@ -2739,6 +2738,15 @@ smite_install_finish_local_ir() {
     }
     echo 'Iran Node verified active. Create the Panel administrator account:'
     smite_install_create_admin || return 2
+    # Cosmetic UI is independent of signed Node identity and Gateway.
+    # Its own existing private backup/rollback remains available at
+    # menu 8/9; a static update issue cannot undo verified pairing.
+    if smite_install_ui_action apply; then
+        echo 'IR_PANEL_STATIC_UI=APPLIED'
+    else
+        echo 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8'
+        echo 'NOTICE: Panel and Iran Node are connected. Optional appearance update remains pending; do not reinstall.'
+    fi
     echo 'PANEL_AND_IR_INSTALL=COMPLETE'
     echo "Panel URL: https://$domain"
     echo 'Sign in: Iran Nodes contains the authenticated local Node.'

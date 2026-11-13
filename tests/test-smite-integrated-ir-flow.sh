@@ -15,8 +15,10 @@ python3() {
     [ "${FAIL_STAGE:-}" != pairing ]
 }
 smite_install_create_admin() { echo admin >> "$TMP/events"; [ "${FAIL_STAGE:-}" != admin ]; }
+smite_install_ui_action() { echo ui >> "$TMP/events"; [ "${FAIL_STAGE:-}" != ui ]; }
 smite_install_finish_local_ir > "$TMP/output"
-[ "$(cat "$TMP/events")" = $'gateway\ntls\npairing\nadmin' ]
+[ "$(cat "$TMP/events")" = $'gateway\ntls\npairing\nadmin\nui' ]
+grep -qx 'IR_PANEL_STATIC_UI=APPLIED' "$TMP/output"
 grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/output"
 for FAIL_STAGE in gateway tls pairing admin; do
     : > "$TMP/events"
@@ -26,6 +28,19 @@ for FAIL_STAGE in gateway tls pairing admin; do
     ! grep -q 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/output"
     if [ "$FAIL_STAGE" != admin ]; then ! grep -qx admin "$TMP/events"; fi
 done
+# A noncritical UI update MUST NOT abort a successful signed IR install,
+# prevent local Node Connected, or force an unnecessary fresh reinstall.
+: > "$TMP/events"
+FAIL_STAGE=ui smite_install_finish_local_ir > "$TMP/ui-warning"
+grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/ui-warning"
+grep -qx 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8' "$TMP/ui-warning"
+[ "$(cat "$TMP/events")" = $'gateway\ntls\npairing\nadmin\nui' ]
+# Failed pairing MUST stop BEFORE admin and cosmetic UI.
+: > "$TMP/events"
+if FAIL_STAGE=pairing smite_install_finish_local_ir > "$TMP/ir-no-ui"; then
+    echo 'FAIL: pairing should prevent admin and optional UI'; exit 1
+fi
+[ "$(cat "$TMP/events")" = $'gateway\ntls\npairing' ]
 unset FAIL_STAGE
 # Real gateway entry returns failure for missing dependencies (no host changes).
 source "$ROOT/modules/smite-gateway.sh"
