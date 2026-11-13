@@ -285,21 +285,23 @@ class PanelTransaction:
                                          uri=True, timeout=5)) as live, closing(
                 sqlite3.connect(snapshot.absolute().as_uri() + "?mode=ro",
                                 uri=True, timeout=5)) as old:
-                past = old.execute("SELECT * FROM smite_node_identities ORDER BY node_id").fetchall()
-                current = live.execute("SELECT * FROM smite_node_identities ORDER BY node_id").fetchall()
-                if past != current:
-                    return True
-                # A newly reserved Foreign Node may not yet have a grant or
-                # signed identity. Refuse rollback if its durable row exists.
-                # The existing check compared only id/name and missed
-                # changes to Pairing/Connected status, role, fingerprint or
-                # reserved Node metadata on an unchanged row. A rollback
-                # must not disconnect an already-progressing existing Node.
-                # Compare the entire original row, including future columns
-                # the real Smite Panel schema may add.
-                if (old.execute("SELECT * FROM nodes ORDER BY id").fetchall()
-                        != live.execute("SELECT * FROM nodes ORDER BY id").fetchall()):
-                    return True
+                # This existing Panel rollback must not run after
+                # an operator has started ANY new or changed signed pairing
+                # state, even before a Foreign grant is issued/redeemed.
+                # Include pending codes and inbound nonces: reverting Panel
+                # config after either action can break the same signed
+                # Iran/Foreign Node. SELECT * also catches metadata/column
+                # drift in existing nodes, not just ID/name changes.
+                for table in (
+                    "smite_node_identities",
+                    "nodes",
+                    "smite_node_pairing_codes",
+                    "smite_node_inbound_nonces",
+                ):
+                    statement = "SELECT * FROM " + table + " ORDER BY 1"
+                    if (old.execute(statement).fetchall()
+                            != live.execute(statement).fetchall()):
+                        return True
                 expected = {"smite_foreign_install_grants","smite_foreign_install_origins"}
                 names = {row[0] for row in live.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}
