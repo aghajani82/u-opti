@@ -1118,7 +1118,29 @@ smite_gateway_ir_stage_snapshot() {
         i=$((i + 1))
     done < <(smite_gateway_ir_stage_paths "$domain")
     [ "$i" -eq 8 ] || return 1
+    # Make private baseline bytes durable BEFORE publishing the snapshot
+    # as a retry/compensation receipt. A partial snapshot is never admitted.
+    python3 -B - "$candidate" <<'PY_IR_STAGE_FSYNC' || return 1
+import os, pathlib, stat, sys
+root=pathlib.Path(sys.argv[1])
+for child in root.iterdir():
+    info=child.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise SystemExit(2)
+    fd=os.open(child, os.O_RDONLY | os.O_NOFOLLOW)
+    try: os.fsync(fd)
+    finally: os.close(fd)
+fd=os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try: os.fsync(fd)
+finally: os.close(fd)
+PY_IR_STAGE_FSYNC
     mv -T -- "$candidate" "$snapshot" || return 1
+    python3 -B - "$(dirname "$snapshot")" <<'PY_IR_STAGE_PARENT' || return 1
+import os,sys
+fd=os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try: os.fsync(fd)
+finally: os.close(fd)
+PY_IR_STAGE_PARENT
     echo 'IR_GATEWAY_STAGE=SNAPSHOT_RETAINED'
 }
 
