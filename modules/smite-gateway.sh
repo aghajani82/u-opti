@@ -1158,6 +1158,14 @@ smite_gateway_ir_stage_restore() {
             return 1
         fi
         if [ -e "$path" ] && [ ! -f "$path" ]; then return 1; fi
+        # Existing FRP SNI allowlists are never rewritten by this Gateway
+        # installer. If one changed since the snapshot, it is a separate
+        # owner's work: do not silently overwrite it during compensation.
+        if [ "$i" -eq 3 ] && [ -f "$snapshot/file-3" ] &&
+           ! cmp -s -- "$snapshot/file-3" "$path"; then
+            echo 'HOLD: independent FRP SNI rules changed; Gateway rollback cannot overwrite them.' >&2
+            return 1
+        fi
         i=$((i + 1))
     done < <(smite_gateway_ir_stage_paths "$domain")
     [ "$i" -eq 8 ] || return 1
