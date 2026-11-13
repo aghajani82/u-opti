@@ -2301,7 +2301,15 @@ smite_install_unified_foreign_after_core() {
     done
 
     # All security review occurs before running Sanaei or touching Nginx.
+    # The same pre-core validator must also check the Panel grant TTL here:
+    # Sanaei setup can take time, and a stale/unconsumed one-use code must
+    # not trigger later Gateway changes that cannot be enrolled.
     smite_install_unified_signed_pair_review || return 2
+    python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" --precore-fields >/dev/null || {
+        echo 'HOLD: Foreign Panel grant expired or changed before post-core setup. Request a fresh code for the SAME reserved Node; do not reinstall.' >&2
+        return 2
+    }
     smite_install_unified_foreign_node_image_review || return 2
     smite_foreign_gateway_require_rc_paused || return 2
     smite_foreign_gateway_rc7_compose config --quiet || return 2
