@@ -21,7 +21,7 @@ STATE
 chmod 0600 "$SMITE_STATE_FILE"
 PACKET="$SMITE_STATE_DIR/staging/foreign-install-packet.json"
 python3 - "$PACKET" <<'PY'
-import json,sys
+import json,sys,time
 packet={
   "protocol":"smi1",
   "panel_url":"https://iran.example.org:443",
@@ -30,7 +30,7 @@ packet={
   "origin":"https://kh.example.org:443",
   "control_url":"https://kh.example.org:443/smite-node/"+"a"*32,
   "installation_code":"smi1_"+"B"*43,
-  "expires_at":1799999999,
+  "expires_at":int(time.time())+3600,
 }
 with open(sys.argv[1],"w") as handle:json.dump(packet,handle)
 PY
@@ -131,6 +131,38 @@ run() {
 }
 
 run 0 signed,paused,compose,sanaei,gateway,paused,compose
+# The original after-core scope check did not recheck expiry. The
+# selected one-choice path must now HOLD before Sanaei/Gateway for an
+# expired OR implausibly far-future code, even with a valid signed pair.
+python3 - "$PACKET" <<'PY_STALE'
+import json,sys,time
+from pathlib import Path
+p=Path(sys.argv[1])
+doc=json.loads(p.read_text())
+doc['expires_at']=int(time.time())-1
+p.write_text(json.dumps(doc))
+PY_STALE
+chmod 0600 "$PACKET"
+MODE=ok; run 2 signed
+python3 - "$PACKET" <<'PY_FUTURE'
+import json,sys,time
+from pathlib import Path
+p=Path(sys.argv[1])
+doc=json.loads(p.read_text())
+doc['expires_at']=int(time.time())+7201
+p.write_text(json.dumps(doc))
+PY_FUTURE
+chmod 0600 "$PACKET"
+run 2 signed
+python3 - "$PACKET" <<'PY_REFRESH'
+import json,sys,time
+from pathlib import Path
+p=Path(sys.argv[1])
+doc=json.loads(p.read_text())
+doc['expires_at']=int(time.time())+3600
+p.write_text(json.dumps(doc))
+PY_REFRESH
+chmod 0600 "$PACKET"
 MODE=bad_signature; run 2 signed
 MODE=wrong_image; run 2 signed
 MODE=wrong_runtime_id; run 2 signed
@@ -332,4 +364,4 @@ PY
     ! grep -q 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED' "$TMP/release-hold"
     ! grep -q 'smi1_B' "$TMP/release-hold"
 )
-echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (19 scenarios)'
+echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (21 scenarios)'
