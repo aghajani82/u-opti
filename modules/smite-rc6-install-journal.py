@@ -360,6 +360,26 @@ class Journal:
                         or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
                     raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
+    def ir_gateway_recovery_plan(self):
+        """Authorize pending Gateway snapshot recovery before Docker health.
+
+        A crash may leave the Node stopped mid-Gateway, so the full
+        ir_resume witness runs only AFTER stage compensation completes.
+        No untrusted/legacy/foreign journal is adopted here.
+        """
+        d = self.load()
+        if d['state'] == 'ROLLED_BACK':
+            return 'FRESH_ALLOWED', None
+        if (d.get('state') != 'COMMITTED' or d.get('role') != 'panel-iran'
+                or d.get('source') != SOURCE
+                or d.get('ir_resumable_version') != 1
+                or d.get('ir_phase') not in IR_PHASES):
+            raise Hold('IR_GATEWAY_RECOVERY_NOT_ADMITTED')
+        if (d.get('installer_start')
+                and process_start(d.get('installer_pid')) == d['installer_start']):
+            raise Hold('INSTALLER_STILL_RUNNING')
+        return d['ir_phase'], d['id']
+
     def ir_resume(self):
         d = self.load()
         if d['state'] == 'ROLLED_BACK':
@@ -414,7 +434,7 @@ class Journal:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback',
-                                       'resume-ir', 'advance-ir', 'admin-present'))
+                                       'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
     ap.add_argument('--resumable-ir', action='store_true')
     ap.add_argument('--phase', choices=IR_PHASES)
@@ -449,6 +469,11 @@ def main():
                     print('IR_OPTION_1_STAGE=' + d.get('ir_phase','CORE_NOT_VERIFIED'))
             elif a.action == 'commit':
                 print(j.commit())
+            elif a.action == 'gateway-recover-ir':
+                stage, project = j.ir_gateway_recovery_plan()
+                print('IR_GATEWAY_RECOVERY_STAGE=' + stage)
+                if project is not None:
+                    print('IR_GATEWAY_RECOVERY_PROJECT=' + project)
             elif a.action == 'resume-ir':
                 stage, project = j.ir_resume()
                 print('IR_INSTALL_STAGE=' + stage)
