@@ -42,6 +42,53 @@ if FAIL_STAGE=pairing smite_install_finish_local_ir > "$TMP/ir-no-ui"; then
 fi
 [ "$(cat "$TMP/events")" = $'gateway\ntls\npairing' ]
 unset FAIL_STAGE
+# Same option-1 function resumes only the next incomplete stage. These
+# are *function-boundary mocks*: real journal/Compose drift tests are in the
+# existing RC6 journal test, and the real signed probe remains mandatory.
+smite_install_ir_advance() {
+    local next="$1"
+    echo "checkpoint:$next" >> "$TMP/events"
+    SMITE_IR_STAGE="$next"
+}
+ADMIN_EXISTS=0
+smite_install_ir_admin_present() { [ "$ADMIN_EXISTS" = 1 ]; }
+SMITE_IR_RESUMABLE=1
+SMITE_IR_STAGE=CORE_COMMITTED
+: > "$TMP/events"
+smite_install_finish_local_ir > "$TMP/resume-fresh"
+[ "$(cat "$TMP/events")" = $'gateway\ntls\ncheckpoint:GATEWAY_VERIFIED\npairing\ncheckpoint:PAIRING_VERIFIED\nadmin\ncheckpoint:ADMIN_CREATED\nui\ncheckpoint:COMPLETE' ]
+grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/resume-fresh"
+SMITE_IR_STAGE=GATEWAY_VERIFIED
+: > "$TMP/events"
+FAIL_STAGE=pairing
+if smite_install_finish_local_ir > "$TMP/resume-pairing-fail"; then
+    echo 'FAIL: signed Pairing error silently advanced to Admin'; exit 1
+fi
+[ "$(cat "$TMP/events")" = $'tls\npairing' ]
+[ "$SMITE_IR_STAGE" = GATEWAY_VERIFIED ]
+unset FAIL_STAGE
+SMITE_IR_STAGE=PAIRING_VERIFIED
+ADMIN_EXISTS=1
+: > "$TMP/events"
+smite_install_finish_local_ir > "$TMP/resume-admin"
+[ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nui\ncheckpoint:COMPLETE' ]
+SMITE_IR_STAGE=COMPLETE
+: > "$TMP/events"
+smite_install_finish_local_ir > "$TMP/resume-finished"
+[ "$(cat "$TMP/events")" = $'tls\npairing' ]
+grep -qx 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED' "$TMP/resume-finished"
+SMITE_IR_STAGE=GATEWAY_VERIFIED
+: > "$TMP/events"
+FAIL_STAGE=tls
+if smite_install_finish_local_ir > "$TMP/resume-gateway-drift"; then
+    echo 'FAIL: previously completed Gateway was silently reconfigured'; exit 1
+fi
+[ "$(cat "$TMP/events")" = tls ]
+unset FAIL_STAGE
+unset SMITE_IR_RESUMABLE SMITE_IR_STAGE ADMIN_EXISTS
+unset -f smite_install_ir_advance smite_install_ir_admin_present
+echo 'IR_OPTION_1_RESUME_CHECKPOINT_ORDER=PASS'
+
 # Real gateway entry returns failure for missing dependencies (no host changes).
 source "$ROOT/modules/smite-gateway.sh"
 id() { echo 0; }
