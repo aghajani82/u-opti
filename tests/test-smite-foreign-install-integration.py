@@ -249,6 +249,97 @@ class Integration(unittest.TestCase):
                             b.execute('PRAGMA index_info('+cj[1]+')').fetchall(),
                             table)
 
+    def test_real_smite_grant_after_iran_panel_transaction_prevents_unsafe_rollback(self):
+        """One existing Iran transaction, actual Smite grant and retained IDs.
+
+        Full disposable U-OPTI Panel stage/transaction, THEN the pinned
+        companion Smite grant store. Issuing a real foreign code must
+        prevent a later config-only Iran Panel rollback, without any
+        Docker, Nginx, host write or separate grant implementation.
+        """
+        import sqlite3
+        from app import foreign_install_grants
+
+        root=Path(__file__).resolve().parents[1]
+        spec_fixture=importlib.util.spec_from_file_location(
+            'uopti_iran_panel_full_trial_fixture',
+            root/'tests'/'test-smite-unified-panel-stage.py')
+        fixture_module=importlib.util.module_from_spec(spec_fixture)
+        sys.modules[spec_fixture.name]=fixture_module
+        spec_fixture.loader.exec_module(fixture_module)
+        site=fixture_module.Prepare(methodName='runTest')
+        site.setUp()
+        self.addCleanup(site.doCleanups)
+
+        # Reserve exactly one Foreign Node through existing Panel schema,
+        # before the signed Panel stage is snapshotted.
+        foreign_id='foreign-node-1234'
+        foreign_name='node-kh'
+        with sqlite3.connect(site.db) as conn:
+            conn.execute(
+                'INSERT INTO nodes VALUES (?,?,?)',
+                (foreign_id,foreign_name,
+                 '{"role":"foreign","provisioning":"reserved_for_pairing"}'))
+        site.panel.prepare(fixture_module.stage.CONFIRM)
+
+        spec_tx=importlib.util.spec_from_file_location(
+            'uopti_iran_panel_actual_grant_rehearsal',
+            root/'modules'/'smite-unified-panel-transaction.py')
+        transaction=importlib.util.module_from_spec(spec_tx)
+        sys.modules[spec_tx.name]=transaction
+        spec_tx.loader.exec_module(transaction)
+        executor=transaction.PanelTransaction(
+            site.root,stager=site.panel,fixture_capability=True)
+        self.assertEqual(executor.rehearse(
+            confirm=transaction.CONFIRM)['status'],'REHEARSED_OFFLINE')
+
+        files={name:(site.root/rel).read_bytes()
+               for name,rel in transaction.CONFIG.items()}
+        before_ir=(site.root/fixture_module.stage.IR_ID_REL).read_bytes()
+        grant=foreign_install_grants.issue(
+            site.db,master_key=fixture_module.MASTER,
+            admin_id='offline-admin',node_id=foreign_id,
+            node_name=foreign_name,domain='kh.example.com',
+            now=1850000000)
+        self.assertEqual(grant.node_id,foreign_id)
+        self.assertTrue(grant.control_url.startswith(
+            'https://kh.example.com:443/smite-node/'))
+        with self.assertRaises(transaction.Hold):
+            executor.rollback_rehearsal(confirm=transaction.CONFIRM)
+        self.assertEqual({name:(site.root/rel).read_bytes()
+                          for name,rel in transaction.CONFIG.items()},files)
+        with sqlite3.connect(site.db) as conn:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM smite_foreign_install_grants').fetchone()[0],1)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM smite_node_identities').fetchone()[0],1)
+
+        # Actual Smite redemption commits a new encrypted foreign identity
+        # (same original Iran Node stays untouched); rollback must STILL
+        # refuse rather than erase the new trust relationship.
+        proof=dict(
+            database_path=site.db,
+            master_key=fixture_module.MASTER,
+            code=grant.code,
+            node_id=foreign_id,
+            node_name=foreign_name,
+            control_url=grant.control_url,
+            node_secret='d'*64,
+            now=1850000030)
+        self.assertTrue(foreign_install_grants.redeem(**proof))
+        self.assertTrue(foreign_install_grants.redeem(**proof))
+        with self.assertRaises(transaction.Hold):
+            executor.rollback_rehearsal(confirm=transaction.CONFIRM)
+        self.assertEqual({name:(site.root/rel).read_bytes()
+                          for name,rel in transaction.CONFIG.items()},files)
+        self.assertEqual(
+            (site.root/fixture_module.stage.IR_ID_REL).read_bytes(),before_ir)
+        with sqlite3.connect(site.db) as conn:
+            self.assertEqual(conn.execute(
+                'SELECT node_role FROM smite_node_identities WHERE node_id=?',
+                (foreign_id,)).fetchone()[0],'foreign')
+        self.assertEqual(executor._journal_read()['phase'],'REHEARSED')
+
     def test_real_redemption_lost_reply_expired_recovery_and_revocation(self):
         fixture=http_fixture.ForeignInstallHTTP();fixture.setUp();self.addCleanup(fixture.doCleanups)
         settings.smite_foreign_install_origin_trust_enabled=True
