@@ -1775,3 +1775,29 @@ any fresh host changes, followed by disposable two-server live
 recovery and bidirectional Connected verification. The Foreign
 public option 2 retains `HOLD_BEFORE_HOST_CHANGES`. Main,
 production servers and existing FRP/Sanaei/Backhaul are untouched.
+
+## Consolidation checkpoint — match exact selected RC7 image pair to existing install journal (2026-11-13)
+
+The existing selected fresh-host installer now uses a read-only preflight
+inside `smite-install.sh` to compare its selected RC7 source, version,
+publication ref and signed Panel/Node manifest against the **original
+imported `smite-rc6-install-journal.py`** constants and candidate images.
+This review runs before installing Docker, pulling images, creating
+containers or beginning a fresh journal. Any unsigned source/journal
+drift returns HOLD.
+
+The independently signed unified-install trial manifest is checked
+separately and must remain an **unapproved, non-journal** source. The
+current Iran choice still selects official RC7; the Foreign option 2
+still holds BEFORE host changes until its full signed runtime/recovery
+can be released and tested. This prevents mixing official Iran images
+with unapproved foreign trial images in an unrecoverable transaction.
+It does not by itself release an integrated image pair.
+
+Existing Iran install test suite covers exact match, mutated journal,
+unauthorized manifest approval, mismatched selected source and
+pre-Docker/pre-journal ordering. No new menu, installer, engine,
+installation feature or production host changes. Next: obtain an
+independently approved exact paired source and align existing journal,
+Pairing and two menu paths, then verify clean two-host signed
+Connected and Rollback before release to main.
