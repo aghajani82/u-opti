@@ -214,7 +214,12 @@ class Integration(unittest.TestCase):
             base=Path(root)
             real=base/'smite-schema.db'
             rehearsed=base/'uopti-schema.db'
-            # Use actual Smite pairing migration on the real side.
+            # Same real Smite prerequisite: the Panel nodes table and
+            # database must exist before the signed pairing migration.
+            # Never make the store silently create a missing live DB.
+            with sqlite3.connect(real) as conn:
+                conn.execute(
+                    "CREATE TABLE nodes (id TEXT PRIMARY KEY, name TEXT, metadata TEXT)")
             from app import node_pairing_store
             node_pairing_store.initialize_schema(real)
             foreign_install_grants.initialize_schema(real)
