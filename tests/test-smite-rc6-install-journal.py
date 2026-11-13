@@ -194,6 +194,127 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(m.Hold): self.j.rollback()
         self.assert_no_stop()
 
+    def prepare_retained_ir(self):
+        """Real journal phase transitions with Docker/SQLite fixture only."""
+        ir_root=self.root/'iran-fixture'
+        ir_root.mkdir()
+        journal=m.Journal(ir_root,self.run_command)
+        journal.folder.mkdir(parents=True,mode=0o700)
+        project=journal.begin('panel-iran',resumable_ir=True)
+        self.objects.clear();self.calls.clear()
+        for i,name in enumerate(('smite-panel','smite-node')):
+            self.objects[('b' if i==0 else 'a')*64] = dict(
+                Id=('b' if i==0 else 'a')*64,Name='/'+name,
+                State={'Running':True,'Health':{'Status':'healthy'}},
+                Config={'Image':m.IMAGES[name],
+                        'Env':(['SMITE_NODE_PANEL_AUTH_MODE=paused',
+                                'SMITE_AGENT_AUTH_MODE=strict'] if name=='smite-node' else []),
+                        'Labels':{
+                            'com.docker.compose.project':project,
+                            'com.docker.compose.service':name,
+                            'com.docker.compose.project.config_files':(
+                                '/opt/smite/docker-compose.yml' if name=='smite-panel'
+                                else '/opt/smite-node/docker-compose.yml')}},
+                HostConfig={'RestartPolicy':{'Name':'unless-stopped'}})
+        state=ir_root/'etc/u-opti/smite/state.env'
+        state.parent.mkdir(parents=True)
+        state.write_text(
+            'SMITE_ROLE=panel-iran\n'
+            'SMITE_CONNECTION_MODE=standard\n'
+            'SMITE_MANAGED_VERSION='+m.VERSION+'\n'
+            'SMITE_UPSTREAM_REF='+m.SOURCE+'\n')
+        state.chmod(0o600)
+        self.assertIn('COMMITTED',journal.commit())
+        return journal,ir_root,project
+
+    def test_ir_resume_from_each_verified_phase_and_complete(self):
+        ir,root,project=self.prepare_retained_ir()
+        self.assertEqual(ir.ir_resume(),('CORE_COMMITTED',project))
+        with self.assertRaisesRegex(m.Hold,'OUT_OF_ORDER'):
+            ir.ir_advance('PAIRING_VERIFIED')
+        self.assertEqual(ir.ir_advance('GATEWAY_VERIFIED'),'GATEWAY_VERIFIED')
+        self.assertEqual(m.Journal(root,self.run_command).ir_resume(),
+                         ('GATEWAY_VERIFIED',project))
+        with self.assertRaisesRegex(m.Hold,'NOT_SIGNED'):
+            ir.ir_advance('PAIRING_VERIFIED')
+        node=self.objects['a'*64]
+        node['Config']['Env']=[
+            'SMITE_NODE_PANEL_AUTH_MODE=signed','SMITE_AGENT_AUTH_MODE=strict']
+        node['Config']['Labels']['com.docker.compose.project.config_files'] = (
+            '/opt/smite-node/docker-compose.yml,'
+            '/opt/smite-node/docker-compose.security-candidate.yml')
+        self.assertEqual(ir.ir_advance('PAIRING_VERIFIED'),'PAIRING_VERIFIED')
+        with self.assertRaisesRegex(m.Hold,'DATABASE_MISSING'):
+            ir.ir_advance('ADMIN_CREATED')
+        db=root/'opt/smite/panel/data/smite.db'
+        db.parent.mkdir(parents=True)
+        with sqlite3.connect(db) as conn:
+            conn.execute('CREATE TABLE admins(username TEXT, password_hash TEXT)')
+            conn.execute("INSERT INTO admins VALUES('operator','hash-bcrypt')")
+        self.assertTrue(ir.ir_admin_present())
+        self.assertEqual(ir.ir_advance('ADMIN_CREATED'),'ADMIN_CREATED')
+        self.assertEqual(ir.ir_advance('COMPLETE'),'COMPLETE')
+        self.assertEqual(ir.ir_resume(),('COMPLETE',project))
+        self.assertEqual(ir.ir_advance('COMPLETE'),'COMPLETE')
+        self.assertEqual(ir.load()['ir_phase'],'COMPLETE')
+        self.assert_no_stop()
+
+    def test_ir_resume_holds_on_drift_and_does_not_recreate_node(self):
+        ir,root,_=self.prepare_retained_ir()
+        node=self.objects['a'*64]
+        for key,value in (
+            ('Image','ghcr.io/aghajani82/smite-node:latest'),
+            ('project','unknown-owner'),
+            ('service','unreviewed-service'),
+            ('files','/tmp/foreign-compose.yml'),
+        ):
+            before_image=node['Config']['Image']
+            before_labels=node['Config']['Labels'].copy()
+            if key=='Image':node['Config']['Image']=value
+            else:
+                name={'project':'com.docker.compose.project',
+                      'service':'com.docker.compose.service',
+                      'files':'com.docker.compose.project.config_files'}[key]
+                node['Config']['Labels'][name]=value
+            with self.subTest(key=key),self.assertRaises(m.Hold):
+                ir.ir_resume()
+            node['Config']['Image']=before_image
+            node['Config']['Labels']=before_labels
+        node['State']['Running']=False
+        with self.assertRaises(m.Hold):ir.ir_resume()
+        node['State']['Running']=True
+        state=root/'etc/u-opti/smite/state.env'
+        state.write_text(state.read_text().replace(
+            'SMITE_MANAGED_VERSION='+m.VERSION,'SMITE_MANAGED_VERSION=unverified'))
+        with self.assertRaises(m.Hold):ir.ir_resume()
+        self.assertEqual(ir.load()['ir_phase'],'CORE_COMMITTED')
+        self.assert_no_stop()
+
+    def test_legacy_or_foreign_installs_not_auto_adopted_by_ir_cursor(self):
+        self.install_partial()
+        state=self.root/'etc/u-opti/smite/state.env';state.parent.mkdir(parents=True)
+        state.write_text('SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION='+m.VERSION+
+                         '\nSMITE_UPSTREAM_REF='+m.SOURCE+'\n')
+        self.j.commit()
+        with self.assertRaisesRegex(m.Hold,'NOT_OWNED'):
+            self.j.ir_resume()
+        with self.assertRaisesRegex(m.Hold,'NOT_OWNED'):
+            self.j.ir_advance('GATEWAY_VERIFIED')
+        with self.assertRaisesRegex(m.Hold,'INVALID_RESUMABLE'):
+            self.j.begin('foreign',resumable_ir=True)
+        ir,_,_=self.prepare_retained_ir()
+        d=ir.load();d.pop('ir_resumable_version');d.pop('ir_phase');ir.save(d)
+        with self.assertRaisesRegex(m.Hold,'NOT_OWNED'):
+            ir.ir_resume()
+
+    def test_ir_resume_rejects_active_installer_same_process_identity(self):
+        ir,_,_=self.prepare_retained_ir()
+        d=ir.load();d['installer_pid']=101;d['installer_start']='start101';ir.save(d)
+        with patch.object(m,'process_start',return_value='start101'):
+            with self.assertRaisesRegex(m.Hold,'STILL_RUNNING'):
+                ir.ir_resume()
+        self.assert_no_stop()
+
     def test_completed_install_refuses(self):
         self.install_partial();p=self.root/'etc/u-opti/smite/state.env';p.parent.mkdir(parents=True)
         p.write_text('SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION='+m.VERSION+'\nSMITE_UPSTREAM_REF='+m.SOURCE+'\n')
