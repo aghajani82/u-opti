@@ -2228,7 +2228,7 @@ smite_install_unified_signed_pair_review() {
     # explicit release decision before any Foreign host mutation.
     local pairing="$module_dir/smite-node-pairing.py"
     [ -f "$pairing" ] && [ ! -L "$pairing" ] || return 2
-    python3 -B - "$pairing" <<'PY_UNIFIED_FOREIGN_RELEASE'
+    python3 -B - "$pairing" <<'PY_UNIFIED_FOREIGN_RELEASE' || return 2
 import importlib.util
 from pathlib import Path
 import sys
@@ -2250,8 +2250,6 @@ except Exception:
           file=sys.stderr)
     raise SystemExit(2)
 PY_UNIFIED_FOREIGN_RELEASE
-    local result=$?
-    [ "$result" -eq 0 ] || return 2
     echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_RELEASE_APPROVED'
 }
 
