@@ -1,9 +1,20 @@
 # Unified Smite installation — trial plan and continuation record
 
-Updated: 2026-11-12 (Asia/Tehran)
-Status: DESIGN / IMPLEMENTATION STARTED — NOT READY FOR HOST INSTALLATION
+Updated: 2026-11-13 (Asia/Tehran)
+Status: OFFLINE INTEGRATION VERIFIED — SIGNED RELEASE / LIVE HOST ACTIVATION BLOCKED
 Branch: trial/unified-smite-install
 Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
+
+## Current release decision (authoritative; older checkpoints below are historical)
+
+- **User-facing IR option 1:** official signed Smite RC7 source `9a1270b3...`. Its existing installer verifies the exact panel/node images against the rollback journal and performs the co-located Iran node signed enrollment. It is **not** the newer unified Panel release.
+- **User-facing Foreign option 2:** explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. No partially installed Node, code redemption or host mutation is permitted until the complete released chain is present.
+- **Unified signed Smite pair:** companion `aghajani82/Smite` branch `trial/unified-smite-install`, pinned signed source `b865be93e22153c60769f6329e6e55e781494ded`. Verified registry images are trial-only; both `release_approved:false` and `activation_allowed:false` remain enforced. Do NOT flip these flags or substitute an unreviewed image.
+- **IR unified Panel transaction:** `smite-unified-panel-stage.py` performs private staging; existing `smite-unified-panel-transaction.py` permits **disposable-root rehearsal and config-only rollback**, not production apply. Recent tests compare complete registered Node rows, pending Pairing codes, inbound Panel nonces, grants, signed identities and replay against sealed snapshots. This protects existing local Iran and new Foreign identities.
+- **Foreign internal sequence:** one hidden private Panel-issued `smi1` packet, exact HTTPS/443 and Node name; original Sanaei read-only attachment; Gateway no-recreate witness; same signed Pairing/rollback entry points; durable one-key redemption and promotion. Its assembled internal helpers are tested offline but **not yet permitted from the public option 2**.
+- **Real cross-repository offline proof:** Panel staging/rehearsal, the actual pinned Smite SQLite grant issue and idempotent redemption, and refusal to roll back Panel config after enrollment have passed alongside the existing ASGI/HTTPS/HMAC tests. This is NOT a live two-server Connected result. Verified U-OPTI CI: https://github.com/aghajani82/u-opti/actions/runs/43382017487
+- **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
+- **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
 ## User-approved outcome
 - Iran: one installation entry installs Panel, HTTPS/443 Gateway and Iran Node; complete only after authenticated local Node enrollment and bidirectional checks, then administrator sign-in.
@@ -26,23 +37,20 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - Fresh installer deliberately refuses partial/existing state. Safe continuation must validate committed install ownership and actual host state, not just a progress flag.
 - Signed RC7 runtime images are immutable. Editing Smite main alone does NOT update the running image. New enrollment backend requires a tested, signed trial image pair and matching U-OPTI pins.
 
-## Milestones
-- [x] Create isolated U-OPTI branch from current main.
-- [x] Persist this plan before implementation.
-- [x] Inventory current U-OPTI and Smite enrollment/origin/replay paths; record exact sources.
-- [x] First implementation checkpoint: explicit Sanaei attachment result codes and isolated regressions.
-- [x] Implement and test the inert installation-grant store: UUID/name/domain binding, 2-hour expiry and atomic identity/origin commit. Gated HTTP administrator authorization is implemented; UI remains pending.
-- [ ] Implement companion Smite trial branch: authenticated issuance/revocation, atomic redemption, safe origin authorization and UI.
-- [ ] Handle credential loss/retry/expired/revoked codes without duplicate identities or secret logging.
-- [ ] Build and verify signed trial images; bind installer to their exact digests.
-- [ ] Integrate existing Iran flow and verified continuation.
-- [ ] Integrate Foreign installer with structured failure propagation and Sanaei return-to-caller.
-- [ ] Reconcile completed phases; refuse drift; resume incomplete phases without destructive reinstall or rekey.
-- [ ] Simplify ordinary menu entries; preserve advanced recovery access and standalone Sanaei.
-- [ ] Test positive, negative, retry and rollback paths; full applicable CI.
-- [ ] Publish exact trial installation command only when runnable.
-- [ ] Mohammad tests fresh Iran and Foreign; record output and limitations.
-- [ ] Merge only after explicit user acceptance.
+## Current implementation / release checklist
+
+- [x] Separate U-OPTI and Smite trial branches, reviewed source locks and signed trial GHCR image pair.
+- [x] Admin/MFA-bound Foreign grant issue/revoke/redeem, additive SQLite tables, origin checks, and Foreign UI in companion Smite trial.
+- [x] One-use two-hour `smi1` packet, no-echo terminal intake, durable identity, lost-ACK reconciliation and strict HTTPS/443 binding.
+- [x] Reuse existing Sanaei attachment, Gateway, signed Pairing, image/Compose validation and rollback helpers in internal trial code.
+- [x] Signed official RC7 Iran source/image/journal coherence preflight and original one-choice Iran flow.
+- [x] Real cross-repository **offline** Panel rehearsal → Foreign grant issue/redeem → protected rollback, including pending Pairing/nonces and replay drift.
+- [x] Trial GitHub CI for the above offline contracts; most recent signed-source and code proofs are linked in this record.
+- [ ] Independently approve/publish a non-trial exact signed Panel+Node release (current trial activation is explicitly OFF).
+- [ ] Adapt **existing** install journal and production Panel lifecycle to that approved release, with reviewed rollback after interruptions (do not use fixture rehearsal as production executor).
+- [ ] Wire approved release to Iran option 1 and full Foreign option 2, without new public choices or extra operator steps.
+- [ ] Test on isolated real Iran/Foreign hosts; verify Sanaei DB RO, TLS/443, encrypted identity retention, real two-direction `Connected`, FRP 20182 unchanged and rollback under failures.
+- [ ] Resolve final CI/PRs, gain explicit acceptance of tested release and then merge safely to `main`.
 
 ## Required enrollment design
 Authenticate administrator issuance using existing admin/MFA protections. Bind the grant to an exact pending Node and normalized public gateway domain; derive/validate the restricted HTTPS/443 control path. Never authorize arbitrary URLs, localhost/private/link-local destinations, redirects, wildcard origins or unrelated nodes based on a bearer code. Protect against DNS rebinding and SSRF using the existing reviewed transport policy.
