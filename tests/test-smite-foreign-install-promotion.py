@@ -51,7 +51,7 @@ class Promotion(unittest.TestCase):
     def write_config(self):
         self.write(self.state, "SMITE_ROLE=foreign\nSMITE_CONNECTION_MODE=standard\nSMITE_NODE_NAME=node-kh\nSMITE_PANEL_DOMAIN=panel.example.com\n")
         self.write(self.gateway, "SMITE_FOREIGN_GATEWAY_DOMAIN=kh.example.com\nSMITE_FOREIGN_PANEL_DOMAIN=panel.example.com\nSMITE_FOREIGN_CONTROL_PATH=/smite-node/" + "a"*32 + "\nSMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\nSMITE_FOREIGN_GATEWAY_MODE=https-control-path\n")
-        self.write(self.env, "PANEL_ADDRESS=panel.example.com:443\nSMITE_CONTROL_ADDRESS=https://kh.example.com/smite-node/" + "a"*32 + "\nSMITE_NODE_PANEL_AUTH_MODE=paused\nSMITE_AGENT_AUTH_MODE=strict\nSMITE_ENGINE_INVENTORY_MODE=managed\n")
+        self.write(self.env, "PANEL_ADDRESS=panel.example.com:443\nSMITE_CONTROL_ADDRESS=https://kh.example.com:443/smite-node/" + "a"*32 + "\nSMITE_NODE_PANEL_AUTH_MODE=paused\nSMITE_AGENT_AUTH_MODE=strict\nSMITE_ENGINE_INVENTORY_MODE=managed\n")
 
     def network(self, panel, target, body, headers):
         self.assertEqual(panel, "https://panel.example.com:443")
@@ -112,7 +112,8 @@ class Promotion(unittest.TestCase):
         variants = [(self.state, "SMITE_NODE_NAME=node-kh", "SMITE_NODE_NAME=other"),
                     (self.gateway, "SMITE_FOREIGN_CONTROL_PATH=/smite-node/", "SMITE_FOREIGN_CONTROL_PATH=/wrong/"),
                     (self.env, "SMITE_NODE_PANEL_AUTH_MODE=paused", "SMITE_NODE_PANEL_AUTH_MODE=legacy"),
-                    (self.env, "SMITE_CONTROL_ADDRESS=https://kh.example.com", "SMITE_CONTROL_ADDRESS=https://other.example.com")]
+                    (self.env, "SMITE_CONTROL_ADDRESS=https://kh.example.com:443", "SMITE_CONTROL_ADDRESS=https://other.example.com"),
+                    (self.env, "SMITE_CONTROL_ADDRESS=https://kh.example.com:443", "SMITE_CONTROL_ADDRESS=https://kh.example.com")]
         for target, old, new in variants:
             original = target.read_text()
             target.write_text(original.replace(old, new))

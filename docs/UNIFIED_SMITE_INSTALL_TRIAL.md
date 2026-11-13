@@ -1801,3 +1801,9 @@ installation feature or production host changes. Next: obtain an
 independently approved exact paired source and align existing journal,
 Pairing and two menu paths, then verify clean two-host signed
 Connected and Rollback before release to main.
+
+## Consolidation checkpoint — same exact Panel-issued HTTPS/443 scope at identity promotion (2026-11-13)
+
+The existing `smite-foreign-install-promotion.py` identity promotion now requires the managed Node `SMITE_CONTROL_ADDRESS` to be **exactly equal** to the already verified Panel-issued `smi1` `control_url` including explicit `:443` and the reserved 32-hex path. Previously both `https://foreign/path` and the exact `https://foreign:443/path` were accepted; the alias made the final identity transaction less strict than the pre-boot Node writer, Gateway and signed Pairing admission. The Panel may continue to accept HTTPS default ports at the HTTP transport layer; this change only binds the new one-choice installer to its exact private credential scope.
+
+Existing promotion, crash-recovery identity-phase, and *real companion Smite ASGI* offline integration tests now use the exact URL, and dedicated negative cases prove that the alias cannot promote an enrolled identity, including after a signed proof. No new menu, API, identifier, packet field, security engine or activation path. The signed trial manifest remains unapproved, selected option 2 stays HOLD before host changes, and main/live servers remain unchanged.

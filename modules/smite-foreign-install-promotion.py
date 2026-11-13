@@ -158,8 +158,11 @@ def verify_gateway(packet, *, state_path, gateway_path, node_env_path, client):
         if (parsed.scheme != "https" or parsed.hostname != foreign_host
                 or parsed.port not in (None, 443) or parsed.path != path
                 or parsed.query or parsed.fragment or parsed.username or parsed.password
-                or control not in (f"https://{foreign_host}{path}",
-                                   f"https://{foreign_host}:443{path}")):
+                # The smi1 Packet has a canonical explicit HTTPS/443 URL.
+                # A semantically equivalent alias is NOT the same host
+                # configuration and must not be promoted as reviewed.
+                or control != scope["control_url"]
+                or control != f"https://{foreign_host}:443{path}"):
             deny()
     except ValueError:
         deny()

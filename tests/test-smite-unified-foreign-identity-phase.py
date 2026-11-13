@@ -65,7 +65,7 @@ class IdentityPhase(unittest.TestCase):
             "SMITE_FOREIGN_GATEWAY_MODE=https-control-path\n"))
         self.write(self.env, (
             "PANEL_ADDRESS=panel.example.com:443\n"
-            "SMITE_CONTROL_ADDRESS=https://kh.example.com/smite-node/"+"a"*32+"\n"
+            "SMITE_CONTROL_ADDRESS=https://kh.example.com:443/smite-node/"+"a"*32+"\n"
             "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
             "SMITE_AGENT_AUTH_MODE=strict\n"
             "SMITE_ENGINE_INVENTORY_MODE=managed\n"))
@@ -177,7 +177,8 @@ class IdentityPhase(unittest.TestCase):
             (self.state,"SMITE_NODE_NAME=node-kh","SMITE_NODE_NAME=other"),
             (self.state,"SMITE_CONNECTION_MODE=standard","SMITE_CONNECTION_MODE=private"),
             (self.env,"SMITE_NODE_PANEL_AUTH_MODE=paused","SMITE_NODE_PANEL_AUTH_MODE=legacy"),
-            (self.env,"SMITE_CONTROL_ADDRESS=https://kh.example.com","SMITE_CONTROL_ADDRESS=https://other.example.com"),
+            (self.env,"SMITE_CONTROL_ADDRESS=https://kh.example.com:443","SMITE_CONTROL_ADDRESS=https://other.example.com"),
+            (self.env,"SMITE_CONTROL_ADDRESS=https://kh.example.com:443","SMITE_CONTROL_ADDRESS=https://kh.example.com"),
         ]
         for target, old, new in variants:
             before=target.read_text()

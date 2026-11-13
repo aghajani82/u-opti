@@ -124,7 +124,7 @@ class Integration(unittest.TestCase):
             'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\n')
         safe_write(env,
             'PANEL_ADDRESS='+panel+':443\n'
-            'SMITE_CONTROL_ADDRESS=https://'+origin+path+'\n'
+            'SMITE_CONTROL_ADDRESS=https://'+origin+':443'+path+'\n'
             'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
             'SMITE_AGENT_AUTH_MODE=strict\n'
             'SMITE_ENGINE_INVENTORY_MODE=managed\n')
