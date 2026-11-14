@@ -46,6 +46,15 @@ class FakePanelOnly:
         self.running = None
         self._event("stop-panel")
 
+    def require_panel_stopped(self):
+        if self.running is not None:
+            raise AssertionError("Refusing SQLite migration with active Panel")
+
+    def migrate_schema(self, migrate):
+        self.require_panel_stopped()
+        migrate()
+        self._event("migrate-schema")
+
     def nginx_check_and_reload(self):
         self._event("nginx-validate-reload")
 
@@ -116,14 +125,14 @@ class PanelServiceCutover(unittest.TestCase):
         self._config(True)
         self.assertEqual(
             self.driver.calls,
-            ["stop-panel", "nginx-validate-reload",
+            ["stop-panel", "migrate-schema", "nginx-validate-reload",
              "start-candidate", "health-candidate"])
         self.assertEqual(
             self.engine.tx._tables(),
             {"smite_foreign_install_grants", "smite_foreign_install_origins"})
         self._untouched()
         self.assertEqual(self._apply()["status"], "ALREADY_REHEARSED")
-        self.assertEqual(len(self.driver.calls), 4)
+        self.assertEqual(len(self.driver.calls), 5)
 
     def test_cutover_and_rollback_keep_additive_schema_and_never_rewind_replay(self):
         self._apply()
@@ -158,6 +167,36 @@ class PanelServiceCutover(unittest.TestCase):
                 self.assertEqual(self._journal()["phase"], "COMMITTED")
                 self._config(True)
                 self._untouched()
+
+    def test_schema_cannot_run_while_original_panel_is_still_active(self):
+        before = self.driver.stop_panel
+        def ineffective_stop():
+            # A superficially successful stop is NOT an actual stopped
+            # state. The service driver must check before touching SQLite.
+            self.driver.calls.append("fake-stop-only")
+        self.driver.stop_panel = ineffective_stop
+        with self.assertRaises(AssertionError):
+            self._apply()
+        self.assertEqual(self._journal()["phase"], "BEFORE_STOP")
+        self.assertEqual(self.driver.running, "original")
+        self.assertEqual(self.engine.tx._tables(), set())
+        self.assertNotIn("migrate-schema", self.driver.calls)
+        self._untouched()
+        self.driver.stop_panel = before
+        self.assertEqual(self._apply()["status"], "REHEARSED_WITH_PANEL_SERVICE")
+
+    def test_interrupted_schema_after_atomic_commit_is_not_run_twice(self):
+        self.driver.once = "migrate-schema"
+        with self.assertRaises(OSError):
+            self._apply()
+        self.assertEqual(self._journal()["phase"], "BEFORE_SCHEMA")
+        self.assertEqual(self.driver.calls.count("migrate-schema"), 1)
+        self.assertEqual(
+            self.engine.tx._tables(),
+            {"smite_foreign_install_grants", "smite_foreign_install_origins"})
+        self.assertEqual(self._apply()["status"], "REHEARSED_WITH_PANEL_SERVICE")
+        self.assertEqual(self.driver.calls.count("migrate-schema"), 1)
+        self._untouched()
 
     def test_service_crash_after_start_before_checkpoint_resumes(self):
         self.driver.once = "start-candidate"
