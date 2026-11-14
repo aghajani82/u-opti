@@ -1,8 +1,10 @@
 """No-network disposable Panel transaction and rollback rehearsal tests."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -49,6 +51,53 @@ class OfflineRollout(unittest.TestCase):
 
     def _ledger(self):
         return json.loads((self.executor.rehearsal / "journal.json").read_text())
+
+    def test_pinned_smite_grant_ddl_matches_existing_executor_schema(self):
+        """Reject Panel-source migration drift before a new digest is admitted.
+
+        The companion checkout is pinned by the existing CI workflow to the
+        signed manifest's exact source commit; never fetch mutable upstream
+        code at test time. This is not another schema migration engine.
+        """
+        manifest_path = ROOT / "modules" / "smite-unified-trial-registry-pair.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        companion = ROOT / "companion-smite" / "panel" / "app" / "foreign_install_grants.py"
+        if not companion.is_file():
+            if os.environ.get("GITHUB_ACTIONS"):
+                self.fail("CI must check out the pinned Smite companion source")
+            self.skipTest("Pinned Smite companion source not present offline")
+        parsed = ast.parse(companion.read_text(encoding="utf-8"))
+        ddl_assignments = [
+            node for node in parsed.body
+            if isinstance(node, ast.Assign) and
+            any(isinstance(target, ast.Name) and
+                target.id == "FOREIGN_INSTALL_DDL" for target in node.targets)
+        ]
+        # The initial, already signed trial source predates the shared DDL
+        # declaration. The next signed source MUST expose the contract.
+        if manifest["source_commit"] == "de0677d015a00160970ed57bba565adc4fafe8eb":
+            self.assertEqual(ddl_assignments, [])
+            return
+        self.assertEqual(len(ddl_assignments), 1)
+        smite_ddl = ast.literal_eval(ddl_assignments[0].value)
+        self.assertEqual(len(smite_ddl), len(trans.GRANT_DDL))
+        with sqlite3.connect(":memory:") as signed, sqlite3.connect(":memory:") as planned:
+            for statement in smite_ddl:
+                signed.execute(statement)
+            for statement in trans.GRANT_DDL:
+                planned.execute(statement)
+            for table in ("smite_foreign_install_grants",
+                          "smite_foreign_install_origins"):
+                for check in ("table_info", "foreign_key_list", "index_list"):
+                    sql = f"PRAGMA {check}({table})"
+                    self.assertEqual(signed.execute(sql).fetchall(),
+                                     planned.execute(sql).fetchall(), sql)
+                indexes = signed.execute(
+                    f"PRAGMA index_list({table})").fetchall()
+                for item in indexes:
+                    sql = f"PRAGMA index_xinfo({item[1]})"
+                    self.assertEqual(signed.execute(sql).fetchall(),
+                                     planned.execute(sql).fetchall(), sql)
 
     def test_review_is_inert_and_bound_to_signed_preimages(self):
         result = self.executor.review()
