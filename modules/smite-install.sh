@@ -1097,6 +1097,90 @@ smite_install_apply_compatibility() {
     smite_recreate_with_overlays_noninteractive || return 1
 }
 
+smite_install_ir_panel_core() {
+    local panel_domain="$1" panel_host="$2"
+    if ! smite_install_panel_files "$panel_domain" "$panel_host"; then
+        return 1
+    fi
+
+    if ! smite_install_cli_tools; then
+        return 1
+    fi
+
+    if ! smite_install_pull_images true; then
+        echo "ERROR: Failed to pull the validated Smite images."
+        return 1
+    fi
+
+    echo
+    echo "Starting Smite Panel on ${panel_host}:8000..."
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
+        echo "ERROR: Failed to start Smite Panel."
+        return 1
+    fi
+
+    if ! smite_wait_healthy smite-panel 90 || ! smite_wait_panel_api; then
+        echo "ERROR: Smite Panel did not become healthy."
+        return 1
+    fi
+
+    if ! smite_install_core_optional_frp_verify smite-panel; then
+        return 1
+    fi
+}
+
+smite_install_ir_node_core() {
+    local node_name="$1" panel_private_ip="$2" connection_mode="$3"
+    mkdir -p "$SMITE_NODE_DIR/certs" || {
+        echo "ERROR: Failed to create the Smite node certificate directory."
+        return 1
+    }
+
+    echo "Downloading the Iran-node CA certificate from the local panel..."
+    if ! curl -fsS --retry 5 \
+        http://127.0.0.1:8000/api/panel/ca \
+        -o "$SMITE_NODE_DIR/certs/ca.crt"; then
+        echo "ERROR: Failed to obtain the Iran-node CA certificate."
+        return 1
+    fi
+
+    if ! grep -q "BEGIN CERTIFICATE" "$SMITE_NODE_DIR/certs/ca.crt"; then
+        echo "ERROR: The panel returned an invalid CA certificate."
+        return 1
+    fi
+
+    if ! smite_install_node_files \
+        "$node_name" \
+        "iran" \
+        "127.0.0.1:8000" \
+        "$SMITE_NODE_DIR/certs/ca.crt" \
+        "" \
+        "$panel_private_ip" \
+        "$connection_mode"; then
+        return 1
+    fi
+
+    echo "Starting Iran Smite Node..."
+    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
+        echo "ERROR: Failed to start Smite Node."
+        return 1
+    fi
+
+    if ! smite_wait_healthy smite-node 90; then
+        echo "ERROR: Smite Node did not become healthy."
+        return 1
+    fi
+
+    if ! smite_install_core_optional_frp_verify smite-node; then
+        return 1
+    fi
+
+    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ] && ! smite_install_clean_rc_broker_start_node_forwarding; then
+        echo "ERROR: Root Broker/Node channel did not pass verification."
+        return 1
+    fi
+}
+
 smite_install_panel_iran() {
     clear
     echo "======================================"
@@ -1259,98 +1343,10 @@ smite_install_panel_iran() {
         return "${SMITE_INSTALL_FAILURE_CODE:-0}"
     }
 
-    if ! smite_install_panel_files "$panel_domain" "$panel_host"; then
+    if ! smite_install_ir_panel_core "$panel_domain" "$panel_host" ||
+       ! smite_install_ir_node_core "$node_name" "$panel_private_ip" "$connection_mode"; then
         smite_install_pause
         return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_install_cli_tools; then
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_install_pull_images true; then
-        echo "ERROR: Failed to pull the validated Smite images."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    echo
-    echo "Starting Smite Panel on ${panel_host}:8000..."
-    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_PANEL_COMPOSE" up -d --no-build smite-panel; then
-        echo "ERROR: Failed to start Smite Panel."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_wait_healthy smite-panel 90 || ! smite_wait_panel_api; then
-        echo "ERROR: Smite Panel did not become healthy."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_install_core_optional_frp_verify smite-panel; then
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    mkdir -p "$SMITE_NODE_DIR/certs" || {
-        echo "ERROR: Failed to create the Smite node certificate directory."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    }
-
-    echo "Downloading the Iran-node CA certificate from the local panel..."
-    if ! curl -fsS --retry 5 \
-        http://127.0.0.1:8000/api/panel/ca \
-        -o "$SMITE_NODE_DIR/certs/ca.crt"; then
-        echo "ERROR: Failed to obtain the Iran-node CA certificate."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! grep -q "BEGIN CERTIFICATE" "$SMITE_NODE_DIR/certs/ca.crt"; then
-        echo "ERROR: The panel returned an invalid CA certificate."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_install_node_files \
-        "$node_name" \
-        "iran" \
-        "127.0.0.1:8000" \
-        "$SMITE_NODE_DIR/certs/ca.crt" \
-        "" \
-        "$panel_private_ip" \
-        "$connection_mode"; then
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    echo "Starting Iran Smite Node..."
-    if ! python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node; then
-        echo "ERROR: Failed to start Smite Node."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_wait_healthy smite-node 90; then
-        echo "ERROR: Smite Node did not become healthy."
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if ! smite_install_core_optional_frp_verify smite-node; then
-        smite_install_pause
-        return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-    fi
-
-    if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
-        if ! smite_install_clean_rc_broker_start_node_forwarding; then
-            echo "ERROR: Root Broker/Node channel did not pass verification."
-            smite_install_pause
-            return "${SMITE_INSTALL_FAILURE_CODE:-0}"
-        fi
     fi
 
     if [ "$SMITE_INSTALL_PROFILE" = clean-rc ]; then
@@ -2649,9 +2645,7 @@ smite_install_selected_fresh() (
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
     [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC7 images qualify amd64 only'; return 2; }
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
-    # Selected Iran phase resume is allowed ONLY for an explicitly
-    # resumable, signed RC7 core journal owned by this same installation.
-    # The signed legacy/foreign paths never auto-adopt an existing host.
+    # Only an explicitly resumable, signed Iran journal may resume here.
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
     # Never inherit a caller-supplied recovery destination on real hosts.
     local SMITE_GATEWAY_IR_STAGE_ROOT=/var/lib/u-opti/rc6-install-journal
@@ -2670,97 +2664,122 @@ smite_install_selected_fresh() (
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     smite_install_selected_pair_journal_review "$module_dir" || return 2
     local journal_file=/var/lib/u-opti/rc6-install-journal/current.json
+    local installer_pid="$BASHPID" rc6_lock
+    local core_recovery resumed stage project panel_domain="" node_name=""
+    local SMITE_UOPTI_BROKER_GID=""
+    python3 -B "$module_dir/smite-rc6-install-journal.py" prepare || return 2
+    # Inherited by installer children so recovery cannot race an orphaned step.
+    exec {rc6_lock}<> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+    flock -n "$rc6_lock" || {
+        echo 'HOLD: another Smite installation is still running.' >&2
+        return 2
+    }
+
     if [ -e "$journal_file" ] || [ -L "$journal_file" ]; then
-        [ "$role" = panel-iran ] && [ -f "$journal_file" ] &&
-        [ ! -L "$journal_file" ] || {
-            echo 'HOLD: an existing/foreign/untrusted Smite journal cannot be resumed automatically.' >&2
-            return 2
-        }
-        local rc6_lock resumed stage project
-        exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
-        flock -n "$rc6_lock" || {
-            echo 'HOLD: another Smite installation is still running.' >&2
-            return 2
-        }
-        # On an interrupted Gateway attempt, the original step snapshot
-        # is rolled back BEFORE requiring the Node to be healthy again.
-        # This uses the original journal owner and the same option 1.
-        local recovery recovery_stage recovery_project gateway_snapshot domain
-        recovery="$(python3 -B "$module_dir/smite-rc6-install-journal.py" gateway-recover-ir)" || {
-            echo 'HOLD: no verified Iran Gateway recovery owner.' >&2
-            return 2
-        }
-        if [ "$recovery" != 'IR_GATEWAY_RECOVERY_STAGE=FRESH_ALLOWED' ]; then
-            local -a recovery_lines=()
-            mapfile -t recovery_lines <<< "$recovery"
-            [ "${#recovery_lines[@]}" -eq 2 ] || return 2
-            recovery_stage="${recovery_lines[0]#IR_GATEWAY_RECOVERY_STAGE=}"
-            recovery_project="${recovery_lines[1]#IR_GATEWAY_RECOVERY_PROJECT=}"
-            [[ "$recovery_project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
-            gateway_snapshot="${SMITE_GATEWAY_IR_STAGE_ROOT:-/var/lib/u-opti/rc6-install-journal}/gateway-$recovery_project"
-            if [ -e "$gateway_snapshot" ] || [ -L "$gateway_snapshot" ]; then
-                domain="$(smite_gateway_panel_domain)" || return 2
-                if [ "$recovery_stage" = CORE_COMMITTED ]; then
-                    smite_gateway_ir_stage_restore "$gateway_snapshot" "$recovery_project" "$domain" || {
-                        echo 'CRITICAL: pending Gateway rollback could not be verified. Retained snapshot; no later stage will run.' >&2
+        core_recovery="$(python3 -B "$module_dir/smite-rc6-install-journal.py" recover-ir-core \
+            --installer-pid "$installer_pid")" || return 2
+        if [ -n "$core_recovery" ]; then
+            local -a core_lines=()
+            mapfile -t core_lines <<< "$core_recovery"
+            stage="${core_lines[0]}"
+            panel_domain="${core_lines[2]}"
+            node_name="${core_lines[3]}"
+            case "$stage" in
+                FRESH_ALLOWED) [ "${#core_lines[@]}" -eq 4 ] || return 2 ;;
+                PANEL_COMMITTED)
+                    [ "${#core_lines[@]}" -eq 5 ] || return 2
+                    project="${core_lines[1]}"
+                    [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+                    SMITE_UOPTI_BROKER_GID="${core_lines[4]}"
+                    smite_wait_panel_api || return 2
+                    echo 'IR_PANEL=VERIFIED_RETAINED; resuming from Iran Node.'
+                    ;;
+                *) return 2 ;;
+            esac
+        else
+            # On an interrupted Gateway attempt, the original step snapshot
+            # is rolled back BEFORE requiring the Node to be healthy again.
+            # This uses the original journal owner and the same option 1.
+            local recovery recovery_stage recovery_project gateway_snapshot domain
+            recovery="$(python3 -B "$module_dir/smite-rc6-install-journal.py" gateway-recover-ir)" || {
+                echo 'HOLD: no verified Iran Gateway recovery owner.' >&2
+                return 2
+            }
+            if [ "$recovery" != 'IR_GATEWAY_RECOVERY_STAGE=FRESH_ALLOWED' ]; then
+                local -a recovery_lines=()
+                mapfile -t recovery_lines <<< "$recovery"
+                [ "${#recovery_lines[@]}" -eq 2 ] || return 2
+                recovery_stage="${recovery_lines[0]#IR_GATEWAY_RECOVERY_STAGE=}"
+                recovery_project="${recovery_lines[1]#IR_GATEWAY_RECOVERY_PROJECT=}"
+                [[ "$recovery_project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+                gateway_snapshot="${SMITE_GATEWAY_IR_STAGE_ROOT:-/var/lib/u-opti/rc6-install-journal}/gateway-$recovery_project"
+                if [ -e "$gateway_snapshot" ] || [ -L "$gateway_snapshot" ]; then
+                    domain="$(smite_gateway_panel_domain)" || return 2
+                    if [ "$recovery_stage" = CORE_COMMITTED ]; then
+                        smite_gateway_ir_stage_restore "$gateway_snapshot" "$recovery_project" "$domain" || {
+                            echo 'CRITICAL: pending Gateway rollback could not be verified. Retained snapshot; no later stage will run.' >&2
+                            return 2
+                        }
+                        echo 'IR_GATEWAY=ROLLED_BACK_AFTER_INTERRUPTION'
+                    else
+                        # The journal already advanced past Gateway: do not
+                        # rewind it or a possibly paired identity.
+                        smite_gateway_ir_stage_guard "$gateway_snapshot" "$recovery_project" "$domain" || return 2
+                    fi
+                    smite_gateway_ir_stage_discard "$gateway_snapshot" "$recovery_project" "$domain" || {
+                        echo 'HOLD: verified Gateway recovery snapshot cleanup failed.' >&2
                         return 2
                     }
-                    echo 'IR_GATEWAY=ROLLED_BACK_AFTER_INTERRUPTION'
-                else
-                    # The journal already advanced past Gateway: do not
-                    # rewind it or a possibly paired identity.
-                    smite_gateway_ir_stage_guard "$gateway_snapshot" "$recovery_project" "$domain" || return 2
                 fi
-                smite_gateway_ir_stage_discard "$gateway_snapshot" "$recovery_project" "$domain" || {
-                    echo 'HOLD: verified Gateway recovery snapshot cleanup failed.' >&2
-                    return 2
-                }
+            fi
+            resumed="$(python3 -B "$module_dir/smite-rc6-install-journal.py" resume-ir)" || {
+                echo 'HOLD: existing installation is not a verified resumable Iran RC7 transaction.' >&2
+                return 2
+            }
+            if [ "$resumed" != 'IR_INSTALL_STAGE=FRESH_ALLOWED' ]; then
+                local -a resume_lines=()
+                mapfile -t resume_lines <<< "$resumed"
+                [ "${#resume_lines[@]}" -eq 2 ] || return 2
+                stage="${resume_lines[0]#IR_INSTALL_STAGE=}"
+                project="${resume_lines[1]#IR_INSTALL_PROJECT=}"
+                [[ "$stage" =~ ^(CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED|ADMIN_CREATED|COMPLETE)$ ]] &&
+                [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+                echo "Iran installation: retained checkpoint $stage."
+                export COMPOSE_PROJECT_NAME="$project"
+                local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE="$stage"
+                smite_install_finish_local_ir || return 2
+                return 0
             fi
         fi
-        resumed="$(python3 -B "$module_dir/smite-rc6-install-journal.py" resume-ir)" || {
-            echo 'HOLD: existing installation is not a verified resumable Iran RC7 transaction.' >&2
+    fi
+    if [ "${stage:-}" != PANEL_COMMITTED ]; then
+        for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+                echo 'HOLD: unverified/partial Smite core; use reviewed recovery.' >&2
+                return 2
+            fi
+        done
+        echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
+        if [ -z "$panel_domain" ]; then
+            read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
+            case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
+            read -rp 'Panel domain (example: ir.example.com): ' panel_domain || return 2
+            panel_domain="${panel_domain,,}"
+            read -rp 'Iran node name [node-ir]: ' node_name || return 2
+            node_name="${node_name:-node-ir}"
+        fi
+        smite_install_validate_domain "$panel_domain" && smite_install_validate_name "$node_name" || {
+            echo 'HOLD: invalid Panel domain or Iran Node name.' >&2
             return 2
         }
-        if [ "$resumed" = 'IR_INSTALL_STAGE=FRESH_ALLOWED' ]; then
-            # A previously reviewed/rolled-back fresh install can begin a
-            # NEW transaction, but never reuse the old project/Node.
-            exec {rc6_lock}>&-
-        else
-            local -a resume_lines=()
-            mapfile -t resume_lines <<< "$resumed"
-            [ "${#resume_lines[@]}" -eq 2 ] || return 2
-            stage="${resume_lines[0]#IR_INSTALL_STAGE=}"
-            project="${resume_lines[1]#IR_INSTALL_PROJECT=}"
-            [[ "$stage" =~ ^(CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED|ADMIN_CREATED|COMPLETE)$ ]] &&
-            [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
-            echo "Iran installation: retained checkpoint $stage; Node will NOT be reinstalled."
-            read -rp 'Continue the verified Iran install from this checkpoint? [y/N]: ' confirm || return 2
-            case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
-            export COMPOSE_PROJECT_NAME="$project"
-            local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE="$stage"
-            smite_install_finish_local_ir || return 2
-            return 0
+        smite_install_require_tools || return 2
+        smite_install_ensure_docker || return 2
+        containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
+            echo 'HOLD: local Docker state unavailable'; return 2;
+        }
+        if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
+            echo 'HOLD: existing Smite container; fresh installation refused'; return 2
         fi
-    fi
-    # An uncommitted, interrupted CORE has no verified safe resume
-    # cursor. Never reuse its paths or implicitly run the fresh installer.
-    for path in "$SMITE_STATE_FILE" "$SMITE_PANEL_DIR" "$SMITE_NODE_DIR" "$SMITE_OVERLAY_DIR"; do
-        if [ -e "$path" ] || [ -L "$path" ]; then
-            echo 'HOLD: unverified/partial Smite core; use reviewed recovery, never reinstall.' >&2
-            return 2
-        fi
-    done
-    echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
-    echo 'Existing installations and live tunnels are not migrated by this entry.'
-    read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
-    case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
-    smite_install_require_tools || return 2
-    smite_install_ensure_docker || return 2
-    containers="$(docker --host unix:///var/run/docker.sock container ls -a --format '{{.Names}}')" || {
-        echo 'HOLD: local Docker state unavailable'; return 2;
-    }
-    if printf '%s\n' "$containers" | grep -Eq '^smite-(panel|node)$'; then
-        echo 'HOLD: existing Smite container; fresh installation refused'; return 2
     fi
     docker() { command docker --host unix:///var/run/docker.sock "$@"; }
     umask 077
@@ -2787,49 +2806,53 @@ smite_install_selected_fresh() (
     }
     echo 'RC7_TRUSTED_ROOT=PINNED_SHA256_VERIFIED'
     local PATH="$workdir:$PATH"
-    smite_install_clean_rc_preflight "$role" standard || return 2
-    if [ "$role" = panel-iran ]; then
+    if [ "${stage:-}" = PANEL_COMMITTED ]; then
+        smite_install_clean_rc_load_images foreign || return 2
+    else
+        smite_install_clean_rc_preflight "$role" standard || return 2
         [ -f "$module_dir/smite-clean-rc-preflight.sh" ] && [ ! -L "$module_dir/smite-clean-rc-preflight.sh" ] || return 2
         source "$module_dir/smite-clean-rc-preflight.sh" || return 2
         if ! smite_clean_rc_nginx_paths_ready; then
             smite_clean_rc_prepare_gateway_packages || return 2
         fi
+        project="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" \
+            --installer-pid "$installer_pid" --resumable-ir --ir-inputs "$panel_domain" "$node_name")" || return 2
+        [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+        export COMPOSE_PROJECT_NAME="$project"
+        if ! smite_install_ir_panel_core "$panel_domain" 127.0.0.1 ||
+           ! python3 -B "$module_dir/smite-rc6-install-journal.py" commit-ir-panel --installer-pid "$installer_pid"; then
+            if python3 -B "$module_dir/smite-rc6-install-journal.py" recover-ir-core \
+                --installer-pid "$installer_pid" >/dev/null; then
+                echo 'IR_PANEL=ROLLED_BACK; select option 1 to retry the Panel.'
+            fi
+            return 2
+        fi
+        echo 'IR_PANEL=COMPLETE'
+        smite_install_continue_step || return 2
     fi
-    local installer_pid="$BASHPID" transaction
-    transaction="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" --installer-pid "$installer_pid" --resumable-ir)" || return 2
-    [[ "$transaction" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
-    # Inherited lock stays held by installer children if the menu shell dies.
-    local rc6_lock
-    exec {rc6_lock}> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
-    flock -n "$rc6_lock" || return 2
-    export COMPOSE_PROJECT_NAME="$transaction"
-    if [ "$role" = panel-iran ]; then
-        smite_install_panel_iran || return 2
-    else
-        smite_install_foreign_node || return 2
-    fi
-    python3 -B "$module_dir/smite-rc6-install-journal.py" commit || return 2
-    if [ "$role" = panel-iran ]; then
-        # Core signed enrollment and administrator credentials are the
-        # installation transaction; static appearance cannot leave them
-        # half-applied. Apply UI only AFTER both are verified.
-        local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE=CORE_COMMITTED
-        smite_install_finish_local_ir || return 2
-    else
-        # The official RC7 core is not the independently signed unified
-        # trial pair. Do not silently run trial post-core operations on it,
-        # or return success/Connected before Sanaei, SSL/443, identity,
-        # replay and bidirectional signed checks are integrated and proven.
-        echo 'HOLD: Foreign Node core is paused. One-choice Sanaei, Gateway and signed enrollment are not yet wired to the admitted runtime.'
-        echo 'FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE'
-        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+    export COMPOSE_PROJECT_NAME="$project"
+    if ! smite_install_ir_node_core "$node_name" "" standard ||
+       ! smite_write_state panel-iran "$panel_domain" "$node_name" "" standard ||
+       ! python3 -B "$module_dir/smite-rc6-install-journal.py" commit; then
+        if python3 -B "$module_dir/smite-rc6-install-journal.py" recover-ir-core \
+            --installer-pid "$installer_pid" >/dev/null; then
+            echo 'IR_NODE=ROLLED_BACK; select option 1 to retry the Iran Node.'
+        fi
         return 2
     fi
+    echo 'IR_NODE=COMPLETE'
+    smite_install_continue_step || return 2
+    local SMITE_IR_RESUMABLE=1 SMITE_IR_STAGE=CORE_COMMITTED
+    smite_install_finish_local_ir || return 2
 )
 
 # Gateway is its own retained transaction, inside the existing Iran
 # option-1 journal and original operation lock. Roll back ONLY this step,
 # then the next option-1 run will start it from the same clean baseline.
+smite_install_continue_step() {
+    [ ! -t 0 ] || read -r -p 'Press Enter to continue installation...'
+}
+
 smite_install_ir_gateway_stage_rollback() {
     local snapshot="$1" project="$2" domain="$3"
     if smite_gateway_ir_stage_restore "$snapshot" "$project" "$domain" &&
@@ -2916,6 +2939,7 @@ smite_install_finish_local_ir() {
         echo 'IR_GATEWAY=VERIFIED_RETAINED'
     elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         smite_install_ir_gateway_stage || return 2
+        smite_install_continue_step || return 2
         domain="$(smite_gateway_panel_domain)" || return 2
     else
         # The independent old/clean-rc path retains its original behavior.
@@ -2937,6 +2961,10 @@ smite_install_finish_local_ir() {
         smite_install_ir_advance PAIRING_VERIFIED || return 2
     fi
     echo 'IR_SIGNED_PAIRING=VERIFIED'
+    if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] &&
+       [[ "$phase" =~ ^(CORE_COMMITTED|GATEWAY_VERIFIED)$ ]]; then
+        smite_install_continue_step || return 2
+    fi
     if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         if smite_install_ir_admin_present; then
             echo 'IR_ADMIN=EXISTING_VERIFIED'
@@ -2962,7 +2990,10 @@ smite_install_finish_local_ir() {
         fi
         case "$phase" in
             CORE_COMMITTED|GATEWAY_VERIFIED|PAIRING_VERIFIED)
-                smite_install_ir_advance ADMIN_CREATED || return 2 ;;
+                smite_install_ir_advance ADMIN_CREATED || return 2
+                echo 'IR_ADMIN=COMPLETE'
+                smite_install_continue_step || return 2
+                ;;
         esac
     else
         echo 'Iran Node verified active. Create the Panel administrator account:'

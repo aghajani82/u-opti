@@ -39,6 +39,7 @@ TARGETS = (
     'etc/systemd/system/u-opti-smite-xhttp-broker.service',
 )
 SERVICE = 'u-opti-smite-xhttp-broker.service'
+IR_NODE_TARGETS = ('opt/smite-node', 'etc/u-opti/smite/state.env')
 # Option 1 uses the EXISTING fresh-install journal as its durable resume
 # cursor. Only NEW explicitly opted-in Iran installs may use these stages:
 # legacy COMMITTED and all foreign journals are never adopted automatically.
@@ -91,13 +92,13 @@ class Journal:
     def docker(self, *args):
         return self.command(['docker', '--host', 'unix:///var/run/docker.sock', *args])
 
-    def save(self, data):
+    def save(self, data, destination=None):
         tmp = self.folder / 'next.json'
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'w') as f:
             json.dump(data, f, sort_keys=True)
             f.write('\n'); f.flush(); os.fsync(f.fileno())
-        os.replace(tmp, self.path)
+        os.replace(tmp, destination or self.path)
         sync_dir(self.folder)
 
     def load(self):
@@ -111,17 +112,21 @@ class Journal:
             raise Hold('INVALID_JOURNAL')
         return d
 
-    def begin(self, role, installer_pid=None, *, resumable_ir=False):
+    def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None):
         if type(resumable_ir) is not bool or (resumable_ir and role != 'panel-iran'):
             raise Hold('INVALID_RESUMABLE_INSTALL_ROLE')
-        if self.path.exists():
+        if ir_inputs is not None and not resumable_ir:
+            raise Hold('INVALID_IR_CORE_INPUTS')
+        archive = None
+        if os.path.lexists(self.path):
             old = self.load()
             if old['state'] != 'ROLLED_BACK':
                 raise Hold('EXISTING_TRANSACTION_USE_STATUS_OR_ROLLBACK')
             archive = self.folder / (old['id'] + '.json')
-            if archive.exists():
-                raise Hold('ARCHIVE_CONFLICT')
-            os.rename(self.path, archive); sync_dir(self.folder)
+            if os.path.lexists(archive):
+                trusted(archive)
+                if not archive.is_file() or json.loads(archive.read_text()) != old:
+                    raise Hold('ARCHIVE_CONFLICT')
         for rel in TARGETS:
             p = self.root / rel
             if os.path.lexists(p):
@@ -146,6 +151,11 @@ class Journal:
                  installer_start=process_start(installer_pid))
         if resumable_ir:
             d['ir_resumable_version'] = 1
+        if ir_inputs is not None:
+            d['ir_inputs'] = dict(zip(('domain', 'name'), ir_inputs, strict=True))
+            self.ir_inputs(d)
+        if archive is not None and not archive.exists():
+            self.save(old, destination=archive)
         self.save(d)
         return d['id']
 
@@ -201,7 +211,10 @@ class Journal:
             conn = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)
             try:
                 tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                for table in ('nodes', 'tunnels', 'frp_proxy_leases'):
+                protected = ('nodes', 'tunnels', 'frp_proxy_leases')
+                if d.get('ir_inputs'):
+                    protected += ('admins',)
+                for table in protected:
                     if table in tables and conn.execute('SELECT count(*) FROM ' + table).fetchone()[0]:
                         raise Hold('PANEL_HAS_MANAGED_STATE')
                 if conn.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
@@ -228,10 +241,154 @@ class Journal:
                 raise Hold('BROKER_UNIT_CHANGED')
         return unit.exists()
 
-    def rollback(self):
+    def ir_inputs(self, d):
+        if (d.get('role') != 'panel-iran' or d.get('source') != SOURCE
+                or d.get('ir_resumable_version') != 1):
+            raise Hold('INVALID_IR_CORE_OWNER')
+        values = d.get('ir_inputs') or {}
+        domain, name = values.get('domain', ''), values.get('name', '')
+        if (not re.fullmatch(r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}', domain)
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,62}', name)):
+            raise Hold('INVALID_IR_CORE_INPUTS')
+        return domain, name
+
+    def panel_witness(self, d):
+        domain, _ = self.ir_inputs(d)
+        self._ir_container_witness(d, 'smite-panel', IMAGES['smite-panel'])
+        directory = self.root / 'opt/smite'
+        trusted(directory, True)
+        env = directory / '.env'
+        trusted(env)
+        if (not env.is_file() or env.read_text().splitlines().count('PANEL_DOMAIN=' + domain) != 1):
+            raise Hold('IR_PANEL_DOMAIN_DRIFT')
+
+    def ir_commit_panel(self, installer_pid):
         d = self.load()
-        if d.get('installer_start') and process_start(d.get('installer_pid')) == d['installer_start']:
+        if (d['state'] != 'INSTALLING' or d.get('ir_phase') is not None
+                or not self.ir_installer_running(d, installer_pid)):
+            raise Hold('INVALID_IR_PANEL_COMMIT')
+        self.panel_witness(d)
+        if {x['name'] for x in self.inspect_owned(d)} != {'smite-panel'}:
+            raise Hold('INVALID_IR_PANEL_CONTAINER_SET')
+        d['ir_phase'] = 'PANEL_COMMITTED'
+        self.save(d)
+
+    def ir_installer_running(self, d, installer_pid):
+        return (installer_pid is not None and installer_pid == d.get('installer_pid')
+                and d.get('installer_start') and process_start(installer_pid) == d['installer_start'])
+
+    def ir_recover_core(self, installer_pid):
+        d = self.load()
+        if not d.get('ir_inputs') or d['state'] == 'COMMITTED':
+            return
+        domain, name = self.ir_inputs(d)
+        if (not self.ir_installer_running(d, installer_pid)
+                and self.ir_installer_running(d, d.get('installer_pid'))):
             raise Hold('INSTALLER_STILL_RUNNING')
+        if d.get('ir_phase') == 'PANEL_COMMITTED':
+            config = self.root / 'etc/u-opti/smite/route-broker.json'
+            trusted(config)
+            gid = json.loads(config.read_text())['peer_gid']
+            if type(gid) != int or not 1 <= gid < 65536:
+                raise Hold('IR_BROKER_GID_INVALID')
+            self.rollback_ir_node(d)
+            d.update(installer_pid=installer_pid, installer_start=process_start(installer_pid))
+            self.save(d)
+            return 'PANEL_COMMITTED', d['id'], domain, name, gid
+        if d.get('ir_phase') is not None:
+            raise Hold('INVALID_IR_CORE_PHASE')
+        if d['state'] != 'ROLLED_BACK':
+            # Before the Panel checkpoint the original quarantine is still
+            # applicable, but there must be no Node belonging to this run.
+            if any(x['name'] == 'smite-node' for x in self.inspect_owned(d)):
+                raise Hold('IR_NODE_BEFORE_PANEL_COMMIT')
+            self.rollback(installer_pid=installer_pid)
+        return 'FRESH_ALLOWED', d['id'], domain, name
+
+    def rollback_ir_node(self, d):
+        if d['state'] != 'INSTALLING':
+            raise Hold('INVALID_IR_NODE_ROLLBACK_STATE')
+        self.panel_witness(d)
+        service = self.inactive(d)
+        if not service and self.root == Path('/'):
+            raise Hold('IR_BROKER_UNIT_MISSING')
+        nodes = [x for x in self.inspect_owned(d) if x['name'] == 'smite-node']
+        if len(nodes) > 1:
+            raise Hold('IR_NODE_OWNERSHIP_AMBIGUOUS')
+        plan = d.get('ir_node_rollback')
+        if plan is None:
+            paths = self.rollback_paths(IR_NODE_TARGETS)
+            if not nodes and not paths:
+                return
+            plan = dict(node=nodes[0]['id'] if nodes else None, paths=paths,
+                        suffix='.rc6-rollback-' + d['id'] + '-' + uuid.uuid4().hex)
+            d['ir_node_rollback'] = plan
+            self.save(d)
+        if nodes and nodes[0]['id'] != plan['node']:
+            raise Hold('IR_NODE_OWNERSHIP_CHANGED')
+        paths = self.verify_rollback_paths(plan['paths'], IR_NODE_TARGETS, plan['suffix'])
+        if nodes:
+            node = plan['node']
+            self.docker('update', '--restart=no', node)
+            self.docker('stop', node)
+            self.inactive(d)
+            # An unpaired attempt has no live identity. Keep all volumes;
+            # Compose must not find the removed container by project label.
+            self.docker('rm', node)
+        if service:
+            self.command(['systemctl', 'disable', '--now', SERVICE])
+            state = self.command(['systemctl', 'show', SERVICE, '--property=ActiveState,UnitFileState'])
+            if set(state.splitlines()) != {'ActiveState=inactive', 'UnitFileState=disabled'}:
+                raise Hold('IR_NODE_BROKER_ROLLBACK_UNVERIFIED')
+        self.quarantine_paths(paths)
+        if any(os.path.lexists(self.root / rel) for rel in IR_NODE_TARGETS):
+            raise Hold('IR_NODE_PATHS_REMAIN')
+        if any(x['name'] == 'smite-node' for x in self.inspect_owned(d)):
+            raise Hold('IR_NODE_CONTAINER_REMAINS')
+        del d['ir_node_rollback']
+        self.save(d)
+
+    def rollback_paths(self, targets):
+        paths = []
+        for rel in targets:
+            p = self.root / rel
+            if os.path.lexists(p):
+                st = trusted(p)
+                paths.append(dict(path=rel, dev=st.st_dev, ino=st.st_ino))
+        return paths
+
+    def verify_rollback_paths(self, items, targets, suffix):
+        paths = []
+        if not re.fullmatch(r'\.rc6-rollback-uopti_rc6_[a-f0-9]{32}(?:-[a-f0-9]{32})?', suffix):
+            raise Hold('INVALID_ROLLBACK_SUFFIX')
+        for item in items:
+            if item['path'] not in targets:
+                raise Hold('INVALID_JOURNAL_PATH')
+            p = self.root / item['path']
+            dest = p.with_name(p.name + suffix)
+            candidates = [x for x in (p, dest) if os.path.lexists(x)]
+            if len(candidates) != 1:
+                raise Hold('ROLLBACK_PATH_AMBIGUOUS')
+            st = trusted(candidates[0])
+            if (st.st_dev, st.st_ino) != (item['dev'], item['ino']):
+                raise Hold('ROLLBACK_PATH_REPLACED')
+            paths.append((p, dest))
+        return paths
+
+    def quarantine_paths(self, paths):
+        for p, dest in paths:
+            if os.path.lexists(p):
+                os.rename(p, dest)
+                sync_dir(p.parent)
+
+    def rollback(self, *, installer_pid=None):
+        d = self.load()
+        if (not self.ir_installer_running(d, installer_pid)
+                and self.ir_installer_running(d, d.get('installer_pid'))):
+            raise Hold('INSTALLER_STILL_RUNNING')
+        if d.get('ir_phase') == 'PANEL_COMMITTED':
+            self.rollback_ir_node(d)
+            return 'IR_NODE_ROLLBACK=PASS_PANEL_RETAINED'
         if d['state'] == 'ROLLED_BACK':
             return 'RC6_ROLLBACK=ALREADY_COMPLETE'
         if d['state'] == 'COMMITTED':
@@ -239,31 +396,18 @@ class Journal:
         if d['state'] == 'INSTALLING':
             containers = self.inspect_owned(d)
             service = self.inactive(d)
-            paths = []
-            for rel in TARGETS:
-                p = self.root / rel
-                if os.path.lexists(p):
-                    st = trusted(p)
-                    dest = p.with_name(p.name + '.rc6-rollback-' + d['id'])
-                    if os.path.lexists(dest):
-                        raise Hold('ARCHIVE_PATH_CONFLICT')
-                    paths.append(dict(path=rel, dev=st.st_dev, ino=st.st_ino))
+            paths = self.rollback_paths(TARGETS)
+            for item in paths:
+                p = self.root / item['path']
+                if os.path.lexists(p.with_name(p.name + '.rc6-rollback-' + d['id'])):
+                    raise Hold('ARCHIVE_PATH_CONFLICT')
             d.update(state='ROLLING_BACK', containers=containers, paths=paths, service=service)
             self.save(d)  # Durable plan before stopping or moving anything.
         # Revalidate identities on every retry; never select a replacement by name.
         owned = {x['id']: x for x in self.inspect_owned(d)}
         if set(owned) != {x['id'] for x in d['containers']}:
             raise Hold('CONTAINER_SET_CHANGED')
-        for item in d['paths']:
-            if item['path'] not in TARGETS:
-                raise Hold('INVALID_JOURNAL_PATH')
-            p = self.root / item['path']; dest = p.with_name(p.name + '.rc6-rollback-' + d['id'])
-            candidates = [x for x in (p, dest) if os.path.lexists(x)]
-            if len(candidates) != 1:
-                raise Hold('ROLLBACK_PATH_AMBIGUOUS')
-            st = trusted(candidates[0])
-            if (st.st_dev, st.st_ino) != (item['dev'], item['ino']):
-                raise Hold('ROLLBACK_PATH_REPLACED')
+        paths = self.verify_rollback_paths(d['paths'], TARGETS, '.rc6-rollback-' + d['id'])
         # Recheck before the first stop. Later retries may already have moved DBs.
         if not d.get('stopped'):
             self.inactive(d)
@@ -280,10 +424,7 @@ class Journal:
                 raise Hold('CONTAINER_RESTARTED')
             if obj['Name'].lstrip('/') == item['name']:
                 self.docker('rename', item['id'], item['archived'])
-        for item in d['paths']:
-            p = self.root / item['path']; dest = p.with_name(p.name + '.rc6-rollback-' + d['id'])
-            if os.path.lexists(p):
-                os.rename(p, dest); sync_dir(p.parent)
+        self.quarantine_paths(paths)
         if d['service']:
             self.command(['systemctl', 'daemon-reload'])
         d['state'] = 'ROLLED_BACK'; self.save(d)
@@ -293,6 +434,11 @@ class Journal:
         d = self.load()
         if d['state'] != 'INSTALLING':
             raise Hold('INVALID_COMMIT_STATE')
+        if d.get('ir_inputs'):
+            if d.get('ir_phase') != 'PANEL_COMMITTED' or 'ir_node_rollback' in d:
+                raise Hold('IR_PANEL_CHECKPOINT_REQUIRED')
+            self.panel_witness(d)
+            self._ir_container_witness(d, 'smite-node', IMAGES['smite-node'])
         expected = set(IMAGES) if d['role'] == 'panel-iran' else {'smite-node'}
         if {x['name'] for x in self.inspect_owned(d)} != expected:
             raise Hold('INCOMPLETE_CONTAINER_SET')
@@ -303,6 +449,11 @@ class Journal:
             'SMITE_MANAGED_VERSION=' + CANDIDATES[d['source']][0] not in lines or
             'SMITE_ROLE=' + d['role'] not in lines):
             raise Hold('STATE_MISMATCH')
+        if d.get('ir_inputs'):
+            domain, name = self.ir_inputs(d)
+            if (lines.count('SMITE_PANEL_DOMAIN=' + domain) != 1
+                    or lines.count('SMITE_NODE_NAME=' + name) != 1):
+                raise Hold('IR_CORE_INPUT_DRIFT')
         d['state'] = 'COMMITTED'
         if d.get('ir_resumable_version') == 1:
             d['ir_phase'] = 'CORE_COMMITTED'
@@ -336,29 +487,32 @@ class Journal:
         if not {'smite-panel', 'smite-node'} <= names:
             raise Hold('IR_RESUME_CONTAINERS_MISSING')
         for name, ref in IMAGES.items():
-            obj = json.loads(self.docker('inspect', name))[0]
-            config = obj.get('Config') or {}
-            labels = config.get('Labels') or {}
-            if (config.get('Image') != ref
-                    or labels.get('com.docker.compose.project') != d['id']
-                    or labels.get('com.docker.compose.service') != name
-                    or not (obj.get('State') or {}).get('Running')
-                    or (obj.get('State') or {}).get('Health', {}).get('Status') == 'unhealthy'):
-                raise Hold('IR_RESUME_CONTAINER_DRIFT')
-            files = labels.get('com.docker.compose.project.config_files')
-            base = '/opt/smite/docker-compose.yml' if name == 'smite-panel' else '/opt/smite-node/docker-compose.yml'
-            overlay = ('/opt/smite/docker-compose.signed-control.yml' if name == 'smite-panel'
-                       else '/opt/smite-node/docker-compose.security-candidate.yml')
-            if files not in (base, base + ',' + overlay):
-                raise Hold('IR_RESUME_COMPOSE_DRIFT')
-            if name == 'smite-node':
-                env = dict(line.split('=', 1) for line in config.get('Env', []) if '=' in line)
-                auth = env.get('SMITE_NODE_PANEL_AUTH_MODE')
-                if auth not in ('paused', 'signed'):
-                    raise Hold('IR_RESUME_UNKNOWN_NODE_AUTH')
-                if (d['ir_phase'] in IR_PHASES[2:] and auth != 'signed'
-                        or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
-                    raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
+            self._ir_container_witness(d, name, ref)
+
+    def _ir_container_witness(self, d, name, ref):
+        obj = json.loads(self.docker('inspect', name))[0]
+        config = obj.get('Config') or {}
+        labels = config.get('Labels') or {}
+        if (config.get('Image') != ref
+                or labels.get('com.docker.compose.project') != d['id']
+                or labels.get('com.docker.compose.service') != name
+                or not (obj.get('State') or {}).get('Running')
+                or (obj.get('State') or {}).get('Health', {}).get('Status', 'healthy') != 'healthy'):
+            raise Hold('IR_RESUME_CONTAINER_DRIFT')
+        files = labels.get('com.docker.compose.project.config_files')
+        base = '/opt/smite/docker-compose.yml' if name == 'smite-panel' else '/opt/smite-node/docker-compose.yml'
+        overlay = ('/opt/smite/docker-compose.signed-control.yml' if name == 'smite-panel'
+                   else '/opt/smite-node/docker-compose.security-candidate.yml')
+        if files not in (base, base + ',' + overlay):
+            raise Hold('IR_RESUME_COMPOSE_DRIFT')
+        if name == 'smite-node':
+            env = dict(line.split('=', 1) for line in config.get('Env', []) if '=' in line)
+            auth = env.get('SMITE_NODE_PANEL_AUTH_MODE')
+            if auth not in ('paused', 'signed'):
+                raise Hold('IR_RESUME_UNKNOWN_NODE_AUTH')
+            if (d.get('ir_phase') in IR_PHASES[2:] and auth != 'signed'
+                    or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
+                raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
     def ir_gateway_recovery_plan(self):
         """Authorize pending Gateway snapshot recovery before Docker health.
@@ -434,9 +588,11 @@ class Journal:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback',
-                                       'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir'))
+                                       'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir',
+                                       'prepare', 'recover-ir-core', 'commit-ir-panel'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
     ap.add_argument('--resumable-ir', action='store_true')
+    ap.add_argument('--ir-inputs', nargs=2)
     ap.add_argument('--phase', choices=IR_PHASES)
     ap.add_argument('--confirm', default='')
     ap.add_argument('--installer-pid', type=int)
@@ -461,7 +617,18 @@ def main():
                 if not a.role: raise Hold('ROLE_REQUIRED')
                 if not a.installer_pid or not process_start(a.installer_pid):
                     raise Hold('INSTALLER_PROCESS_REQUIRED')
-                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir))
+                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir, ir_inputs=a.ir_inputs))
+            elif a.action == 'prepare':
+                fd = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                os.close(fd)
+            elif a.action == 'recover-ir-core':
+                if not a.installer_pid or not process_start(a.installer_pid):
+                    raise Hold('INSTALLER_PROCESS_REQUIRED')
+                recovery = j.ir_recover_core(a.installer_pid)
+                if recovery is not None:
+                    print(*recovery, sep='\n')
+            elif a.action == 'commit-ir-panel':
+                j.ir_commit_panel(a.installer_pid)
             elif a.action == 'status':
                 d=j.load()
                 print('RC6_INSTALL_TRANSACTION=' + d['state'])

@@ -6,12 +6,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Replace only the fixed lock path in a temporary copy; production path guard
 # is exercised below. All operations stay inside this fixture.
-sed "s@/var/lib/u-opti/rc6-install-journal/operation.lock@$TMP/operation.lock@g" "$ROOT/modules/smite-install.sh" > "$TMP/installer.sh"
+sed -e "s@/var/lib/u-opti/rc6-install-journal/operation.lock@$TMP/operation.lock@g" \
+    -e "s@/var/lib/u-opti/rc6-install-journal/current.json@$TMP/current.json@g" "$ROOT/modules/smite-install.sh" > "$TMP/installer.sh"
 source "$TMP/installer.sh"
 ln -s "$ROOT/modules/smite-clean-rc-preflight.sh" "$TMP/smite-clean-rc-preflight.sh"
 # The production guard rejects symlink helpers; copy the fixture dependency.
 rm "$TMP/smite-clean-rc-preflight.sh"
-cp "$ROOT/modules/smite-clean-rc-preflight.sh" "$TMP/smite-clean-rc-preflight.sh"
+for component in smite-clean-rc-preflight.sh smite-rc6-install-journal.py \
+    smite-rc7-registry-pair.json smite-unified-trial-registry-pair.json; do
+    cp "$ROOT/modules/$component" "$TMP/"
+done
 # Exercise actual early failure branches with a successful UI pause.
 clear() { :; }
 smite_install_pause() { :; }
@@ -89,9 +93,15 @@ smite_install_clean_rc_preflight() {
     [ "${FAIL_SIGNATURE:-0}" = 0 ] || return 2
 }
 python3() {
-    if [[ "$*" == *smite-rc6-install-journal.py* ]]; then
+    if [[ "${2:-}" == */smite-rc6-install-journal.py ]]; then
         case "$*" in
-            *' begin '*) echo uopti_rc6_0123456789abcdef0123456789abcdef ;;
+            *' prepare') touch "$TMP/operation.lock" ;;
+            *' begin '*) echo "$PROJECT" ;;
+            *' commit-ir-panel '*) : ;;
+            *' recover-ir-core '*)
+                if [ -e "$TMP/current.json" ]; then
+                    printf '%s\n' PANEL_COMMITTED "$PROJECT" iran.example.org node-ir 39100
+                fi ;;
             *' commit') : ;;
             *) return 98 ;;
         esac
@@ -101,27 +111,54 @@ python3() {
 }
 smite_install_ui_action() { echo "$1" >> "$TMP/ui-dispatch"; [ "${FAIL_UI:-0}" = 0 ]; }
 smite_install_finish_local_ir() { echo enrolled >> "$TMP/enrollment"; }
-smite_install_panel_iran() { echo panel >> "$TMP/dispatch"; }
+PROJECT=uopti_rc6_0123456789abcdef0123456789abcdef
+IR_INPUT=$'y\niran.example.org\nnode-ir'
+smite_install_ir_panel_core() {
+    [ "$1:$2" = iran.example.org:127.0.0.1 ] || return 1
+    echo panel >> "$TMP/dispatch"
+}
+smite_install_clean_rc_load_images() { [ "$1" = foreign ]; }
+smite_wait_panel_api() { :; }
+smite_write_state() { [ "$1:$2:$3" = panel-iran:iran.example.org:node-ir ]; }
+smite_install_ir_node_core() {
+    [ "$1" = node-ir ] && [ "$COMPOSE_PROJECT_NAME" = "$PROJECT" ] || return 1
+    echo node >> "$TMP/dispatch"
+    if [ "${FAIL_NODE:-0}" = 1 ]; then
+        touch "$TMP/current.json"
+        return 1
+    fi
+}
 smite_install_foreign_node() { echo foreign >> "$TMP/dispatch"; }
 export DOCKER_CONTEXT=untrusted DOCKER_HOST=tcp://not-a-real-host:2375
-smite_install_selected_fresh foreign <<< y
-[ "$(cat "$TMP/dispatch")" = foreign ]
-# Settings are scoped to the selected call, leaving old recovery untouched.
+status=0
+smite_install_selected_fresh foreign </dev/null > "$TMP/foreign.log" || status=$?
+[ "$status" = 2 ]
+grep -qx 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES' "$TMP/foreign.log"
+[ ! -e "$TMP/operation.lock" ]
+smite_install_selected_fresh panel-iran <<< "$IR_INPUT"
+[ "$(cat "$TMP/dispatch")" = $'panel\nnode' ]
+[ -s "$TMP/enrollment" ]
 [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.1 ]
 [ "$SMITE_INSTALL_PROFILE" = stable ]
 [ "$DOCKER_CONTEXT" = untrusted ]
-rm "$TMP/dispatch"
-smite_install_selected_fresh panel-iran <<< y
-[ "$(cat "$TMP/dispatch")" = panel ]
+rm "$TMP/dispatch" "$TMP/enrollment"
+
+# Retry through actual option 1 with no credentials/domain prompt.
+status=0
+FAIL_NODE=1 smite_install_selected_fresh panel-iran <<< "$IR_INPUT" > "$TMP/node-failure.log" || status=$?
+[ "$status" = 2 ]
+grep -q '^IR_NODE=ROLLED_BACK' "$TMP/node-failure.log"
+[ ! -e "$TMP/enrollment" ]
+printf '1\n0\n' | show_smite_install_menu > "$TMP/retry-menu.log"
+[ "$(cat "$TMP/dispatch")" = $'panel\nnode\nnode' ]
+grep -q '^IR_PANEL=VERIFIED_RETAINED' "$TMP/retry-menu.log"
 [ -s "$TMP/enrollment" ]
-[ "$(cat "$TMP/ui-dispatch")" = apply ]
-rm "$TMP/dispatch" "$TMP/ui-dispatch"
-# Exact selected installer Cosign bootstrap must never silently hang.
-# Simulate release CDN timeouts and verify official API fallback is used,
-# all transfer attempts are bounded, and the final pinned digest is checked.
+rm "$TMP/dispatch" "$TMP/current.json"
+
+# Exact selected installer Cosign bootstrap never silently hangs.
 : > "$TMP/curl-calls"
-MOCK_COSIGN_RELEASE_FAIL=1 smite_install_selected_fresh foreign <<< y > "$TMP/fallback.log"
-[ "$(cat "$TMP/dispatch")" = foreign ]
+MOCK_COSIGN_RELEASE_FAIL=1 smite_install_selected_fresh panel-iran <<< "$IR_INPUT" > "$TMP/fallback.log"
+[ "$(cat "$TMP/dispatch")" = $'panel\nnode' ]
 grep -q '^RC7_COSIGN_DOWNLOAD=OFFICIAL_GITHUB_API_FALLBACK' "$TMP/fallback.log"
 grep -Fq -- '--connect-timeout 10 --max-time 180' "$TMP/curl-calls"
 grep -Fq -- '--progress-bar' "$TMP/curl-calls"
@@ -130,7 +167,7 @@ grep -q '^RC7_COSIGN_SHA256=VERIFIED' "$TMP/fallback.log"
 rm "$TMP/dispatch"
 : > "$TMP/curl-calls"
 if MOCK_COSIGN_RELEASE_FAIL=1 MOCK_COSIGN_API_FAIL=1 \
-  smite_install_selected_fresh foreign <<< y > "$TMP/all-downloads-failed.log" 2>&1; then
+  smite_install_selected_fresh panel-iran <<< "$IR_INPUT" > "$TMP/all-downloads-failed.log" 2>&1; then
     echo 'FAIL: RC7 accepted unavailable verifier'; exit 1
 fi
 grep -q 'HOLD_RC7_COSIGN_VERIFIER_UNAVAILABLE' "$TMP/all-downloads-failed.log"
@@ -141,41 +178,36 @@ echo 'RC7_VISIBLE_BOUNDED_COSIGN_AND_OFFICIAL_FALLBACK=PASS_ISOLATED'
 
 for flag in FAIL_DOCKER BAD_COSIGN BAD_TRUST_ROOT FAIL_SIGNATURE; do
     export "$flag=1"
-    if smite_install_selected_fresh foreign <<< y; then echo "FAIL: accepted $flag"; exit 1; fi
+    if smite_install_selected_fresh panel-iran <<< "$IR_INPUT"; then echo "FAIL: accepted $flag"; exit 1; fi
     unset "$flag"
     [ ! -e "$TMP/dispatch" ]
 done
 EXISTING_CONTAINER=smite-node
-if smite_install_selected_fresh foreign <<< y; then exit 1; fi
+if smite_install_selected_fresh panel-iran <<< "$IR_INPUT"; then exit 1; fi
 unset EXISTING_CONTAINER
 ln -s "$TMP/missing" "$SMITE_STATE_FILE"
-if smite_install_selected_fresh foreign <<< y; then exit 1; fi
+if smite_install_selected_fresh panel-iran <<< "$IR_INPUT"; then exit 1; fi
 [ ! -e "$TMP/dispatch" ]
 rm "$SMITE_STATE_FILE"
-if smite_install_selected_fresh foreign <<< n; then exit 1; fi
+if smite_install_selected_fresh panel-iran <<< n; then exit 1; fi
 [ ! -e "$TMP/dispatch" ]
 SMITE_INSTALL_PROFILE=clean-rc
 smite_install_selected_fresh foreign
 [ "$(cat "$TMP/dispatch")" = foreign ]
 rm "$TMP/dispatch"
 SMITE_INSTALL_PROFILE=stable
-printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/menu.log"
-[ "$(cat "$TMP/dispatch")" = panel ]
+printf '1\n%s\n0\n' "$IR_INPUT" | show_smite_install_menu > "$TMP/menu.log"
+[ "$(cat "$TMP/dispatch")" = $'panel\nnode' ]
 grep -q 'Selected Smite 2.0.0-rc.7' "$TMP/menu.log"
 export FAIL_SIGNATURE=1
-printf '1\ny\n0\n' | show_smite_install_menu > "$TMP/failed-menu.log"
+printf '1\n%s\n0\n' "$IR_INPUT" | show_smite_install_menu > "$TMP/failed-menu.log"
 unset FAIL_SIGNATURE
 grep -q 'HOLD: Panel + Iran Node installation did not complete' "$TMP/failed-menu.log"
-echo 'OFFICIAL_MENU_OPTION_1=PASS_ISOLATED_FIXTURE'
-echo 'SELECTED_RC7_DISPATCH_FIXTURES=PASS (not a real host installation)'
+echo 'OFFICIAL_MENU_OPTION_1_AND_NODE_RETRY=PASS_ISOLATED_FIXTURE'
 
 printf '8\ny\n9\ny\n0\n' | show_smite_install_menu > "$TMP/ui-menu.log"
 [ "$(tail -n 2 "$TMP/ui-dispatch")" = $'apply\nrollback' ]
-FAIL_UI=1
-if smite_install_selected_fresh panel-iran <<< y > "$TMP/ui-fail.log"; then exit 1; fi
-unset FAIL_UI
-grep -q 'runtime installed; UI update pending' "$TMP/ui-fail.log"
-echo 'UI_UPDATE_ROLLBACK_MENU_AND_FRESH_INSTALL=PASS'
+echo 'UI_UPDATE_ROLLBACK_MENU=PASS'
 
 # Review only the new menu functions. No host Docker installer is executed.
 mkdir -p "$TMP/advanced-pairing"

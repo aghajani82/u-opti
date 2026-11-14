@@ -1,6 +1,6 @@
 # Unified Smite installation — trial plan and continuation record
 
-Updated: 2026-11-13 (Asia/Tehran)
+Updated: 2026-11-14 (Asia/Tehran)
 Status: OFFLINE INTEGRATION VERIFIED — SIGNED RELEASE / LIVE HOST ACTIVATION BLOCKED
 Branch: trial/unified-smite-install
 Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
@@ -22,36 +22,37 @@ Operator intent: **press the same option 1 again**, just like resuming a
 paused video. Do not reinstall the Panel/Node, reset identity or replay,
 or jump ahead when a preceding stage has not been VERIFIED.
 
-The existing `smite-rc6-install-journal.py` now records `ir_resumable_version=1`
-ONLY for **new selected** official signed RC7 Iran installs. After the
-*original* core-install journal commits, it initializes a monotonic
-`ir_phase` cursor. Exactly these stages are admitted:
+The existing `smite-rc6-install-journal.py` stores the Panel domain and
+Iran Node name for new option 1 transactions. The same installer verifies
+and records the following checkpoints, with Enter to continue after a
+newly completed step in an interactive terminal:
 
-1. `CORE_COMMITTED`: Panel + Iran Node signed image references, original
-   Compose project/role and local core are transaction-owned.
-2. `GATEWAY_VERIFIED`: the existing Gateway configured and TLS-verified
-   `https://<panel-domain>:443/api/status`.
-3. `PAIRING_VERIFIED`: the existing root-only local Iran Pairing confirms
-   signed HMAC **in both directions** and retains the original Node ID.
-4. `ADMIN_CREATED`: the existing CLI created an administrator, and the
-   installed Panel's original SQLite database contains a valid admin row.
-5. `COMPLETE`: the existing static UI update was attempted (optional, not
-   a prerequisite of signed Node enrollment); the mandatory prior stages
-   already verified. A pending static appearance remains available at
-   existing menu option 8.
+1. `PANEL_COMMITTED`: the signed Panel is healthy, answers the local API,
+   and matches the original Compose project and domain.
+2. `CORE_COMMITTED`: the signed-image Iran Node is running paused/strict
+   under the same project and its local broker socket was verified.
+3. `GATEWAY_VERIFIED`: the existing Gateway configured and TLS-verified
+   `https://<panel-domain>:443/api/status`. This stage follows the paused
+   Node because it sets that Node's HTTPS Panel address.
+4. `PAIRING_VERIFIED`: the existing local Iran Pairing confirms signed HMAC
+   in both directions and retains the original Node ID.
+5. `ADMIN_CREATED`: the existing CLI created an administrator and the
+   installed Panel's SQLite database contains a valid admin row.
+6. `COMPLETE`: the existing optional static UI update was attempted. It
+   remains available at the existing menu option 8.
 
-On reselecting option 1, the first action is a read-only journal
-recovery admission under the **original operation lock**. If a Gateway
-snapshot is pending while the cursor is still `CORE_COMMITTED`, the SAME
-option compensates the interrupted stage **before** requiring healthy
-Docker/Compose state. Normal `resume-ir` then validates the 0600 root-owned
-journal, original source/version, exact image references, project and
-service/Compose labels, running containers and original Iran role/state.
-There is **no new Docker project, Panel reinstall, rekey, FRP restart or
-separate Pairing/rollback menu**. Only a still-paused, transaction-owned
-Iran Node may be recreated to restore its prior environment after a
-failed Gateway attempt; previously signed/paired Nodes are never
-automatically reverted.
+Option 1 uses the original operation lock for recovery. Before the Panel
+checkpoint it quarantines the unfinished fresh attempt using the original
+rollback and retries with the saved inputs. After the Panel checkpoint it
+rechecks Panel ownership and rolls back only an unfinished, unpaired Node:
+it removes that stopped container without deleting volumes, quarantines
+its files and restores the broker to its inactive/disabled state. The
+completed Panel, its database, and the original Compose project survive.
+If a Gateway snapshot is pending at `CORE_COMMITTED`, option 1 restores it
+before verifying Docker health. Older incomplete journals without saved
+inputs still require reviewed recovery. Existing post-core cursors remain
+supported.
+
 A returned checkpoint is NEVER trusted alone: a retained Gateway is
 reverified by strict local HTTPS; existing signed Pairing/identity is
 reverified using the original idempotent `--complete-local-ir-install`;
@@ -67,12 +68,10 @@ Safe crash boundaries:
   **unreadable/invalid DB** (HOLD). Never reset a password on retry.
 - After completion → verify Gateway/Pairing/Admin and report already
   complete; never needlessly repeat the cosmetic UI patch.
-- **Before core COMMIT** (download, Docker, first core image/install):
-  previously interrupted ownership is insufficiently proven. This
-  version **HOLDs** and leaves all data untouched for reviewed recovery,
-  rather than guessing and destructively replaying half of a Docker
-  transaction. Existing old `COMMITTED` journals without explicit
-  `ir_resumable_version=1` are NOT auto-adopted as new resumable installs.
+- Before Panel commit → roll back the partial Panel and retry with the
+  saved domain and Node name.
+- After Panel commit, before Node commit → roll back only unfinished Node
+  changes and restart at Node setup with the same Panel.
 - Foreign option 2 is still intentionally `HOLD_BEFORE_HOST_CHANGES`
   pending a separately approved signed unified release. Apply the
   SAME journal principle to that existing path only after its complete
@@ -122,11 +121,9 @@ instead of overwriting user data or breaking an active tunnel.
 **Scope/limitations:** this compensates the Gateway's owned runtime
 configuration, NOT automatic removal of downloaded apt packages or a
 Let's Encrypt certificate already issued. Those are safely reusable
-preparatory artifacts. It does not yet automate cleanup/retry of an
-uncommitted initial CORE, or promise rollback of an interrupted signed
-identity/admin operation: existing Pairing uses verified identity-safe
-rollback and Admin uses a read-only existing-row check to avoid rekeying
-or duplicate creation. Foreign option 2 remains signed-release gated.
+preparatory artifacts. Pairing uses verified identity-safe recovery and
+Admin uses a read-only existing-row check to avoid rekeying or duplicate
+creation. Foreign option 2 remains signed-release gated.
 The current proof is **disposable offline failure injection**, not a
 real production power-loss or two-host Connected test.
 
@@ -144,7 +141,7 @@ from green CI.
 
 | Phase | Existing function/code | Current admission and tested outcome |
 | --- | --- | --- |
-| Iran selected option 1, fresh host | `smite_install_selected_fresh panel-iran` and `smite-rc6-install-journal.py` | Official RC7 source, pinned Panel+Node signed digests and exact commit journal; all verified before Docker. Refuses an existing/partial host |
+| Iran selected option 1, fresh host | `smite_install_selected_fresh panel-iran` and `smite-rc6-install-journal.py` | Official RC7 source, pinned Panel+Node signed digests and exact commit journal; verified before starting services. Resumes the original owned Panel or Node checkpoint |
 | Iran Gateway and local Node | `smite_install_finish_local_ir` → `smite_gateway_configure_panel`, `smite-node-pairing.py --complete-local-ir-install` | HTTPS/443 and signed bidirectional IR check before administrator creation. No extra Pairing menu action. Failures HOLD and preserve identity |
 | Iran admin and appearance | `smite_install_create_admin` → existing `smite_install_ui_action apply` | Admin after signed IR check; optional static-only appearance now occurs last. UI failure points to existing menu 8 without abandoning connected Node |
 | Administrator reserves Foreign Node | Companion Smite `ForeignInstallDialog`, signed grant store and explicitly migrated SQLite tables | Tested real Smite admin-issued `smi1` code, scoped 2-hour grant, exact origin/path and durable one-key redemption **in offline ASGI/DB tests**. New Panel image is NOT in official IR option 1 |

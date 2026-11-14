@@ -231,9 +231,8 @@ assert core.index('FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION') < core.i
 assert 'FOREIGN_CONNECTED=NOT_PROVEN' in core
 selected=src.split('smite_install_selected_fresh() (',1)[1].split(
     '\nsmite_install_finish_local_ir() {',1)[0]
-assert 'FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE' in selected
 assert "echo 'FOREIGN_CONNECTED=NOT_PROVEN'" in selected
-assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=INCOMPLETE_RETAIN_CORE',1)[1]
+assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES',1)[1].split('    fi', 1)[0]
 assert 'smite_install_finish_local_ir || return 2' in selected
 PY
 
@@ -345,7 +344,7 @@ src=Path(sys.argv[1]).read_text()
 start=src.index('smite_install_selected_fresh() (')
 end=src.index('\nsmite_install_finish_local_ir() {',start)
 assert 'smite_install_unified_foreign_after_core' not in src[start:end]
-assert 'smite_install_foreign_node || return 2' in src[start:end]
+assert 'smite_install_foreign_node; fi' in src[start:end]
 assert 'smite_install_finish_local_ir || return 2' in src[start:end]
 PY
 

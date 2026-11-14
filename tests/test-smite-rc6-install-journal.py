@@ -34,6 +34,7 @@ class RecoveryTests(unittest.TestCase):
                 out = json.dumps([obj])
             elif a[0] == 'update': self.objects[a[-1]]['HostConfig']['RestartPolicy'] = {'Name': 'no'}
             elif a[0] == 'stop': self.objects[a[1]]['State']['Running'] = False
+            elif a[0] == 'rm': del self.objects[a[-1]]
             elif a[0] == 'rename': self.objects[a[1]]['Name'] = '/' + a[2]
             else: raise AssertionError(a)
         elif args[0] != 'systemctl': raise AssertionError(args)
@@ -226,6 +227,69 @@ class RecoveryTests(unittest.TestCase):
         state.chmod(0o600)
         self.assertIn('COMMITTED',journal.commit())
         return journal,ir_root,project
+
+    def prepare_staged_ir(self, panel_committed):
+        ir, root, project = self.prepare_retained_ir()
+        doc = ir.load()
+        doc.update(state='INSTALLING', installer_pid=os.getpid(),
+                   installer_start=m.process_start(os.getpid()),
+                   ir_inputs=dict(domain='iran.example.org', name='node-ir'))
+        del doc['ir_phase']
+        ir.save(doc)
+        self.objects.pop('a'*64)
+        (root / 'etc/u-opti/smite/state.env').unlink()
+        (root / 'etc/u-opti/smite/route-broker.json').write_text('{"peer_gid":39100}')
+        panel = root / 'opt/smite'
+        panel.mkdir(parents=True)
+        (panel / '.env').write_text('PANEL_DOMAIN=iran.example.org\nSECRET_KEY=retained\n')
+        if panel_committed:
+            ir.ir_commit_panel(os.getpid())
+        return ir, root, project
+
+    def test_failed_panel_quarantined_then_reuses_inputs(self):
+        ir, root, project = self.prepare_staged_ir(panel_committed=False)
+        self.assertEqual(ir.ir_recover_core(os.getpid()),
+                         ('FRESH_ALLOWED', project, 'iran.example.org', 'node-ir'))
+        archive = root / 'opt' / ('smite.rc6-rollback-' + project)
+        self.assertIn('SECRET_KEY=retained', (archive / '.env').read_text())
+        self.assertEqual(ir.ir_recover_core(os.getpid())[2:], ('iran.example.org', 'node-ir'))
+        self.assertNotEqual(project, ir.begin('panel-iran', os.getpid(),
+                                             resumable_ir=True,
+                                             ir_inputs=('iran.example.org', 'node-ir')))
+
+    def test_node_rollback_retries_after_interruption_and_preserves_panel(self):
+        ir, root, project = self.prepare_staged_ir(panel_committed=True)
+        self.tx = project
+        draft = self.install_partial()
+        draft.rename(root / 'opt/smite-node')
+        interrupted = root / 'etc/u-opti/smite/state.env'
+        interrupted.write_text('partial write')
+        panel = self.objects['b'*64]
+        panel_env = (root / 'opt/smite/.env').read_bytes()
+        with patch.object(ir, 'quarantine_paths', side_effect=RuntimeError('interrupted')):
+            with self.assertRaisesRegex(RuntimeError, 'interrupted'):
+                ir.ir_recover_core(os.getpid())
+        self.assertTrue(interrupted.exists())
+        self.assertNotIn('a'*64, self.objects)
+        self.assertTrue(ir.load()['ir_node_rollback'])
+        self.assertEqual(ir.ir_recover_core(os.getpid()),
+                         ('PANEL_COMMITTED', project, 'iran.example.org', 'node-ir', 39100))
+        self.assertIs(self.objects['b'*64], panel)
+        self.assertTrue(panel['State']['Running'])
+        self.assertEqual((root / 'opt/smite/.env').read_bytes(), panel_env)
+        self.assertFalse((root / 'opt/smite-node').exists())
+        self.assertFalse(interrupted.exists())
+        self.assertNotIn('ir_node_rollback', ir.load())
+        self.assertEqual(len(list((root / 'opt').glob('smite-node.rc6-rollback-*'))), 1)
+        self.assertFalse(any('b'*64 in call and ('stop' in call or 'rm' in call)
+                             for call in self.calls))
+
+    def test_completed_panel_drift_prevents_node_rollback(self):
+        ir, root, _ = self.prepare_staged_ir(panel_committed=True)
+        (root / 'opt/smite/.env').write_text('PANEL_DOMAIN=unexpected.example.org\n')
+        with self.assertRaisesRegex(m.Hold, 'IR_PANEL_DOMAIN_DRIFT'):
+            ir.ir_recover_core(os.getpid())
+        self.assert_no_stop()
 
     def test_ir_resume_from_each_verified_phase_and_complete(self):
         ir,root,project=self.prepare_retained_ir()
