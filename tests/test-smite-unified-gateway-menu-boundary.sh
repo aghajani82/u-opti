@@ -227,6 +227,9 @@ smite_foreign_gateway_write_renew_hook() {
     # which exposed the original missing preimage compensation.
     smite_foreign_gateway_render_renew_hook > "$SMITE_FOREIGN_RENEW_HOOK" || return 1
     chmod 0755 "$SMITE_FOREIGN_RENEW_HOOK" || return 1
+    # A process may die AFTER the hook was overwritten, but BEFORE the
+    # durable Gateway receipt. The next same-option run must compensate.
+    if [ "$FAULT" = hook_interrupted ]; then exit 78; fi
     [ "$FAULT" != hook ]
 }
 mv() {
@@ -280,6 +283,32 @@ smite_foreign_gateway_configure <<< "" > "$TMP/existing-hook-rollback" 2>&1 || s
 [ "$(stat -c %a "$SMITE_FOREIGN_RENEW_HOOK")" = 755 ]
 [ ! -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
 rm -f "$SMITE_FOREIGN_RENEW_HOOK"
+
+# Crash after the shared hook was written but before the Gateway receipt:
+# the SAME option must restore BOTH site and hook before reapplying. No
+# dedicated rollback menu, no container recreation or partial success.
+FAULT=hook_interrupted
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/hook-interrupted" 2>&1 || status=$?
+[ "$status" = 78 ]
+[ -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+[ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
+[ -f "$SMITE_FOREIGN_RENEW_HOOK" ]
+smite_foreign_gateway_render_renew_hook | cmp -s - "$SMITE_FOREIGN_RENEW_HOOK"
+grep -qx 'candidate vhost' "$TMP/site"
+FAULT=
+smite_foreign_gateway_configure <<< "" > "$TMP/hook-interrupted-retry"
+grep -qx 'FOREIGN_GATEWAY_SITE=ROLLED_BACK_AFTER_INTERRUPTION' "$TMP/hook-interrupted-retry"
+grep -qx 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/hook-interrupted-retry"
+[ ! -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+[ -f "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
+smite_foreign_gateway_render_renew_hook | cmp -s - "$SMITE_FOREIGN_RENEW_HOOK"
+
+# Reset the *disposable* test fixture to exercise the older pre-hook
+# Nginx-crash path independently, without pretending a new host install.
+rm -f "$SMITE_FOREIGN_GATEWAY_STATE_FILE" "$SMITE_FOREIGN_RENEW_HOOK"
+printf 'original vhost\n' > "$TMP/site"
+ln -sfn "$TMP/original-link" "$TMP/enabled"
 
 # Exit the stage subprocess after the new site is installed and before commit.
 FAULT=interrupted
