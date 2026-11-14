@@ -647,5 +647,144 @@ class Prepare(unittest.TestCase):
         self.assertFalse(self.panel.staging.exists())
 
 
+class RuntimeDockerWitness(unittest.TestCase):
+    """Fake Docker client exercises the REAL live witness; never runs Docker."""
+
+    def setUp(self):
+        install = stage._module("smite-rc6-install-journal")
+        self.project = "uopti_rc6_" + "f"*32
+        self.image = install.IMAGES["smite-node"]
+        self.runtime = {
+            "Id": "d"*64,
+            "Created": "2026-11-14T16:00:00.123456789Z",
+            "Image": "sha256:" + "e"*64,
+            "Name": "/smite-node",
+            "State": {"Running": True, "Restarting": False,
+                      "StartedAt": "2026-11-14T16:00:10.123456789Z"},
+            "Config": {
+                "Image": self.image,
+                "Labels": {
+                    "com.docker.compose.project": self.project,
+                    "com.docker.compose.service": "smite-node",
+                    "com.docker.compose.project.config_files":
+                        "/opt/smite-node/docker-compose.yml,"
+                        "/opt/smite-node/docker-compose.security-candidate.yml",
+                },
+            },
+            "Mounts": [{"Type": "bind", "Source": "/opt/smite-node/config",
+                        "Destination": "/etc/smite-node"}],
+        }
+        self.record = {
+            "source": install.SOURCE, "role": "panel-iran",
+            "state": "COMMITTED", "ir_resumable_version": 1,
+            "ir_phase": "COMPLETE", "id": self.project,
+        }
+        self.calls = []
+        self.inspect_payloads = []
+        current = self
+        class FakeJournal:
+            folder = Path("/var/lib/u-opti/rc6-install-journal")
+
+            def load(self):
+                current.calls.append("load")
+                return dict(current.record)
+
+            def _ir_container_witness(self, record, name, ref):
+                current.calls.append("signed_node_witness")
+                if (record != current.record
+                        or name != "smite-node" or ref != current.image):
+                    raise ValueError("unexpected owner")
+
+            def docker(self, *args):
+                if args == ("inspect", "smite-node"):
+                    current.calls.append("inspect")
+                    if current.inspect_payloads:
+                        return json.dumps([current.inspect_payloads.pop(0)])
+                    return json.dumps([current.runtime])
+                if args == ("image", "inspect", "-f", "{{.Id}}", current.image):
+                    current.calls.append("image_inspect")
+                    return current.runtime["Image"] + "\n"
+                raise AssertionError("unexpected Docker action: " + repr(args))
+        self.fake = SimpleNamespace(
+            SOURCE=install.SOURCE, IMAGES=install.IMAGES,
+            Hold=type("FakeJournalHold", (Exception,), {}),
+            Journal=FakeJournal,
+            trusted=lambda path, directory=False: None,
+        )
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.manager = stage.PanelStage(Path(self.temp.name))
+
+    def run_witness(self):
+        with patch.object(stage, "_module", return_value=self.fake), \
+             patch.object(self.manager, "root", Path("/")):
+            return self.manager._iran_node_runtime()
+
+    def test_exact_retained_node_runtime_witness_is_only_inspected(self):
+        result = self.run_witness()
+        self.assertEqual(result["container_id"], "d"*64)
+        self.assertEqual(result["project_id"], self.project)
+        self.assertEqual(result["image_reference"], self.image)
+        self.assertEqual(result["started_at"],
+                         self.runtime["State"]["StartedAt"])
+        self.assertEqual(self.calls,
+                         ["load", "inspect", "signed_node_witness",
+                          "inspect", "image_inspect"])
+
+    def test_recreation_between_docker_inspections_is_denied(self):
+        prior = json.loads(json.dumps(self.runtime))
+        current = json.loads(json.dumps(self.runtime))
+        current["Id"] = "b"*64
+        self.inspect_payloads = [prior, current]
+        with self.assertRaises(stage.StageHold):
+            self.run_witness()
+        self.assertNotIn("image_inspect", self.calls)
+
+    def test_started_at_drift_between_inspections_is_denied(self):
+        prior = json.loads(json.dumps(self.runtime))
+        current = json.loads(json.dumps(self.runtime))
+        current["State"]["StartedAt"] = "2026-11-14T16:10:11.123456789Z"
+        self.inspect_payloads = [prior, current]
+        with self.assertRaises(stage.StageHold):
+            self.run_witness()
+
+    def test_retained_node_ownership_and_identity_mounts_are_required(self):
+        for variant in ("foreign-project", "wrong-image", "missing-mount",
+                        "stopped", "restarting", "wrong-service",
+                        "wrong-node-name"):
+            old = json.loads(json.dumps(self.runtime))
+            with self.subTest(variant=variant):
+                if variant == "foreign-project":
+                    self.runtime["Config"]["Labels"]["com.docker.compose.project"] = (
+                        "uopti_rc6_"+"a"*32)
+                elif variant == "wrong-image":
+                    self.runtime["Config"]["Image"] = (
+                        "ghcr.io/aghajani82/smite-node:latest")
+                elif variant == "missing-mount":
+                    self.runtime["Mounts"] = []
+                elif variant == "stopped":
+                    self.runtime["State"]["Running"] = False
+                elif variant == "restarting":
+                    self.runtime["State"]["Restarting"] = True
+                elif variant == "wrong-service":
+                    self.runtime["Config"]["Labels"][
+                        "com.docker.compose.service"] = "smite-panel"
+                else:
+                    self.runtime["Name"] = "/smite-node-replaced"
+                with self.assertRaises(stage.StageHold):
+                    self.run_witness()
+                self.runtime = old
+
+    def test_existing_iran_installer_journal_must_be_complete(self):
+        for field, value in (("role", "foreign"), ("state", "INSTALLING"),
+                             ("ir_phase", "PAIRING_VERIFIED"),
+                             ("ir_resumable_version", 0)):
+            with self.subTest(field=field):
+                original = self.record[field]
+                self.record[field] = value
+                with self.assertRaises(stage.StageHold):
+                    self.run_witness()
+                self.record[field] = original
+
 if __name__=="__main__":
     unittest.main(verbosity=2)
