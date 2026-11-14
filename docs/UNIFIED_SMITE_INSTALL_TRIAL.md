@@ -2616,3 +2616,87 @@ receipts were changed by this repository update.
    FRP/Backhaul/Sanaei inventories and scoped rollback evidence, remain
    **not proven**. Until then, keep `main` unchanged.
 
+
+## Consolidation milestone — Iran signed Panel rollback continuity (2026-11-14)
+
+**Objective:** close existing Iran Panel preimage and rollback defects before
+activating any production executor; reuse the original sealed stage,
+`smite-unified-panel-transaction.py` transaction/journal and signed-replay
+continuity code. No new menu, UI, tunnel feature or credential engine.
+
+### Completed in U-OPTI trial
+
+1. **Candidate source verification rather than only trusting hashes.**
+   `smite-unified-panel-stage.py status` re-derives the exact three upgrade
+   candidates (Panel compose/image, Panel environment flags, Nginx 443
+   backend) **from sealed before-files with the existing pinned renderer**.
+   A malicious candidate plus a matching rewritten journal SHA256 is not
+   sufficient. Journal admission also rejects duplicate JSON keys, extra
+   keys, non-dictionary snapshot maps and non-hex/wrong-type hashes.
+   Private SQLite and replay snapshots and the installed Iran Node are
+   never overwritten by this check.
+2. **Real-host-compatible but read-only rollback preflight.**
+   `smite-unified-panel-transaction.py --review-rollback` checks the
+   sealed/still-signed pair, complete candidate config, canonical empty
+   additive Foreign tables, exact unmodified pairing/origin/identity, and
+   the already-existing Iran-only HMAC/replay heartbeat reconciliation.
+   Normal `last_seen`, FRP telemetry and signed nonces may advance; a
+   pending pairing code, a Foreign grant or reservation, replay identity
+   change, altered expiry, missing active nonce, altered secret, schema
+   drift or unknown config always results in HOLD. The output is expressly
+   a **READ_ONLY PREFLIGHT**, not a runtime-health proof or authority to
+   perform an actual rollback.
+3. **Scoped rollback fault injection through the same existing transaction.**
+   The fixture-only `rollback_rehearsal(allow_iran_heartbeat=True)`
+   uses the same verified continuity predicate while restoring **only**
+   the three owned config files. Both live-like Panel inbound and Node
+   replay nonces remain byte-for-byte retained, even after interruption
+   immediately following an owned rename and retry from
+   `BEFORE_ROLLBACK`. An ordinary fixture rollback stays deliberately
+   strict unless this specific fixture option is requested. All
+   internal writer primitives check disposable-root authorization
+   themselves, so directly invoking a helper cannot write to `/`.
+4. **Regression coverage.** Newly added tests cover forged candidate/
+   rehashed journal, duplicate keys, malformed digests, signed heartbeat
+   rollback, power-loss recovery, preserved replay, pending code/Foreign
+   grant/security drift, partial schema, legacy unsigned metadata, and
+   direct calls to internal writer methods without a fixture capability.
+
+Key commits:
+`16ea6861ae9cc1b44a78c3ca11045bfedd96f0c9`,
+`9c00eb4aa205148bc1149278f606f08dc385ae2c`,
+`8ff085963d7414f7b1117be92ef337332b8a4832`,
+`0e8d430089d7d302f5e47daf366c9e1211e083df`,
+`38e1a165e122d73fb89d695e02babc15fd343671`,
+`ab0cf7180be5e7aed057a4541b0afe7593682e6f`,
+`79a468c2bd68932ca1481234ac4d25153741649a`,
+`2be103915a463329a586272ac00f4983023bb2ab`,
+`bd4038baa3c8a37740e0df1b3854e08f0efd6a41`,
+`40c516459290108732e73251fec0211ac943bbe1`,
+`7896c443090aec959d626cda6a228a2aa79148e8`,
+`8f47db34d1aa22a203258cb5b4bd347dfd3b468e`.
+
+CI for signed-heartbeat rollback and interrupted-step recovery:
+https://github.com/aghajani82/u-opti/actions/runs/43619029442
+CI for final internal root-writer guards:
+https://github.com/aghajani82/u-opti/actions/runs/43619201927
+(Check final conclusion before reporting these runs as green.)
+
+### Still HOLD — finish the project, do not broaden scope
+
+- Actual **production Iran Panel apply/rollback** must still be bound to an
+  approved release pair and a durable live executor with service-level
+  health checks and a retained Node ID/container/start-time witness.
+  The current trial manifest still has `release_approved=false`,
+  `activation_allowed=false`, and does **not** authorize a live
+  redeployment or real rollback. Do not hand-edit these booleans.
+- Only after a verified live Iran baseline and reviewed Panel executor may
+  the existing Foreign option-2 private Node/Sanaei/Gateway/identity
+  steps be connected to the public one-choice path. Today the public
+  Foreign entry retains `HOLD_BEFORE_HOST_CHANGES`.
+- End-to-end acceptance means actual two-host signed **Connected**,
+  preserved Iran/Foreign FRP and Backhaul data and original Sanaei DB,
+  witnessed per-stage rollback and clean CI, then integrate to `main`
+  with no unresolved PR/workflow. No production host is touched by this
+  trial milestone.
+
