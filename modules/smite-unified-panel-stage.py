@@ -480,6 +480,18 @@ class PanelStage:
             ):
                 if pairing._run(curl + endpoint, timeout=10, capture=True) != "200":
                     deny()
+            # Reuse the existing authenticated local Iran probes. HTTP 200
+            # alone is NOT evidence that signed HMAC and replay still work.
+            # These GET probes do not rekey/recreate a Node or edit Compose;
+            # the replay guard does record a fresh ordinary nonce, which
+            # live-continuity already reconciles without rewinding.
+            node_id = json.loads(originals["iran-identity"])["node_id"]
+            if (not isinstance(node_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", node_id)):
+                deny()
+            pairing._local_signed_replay_probe()
+            pairing._wait_panel_signed_checkin(node_id, timeout=6)
+            pairing._panel_to_ir_signed_probe(node_id)
         except (journal_module.Hold, pairing.WizardHold):
             deny()
         # Older branch installations record the selected channel in
@@ -499,7 +511,7 @@ class PanelStage:
             "IR_GATEWAY_TLS443": "PASS",
             "IR_ADMIN": "PRESENT",
             "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
-            "IR_SIGNED_TWO_WAY": "NOT_CHECKED",
+            "IR_SIGNED_TWO_WAY": "PASS_EXISTING_SIGNED_CONTROL_PROBES",
         }
 
     def prepare(self, confirm: str):
