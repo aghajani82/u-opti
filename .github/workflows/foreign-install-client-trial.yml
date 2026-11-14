@@ -39,6 +39,8 @@ on:
       - modules/docker-3xui.sh
       - tests/test-smite-unified-sanaei-continuation.sh
       - modules/smite-unified-panel-transaction.py
+      - modules/smite-unified-panel-cutover.py
+      - tests/test-smite-unified-panel-cutover.py
       - tests/test-smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-docker.sh
       - tests/test-smite-unified-panel-stage.py
@@ -110,6 +112,7 @@ jobs:
       - run: sudo python -B tests/test-smite-rc6-install-journal.py -v
       - run: bash tests/test-smite-sanaei-result.sh
       - run: python -B tests/test-smite-unified-panel-transaction.py -v
+      - run: python -B tests/test-smite-unified-panel-cutover.py -v
       - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-panel-ingress.py -v
       - run: python -B tests/test-smite-foreign-install-integration.py -v
