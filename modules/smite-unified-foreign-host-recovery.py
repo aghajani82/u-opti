@@ -6,9 +6,10 @@ not by public CLI or a deployed host.
 
 Safety property: after an interrupted side-effectful stage, NEVER rerun it
 based on a journal alone. Verify observed external state first; if it is
-fully READY, commit and continue; if it is ABSENT or DRIFT, HOLD for a
-reviewed recovery. An already completed stage is verified again on EVERY
-retry, so a stale "success" journal can never declare Connected.
+fully READY, commit and continue; if it is ABSENT, only an explicitly
+supplied, ownership-checked rollback may restore that stage to its initial
+state. DRIFT always HOLDs; so does failed compensation. Existing completed
+stages are reverified on EVERY retry. Never declare Connected.
 """
 from __future__ import annotations
 
@@ -98,7 +99,9 @@ def write_journal(fd, record):
 
 def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
              expected_node, verify_core, verify_sanaei, verify_gateway,
-             install_sanaei, install_gateway, disposable_capability=False):
+             install_sanaei, install_gateway,
+             rollback_sanaei=None, rollback_gateway=None,
+             disposable_capability=False):
     """Model host stage transitions with injected witnesses and operations.
 
     verify_core(scope) must independently verify a signed, owned fresh Node
@@ -107,12 +110,19 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
     HTTPS/443 path, cert, current config and paused Node runtime.
 
     Witnesses return READY/ABSENT/DRIFT; any other value is a hard HOLD.
+    Optional rollback callbacks model the ORIGINAL owner's existing private
+    snapshots/rollback, not a new installer. They may be used only after
+    the matching *_INTENT journal and with exact independent post-witness.
+    They must return ROLLED_BACK_VERIFIED, or the journal stays in INTENT.
+    The next invocation with the same option then retries that step.
     This experimental function is not connected to the Smite Manager menu.
     """
     witnesses = (verify_core, verify_sanaei, verify_gateway,
                  install_sanaei, install_gateway)
     if (disposable_capability is not True or type(now) is not int
-            or not all(callable(fn) for fn in witnesses)):
+            or not all(callable(fn) for fn in witnesses)
+            or any(fn is not None and not callable(fn)
+                   for fn in (rollback_sanaei, rollback_gateway))):
         deny()
     fixture_scope(directory, packet_path)
 
@@ -194,6 +204,41 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
                     write_journal(fd, {**baseline, "phase": new_phase})
                     phase = new_phase
 
+                def compensate(intent, prior, rollback, witness):
+                    """Rewind ONLY the interrupted stage, never a committed one."""
+                    nonlocal phase
+                    if phase != intent or rollback is None:
+                        deny()
+                    if verify_core(packet.scope) is not True:
+                        deny()
+                    if intent == "SANAEI_INTENT":
+                        # No Gateway may have been configured by this stage.
+                        if verify_gateway(packet.scope) != "ABSENT":
+                            deny()
+                    elif intent == "GATEWAY_INTENT":
+                        if verify_sanaei(packet.scope) != "READY":
+                            deny()
+                    else:
+                        deny()
+                    # Ambiguous, unowned/foreign mutations are always HOLD.
+                    # The callback itself must own and validate its original
+                    # snapshot, no-symlink paths and target permissions.
+                    if witness(packet.scope) not in ("READY", "ABSENT"):
+                        deny()
+                    if rollback(packet.scope) != "ROLLED_BACK_VERIFIED":
+                        deny()
+                    # A callback success without a fresh witness is NOT a
+                    # verified rollback. Retain the durable INTENT journal.
+                    if (verify_core(packet.scope) is not True
+                            or witness(packet.scope) != "ABSENT"
+                            or (intent == "SANAEI_INTENT" and
+                                verify_gateway(packet.scope) != "ABSENT")
+                            or (intent == "GATEWAY_INTENT" and
+                                verify_sanaei(packet.scope) != "READY")):
+                        deny()
+                    write_journal(fd, {**baseline, "phase": prior})
+                    phase = prior
+
                 # Recheck observed external state while holding the lock.
                 # Neither a stale journal nor a successful callback alone is
                 # enough to skip stage verification.
@@ -218,24 +263,46 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
                     advance(phase)
 
                 if sanaei == "ABSENT":
+                    if phase == "SANAEI_INTENT":
+                        # Prior attempt interrupted: compensate first, then
+                        # the SAME option will retry from CORE_VERIFIED.
+                        compensate("SANAEI_INTENT", "CORE_VERIFIED",
+                                   rollback_sanaei, verify_sanaei)
+                        deny()
                     if phase != "CORE_VERIFIED":
-                        # A previous action was interrupted; "absent" is
-                        # ambiguous. Never reinstall or recreate blindly.
                         deny()
                     advance("SANAEI_INTENT")
-                    install_sanaei(packet.scope)
+                    try:
+                        install_sanaei(packet.scope)
+                    except (OSError, ValueError, RuntimeError):
+                        compensate("SANAEI_INTENT", "CORE_VERIFIED",
+                                   rollback_sanaei, verify_sanaei)
+                        deny()
                     if verify_sanaei(packet.scope) != "READY":
+                        compensate("SANAEI_INTENT", "CORE_VERIFIED",
+                                   rollback_sanaei, verify_sanaei)
                         deny()
                     advance("SANAEI_RO_VERIFIED")
                 elif PHASES.index(phase) < PHASES.index("SANAEI_RO_VERIFIED"):
                     advance("SANAEI_RO_VERIFIED")
 
                 if gateway == "ABSENT":
+                    if phase == "GATEWAY_INTENT":
+                        compensate("GATEWAY_INTENT", "SANAEI_RO_VERIFIED",
+                                   rollback_gateway, verify_gateway)
+                        deny()
                     if phase != "SANAEI_RO_VERIFIED":
                         deny()
                     advance("GATEWAY_INTENT")
-                    install_gateway(packet.scope)
+                    try:
+                        install_gateway(packet.scope)
+                    except (OSError, ValueError, RuntimeError):
+                        compensate("GATEWAY_INTENT", "SANAEI_RO_VERIFIED",
+                                   rollback_gateway, verify_gateway)
+                        deny()
                     if verify_gateway(packet.scope) != "READY":
+                        compensate("GATEWAY_INTENT", "SANAEI_RO_VERIFIED",
+                                   rollback_gateway, verify_gateway)
                         deny()
                     advance("GATEWAY_443_VERIFIED")
                 elif PHASES.index(phase) < PHASES.index("GATEWAY_443_VERIFIED"):
