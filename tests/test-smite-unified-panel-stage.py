@@ -486,13 +486,14 @@ class Prepare(unittest.TestCase):
         variants = (
             original.rstrip().removesuffix(b"}") +
                 b',"source_sha":"0000000000000000000000000000000000000000"}\n',
-            original.replace(b'"snapshots":{',
-                             b'"snapshots":{"before-panel-env":"0",'),
+            original.replace(b'"snapshots": {',
+                             b'"snapshots": {"before-panel-env":"0",', 1),
             original.rstrip().removesuffix(b"}") +
                 b',"production_apply":true}\n',
-            original.replace(b'"candidates":{',b'"candidates":[],"unused":{'),
+            original.replace(b'"candidates": {',b'"candidates": [], "unused": {', 1),
         )
         for forged in variants:
+            self.assertNotEqual(forged, original, "fixture was not mutated")
             with self.subTest(forged=forged[:48]):
                 journal.write_bytes(forged)
                 with self.assertRaises((stage.StageHold, ValueError, TypeError)):
