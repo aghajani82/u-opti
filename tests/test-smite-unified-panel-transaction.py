@@ -58,6 +58,24 @@ class OfflineRollout(unittest.TestCase):
         self.assertFalse(self.executor.rehearsal.exists())
         self._assert_originals()
 
+    def test_fresh_apply_holds_if_signed_state_changed_after_staging(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("INSERT INTO smite_node_inbound_nonces VALUES (?, ?, ?)",
+                         ("iran-node-1234", "new-nonce", 400))
+        with self.assertRaises(trans.Hold):
+            self._invoke()
+        self.assertFalse(self.executor.rehearsal.exists())
+        self._assert_originals()
+
+    def test_apply_and_rollback_share_the_same_nonblocking_lock(self):
+        with self.executor._operation(trans.CONFIRM):
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+            with self.assertRaises(trans.Hold):
+                self._undo()
+        self.assertFalse(self.executor.rehearsal.exists())
+        self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+
     def test_successful_rehearsal_is_offline_and_leaves_stage_untouched(self):
         stagejournal=(self.panel.staging / "journal.json").read_bytes()
         result=self._invoke()
@@ -97,7 +115,10 @@ class OfflineRollout(unittest.TestCase):
         with self.assertRaises(trans.Hold):
             self._invoke(fail_after="ENV")
         self.assertEqual(self._ledger()["phase"], "AFTER_ENV")
-        self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+        with patch.object(self.executor, "_replace", wraps=self.executor._replace) as replace, \
+                patch.object(self.executor, "_schema_rehearsal", side_effect=AssertionError):
+            self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+        self.assertEqual([call.args[0] for call in replace.call_args_list], ["nginx-backend"])
         self.assertEqual(self._ledger()["phase"], "REHEARSED")
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute(
@@ -106,6 +127,40 @@ class OfflineRollout(unittest.TestCase):
             self.assertEqual(conn.execute(
                 "SELECT encrypted_secret FROM smite_node_identities"
             ).fetchone(), ("secret-ciphertext",))
+
+    def test_retry_after_config_write_before_checkpoint_skips_the_existing_write(self):
+        write = self.executor._journal_write
+
+        def lose_checkpoint(record):
+            if record["phase"] == "AFTER_NGINX":
+                raise OSError("simulated interruption before checkpoint")
+            write(record)
+
+        with patch.object(self.executor, "_journal_write", side_effect=lose_checkpoint):
+            with self.assertRaises(OSError):
+                self._invoke()
+        self.assertEqual(self._ledger()["phase"], "BEFORE_NGINX")
+        with patch.object(self.executor, "_replace", side_effect=AssertionError):
+            self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+
+    def test_retry_does_not_rewrite_drift_in_a_completed_step(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="ENV")
+        path = self.root / trans.CONFIG["panel-compose"]
+        path.write_bytes(self.original[trans.CONFIG["panel-compose"]])
+        with patch.object(self.executor, "_replace", side_effect=AssertionError):
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+        self.assertEqual(self._ledger()["phase"], "AFTER_ENV")
+
+    def test_step_requires_config_readback_before_checkpoint(self):
+        with patch.object(self.executor, "_replace", return_value=None) as replace:
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+        self.assertEqual([call.args[0] for call in replace.call_args_list], ["panel-compose"])
+        self.assertEqual(self._ledger()["phase"], "BEFORE_COMPOSE")
+        self._assert_originals()
+        self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
 
     def test_repeated_rollback_refuses_drift_after_the_original_rollback(self):
         self._invoke()

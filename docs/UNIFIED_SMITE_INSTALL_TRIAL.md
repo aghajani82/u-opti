@@ -51,6 +51,30 @@ repository milestone is the reviewed transactional Panel upgrade for
 Foreign grant issuance. The public Foreign option 2 remains on hold
 pending the approved release and the live upgrade and connectivity gates.
 
+### Panel upgrade recovery verified in isolation
+
+The existing Panel transaction now serializes rehearsal and rollback on
+the same sealed stage. Retry verifies completed checkpoints and continues
+from the interrupted step. It can recognize an already-written candidate
+when the checkpoint write was lost. A completed step with changed files,
+pairing data or Replay state holds the transaction for review. Explicit
+rollback restores owned configuration and retains the database and replay
+history. The integration suite runs the pinned Smite migration against
+the same disposable Panel database, interrupts it after the private
+backup is saved, resumes with that same backup and exercises actual
+Foreign grant issue and redeem. Both operations block later config rollback.
+
+The production executor still needs to coordinate the running Panel and
+Nginx on a disposable two-host environment before use on Iran. In
+particular, capture the actual Compose owner and running Node ID, keep
+grant ingress closed through migration, verify the candidate with local
+and TLS probes plus signed checks, and record fresh runtime witnesses.
+Signed check-ins and Replay nonces can legitimately advance on a running
+host. The isolated database drift rule must not be reused as a live
+reconciliation policy without distinguishing those changes from grants,
+origin changes and identity changes. Keep the exact signed trial pair
+separate from the independently approved release used for live activation.
+
 ## Resume/checkpoint design — Iran selected option 1 (2026-11-13)
 
 Operator intent: **press the same option 1 again**, just like resuming a

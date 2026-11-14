@@ -258,7 +258,8 @@ class Integration(unittest.TestCase):
         Docker, Nginx, host write or separate grant implementation.
         """
         import sqlite3
-        from app import foreign_install_grants
+        from unittest.mock import patch
+        from app import foreign_install_grants, foreign_install_migration
 
         root=Path(__file__).resolve().parents[1]
         spec_fixture=importlib.util.spec_from_file_location(
@@ -289,9 +290,25 @@ class Integration(unittest.TestCase):
         sys.modules[spec_tx.name]=transaction
         spec_tx.loader.exec_module(transaction)
         executor=transaction.PanelTransaction(
-            site.root,stager=site.panel,fixture_capability=True)
-        self.assertEqual(executor.rehearse(
-            confirm=transaction.CONFIRM)['status'],'REHEARSED_OFFLINE')
+            site.root,stager=site.panel,fixture_capability=True,
+            fixture_migration=lambda db: foreign_install_migration.migrate(
+                db, confirm=foreign_install_migration.CONFIRM))
+        backup=site.db.with_name(site.db.name + foreign_install_migration.BACKUP_SUFFIX)
+        with patch.object(foreign_install_grants, 'initialize_schema',
+                          side_effect=sqlite3.OperationalError('simulated interruption')):
+            with self.assertRaises(foreign_install_migration.AdmissionHold):
+                executor.rehearse(confirm=transaction.CONFIRM)
+        self.assertEqual(executor._journal_read()['phase'],'BEFORE_SCHEMA')
+        self.assertEqual(foreign_install_migration.inspect(site.db),'MISSING')
+        original_backup=backup.read_bytes()
+        self.assertEqual(backup.stat().st_mode & 0o777,0o600)
+        with patch.object(executor, '_replace', wraps=executor._replace) as replace:
+            self.assertEqual(executor.rehearse(
+                confirm=transaction.CONFIRM)['status'],'REHEARSED_OFFLINE')
+        self.assertEqual([call.args[0] for call in replace.call_args_list],
+                         ['panel-env', 'nginx-backend'])
+        self.assertEqual(foreign_install_migration.inspect(site.db),'READY')
+        self.assertEqual(backup.read_bytes(),original_backup)
 
         files={name:(site.root/rel).read_bytes()
                for name,rel in transaction.CONFIG.items()}

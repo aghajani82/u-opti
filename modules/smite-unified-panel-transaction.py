@@ -10,7 +10,8 @@ health gates, per-step recovery and an operator approval before activation.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -32,6 +33,7 @@ CONFIG = {
     "nginx-backend": "etc/nginx/conf.d/u-opti-smite-panel-backend.conf",
 }
 STEPS = ("COMPOSE", "SCHEMA", "ENV", "NGINX")
+STEP_CONFIG = {"COMPOSE": "panel-compose", "ENV": "panel-env", "NGINX": "nginx-backend"}
 GRANT_DDL = (
     """CREATE TABLE smite_foreign_install_grants (
     code_hash TEXT PRIMARY KEY, node_id TEXT NOT NULL,
@@ -83,7 +85,8 @@ def checked_json(raw: bytes):
 
 
 class PanelTransaction:
-    def __init__(self, root: Path = Path("/"), *, stager=None, fixture_capability=False):
+    def __init__(self, root: Path = Path("/"), *, stager=None, fixture_capability=False,
+                 fixture_migration=None):
         # An injected disposable stager may have been imported with a
         # distinct module name. Reuse ITS exact exception/constants rather
         # than loading an unrelated duplicate of the same Python module.
@@ -93,6 +96,7 @@ class PanelTransaction:
         self.root = self.stage.root
         self.rehearsal = self.root / REHEARSAL_REL
         self.fixture_capability = fixture_capability
+        self.fixture_migration = fixture_migration
 
     def _snapshot(self, name: str) -> bytes:
         return self.stage._read(self.stage_mod.STAGE_REL + "/before-" + name, mode=0o600)
@@ -125,10 +129,13 @@ class PanelTransaction:
                     deny()
             self.stage._preflight_database()
             self.stage._preflight_replay()
+            # The disposable transaction expects a quiet fixture. On a live
+            # read-only review, signed heartbeats and nonces can advance
+            # after staging. Live application needs its own reconciliation.
+            if self.root != Path("/") and (self._new_enrollment() or self._replay_drift()):
+                deny()
             if resume_rolled_back:
                 if self._journal_read()["phase"] != "ROLLED_BACK":
-                    deny()
-                if self._new_enrollment() or self._replay_drift():
                     deny()
             elif self._tables():
                 deny()
@@ -156,6 +163,25 @@ class PanelTransaction:
         if (not self.fixture_capability or self.root.resolve() == Path("/")
                 or confirm != CONFIRM):
             deny()
+
+    @contextmanager
+    def _operation(self, confirm):
+        self._check_fixture(confirm)
+        try:
+            self.stage.status()
+        except (OSError, ValueError, self.stage_mod.StageHold):
+            deny()
+        # Lock the sealed stage directory without editing it. Apply, retry and
+        # compensation for the same staged transaction share this descriptor.
+        descriptor = os.open(self.stage.staging, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                deny()
+            yield
+        finally:
+            os.close(descriptor)
 
     def _fsync_directory(self, folder: Path):
         descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -236,6 +262,10 @@ class PanelTransaction:
 
     def _schema_rehearsal(self):
         db = self.root / self.stage_mod.DB_REL
+        if self.fixture_migration is not None:
+            if self.fixture_migration(db) not in ("READY", "ALREADY_READY"):
+                deny()
+            return
         try:
             with closing(sqlite3.connect(db, timeout=8)) as conn:
                 conn.execute("BEGIN IMMEDIATE")
@@ -257,55 +287,86 @@ class PanelTransaction:
 
     def rehearse(self, *, confirm: str, fail_after=None):
         """Test-only! Never accepts a real / host or real service capability."""
-        self._check_fixture(confirm)
+        with self._operation(confirm):
+            return self._rehearse_locked(fail_after)
+
+    def _rehearse_locked(self, fail_after):
         if os.path.lexists(self.rehearsal):
-            if self._journal_read()["phase"] == "REHEARSED":
-                try:
-                    self.stage.status()
-                    self.stage._signed_pair()
-                    self.stage._preflight_database()
-                    self.stage._preflight_replay()
-                    for name in self.stage_mod.FILE_MAP:
-                        expected = self._candidate(name) if name in CONFIG else self._snapshot(name)
-                        if self._live(name) != expected:
-                            deny()
-                    if (self._tables() != {"smite_foreign_install_grants", "smite_foreign_install_origins"}
-                            or self._new_enrollment() or self._replay_drift()):
-                        deny()
-                except (OSError, ValueError, self.stage_mod.StageHold, sqlite3.Error):
-                    deny()
-                return {"status":"REHEARSED_OFFLINE","schema":"ADDITIVE_ONLY",
-                        "production":False,"runtime_started":False}
-            self.rollback_rehearsal(confirm=confirm)
-            self.review(resume_rolled_back=True)
+            journal = self._journal_read()
+            phase = journal["phase"]
+            if phase in ("BEFORE_ROLLBACK", "ROLLED_BACK"):
+                self._rollback_locked()
+                self.review(resume_rolled_back=True)
+                start = 0
+            else:
+                start = self._resume_index(phase)
         else:
             self.review()
             self.stage._parents(self.rehearsal)
             self.rehearsal.mkdir(mode=0o700)
-        journal = {
-            "schema":1, "kind":"unified-panel-disposable-rehearsal",
-            "source":SOURCE_SHA, "phase":"BEFORE_COMPOSE",
-            "production":False, "database_rollback":False,
-            "snapshots": {name:digest(self._snapshot(name)) for name in CONFIG},
-        }
-        self._journal_write(journal)
-        for step in STEPS:
+            self._fsync_directory(self.rehearsal.parent)
+            journal = {
+                "schema":1, "kind":"unified-panel-disposable-rehearsal",
+                "source":SOURCE_SHA, "phase":"BEFORE_COMPOSE",
+                "production":False, "database_rollback":False,
+                "snapshots": {name:digest(self._snapshot(name)) for name in CONFIG},
+            }
+            start = 0
+        if journal["phase"] == "REHEARSED":
+            return {"status":"REHEARSED_OFFLINE","schema":"ADDITIVE_ONLY",
+                    "production":False,"runtime_started":False}
+        for step in STEPS[start:]:
             journal["phase"] = "BEFORE_" + step
             self._journal_write(journal)
             if step == "SCHEMA":
                 self._schema_rehearsal()
+                if not self._tables() or self._new_enrollment():
+                    deny()
             else:
-                name = {"COMPOSE":"panel-compose","ENV":"panel-env",
-                        "NGINX":"nginx-backend"}[step]
-                self._replace(name, self._candidate(name))
+                name = STEP_CONFIG[step]
+                candidate = self._candidate(name)
+                if self._live(name) != candidate:
+                    self._replace(name, candidate)
+                if self._live(name) != candidate:
+                    deny()
             journal["phase"] = "AFTER_" + step
             self._journal_write(journal)
             if fail_after == step:
                 raise Hold("Simulated interruption; explicit rollback required")
+        self._resume_index("REHEARSED", verify_pair=False)
         journal["phase"] = "REHEARSED"
         self._journal_write(journal)
         return {"status":"REHEARSED_OFFLINE","schema":"ADDITIVE_ONLY",
                 "production":False,"runtime_started":False}
+
+    def _resume_index(self, phase, *, verify_pair=True):
+        """Revalidate the completed steps and tolerate only the current step's pre/post image."""
+        boundary, _, interrupted = phase.partition("_")
+        start = len(STEPS) if phase == "REHEARSED" else (
+            STEPS.index(interrupted) + (boundary == "AFTER"))
+        try:
+            if verify_pair:
+                self.stage._signed_pair()
+            self.stage._preflight_database()
+            self.stage._preflight_replay()
+            if self._new_enrollment() or self._replay_drift():
+                deny()
+            for name in self.stage_mod.FILE_MAP.keys() - CONFIG.keys():
+                if self._live(name) != self._snapshot(name):
+                    deny()
+            for step, name in STEP_CONFIG.items():
+                index = STEPS.index(step)
+                allowed = (self._candidate(name),) if index < start else (self._snapshot(name),)
+                if boundary == "BEFORE" and step == interrupted:
+                    allowed += (self._candidate(name),)
+                if self._live(name) not in allowed:
+                    deny()
+            tables_present = bool(self._tables())
+            if start > STEPS.index("SCHEMA") and not tables_present:
+                deny()
+        except (OSError, ValueError, self.stage_mod.StageHold, sqlite3.Error):
+            deny()
+        return start
 
     def _new_enrollment(self):
         db = self.root / self.stage_mod.DB_REL
@@ -369,11 +430,15 @@ class PanelTransaction:
 
     def rollback_rehearsal(self, *, confirm: str):
         """Restore ONLY owned config files; never rewind DB, replay or identity."""
-        self._check_fixture(confirm)
+        with self._operation(confirm):
+            return self._rollback_locked()
+
+    def _rollback_locked(self):
         # The original staged SQLite snapshot and replay evidence must still
         # match the sealed journal before ANY config restoration is attempted.
         try:
             self.stage.status()
+            self.stage._preflight_database()
         except (OSError, ValueError, self.stage_mod.StageHold):
             deny()
         journal = self._journal_read()
@@ -396,6 +461,8 @@ class PanelTransaction:
         for name in ("nginx-backend","panel-env","panel-compose"):
             if self._live(name) != self._snapshot(name):
                 self._replace(name,self._snapshot(name))
+        if any(self._live(name) != self._snapshot(name) for name in CONFIG):
+            deny()
         journal["phase"] = "ROLLED_BACK"
         self._journal_write(journal)
         return {"status":"ROLLED_BACK_OFFLINE","schema":"PRESERVED",
