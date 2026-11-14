@@ -229,6 +229,21 @@ class OfflineRollout(unittest.TestCase):
             self._undo()
         self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
 
+    def test_unexpected_foreign_grant_trigger_blocks_resume_and_rollback(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="SCHEMA")
+        with sqlite3.connect(self.db) as db:
+            db.execute("""CREATE TRIGGER unreviewed_foreign_grant_trigger
+                AFTER INSERT ON smite_foreign_install_grants
+                BEGIN SELECT RAISE(ABORT, 'unreviewed trigger'); END""")
+        with patch.object(self.executor, "_replace",
+                          side_effect=AssertionError("unexpected config restore")):
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+            with self.assertRaises(trans.Hold):
+                self._undo()
+        self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
+
     def test_interrupted_partial_schema_blocks_resume_before_config_update(self):
         with self.assertRaises(trans.Hold):
             self._invoke(fail_after="SCHEMA")
