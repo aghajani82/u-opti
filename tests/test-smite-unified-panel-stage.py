@@ -251,6 +251,37 @@ class Prepare(unittest.TestCase):
         self.assertFalse(self.panel.staging.exists())
         self.assert_untouched()
 
+    def test_live_report_checks_both_endpoints_without_guessing_installed_sha(self):
+        record = {"role": "panel-iran", "ir_phase": "COMPLETE",
+                  "id": "uopti_rc6_" + "a" * 32, "source": "b" * 40}
+        journal = SimpleNamespace(ir_admin_present=lambda: True)
+        journal_module = SimpleNamespace(Hold=RuntimeError, VERSION="2.0.0-rc.7")
+        run = unittest.mock.Mock(return_value="200")
+        pairing = SimpleNamespace(_run=run, WizardHold=RuntimeError)
+        ref = self.root / stage.INSTALL_REF_REL
+        ref.parent.mkdir(parents=True)
+        ref.write_text("trial/unified-smite-install\n")
+        load_module = stage._module
+        with patch.object(self.panel, "verify_live_baseline",
+                          return_value=(journal, record, journal_module)), \
+                patch.object(stage, "_module", side_effect=lambda name: pairing
+                             if name == "smite-node-pairing" else load_module(name)):
+            report = self.panel.live_baseline_report()
+            self.assertEqual(report["IR_INSTALL_SOURCE_ON_HOST"], "UNKNOWN")
+            self.assertEqual(report["IR_SIGNED_TWO_WAY"], "NOT_CHECKED")
+            loopback, https = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(loopback[-1], "http://127.0.0.1:8000/api/status")
+            self.assertEqual(https[-3:], ["--resolve", "panel.example.com:443:127.0.0.1",
+                                           "https://panel.example.com:443/api/status"])
+            self.assertNotIn("--insecure", https)
+            ref.write_text("c" * 40 + "\n")
+            self.assertEqual(self.panel.live_baseline_report()["IR_INSTALL_SOURCE_ON_HOST"], "c" * 40)
+            run.return_value = "302"
+            with self.assertRaises(stage.StageHold):
+                self.panel.live_baseline_report()
+        self.assertFalse(self.panel.staging.exists())
+        self.assert_untouched()
+
     def test_signed_pair_must_pass_before_writes(self):
         self.panel._admission=lambda: {"status":"not verified"}
         with self.assertRaises(stage.StageHold):self.stage()

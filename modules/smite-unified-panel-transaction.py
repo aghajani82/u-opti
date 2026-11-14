@@ -377,19 +377,20 @@ class PanelTransaction:
         except (OSError, ValueError, self.stage_mod.StageHold):
             deny()
         journal = self._journal_read()
-        if journal["phase"] == "ROLLED_BACK":
-            return {"status":"ALREADY_ROLLED_BACK","schema":"PRESERVED"}
+        rolled_back = journal["phase"] == "ROLLED_BACK"
         if self._new_enrollment() or self._replay_drift():
             deny()
         # Refuse to restore any old config if security identities or replay
         # history drifted; a new grant or key must never be disconnected.
         for name in self.stage_mod.FILE_MAP:
-            if name in CONFIG:
-                if self._live(name) not in (self._snapshot(name),self._candidate(name)):
-                    deny()
-            elif self._live(name) != self._snapshot(name):
+            allowed = (self._snapshot(name),)
+            if name in CONFIG and not rolled_back:
+                allowed += (self._candidate(name),)
+            if self._live(name) not in allowed:
                 deny()
         self.stage._preflight_replay()
+        if rolled_back:
+            return {"status":"ALREADY_ROLLED_BACK","schema":"PRESERVED"}
         journal["phase"] = "BEFORE_ROLLBACK"
         self._journal_write(journal)
         for name in ("nginx-backend","panel-env","panel-compose"):

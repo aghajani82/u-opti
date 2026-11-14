@@ -107,6 +107,17 @@ class OfflineRollout(unittest.TestCase):
                 "SELECT encrypted_secret FROM smite_node_identities"
             ).fetchone(), ("secret-ciphertext",))
 
+    def test_repeated_rollback_refuses_drift_after_the_original_rollback(self):
+        self._invoke()
+        self._undo()
+        path = self.root / trans.CONFIG["panel-compose"]
+        candidate = self.executor._candidate("panel-compose")
+        path.write_bytes(candidate)
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(path.read_bytes(), candidate)
+        self.assertEqual(self._ledger()["phase"], "ROLLED_BACK")
+
     def test_completed_upgrade_rechecks_without_replaying_config_writes(self):
         self._invoke()
         with patch.object(self.executor, "_replace", side_effect=AssertionError):

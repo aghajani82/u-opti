@@ -9,12 +9,28 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 
 - **User-facing IR option 1:** official signed Smite RC7 source `9a1270b3...`. Its existing installer verifies the exact panel/node images against the rollback journal and performs the co-located Iran node signed enrollment. It is **not** the newer unified Panel release.
 - **User-facing Foreign option 2:** explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. No partially installed Node, code redemption or host mutation is permitted until the complete released chain is present.
-- **Unified signed Smite pair:** companion `aghajani82/Smite` branch `trial/unified-smite-install`, pinned signed source `b865be93e22153c60769f6329e6e55e781494ded`. Verified registry images are trial-only; both `release_approved:false` and `activation_allowed:false` remain enforced. Do NOT flip these flags or substitute an unreviewed image.
+- **Unified signed Smite pair:** companion `aghajani82/Smite` source `de0677d015a00160970ed57bba565adc4fafe8eb`. The [Smite build](https://github.com/aghajani82/Smite/actions/runs/43585094525) published the pair and the [U-OPTI signature review](https://github.com/aghajani82/u-opti/actions/runs/43596467307) independently verified both digests and the workflow identity. The artifact manifest matches the pinned manifest byte for byte, SHA-256 `61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84`. Both `release_approved:false` and `activation_allowed:false` remain enforced.
 - **IR unified Panel transaction:** `smite-unified-panel-stage.py` performs private staging; existing `smite-unified-panel-transaction.py` permits **disposable-root rehearsal and config-only rollback**, not production apply. Recent tests compare complete registered Node rows, pending Pairing codes, inbound Panel nonces, grants, signed identities and replay against sealed snapshots. This protects existing local Iran and new Foreign identities.
 - **Foreign internal sequence:** one hidden private Panel-issued `smi1` packet, exact HTTPS/443 and Node name; original Sanaei read-only attachment; Gateway no-recreate witness; same signed Pairing/rollback entry points; durable one-key redemption and promotion. Its assembled internal helpers are tested offline but **not yet permitted from the public option 2**.
 - **Real cross-repository offline proof:** Panel staging/rehearsal, the actual pinned Smite SQLite grant issue and idempotent redemption, and refusal to roll back Panel config after enrollment have passed alongside the existing ASGI/HTTPS/HMAC tests. This is NOT a live two-server Connected result. Verified U-OPTI CI: https://github.com/aghajani82/u-opti/actions/runs/43382017487
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
+
+### Read-only evidence for the existing Iran installation
+
+On an Iran host with the current trial verifier already installed, run as root:
+
+```sh
+python3 -B /usr/local/lib/u-opti/modules/smite-unified-panel-stage.py --verify-live-baseline
+```
+
+The report checks the completed install journal, Compose owner and signed
+runtime, retained Iran identity and replay, an existing admin, the loopback
+Panel endpoint and certificate-verified local HTTPS/443. It prints only
+allowlisted values. A branch-only `INSTALL_REF` reports `UNKNOWN` for the
+installed U-OPTI SHA. Use the original install output's `Verified revision`
+when available. The operator still needs to verify the Iran Node in the
+Panel and establish fresh two-way signed evidence separately.
 
 ## Resume/checkpoint design — Iran selected option 1 (2026-11-13)
 

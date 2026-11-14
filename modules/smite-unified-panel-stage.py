@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+import subprocess
 import sys
 
 SOURCE = "de0677d015a00160970ed57bba565adc4fafe8eb"
@@ -39,6 +40,7 @@ DB_REL = "opt/smite/panel/data/smite.db"
 IR_ID_REL = "etc/u-opti/smite/identities/node-identity.json"
 REPLAY_MARKER_REL = "etc/u-opti/smite/identities/replay-enrollment.json"
 REPLAY_DB_REL = "var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3"
+INSTALL_REF_REL = "usr/local/lib/u-opti/INSTALL_REF"
 FILE_MAP = {
     "panel-env": (PANEL_REL, 0o600, 65536),
     "panel-compose": (COMPOSE_REL, None, 262144),
@@ -454,8 +456,51 @@ class PanelStage:
                 deny()
             pairing._run(command + ["config", "--quiet"], timeout=30)
         except (OSError, ValueError, TypeError, KeyError, IndexError,
-                journal_module.Hold, pairing.WizardHold):
+                subprocess.SubprocessError, journal_module.Hold, pairing.WizardHold):
             deny()
+        return journal, record, journal_module
+
+    def live_baseline_report(self):
+        """Check the installed RC7 baseline and expose only allowlisted evidence."""
+        journal, record, journal_module = self.verify_live_baseline()
+        pairing = _module("smite-node-pairing")
+        curl = ["curl", "-q", "--noproxy", "*", "--fail", "--silent",
+                "--connect-timeout", "2", "--max-time", "5",
+                "--output", "/dev/null", "--write-out", "%{http_code}"]
+        try:
+            originals, _ = self._collect()
+            self._preflight_database()
+            self._preflight_replay()
+            if not journal.ir_admin_present():
+                deny()
+            domain = _env(originals["smite-state"])["SMITE_PANEL_DOMAIN"]
+            for endpoint in (
+                ["http://127.0.0.1:8000/api/status"],
+                ["--resolve", f"{domain}:443:127.0.0.1", f"https://{domain}:443/api/status"],
+            ):
+                if pairing._run(curl + endpoint, timeout=10, capture=True) != "200":
+                    deny()
+        except (journal_module.Hold, pairing.WizardHold):
+            deny()
+        # Older branch installations record the selected channel in
+        # INSTALL_REF. Never use today's branch head as the installed SHA.
+        try:
+            ref = self._read(INSTALL_REF_REL, limit=256).decode("ascii").strip()
+        except (StageHold, UnicodeError):
+            ref = ""
+        return {
+            "IR_INSTALL_SOURCE_ON_HOST": ref if re.fullmatch(r"[0-9a-f]{40}", ref) else "UNKNOWN",
+            "IR_INSTALL_ROLE": record["role"],
+            "IR_INSTALL_CHECKPOINT": record["ir_phase"],
+            "IR_INSTALL_PROJECT": record["id"],
+            "IR_SMITE_SOURCE": record["source"],
+            "IR_SMITE_VERSION": journal_module.VERSION,
+            "IR_PANEL_LOOPBACK": "PASS",
+            "IR_GATEWAY_TLS443": "PASS",
+            "IR_ADMIN": "PRESENT",
+            "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
+            "IR_SIGNED_TWO_WAY": "NOT_CHECKED",
+        }
 
     def prepare(self, confirm: str):
         if confirm != CONFIRM:
@@ -544,10 +589,9 @@ def main(argv=None):
             deny()
         manager=PanelStage()
         if args.verify_live_baseline:
-            manager.verify_live_baseline()
-            manager._collect()
-            manager._preflight_database()
-            manager._preflight_replay()
+            report = manager.live_baseline_report()
+            for name, value in report.items():
+                print(f"{name}={value}")
             status = {"state":"LIVE_BASELINE_VERIFIED"}
         else:
             status=manager.prepare(args.confirm) if args.stage else manager.status()
