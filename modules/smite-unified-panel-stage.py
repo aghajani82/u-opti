@@ -74,6 +74,15 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _unique_journal_fields(pairs):
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            deny()
+        result[name] = value
+    return result
+
+
 def _module(name: str):
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + ".py"))
     if spec is None or spec.loader is None:
@@ -596,8 +605,16 @@ class PanelStage:
         if (not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid()
                 or stat.S_IMODE(st.st_mode) != 0o700):
             deny()
-        journal = json.loads(self._read(STAGE_REL + "/journal.json",mode=0o600,limit=8192))
-        if (not isinstance(journal,dict) or journal.get("schema") != 1
+        journal = json.loads(
+            self._read(STAGE_REL + "/journal.json", mode=0o600, limit=8192),
+            object_pairs_hook=_unique_journal_fields)
+        if (not isinstance(journal, dict)
+                or set(journal) != {"schema", "state", "source_sha",
+                                   "panel_image", "node_image", "live_write",
+                                   "snapshots", "candidates"}
+                or not isinstance(journal.get("snapshots"), dict)
+                or not isinstance(journal.get("candidates"), dict)
+                or journal.get("schema") != 1
                 or journal.get("state") != "PREPARED_ONLY"
                 or journal.get("source_sha") != SOURCE
                 or journal.get("panel_image") != NEW_PANEL
@@ -615,7 +632,8 @@ class PanelStage:
             deny()
         for group in ("snapshots","candidates"):
             for filename,digest in journal[group].items():
-                if not re.fullmatch("[a-f0-9]{64}",digest):
+                if not isinstance(digest, str) or not re.fullmatch(
+                        "[a-f0-9]{64}", digest):
                     deny()
                 content = self._read(STAGE_REL + "/" + filename,
                                      mode=0o600,limit=32_000_000)
