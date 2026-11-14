@@ -214,6 +214,109 @@ class HostRecovery(unittest.TestCase):
         self.assert_no_install()
         self.assertEqual(self.journal()["phase"], "GATEWAY_INTENT")
 
+    def test_sanaei_failure_compensates_only_sanaei_then_resumes(self):
+        self.fail_sanaei = "error"
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_sanaei=self.rollback_sanaei,
+                    rollback_gateway=self.rollback_gateway)
+        self.assertEqual(self.journal()["phase"], "CORE_VERIFIED")
+        self.assertEqual(self.states["sanaei"], "ABSENT")
+        self.assertEqual(self.events.count("rollback_sanaei"), 1)
+        self.assertNotIn("install_gateway", self.events)
+        self.fail_sanaei = None
+        self.events.clear()
+        self.assertEqual(self.tx(rollback_sanaei=self.rollback_sanaei,
+                                 rollback_gateway=self.rollback_gateway)["phase"],
+                         "GATEWAY_443_VERIFIED")
+        self.assertEqual(self.events.count("install_sanaei"), 1)
+        self.assertEqual(self.events.count("install_gateway"), 1)
+
+    def test_gateway_error_compensates_only_gateway_preserving_sanaei(self):
+        self.fail_gateway = "error_after_ready"
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_gateway=self.rollback_gateway)
+        self.assertEqual(self.journal()["phase"], "SANAEI_RO_VERIFIED")
+        self.assertEqual(self.states["sanaei"], "READY")
+        self.assertEqual(self.states["gateway"], "ABSENT")
+        self.assertEqual(self.events.count("rollback_gateway"), 1)
+        self.assertNotIn("rollback_sanaei", self.events)
+        self.fail_gateway = None
+        self.events.clear()
+        self.assertEqual(self.tx(rollback_gateway=self.rollback_gateway)["phase"],
+                         "GATEWAY_443_VERIFIED")
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertEqual(self.events.count("install_gateway"), 1)
+
+    def test_interrupted_sanaei_compensated_next_run_before_retry(self):
+        self.fail_sanaei = "crash_before_ready"
+        with self.assertRaises(KeyboardInterrupt):
+            self.tx(rollback_sanaei=self.rollback_sanaei)
+        self.assertEqual(self.journal()["phase"], "SANAEI_INTENT")
+        self.fail_sanaei = None
+        self.events.clear()
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_sanaei=self.rollback_sanaei)
+        self.assertEqual(self.journal()["phase"], "CORE_VERIFIED")
+        self.assertEqual(self.events.count("rollback_sanaei"), 1)
+        self.assert_no_install()
+        self.events.clear()
+        self.assertEqual(self.tx(rollback_sanaei=self.rollback_sanaei)["phase"],
+                         "GATEWAY_443_VERIFIED")
+
+    def test_interrupted_gateway_compensated_next_run_before_retry(self):
+        self.fail_gateway = "crash_before_ready"
+        with self.assertRaises(KeyboardInterrupt):
+            self.tx(rollback_gateway=self.rollback_gateway)
+        self.assertEqual(self.journal()["phase"], "GATEWAY_INTENT")
+        self.fail_gateway = None
+        self.events.clear()
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_gateway=self.rollback_gateway)
+        self.assertEqual(self.journal()["phase"], "SANAEI_RO_VERIFIED")
+        self.assertEqual(self.events.count("rollback_gateway"), 1)
+        self.assert_no_install()
+        self.events.clear()
+        self.assertEqual(self.tx(rollback_gateway=self.rollback_gateway)["phase"],
+                         "GATEWAY_443_VERIFIED")
+        self.assertNotIn("install_sanaei", self.events)
+
+    def test_callback_claim_without_external_witness_keeps_intent(self):
+        self.fail_gateway = "error_after_ready"
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_gateway=lambda scope: "ROLLED_BACK_VERIFIED")
+        self.assertEqual(self.journal()["phase"], "GATEWAY_INTENT")
+        self.assertEqual(self.states["gateway"], "READY")
+        # Existing independent witness may reconcile the actual READY step.
+        self.fail_gateway = None
+        self.assertEqual(self.tx()["phase"], "GATEWAY_443_VERIFIED")
+
+    def test_failed_compensation_keeps_original_intent_and_refuses_retry(self):
+        self.fail_gateway = "error"
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_gateway=lambda scope: "ROLLBACK_FAILED")
+        self.assertEqual(self.journal()["phase"], "GATEWAY_INTENT")
+        self.fail_gateway = None
+        self.events.clear()
+        with self.assertRaises(mod.Hold):
+            self.tx()
+        self.assert_no_install()
+        self.assertEqual(self.journal()["phase"], "GATEWAY_INTENT")
+
+    def test_completed_stage_drift_never_calls_rollback(self):
+        self.tx()
+        self.states["gateway"] = "DRIFT"
+        self.events.clear()
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_gateway=self.rollback_gateway)
+        self.assertNotIn("rollback_gateway", self.events)
+        self.assertEqual(self.journal()["phase"], "GATEWAY_443_VERIFIED")
+
+    def test_invalid_rollback_callback_denied_before_host_actions(self):
+        with self.assertRaises(mod.Hold):
+            self.tx(rollback_sanaei="unsafe")
+        self.assert_no_install()
+        self.assertFalse(self.journal_path().exists())
+
     def test_drift_after_complete_never_trusts_stale_journal(self):
         self.tx()
         for component in ("core", "sanaei", "gateway"):
