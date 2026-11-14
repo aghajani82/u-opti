@@ -293,7 +293,8 @@ smite_foreign_gateway_prepare_acme() {
     smite_foreign_gateway_validate_domain "$domain" || return 1
     # The ACME root is rendered into Nginx syntax. Never interpolate a
     # caller-provided path with whitespace, semicolon or Nginx directives.
-    [[ "$SMITE_FOREIGN_ACME_ROOT" =~ ^/[a-zA-Z0-9/_-]+$ ]] || return 1
+    [[ "$SMITE_FOREIGN_ACME_ROOT" =~ ^/[a-zA-Z0-9/_.-]+$ ]] &&
+    [[ "$SMITE_FOREIGN_ACME_ROOT" != *..* ]] || return 1
     acme_conf="$(smite_foreign_gateway_acme_conf_path "$domain")" || return 1
     parent="$(dirname -- "$acme_conf")" || return 1
     # The ACME vhost belongs to the Nginx installation, not to the
