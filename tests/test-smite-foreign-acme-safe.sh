@@ -57,6 +57,36 @@ grep -qx '# independent protected config' "$protected"
 [ -L "$SITE" ]
 rm -f "$SITE"
 
+# An existing webroot is shared state: never chmod it to make an
+# unsafe directory appear valid. HOLD before creating an ACME Nginx site.
+chmod 0700 "$SMITE_FOREIGN_ACME_ROOT"
+if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/unsafe-root-mode" 2>&1; then
+    echo 'FAIL: existing private ACME webroot was silently chmodded'; exit 1
+fi
+[ "$(stat -c %a "$SMITE_FOREIGN_ACME_ROOT")" = 700 ]
+[ ! -e "$SITE" ]
+chmod 0755 "$SMITE_FOREIGN_ACME_ROOT"
+mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+chmod 0777 "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/unsafe-child-mode" 2>&1; then
+    echo 'FAIL: existing foreign-owned ACME child mode was altered'; exit 1
+fi
+[ "$(stat -c %a "$SMITE_FOREIGN_ACME_ROOT/.well-known")" = 777 ]
+[ ! -e "$SITE" ]
+chmod 0755 "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+
+# Also refuse a symlink anywhere in the path ABOVE the webroot, not just
+# a symlink at the final ACME directory or challenge subdirectory.
+mkdir -p "$TMP/actual-parent/acme"
+ln -s "$TMP/actual-parent" "$TMP/linked-parent"
+SMITE_FOREIGN_ACME_ROOT="$TMP/linked-parent/acme"
+if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/unsafe-ancestor" 2>&1; then
+    echo 'FAIL: intermediate symlink in ACME webroot accepted'; exit 1
+fi
+[ ! -e "$SITE" ]
+[ -L "$TMP/linked-parent" ]
+SMITE_FOREIGN_ACME_ROOT="$TMP/acme"
+
 # Failed rendering before commit leaves NO managed conf, no temp file.
 (
     smite_foreign_gateway_render_acme() {
