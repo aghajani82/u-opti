@@ -266,7 +266,7 @@ class OperatorPacketIntake(unittest.TestCase):
                 def paste():
                     self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
                     os.write(master,
-                             (json.dumps(renewed)+"\\n\\n").encode("utf-8"))
+                             (json.dumps(renewed)+"\n\n").encode("utf-8"))
                 result = module.capture_selected_hidden_tty(
                     tty, target=self.file, now=self.now+7200,
                     confirm_scope=lambda s: s["node_id"] == self.grant["node_id"],
