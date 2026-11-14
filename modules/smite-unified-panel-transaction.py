@@ -421,7 +421,9 @@ class PanelTransaction:
             if (not tables and signature != (True, False, False)
                     or signature == (False, False, False) and not tables):
                 deny()
-            recovery_state = ordered[signature]
+            recovery_state = (
+                "AFTER_SCHEMA" if signature == (True, False, False) and tables
+                else ordered[signature])
             to_restore = [name for name in reversed(names) if candidate[name]]
         except (OSError, ValueError, KeyError, TypeError, sqlite3.Error,
                 self.stage_mod.StageHold):
