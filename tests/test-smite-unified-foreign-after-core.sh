@@ -143,6 +143,14 @@ doc['expires_at']=int(time.time())-1
 p.write_text(json.dumps(doc))
 PY_STALE
 chmod 0600 "$PACKET"
+# Verify the exact already existing CLI that option 2 invokes. A stale
+# packet must fail independently of Docker stubs and Nginx test fixtures.
+if python3 -B "$ROOT/modules/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$PACKET" --precore-fields \
+        >"$TMP/stale-precore.log" 2>&1; then
+    echo 'FAIL: expired packet unexpectedly admitted by existing pre-core parser' >&2
+    exit 1
+fi
 MODE=ok; run 2 signed
 python3 - "$PACKET" <<'PY_FUTURE'
 import json,sys,time
