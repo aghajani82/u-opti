@@ -108,6 +108,44 @@ class OfflineRollout(unittest.TestCase):
         self.assertFalse(self.executor.rehearsal.exists())
         self._assert_originals()
 
+    def test_all_internal_mutators_refuse_production_root_even_when_imported(self):
+        # The internal methods themselves must preserve the no-production
+        # write invariant; callers cannot bypass it by skipping the outer
+        # fixture-only rehearsal entrypoint.
+        prior = {name:self.executor._live(name) for name in trans.CONFIG}
+        commands = (
+            lambda: self.executor._journal_write({"phase":"ANY"}),
+            lambda: self.executor._replace(
+                "panel-env", self.executor._candidate("panel-env")),
+            lambda: self.executor._schema_rehearsal(),
+            lambda: self.executor._rehearse_locked(None),
+            lambda: self.executor._rollback_locked(allow_iran_heartbeat=True),
+        )
+        with patch.object(self.executor, "root", Path("/")):
+            for number, action in enumerate(commands):
+                with self.subTest(method=number), self.assertRaises(trans.Hold):
+                    action()
+        self.assertEqual(
+            {name:self.executor._live(name) for name in trans.CONFIG}, prior)
+        self.assertFalse(self.executor.rehearsal.exists())
+
+    def test_internal_mutators_refuse_missing_disposable_capability(self):
+        original = self.executor.fixture_capability
+        self.executor.fixture_capability = False
+        try:
+            for action in (
+                lambda: self.executor._schema_rehearsal(),
+                lambda: self.executor._journal_write({"phase":"ANY"}),
+                lambda: self.executor._rollback_locked(),
+                lambda: self.executor._rehearse_locked(None),
+            ):
+                with self.assertRaises(trans.Hold):
+                    action()
+        finally:
+            self.executor.fixture_capability = original
+        self.assertFalse(self.executor.rehearsal.exists())
+        self._assert_originals()
+
     def test_fresh_apply_holds_if_signed_state_changed_after_staging(self):
         with sqlite3.connect(self.db) as conn:
             conn.execute("INSERT INTO smite_node_inbound_nonces VALUES (?, ?, ?)",
