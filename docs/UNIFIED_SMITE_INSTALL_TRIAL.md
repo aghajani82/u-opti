@@ -2700,3 +2700,95 @@ https://github.com/aghajani82/u-opti/actions/runs/43619201927
   with no unresolved PR/workflow. No production host is touched by this
   trial milestone.
 
+
+## Retained Iran Node and interrupted Panel rollback — closeout milestone (2026-11-14)
+
+This milestone uses the **existing** `smite-unified-panel-stage.py`,
+`smite-unified-panel-transaction.py`, RC7 installer journal, and
+disposable transaction tests. It does not create a menu, new network
+service, alternate enrollment flow or production deployment.
+
+### 1. Sealed proof of the **same Iran Node**, not merely the same image
+
+During a real-root Panel-only stage, after the existing signed Iran
+baseline succeeds and before any staged journal is committed, a private,
+checksummed `iran-node-runtime.json` snapshot now records ONLY:
+
+- the original RC7 install source and Compose project;
+- the exact retained `smite-node` Docker container ID, image digest and
+  effective runtime image ID;
+- the original `Created` and `State.StartedAt` timestamps and exact
+  Node Compose file ownership.
+
+The stage uses the retained RC7 install journal, original pinned RC7 Node
+image, strict/signed Node ownership check, fixed local Docker socket,
+read-only Docker inspection, and exact retained identity bind mount. It
+inspects the Node both **before and after** the install journal's owner
+check. A replacement between those inspections, even with a matching
+name/image/labels, is refused. Stage status and the rollback preflight
+compare every byte of the sealed fingerprint to the running Node: a new
+container ID, image ID, project, bind, or start timestamp is a hard HOLD.
+
+The actual root `/` forbids injecting a fake witness. Only a disposable
+test root accepts an explicit fake reader, and the original stage
+journal remains immutable once committed. A real-root stage captured
+with the new code requires the exact runtime witness; older/partial
+stage state will not be silently adopted.
+
+### 2. Ordered, **read-only** interrupted rollback inference
+
+The prior preflight only recognized all three upgraded Panel config
+files. The same `--review-rollback` path now recognizes precise
+**atomic, stage-owned** preimage combinations:
+
+- COMPOSE candidate; empty base Foreign schema: `AFTER_COMPOSE`.
+- COMPOSE candidate; canonical empty additive schema: `AFTER_SCHEMA`.
+- COMPOSE and Panel env candidates; canonical schema: `AFTER_ENV`.
+- COMPOSE, env and Nginx candidates; canonical schema: `AFTER_NGINX`.
+- all original config restored but canonical additive schema retained:
+  `CONFIG_RESTORED_SCHEMA_RETAINED`.
+
+It returns exactly the outstanding owned file restoration order, in
+reverse: Nginx, env, Compose. **No** actual file is written by this
+preflight. Out-of-order mixed config, altered Nginx, foreign grant,
+pending pairing code, untrusted DDL, lost replay nonce or unexpected
+Node recreation remain a HOLD. The schema is **never** rewound, and the
+Iran Node is **never** recreated or restarted to make the check pass.
+
+The old offline fixture now exercises each interruption boundary,
+a completed config rollback, out-of-order corruption, missing schema,
+retained Node tampering, and verified read-only Docker diagnostics.
+The existing two-way HMAC/replay continuity policy remains unchanged.
+
+Commits:
+`78eeac5f8c5ed08d48bf0f9d01d74ea95c7e65be`,
+`46a5175e257cf27f7f2eca45ef673add222b9073`,
+`54cfac94b00ba3e184318fea2bf16a6bdc846b0e`,
+`fe9e4dc187f6f8b78cf9096d8aeb774e1d200606`,
+`f387682f9db9686a61339a174c956a910249a414`,
+`4eef11bda4cd8decdc70e5413e4bf12fd463cb1f`,
+`2669a99900d79cea1622642a91b9ed27495f394a`,
+`57b2b1c72b774112708bebe4e15f665d45668dd4`,
+`cc8ff7490386080302e3ca58e3f7e5e3ec6fd9ec`,
+`271fa289854aa109806186dea1141c3551b35ca8`.
+
+- Successful full test run for the pinned schema/retained runtime
+  and Foreign TTL boundary tests:
+  https://github.com/aghajani82/u-opti/actions/runs/43620928569
+- Latest end-to-end rollback continuity regression:
+  https://github.com/aghajani82/u-opti/actions/runs/43621053728
+  (check its completed outcome before calling it green).
+
+### Remaining final release gaps (deliberately held)
+
+**This is stronger recovery proof, not a live executor.**
+The signed trial pair still has
+`release_approved=false`, `activation_allowed=false`.
+The real Iran Panel apply/rollback with bounded runtime health
+checks, durable per-stage production journal and explicit release
+approval is not yet deployed. Do not set production flags by hand
+or run a fixture mutator on the host. Public Foreign option 2 remains
+`HOLD_BEFORE_HOST_CHANGES`. Final acceptance still requires safe Iran
+rollout and rollback proof, complete Foreign stage compensation, an
+approved signed release pair, preserved FRP/Backhaul/Sanaei state, and
+actual two-host signed `Connected` evidence before merging to `main`.
