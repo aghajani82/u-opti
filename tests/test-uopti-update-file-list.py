@@ -126,6 +126,7 @@ class UpdaterFileListTests(unittest.TestCase):
             "smite-unified-panel-stage.py",
             "smite-unified-panel-transaction.py",
             "smite-unified-panel-cutover.py",
+            "smite-unified-panel-host-driver.py",
         }
         self.assertLessEqual(names, quoted_names(array_body(self.installer, "MODULES")))
         self.assertLessEqual(names, quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
