@@ -325,14 +325,22 @@ smite_foreign_gateway_ensure_certificate() {
     [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]
 }
 
-smite_foreign_gateway_write_renew_hook() {
-    mkdir -p "$(dirname "$SMITE_FOREIGN_RENEW_HOOK")" || return 1
-    cat > "$SMITE_FOREIGN_RENEW_HOOK" <<'EOF'
+smite_foreign_gateway_render_renew_hook() {
+    cat <<'EOF'
 #!/bin/sh
 if nginx -t >/dev/null 2>&1; then
     systemctl reload nginx
 fi
 EOF
+}
+
+smite_foreign_gateway_write_renew_hook() {
+    mkdir -p "$(dirname "$SMITE_FOREIGN_RENEW_HOOK")" || return 1
+    # The shared hook cannot be replaced through a symlink or with an
+    # unrelated administrator's script by selected Foreign step recovery.
+    [ ! -L "$SMITE_FOREIGN_RENEW_HOOK" ] &&
+    { [ ! -e "$SMITE_FOREIGN_RENEW_HOOK" ] || [ -f "$SMITE_FOREIGN_RENEW_HOOK" ]; } || return 1
+    smite_foreign_gateway_render_renew_hook > "$SMITE_FOREIGN_RENEW_HOOK" || return 1
     chmod 0755 "$SMITE_FOREIGN_RENEW_HOOK"
 }
 
@@ -856,6 +864,33 @@ smite_foreign_gateway_status() {
     smite_foreign_gateway_pause
 }
 
+# Compensate ONLY a shared renewal hook touched by this exact Foreign
+# Gateway attempt. Its candidate and preimage are retained in the same
+# private stage journal, not a parallel backup/repair tool.
+smite_foreign_gateway_restore_inline_hook() {
+    local staged="$1" current="$SMITE_FOREIGN_RENEW_HOOK"
+    [ -f "$staged/hook-candidate" ] && [ ! -L "$staged/hook-candidate" ] ||
+        return 1
+    [ ! -L "$current" ] && { [ ! -e "$current" ] || [ -f "$current" ]; } ||
+        return 1
+    if [ -e "$current" ] && ! cmp -s "$staged/hook-candidate" "$current"; then
+        # Never erase edits from another service/admin after the snapshot.
+        [ -f "$staged/hook" ] &&
+        cmp -s "$staged/hook" "$current" || return 1
+    fi
+    if [ -f "$staged/hook-absent" ]; then
+        [ ! -e "$staged/hook" ] || return 1
+        rm -f -- "$current" || return 1
+        [ ! -e "$current" ] && [ ! -L "$current" ]
+    elif [ -f "$staged/hook" ] && [ ! -L "$staged/hook" ]; then
+        [ ! -e "$staged/hook-absent" ] || return 1
+        cp -a -- "$staged/hook" "$current" &&
+        cmp -s -- "$staged/hook" "$current"
+    else
+        return 1
+    fi
+}
+
 smite_foreign_gateway_restore_inline_site() {
     local site="$1" enabled="$2" backup="$3" original_link="$4" failed=0
     if [ -n "$backup" ]; then
@@ -884,6 +919,10 @@ smite_foreign_gateway_inline_stage() (
     exec {lock}>> "$SMITE_STATE_DIR/foreign-gateway.lock" || return 2
     flock -n "$lock" || return 2
     [ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ] && [ ! -L "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ] || return 2
+    # The renew hook is shared with other services. Reject an unrelated,
+    # changed or symlinked hook BEFORE modifying the Foreign vhost.
+    [ ! -L "$SMITE_FOREIGN_RENEW_HOOK" ] &&
+    { [ ! -e "$SMITE_FOREIGN_RENEW_HOOK" ] || [ -f "$SMITE_FOREIGN_RENEW_HOOK" ]; } || return 2
 
     if [ -e "$staging" ] || [ -L "$staging" ]; then
         [ -d "$staging" ] && [ ! -L "$staging" ] &&
@@ -892,7 +931,9 @@ smite_foreign_gateway_inline_stage() (
         cmp -s "$staging/scope" <(printf '%s\n' "$control_url" "$site" "$enabled") &&
         [ -f "$staging/candidate" ] && [ ! -L "$staging/candidate" ] &&
         [ -f "$staging/link" ] && [ ! -L "$staging/link" ] || return 2
-        [ ! -L "$staging/site" ] || return 2
+        [ ! -L "$staging/site" ] &&
+        [ -f "$staging/hook-candidate" ] && [ ! -L "$staging/hook-candidate" ] &&
+        { [ -f "$staging/hook-absent" ] || [ -f "$staging/hook" ]; } || return 2
         if [ -e "$staging/site" ]; then
             [ -f "$staging/site" ] || return 2
             backup="$staging/site"
@@ -912,7 +953,16 @@ smite_foreign_gateway_inline_stage() (
             current_link="$(readlink -- "$enabled")" || return 2
             [ "$current_link" = "$site" ] || [ "$current_link" = "$original_link" ] || return 2
         fi
-        smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$backup" "$original_link" || return 2
+        # Preflight both compensations before restoring ANY target:
+        # an externally edited hook must not cause a partial site restore.
+        if [ -e "$SMITE_FOREIGN_RENEW_HOOK" ] &&
+            ! cmp -s "$staging/hook-candidate" "$SMITE_FOREIGN_RENEW_HOOK" &&
+            { [ ! -f "$staging/hook" ] || ! cmp -s "$staging/hook" "$SMITE_FOREIGN_RENEW_HOOK"; }; then
+            echo 'HOLD: Shared renewal hook changed outside the Foreign stage.' >&2
+            return 2
+        fi
+        smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$backup" "$original_link" &&
+        smite_foreign_gateway_restore_inline_hook "$staging" || return 2
         rm -rf -- "$staging" || return 2
         echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK_AFTER_INTERRUPTION'
         backup=""
@@ -928,6 +978,18 @@ smite_foreign_gateway_inline_stage() (
         : > "$scratch/link" || return 2
     fi
     original_link="$(cat "$scratch/link")" || return 2
+    smite_foreign_gateway_render_renew_hook > "$scratch/hook-candidate" || return 2
+    if [ -e "$SMITE_FOREIGN_RENEW_HOOK" ]; then
+        # Only the canonical U-OPTI Nginx reload hook may be shared.
+        # Never replace or silently roll back an independent hook.
+        cmp -s "$scratch/hook-candidate" "$SMITE_FOREIGN_RENEW_HOOK" || {
+            echo 'HOLD: Existing independent certificate renewal hook must be preserved.' >&2
+            return 2
+        }
+        cp -a -- "$SMITE_FOREIGN_RENEW_HOOK" "$scratch/hook" || return 2
+    else
+        : > "$scratch/hook-absent" || return 2
+    fi
     if [ -f "$site" ]; then
         cp -a -- "$site" "$scratch/site" && cp -a -- "$site" "$scratch/candidate" || return 2
         backup="$staging/site"
@@ -948,6 +1010,8 @@ smite_foreign_gateway_inline_stage() (
        smite_foreign_gateway_set_node_control_address "$control_url" "" &&
        smite_foreign_gateway_recreate_node &&
        smite_foreign_gateway_write_renew_hook &&
+       [ -f "$SMITE_FOREIGN_RENEW_HOOK" ] &&
+       cmp -s "$staging/hook-candidate" "$SMITE_FOREIGN_RENEW_HOOK" &&
        smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
         rm -rf -- "$staging" || return 2
         echo 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY'
@@ -960,6 +1024,7 @@ smite_foreign_gateway_inline_stage() (
         return 2
     fi
     if smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$backup" "$original_link" &&
+        smite_foreign_gateway_restore_inline_hook "$staging" &&
         rm -rf -- "$staging"; then
         echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' >&2
     else
