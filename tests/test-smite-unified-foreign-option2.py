@@ -285,6 +285,69 @@ class UnifiedForeignOption2(unittest.TestCase):
         self.assertEqual(self.events, [])
         self.assert_no_identity()
 
+    def test_revoked_signed_panel_after_completion_never_regenerates_node_key(self):
+        self.run_option2()
+        original_key = self.fixture.live.read_bytes()
+        self.fixture.calls.clear()
+        self.events.clear()
+        self.fixture.revoke = True
+        with self.assertRaises(ValueError):
+            self.run_option2()
+        self.assertEqual(self.fixture.live.read_bytes(), original_key)
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertNotIn("/api/foreign-install/redeem", self.fixture.calls)
+
+    def test_corrupted_identity_transaction_journal_cannot_be_redeemed_again(self):
+        self.run_option2()
+        original_key = self.fixture.live.read_bytes()
+        receipt = self.fixture.stage / "unified-foreign-transaction.json"
+        doc = json.loads(receipt.read_text())
+        doc["phase"] = "UNREVIEWED_RUNTIME_ACTIVATION"
+        receipt.write_text(json.dumps(doc))
+        receipt.chmod(0o600)
+        self.events.clear()
+        self.fixture.calls.clear()
+        with self.assertRaises(ValueError):
+            self.run_option2()
+        self.assertEqual(self.fixture.live.read_bytes(), original_key)
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertNotIn("/api/foreign-install/redeem", self.fixture.calls)
+
+    def test_foreign_scope_switch_after_complete_never_adopts_old_identity(self):
+        self.run_option2()
+        original_key = self.fixture.live.read_bytes()
+        original_doc = dict(self.fixture.doc)
+        self.fixture.doc["node_id"] = "foreign-node-other"
+        self.fixture.write_packet()
+        self.events.clear()
+        self.fixture.calls.clear()
+        try:
+            with self.assertRaises(host.Hold):
+                self.run_option2()
+            self.assertEqual(self.fixture.live.read_bytes(), original_key)
+            self.assertNotIn("install_sanaei", self.events)
+            self.assertNotIn("install_gateway", self.events)
+            self.assertFalse(self.fixture.calls)
+        finally:
+            self.fixture.doc = original_doc
+            self.fixture.write_packet()
+
+    def test_gateway_drift_after_success_does_not_trigger_rollback_of_completed_stage(self):
+        self.run_option2()
+        original_key = self.fixture.live.read_bytes()
+        self.states["gateway"] = "DRIFT"
+        self.events.clear()
+        self.fixture.calls.clear()
+        with self.assertRaises(host.Hold):
+            self.run_option2()
+        self.assertEqual(self.fixture.live.read_bytes(), original_key)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertNotIn("rollback_gateway", self.events)
+        self.assertNotIn("rollback_sanaei", self.events)
+        self.assertFalse(self.fixture.calls)
+
     def test_public_cli_remains_status_only_and_never_claims_connected(self):
         source = (ROOT / "modules" /
                   "smite-unified-foreign-host-recovery.py").read_text()
