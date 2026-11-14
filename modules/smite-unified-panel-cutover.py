@@ -228,8 +228,9 @@ class Cutover:
 
     def _step(self, step):
         if step == "COMPOSE":
-            self.tx._replace(
-                "panel-compose", self.tx._candidate("panel-compose"))
+            if self.tx._live("panel-compose") != self.tx._candidate("panel-compose"):
+                self.tx._replace(
+                    "panel-compose", self.tx._candidate("panel-compose"))
         elif step == "STOP":
             self.driver.stop_panel()  # NO smite-node actions
         elif step == "SCHEMA":
@@ -240,7 +241,8 @@ class Cutover:
                 deny()
         elif step in ("ENV", "NGINX"):
             name = CONFIG_STEPS[step]
-            self.tx._replace(name, self.tx._candidate(name))
+            if self.tx._live(name) != self.tx._candidate(name):
+                self.tx._replace(name, self.tx._candidate(name))
             if step == "NGINX":
                 self.driver.nginx_check_and_reload()
         elif step == "START":
@@ -291,7 +293,13 @@ class Cutover:
                 self._continuity()
                 self._check_ordered_config("ROLLED_BACK", rolling_back=True)
                 return {"status": "ALREADY_ROLLED_BACK", "production": False}
-            self._prewrite(doc["phase"], rollback=True)
+            if doc["phase"] == "BEFORE_ROLLBACK":
+                self._prewrite(doc["phase"], rollback=True)
+            else:
+                # Before beginning compensation, require the ORIGINAL
+                # ordered phase. Mixed owned preimages are allowed ONLY
+                # after our durable BEFORE_ROLLBACK checkpoint.
+                self._prewrite(doc["phase"])
             doc["phase"] = "BEFORE_ROLLBACK"
             self._write(doc)
             # Stop ONLY Panel. Each action is idempotent after a crash.
