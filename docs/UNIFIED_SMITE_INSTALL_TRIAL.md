@@ -2792,3 +2792,69 @@ or run a fixture mutator on the host. Public Foreign option 2 remains
 rollout and rollback proof, complete Foreign stage compensation, an
 approved signed release pair, preserved FRP/Backhaul/Sanaei state, and
 actual two-host signed `Connected` evidence before merging to `main`.
+
+
+## Iran Panel-only service cutover and stage-owned rollback (2026-11-14)
+
+**Purpose:** finish the existing Panel service-level transaction choreography
+without adding any user-facing feature. This step reuses the exact sealed
+Panel candidates, existing schema/identity/replay validators, old RC7
+installer Journal, and retained Iran Node Docker fingerprint.
+
+The internal module `modules/smite-unified-panel-cutover.py` is packaged by
+both fresh U-OPTI install and updater. Its private, fsynced, 0700/0600
+transaction Journal records `BEFORE_*` and `AFTER_*` checkpoints across:
+
+1. `COMPOSE` — replace only the Panel image Compose candidate.
+2. `STOP` — stop *only* Panel; verify the Panel process stopped.
+3. `SCHEMA` — use the existing additive migration while Panel is stopped.
+4. `ENV` — set only the signed Foreign grant/trust flags.
+5. `NGINX` — apply the exact HTTPS/443 backend, then validate and reload.
+6. `START` — start *only* the selected Panel image.
+7. `HEALTH` — verify the current Panel runtime and retained Node continuity.
+
+**Interrupted continuation:** a previous atomic file write or SQLite
+migration may already be complete when an AFTER checkpoint is missing.
+The engine validates exact candidate/original bytes before moving a
+checkpoint, skips already-completed migrations and config writes, and
+refuses out-of-order config, unknown schema, new pairing/grants, replay
+identity drift, or a changed Node Docker ID/Image/StartedAt. It shares
+the existing nonblocking sealed-stage lock.
+
+**Rollback:** the existing config-only compensation is now coupled to a
+durable `BEFORE_ROLLBACK` service-phase checkpoint. Only Panel is stopped.
+Owned Nginx/env/Compose files are restored in reverse, Nginx is
+revalidated/reloaded, and the original Panel is started and health-
+checked. Additive schema, real signed replay history, Node identity,
+FRP, Backhaul and Sanaei remain untouched. Retry after interruption
+does not restore a different file or erase progress. A completed
+cutover or already-rolled-back Journal must still prove *current*
+Panel health and exact config; Journal success alone is insufficient.
+
+**Automated proof:** `tests/test-smite-unified-panel-cutover.py` covers
+each of seven interrupted steps, service crash before journal checkpoint,
+refusal to migrate while Panel is running, rollback after each stage,
+crashes during owned config restore and Panel restart, exact retained
+Node fingerprint, no new grants/pairing, unknown Nginx, root/fixture
+guard bypass, symlink/forged journal, shared lock and current runtime
+health. Existing GitHub Actions also retains separate *real disposable
+Compose* migration/rollback and isolated Nginx tests.
+
+CI (service transaction and direct-writer guards):
+https://github.com/aghajani82/u-opti/actions/runs/43623245077
+Latest extra current-health regression:
+https://github.com/aghajani82/u-opti/actions/runs/43623378952
+(Check the final result of the latest run before calling it green.)
+
+**HOLD remains:** this is the disposable, service-aware integration
+engine, **not** an approved production executor. Its service driver is
+injected ONLY into disposable fixtures. Real root `/` cannot run
+the mutators; the public CLI supports read-only `--review` only.
+The exact signed trial pair still has `release_approved=false` and
+`activation_allowed=false`. Before enabling actual Iran host cutover
+we still need a reviewed, fixed-command production service driver,
+independent signed release approval and live signed two-way health
+proof, plus safe actual-host rollback acceptance. Only then link
+Foreign option 2 and verify two-host `Connected`, retaining the
+existing FRP/Backhaul/Sanaei state. No `main` or live host changes
+were performed by this trial stage.
