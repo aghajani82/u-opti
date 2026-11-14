@@ -93,6 +93,29 @@ class OfflineRollout(unittest.TestCase):
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM smite_foreign_install_grants").fetchone()[0],0)
 
+    def test_interrupted_upgrade_resumes_from_the_original_stage(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="ENV")
+        self.assertEqual(self._ledger()["phase"], "AFTER_ENV")
+        self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+        self.assertEqual(self._ledger()["phase"], "REHEARSED")
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT name FROM nodes WHERE id='iran-node-1234'"
+            ).fetchone(), ("node-ir",))
+            self.assertEqual(conn.execute(
+                "SELECT encrypted_secret FROM smite_node_identities"
+            ).fetchone(), ("secret-ciphertext",))
+
+    def test_completed_upgrade_rechecks_without_replaying_config_writes(self):
+        self._invoke()
+        with patch.object(self.executor, "_replace", side_effect=AssertionError):
+            self.assertEqual(self._invoke()["status"], "REHEARSED_OFFLINE")
+            (self.root / trans.CONFIG["panel-env"]).write_bytes(b"changed")
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+        self.assertEqual(self._ledger()["phase"], "REHEARSED")
+
     def test_interrupted_after_compose_restores_only_owned_files(self):
         with self.assertRaises(trans.Hold):self._invoke(fail_after="COMPOSE")
         self.assertEqual(self._ledger()["phase"],"AFTER_COMPOSE")

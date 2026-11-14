@@ -115,7 +115,7 @@ class PanelTransaction:
                 "AND name IN ('smite_foreign_install_grants','smite_foreign_install_origins')")}
             return names
 
-    def review(self):
+    def review(self, *, resume_rolled_back=False):
         """Verify exact signed pair, stage and current preimages; ZERO writes."""
         try:
             self.stage.status()
@@ -125,7 +125,12 @@ class PanelTransaction:
                     deny()
             self.stage._preflight_database()
             self.stage._preflight_replay()
-            if self._tables():
+            if resume_rolled_back:
+                if self._journal_read()["phase"] != "ROLLED_BACK":
+                    deny()
+                if self._new_enrollment() or self._replay_drift():
+                    deny()
+            elif self._tables():
                 deny()
             originals, candidates = self.stage._collect()
             if any(originals[name] != self._snapshot(name)
@@ -134,7 +139,7 @@ class PanelTransaction:
             if any(candidates[name] != self._candidate(name)
                    for name in CONFIG):
                 deny()
-            if self.rehearsal.exists() or self.rehearsal.is_symlink():
+            if not resume_rolled_back and (self.rehearsal.exists() or self.rehearsal.is_symlink()):
                 deny()
         except (OSError, ValueError, KeyError, sqlite3.Error,
                 self.stage_mod.StageHold):
@@ -236,9 +241,13 @@ class PanelTransaction:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     if self._tables():
-                        deny()
-                    for sql in GRANT_DDL:
-                        conn.execute(sql)
+                        # A previous rollback retains the empty additive
+                        # tables. Validate them instead of rebuilding them.
+                        if self._new_enrollment():
+                            deny()
+                    else:
+                        for sql in GRANT_DDL:
+                            conn.execute(sql)
                     conn.commit()
                 except Exception:
                     conn.rollback()
@@ -249,9 +258,30 @@ class PanelTransaction:
     def rehearse(self, *, confirm: str, fail_after=None):
         """Test-only! Never accepts a real / host or real service capability."""
         self._check_fixture(confirm)
-        self.review()
-        self.stage._parents(self.rehearsal)
-        self.rehearsal.mkdir(mode=0o700)
+        if os.path.lexists(self.rehearsal):
+            if self._journal_read()["phase"] == "REHEARSED":
+                try:
+                    self.stage.status()
+                    self.stage._signed_pair()
+                    self.stage._preflight_database()
+                    self.stage._preflight_replay()
+                    for name in self.stage_mod.FILE_MAP:
+                        expected = self._candidate(name) if name in CONFIG else self._snapshot(name)
+                        if self._live(name) != expected:
+                            deny()
+                    if (self._tables() != {"smite_foreign_install_grants", "smite_foreign_install_origins"}
+                            or self._new_enrollment() or self._replay_drift()):
+                        deny()
+                except (OSError, ValueError, self.stage_mod.StageHold, sqlite3.Error):
+                    deny()
+                return {"status":"REHEARSED_OFFLINE","schema":"ADDITIVE_ONLY",
+                        "production":False,"runtime_started":False}
+            self.rollback_rehearsal(confirm=confirm)
+            self.review(resume_rolled_back=True)
+        else:
+            self.review()
+            self.stage._parents(self.rehearsal)
+            self.rehearsal.mkdir(mode=0o700)
         journal = {
             "schema":1, "kind":"unified-panel-disposable-rehearsal",
             "source":SOURCE_SHA, "phase":"BEFORE_COMPOSE",
