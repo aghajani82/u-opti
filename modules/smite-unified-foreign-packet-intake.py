@@ -15,6 +15,8 @@ and call this admission before starting expensive host installation. The
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import importlib.util
 import io
 import json
@@ -74,7 +76,7 @@ def read_multiline(reader):
     return data
 
 
-def _private_fixture(path):
+def _private_fixture(path, *, allow_existing=False):
     target = Path(path)
     if (not target.is_absolute() or ".." in target.parts
             or target.name != "foreign-install-packet.json"
@@ -82,8 +84,8 @@ def _private_fixture(path):
             or target.parent.parent.name != "foreign-fixture"
             or target.parent.parent.parent.parent != Path(tempfile.gettempdir()).resolve()):
         deny()
-    if os.path.lexists(target):
-        deny()  # Cannot silently rotate an existing code or a staged identity.
+    if not allow_existing and os.path.lexists(target):
+        deny()  # The original first-write path never overwrites a packet.
     for item in (target.parent.parent.parent, target.parent.parent, target.parent):
         if item.is_symlink():
             deny()
@@ -97,8 +99,147 @@ def _private_fixture(path):
     return target
 
 
+
+def _renew_expired_disposable(*, target, data, packet, now, client):
+    """Repair the existing Foreign resume path for one expired Panel grant.
+
+    The *already existing* host-recovery journal is the owner of this scope.
+    Lock against both host stage recovery and signed enrollment. Never alter
+    an active grant, a different reserved Node, a published identity, or a
+    journal whose preimage cannot be independently verified.
+
+    Only the private packet is replaced atomically; the original recovery
+    journal remains in place and revalidates all completed host witnesses
+    when it adopts the new code on next resume. No runtime/network writes.
+    """
+    host = Path(__file__).with_name("smite-unified-foreign-host-recovery.py")
+    promotion = Path(__file__).with_name("smite-foreign-install-promotion.py")
+    if (host.is_symlink() or not host.is_file()
+            or promotion.is_symlink() or not promotion.is_file()):
+        deny()
+    def load(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            deny()
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    journal_owner = load("foreign_existing_host_recovery_contract", host)
+    files = load("foreign_existing_promotion_file_admission", promotion)
+    try:
+        with files.private_directory(target.parent) as directory:
+            lock = os.open(journal_owner.LOCK, os.O_RDWR | os.O_NOFOLLOW |
+                           os.O_NONBLOCK, dir_fd=directory)
+            try:
+                client.private_file(lock)
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                original = files.read_optional(directory, target.name, client)
+                if original is None:
+                    deny()
+                prior = client.parse_packet(original)
+                # Idempotent re-paste of the exact still-valid packet never
+                # changes a file or consumes a new grant.
+                if data == original and now < prior.expires_at:
+                    return {"status": "ALREADY_STAGED_PRIVATE",
+                            "node_name": packet.scope["node_name"],
+                            "expires_at": packet.expires_at, "connected": False}
+
+                if (prior.expires_at > now
+                        or prior.scope != packet.scope
+                        or prior.code == packet.code):
+                    deny()
+                saved = files.read_optional(directory, journal_owner.JOURNAL, client)
+                if saved is None:
+                    deny()
+                record = client.decode(saved)
+                if (not isinstance(record, dict)
+                        or set(record) != {
+                            "schema", "packet_sha256", "expires_at", "scope", "phase"}
+                        or record["schema"] != 2
+                        or type(record["expires_at"]) is not int
+                        or record["expires_at"] != prior.expires_at
+                        or record["scope"] != prior.scope
+                        or record["phase"] not in journal_owner.PHASES
+                        or record["packet_sha256"] != hashlib.sha256(original).hexdigest()):
+                    deny()
+                # New grants may never silently displace an enrolled,
+                # promoted or already-published Node runtime identity.
+                if (files.read_optional(directory,
+                        "foreign-install-promotion-prepared.json", client) is not None
+                        or files.read_optional(directory,
+                        "foreign-install-promotion-completed.json", client) is not None):
+                    deny()
+                identity = files.read_optional(
+                    directory, "foreign-install-identity.json", client)
+                if identity is not None:
+                    record_identity = client.decode(identity)
+                    if (not isinstance(record_identity, dict)
+                            or set(record_identity) != {
+                                "schema", "scope", "node_secret"}
+                            or record_identity["schema"] != 1
+                            or record_identity["scope"] != packet.scope
+                            or not isinstance(record_identity["node_secret"], str)
+                            or len(record_identity["node_secret"]) != 64
+                            or any(c not in "0123456789abcdef"
+                                   for c in record_identity["node_secret"])):
+                        deny()
+
+                # Serialize with the existing enrollment client too. An
+                # unknown lock or identity state is always a HOLD.
+                enroll_lock = os.open("enrollment.lock", os.O_RDWR | os.O_CREAT |
+                                      os.O_NOFOLLOW | os.O_NONBLOCK, 0o600,
+                                      dir_fd=directory)
+                try:
+                    client.private_file(enroll_lock)
+                    fcntl.flock(enroll_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # Recheck proofs AFTER acquiring both locks. No file is
+                    # trusted merely because it passed an earlier read.
+                    if (files.read_optional(directory, target.name, client)
+                            != original
+                            or files.read_optional(
+                                directory, journal_owner.JOURNAL, client) != saved
+                            or files.read_optional(
+                                directory, "foreign-install-identity.json", client)
+                                != identity
+                            or files.read_optional(
+                                directory, "foreign-install-promotion-prepared.json",
+                                client) is not None
+                            or files.read_optional(
+                                directory, "foreign-install-promotion-completed.json",
+                                client) is not None):
+                        deny()
+                    temporary = ".packet-renew-" + secrets.token_hex(16)
+                    output = os.open(temporary, os.O_WRONLY | os.O_CREAT |
+                                     os.O_EXCL | os.O_NOFOLLOW, 0o600,
+                                     dir_fd=directory)
+                    try:
+                        with os.fdopen(output, "wb") as stream:
+                            stream.write(data)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        os.replace(temporary, target.name, src_dir_fd=directory,
+                                   dst_dir_fd=directory)
+                        os.fsync(directory)
+                    finally:
+                        try:
+                            os.unlink(temporary, dir_fd=directory)
+                        except FileNotFoundError:
+                            pass
+                finally:
+                    os.close(enroll_lock)
+                return {"status": "RENEWED_PRIVATE",
+                        "node_name": packet.scope["node_name"],
+                        "expires_at": packet.expires_at, "connected": False}
+            finally:
+                os.close(lock)
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+
 def capture_disposable(reader, *, target, expected_panel, expected_domain,
-                       expected_node, now, disposable_capability=False):
+                       expected_node, now, disposable_capability=False,
+                       allow_expired_renewal=False):
     """Write the exact validated packet once in a PRIVATE disposable fixture.
 
     No host path, overwrite, reuse of a consumed code, secret output, child
@@ -106,7 +247,7 @@ def capture_disposable(reader, *, target, expected_panel, expected_domain,
     """
     if not disposable_capability or type(now) is not int:
         deny()
-    target = _private_fixture(target)
+    target = _private_fixture(target, allow_existing=allow_expired_renewal)
     c = client_module()
     try:
         raw = read_multiline(reader)
@@ -122,6 +263,9 @@ def capture_disposable(reader, *, target, expected_panel, expected_domain,
         data = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(data) > 8192:
             deny()
+        if allow_expired_renewal and os.path.lexists(target):
+            return _renew_expired_disposable(
+                target=target, data=data, packet=packet, now=now, client=c)
         directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             info = os.fstat(directory)
@@ -181,7 +325,7 @@ def read_hidden_tty(stream, *, ready=None):
 
 def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
                          expected_panel=None, expected_domain=None,
-                         expected_node=None):
+                         expected_node=None, allow_expired_renewal=False):
     """One verified hidden paste for BOTH existing intake callers.
 
     Always validate the private destination and grant expiry BEFORE showing
@@ -191,7 +335,7 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
     """
     if type(now) is not int or not callable(confirm_scope):
         deny()
-    _private_fixture(target)
+    _private_fixture(target, allow_existing=allow_expired_renewal)
     raw = read_hidden_tty(tty, ready=ready)
     packet = client_module().parse_packet(raw)
     scope = packet.scope
@@ -212,7 +356,8 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
         expected_panel=scope["panel_url"],
         expected_domain=scope["origin"],
         expected_node=scope["node_name"],
-        now=now, disposable_capability=True)
+        now=now, disposable_capability=True,
+        allow_expired_renewal=allow_expired_renewal)
 
 
 def capture_disposable_hidden_tty(tty, *, confirm_scope, ready=None, **kwargs):
@@ -231,7 +376,8 @@ def capture_selected_hidden_tty(tty, *, target, now, confirm_scope,
                                 ready=None):
     """Existing selected option-2 intake using the SAME hidden/staging path."""
     return _capture_hidden_once(
-        tty, target=target, now=now, confirm_scope=confirm_scope, ready=ready)
+        tty, target=target, now=now, confirm_scope=confirm_scope,
+        ready=ready, allow_expired_renewal=True)
 
 
 def _confirm_selected_scope(tty, scope):
@@ -260,7 +406,7 @@ def main(argv=None):
     target = (Path(args.capture_selected_foreign) / "foreign-fixture" /
               "foreign-staging" / "foreign-install-packet.json")
     try:
-        _private_fixture(target)
+        _private_fixture(target, allow_existing=True)
         print("Paste Iran Panel's complete Foreign installation JSON and"
               " finish with an empty line. Input is hidden.",
               file=sys.stderr, flush=True)
