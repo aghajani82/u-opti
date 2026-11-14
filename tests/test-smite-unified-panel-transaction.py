@@ -654,6 +654,126 @@ class LiveHeartbeatContinuity(unittest.TestCase):
         with self.assertRaises(trans.Hold):
             self.executor.rollback_rehearsal(confirm=trans.CONFIRM)
 
+    def _ordinary_signed_heartbeat_after_upgrade(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE nodes SET last_seen=? WHERE id=?",
+                       ("2026-11-14 10:30:00", "iran-node-1234"))
+            db.execute("INSERT INTO smite_node_inbound_nonces VALUES (?,?,?)",
+                       ("iran-node-1234", "post-upgrade-signed",
+                        self.unexpired_nonce+60))
+        with sqlite3.connect(self.root / fixture.stage.REPLAY_DB_REL) as db:
+            db.execute("INSERT INTO agent_nonces VALUES (?,?,?)",
+                       ("iran-node-1234", "post-upgrade-replay",
+                        self.unexpired_nonce+60))
+
+    def test_scoped_rollback_rehearsal_after_live_signed_heartbeat_retains_nonce(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        original_replay = (
+            self.root / fixture.stage.REPLAY_DB_REL).read_bytes()
+        result = self.executor.rollback_rehearsal(
+            confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(result["status"], "ROLLED_BACK_OFFLINE")
+        self.assertFalse(result["production"])
+        self.assertEqual(
+            json.loads((self.executor.rehearsal / "journal.json").read_text())["phase"],
+            "ROLLED_BACK")
+        self.assertEqual(
+            (self.root / fixture.stage.REPLAY_DB_REL).read_bytes(),
+            original_replay)
+        for name in trans.CONFIG:
+            self.assertEqual(
+                self.executor._live(name), self.executor._snapshot(name))
+        with sqlite3.connect(self.db) as db:
+            self.assertIn(
+                ("iran-node-1234", "post-upgrade-signed",
+                 self.unexpired_nonce+60),
+                db.execute("SELECT * FROM smite_node_inbound_nonces").fetchall())
+        self.assertEqual(
+            self.executor.rollback_rehearsal(
+                confirm=trans.CONFIRM, allow_iran_heartbeat=True)["status"],
+            "ALREADY_ROLLED_BACK")
+
+    def test_signed_heartbeat_rollback_can_resume_after_config_write_crash(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        previous = self.executor._replace
+        invoked = []
+        def interrupted(name, content):
+            invoked.append(name)
+            previous(name, content)
+            if name == "nginx-backend":
+                raise OSError("simulated power loss after stage-owned rename")
+        with patch.object(self.executor, "_replace", side_effect=interrupted):
+            with self.assertRaises(OSError):
+                self.executor.rollback_rehearsal(
+                    confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(
+            json.loads((self.executor.rehearsal / "journal.json").read_text())["phase"],
+            "BEFORE_ROLLBACK")
+        with patch.object(self.executor, "_replace",
+                          wraps=self.executor._replace) as replacements:
+            result = self.executor.rollback_rehearsal(
+                confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(result["status"], "ROLLED_BACK_OFFLINE")
+        # The Gateway file restored before the simulated crash is verified
+        # but not rewritten; only the remaining stage-owned flags and image.
+        self.assertEqual(
+            [call.args[0] for call in replacements.call_args_list],
+            ["panel-env", "panel-compose"])
+        with sqlite3.connect(self.root / fixture.stage.REPLAY_DB_REL) as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM agent_nonces "
+                           "WHERE nonce='post-upgrade-replay'").fetchone(), (1,))
+
+    def test_heartbeat_aware_rollback_holds_on_pending_code_without_mutation(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        before = {name:self.executor._live(name) for name in trans.CONFIG}
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_pairing_codes "
+                       "VALUES(?,?,NULL)", ("new-pair-code", "iran-node-1234"))
+        with patch.object(self.executor, "_replace",
+                          side_effect=AssertionError("unexpected config restore")):
+            with self.assertRaises(trans.Hold):
+                self.executor.rollback_rehearsal(
+                    confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(
+            {name:self.executor._live(name) for name in trans.CONFIG}, before)
+
+    def test_heartbeat_aware_rollback_holds_on_foreign_grant_without_mutation(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        with sqlite3.connect(self.db) as db:
+            db.execute(
+                "INSERT INTO smite_foreign_install_grants "
+                "(code_hash,node_id,node_name,origin,control_url,issued_by,"
+                "issued_at,expires_at) VALUES(?,?,?,?,?,?,?,?)",
+                ("a"*64, "foreign-node-1234","node-kh",
+                 "https://kh.example.com:443",
+                 "https://kh.example.com:443/smite-node/"+"b"*32,
+                 "operator",1850000000,1850007200))
+        before = {name:self.executor._live(name) for name in trans.CONFIG}
+        with self.assertRaises(trans.Hold):
+            self.executor.rollback_rehearsal(
+                confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(
+            {name:self.executor._live(name) for name in trans.CONFIG}, before)
+
+    def test_heartbeat_aware_rollback_holds_on_untrusted_schema(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE smite_foreign_install_origins")
+            db.execute("CREATE TABLE smite_foreign_install_origins "
+                       "(node_id TEXT PRIMARY KEY, node_name TEXT)")
+        before = {name:self.executor._live(name) for name in trans.CONFIG}
+        with self.assertRaises(trans.Hold):
+            self.executor.rollback_rehearsal(
+                confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        self.assertEqual(
+            {name:self.executor._live(name) for name in trans.CONFIG}, before)
+
     def test_rollback_preview_refuses_new_pending_pairing_code(self):
         self.executor.rehearse(confirm=trans.CONFIRM)
         with sqlite3.connect(self.db) as db:
