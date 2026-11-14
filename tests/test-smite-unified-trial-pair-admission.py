@@ -204,9 +204,11 @@ class SealedRepositoryPinContract(unittest.TestCase):
         for filename, expected in contracts.items():
             actual = self.constants(filename)
             for key, correct_value in expected.items():
-                with self.subTest(file=filename, pin=key):
-                    self.assertIn(key, actual)
-                    self.assertEqual(actual[key], correct_value)
+                # Propagate errors normally so the negative-control tests
+                # can prove mismatches really fail the entire release gate.
+                self.assertIn(key, actual, f"Missing {key} in {filename}")
+                self.assertEqual(actual[key], correct_value,
+                                 f"Drifted {key} in {filename}")
 
         pairing = (modules / "smite-node-pairing.py").read_text()
         release_gate = pairing.split(
