@@ -355,6 +355,54 @@ class IdentityPhase(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.assertFalse(self.live.exists())
 
+    def test_renewal_after_expiry_resumes_with_the_staged_key(self):
+        def unavailable_before_redeem(*args):
+            raise TimeoutError("no reply from the Panel")
+
+        with self.assertRaises(module.Hold):
+            self.tx(transport=unavailable_before_redeem)
+        stage_file = self.stage / "foreign-install-identity.json"
+        before = stage_file.read_bytes()
+        expired = self.doc["expires_at"]
+        self.doc["installation_code"] = "smi1_" + "c" * 43
+        self.doc["expires_at"] = expired + 7200
+        self.write_packet()
+        with self.assertRaises(module.Hold):
+            self.tx(now=expired - 1)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.tx(now=expired)["journal"], "IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(stage_file.read_bytes(), before)
+        self.assertEqual(json.loads(self.live.read_text())["node_secret"],
+                         json.loads(before)["node_secret"])
+
+    def test_expired_first_packet_does_not_pin_an_unstarted_transaction(self):
+        expired = self.doc["expires_at"]
+        with self.assertRaises(module.Hold):
+            self.tx(now=expired)
+        self.assertFalse(self.journal().exists())
+        self.assertFalse(self.calls)
+        self.doc["expires_at"] = expired + 7200
+        self.doc["installation_code"] = "smi1_" + "c" * 43
+        self.write_packet()
+        self.assertEqual(self.tx(now=expired)["journal"], "IDENTITY_PROMOTED_OFFLINE")
+
+    def test_lost_redemption_reply_can_be_recovered_after_code_expiry(self):
+        def interrupted(panel, endpoint, body, headers):
+            result = self.mock_panel(panel, endpoint, body, headers)
+            if endpoint == "/api/foreign-install/redeem":
+                raise KeyboardInterrupt("interrupted after the Panel enrolled")
+            return result
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.tx(transport=interrupted)
+        prior = self.secret
+        self.calls.clear()
+        self.assertEqual(self.tx(now=self.doc["expires_at"])["journal"],
+                         "IDENTITY_PROMOTED_OFFLINE")
+        self.assertTrue(self.calls)
+        self.assertEqual(set(self.calls), {"/api/node-control/installation-status"})
+        self.assertEqual(json.loads(self.live.read_text())["node_secret"], prior)
+
     def test_parallel_transaction_lock_does_not_consume_a_code(self):
         lock=self.stage/"unified-foreign-transaction.lock"
         with open(lock,"wb") as handle:

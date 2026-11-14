@@ -218,8 +218,8 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
 
     The production CLI provides no entry to this function. The operation
     journal only records INTENT/IDENTITY_PROMOTED_OFFLINE, never Connected.
-    Its scope includes the SHA256 of the private packet to reject code swaps
-    after partial enrollment. Re-running a completed journal *still* checks
+    A replacement code after expiry must retain the exact scope and staged
+    key. Re-running a completed journal *still* checks
     fresh signed proof through the existing promotion module.
     """
     if (not disposable_capability or not callable(transport)
@@ -261,20 +261,39 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
                     deny()
                 fingerprint = hashlib.sha256(raw).hexdigest()
                 expected = {
-                    "schema": 1,
+                    "schema": 2,
                     "packet_sha256": fingerprint,
+                    "expires_at": packet.expires_at,
                     "node_id": packet.scope["node_id"],
                     "scope": packet.scope,
                 }
                 previous = promotion.read_optional(fd, _TX_JOURNAL, client)
                 if previous is not None:
                     journal = client.decode(previous)
-                    if (set(journal) != set(expected) | {"phase"}
-                            or any(journal.get(k) != v for k, v in expected.items())
-                            or journal["phase"] not in
-                            ("INTENT", "IDENTITY_PROMOTED_OFFLINE")):
+                    phase = journal.get("phase")
+                    if phase not in ("INTENT", "IDENTITY_PROMOTED_OFFLINE"):
                         deny()
-                else:
+                    if journal.get("schema") == 1:
+                        legacy = {key: value for key, value in expected.items() if key != "expires_at"}
+                        legacy["schema"] = 1
+                        if journal != {**legacy, "phase": phase}:
+                            deny()
+                    elif (set(journal) != set(expected) | {"phase"}
+                          or journal["schema"] != 2 or journal["scope"] != expected["scope"]
+                          or journal["node_id"] != expected["node_id"]
+                          or type(journal["expires_at"]) is not int):
+                        deny()
+                    elif journal["packet_sha256"] != fingerprint:
+                        if (phase != "INTENT" or os.path.lexists(live_identity)
+                                or journal["expires_at"] > now
+                                or not now < packet.expires_at <= now + 7200):
+                            deny()
+                    elif journal["expires_at"] != packet.expires_at:
+                        deny()
+                elif not now < packet.expires_at <= now + 7200:
+                    # Do not pin an expired first packet to a new transaction.
+                    deny()
+                if previous is None or phase == "INTENT":
                     _write_journal_once_locked(fd, {**expected, "phase": "INTENT"})
                 # On lost ACK, process interruption or incomplete
                 # promotion the existing client and promoter reconcile
