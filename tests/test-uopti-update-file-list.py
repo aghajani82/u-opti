@@ -120,6 +120,15 @@ class UpdaterFileListTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_iran_panel_staging_and_review_helpers_are_packaged(self):
+        names = {
+            "smite-foreign-install-panel-ingress.py",
+            "smite-unified-panel-stage.py",
+            "smite-unified-panel-transaction.py",
+        }
+        self.assertLessEqual(names, quoted_names(array_body(self.installer, "MODULES")))
+        self.assertLessEqual(names, quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
+
     def test_rc7_frp_enrollment_in_installer_and_updater(self):
         helper = "smite-rc7-frp-enrollment.py"
         for name in ("UPDATE_FILE_NAMES",):

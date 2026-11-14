@@ -29,6 +29,8 @@ NEW_NODE = "ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d
 STAGE_REL = "var/lib/u-opti/unified-panel-trial-stage"
 PANEL_REL = "opt/smite/.env"
 COMPOSE_REL = "opt/smite/docker-compose.yml"
+SIGNED_COMPOSE_REL = "opt/smite/docker-compose.signed-control.yml"
+ORIGINS_REL = "etc/u-opti/smite/panel-trusted-nodes/approved-origins.json"
 NGINX_REL = "etc/nginx/conf.d/u-opti-smite-panel-backend.conf"
 STATE_REL = "etc/u-opti/smite/state.env"
 SECRET_REL = "etc/nginx/u-opti-smite-pairing-secret.conf"
@@ -40,6 +42,8 @@ REPLAY_DB_REL = "var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3"
 FILE_MAP = {
     "panel-env": (PANEL_REL, 0o600, 65536),
     "panel-compose": (COMPOSE_REL, None, 262144),
+    "panel-signed-compose": (SIGNED_COMPOSE_REL, 0o600, 32000),
+    "panel-approved-origins": (ORIGINS_REL, 0o600, 64000),
     "nginx-backend": (NGINX_REL, None, 262144),
     "smite-state": (STATE_REL, None, 16384),
     "nginx-ingress-key": (SECRET_REL, 0o600, 4096),
@@ -223,6 +227,25 @@ class PanelStage:
                 or receipt.get("host_activation_allowed") is not False):
             deny()
 
+    def _verify_iran_node(self, conn):
+        state = _env(self._read(STATE_REL, limit=16384))
+        identity = json.loads(self._read(IR_ID_REL, mode=0o600, limit=4096))
+        node_id = identity.get("node_id")
+        node_name = state.get("SMITE_NODE_NAME", "")
+        if (not isinstance(node_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", node_id)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", node_name)):
+            deny()
+        rows = conn.execute(
+            "SELECT nodes.name, identities.node_role, identities.revoked_at, "
+            "length(identities.encrypted_secret) "
+            "FROM nodes JOIN smite_node_identities AS identities "
+            "ON nodes.id = identities.node_id WHERE nodes.id = ?", (node_id,)
+        ).fetchall()
+        if (len(rows) != 1 or rows[0][:3] != (node_name, "iran", None)
+                or not rows[0][3]):
+            deny()
+
     def _preflight_database(self):
         db = self._at(DB_REL)
         self._parents(db)
@@ -234,6 +257,7 @@ class PanelStage:
             with sqlite3.connect(db.absolute().as_uri() + "?mode=ro", uri=True, timeout=10) as conn:
                 for sql in BASE_SCHEMA:
                     conn.execute(sql)
+                self._verify_iran_node(conn)
                 if conn.execute("PRAGMA quick_check").fetchone() != ("ok",):
                     deny()
         except (OSError, sqlite3.Error):
@@ -334,6 +358,7 @@ class PanelStage:
                                          uri=True)) as copy:
                 for sql in BASE_SCHEMA:
                     copy.execute(sql)
+                self._verify_iran_node(copy)
                 if copy.execute("PRAGMA quick_check").fetchone() != ("ok",):
                     deny()
             with open(dest, "rb") as handle:
@@ -357,6 +382,28 @@ class PanelStage:
             deny()
         domain = state.get("SMITE_PANEL_DOMAIN", "")
         if not re.fullmatch(r"(?=.{4,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z", domain):
+            deny()
+        identity = json.loads(records["iran-identity"])
+        origins = json.loads(records["panel-approved-origins"])
+        expected_override = (
+            "services:\n"
+            "  smite-panel:\n"
+            "    volumes:\n"
+            "      - /etc/u-opti/smite/panel-trusted-nodes:/etc/smite-panel/trusted-nodes:ro\n"
+        ).encode("ascii")
+        if (not isinstance(identity, dict) or not isinstance(origins, dict)
+                or not isinstance(identity.get("node_id"), str)
+                or records["panel-signed-compose"] != expected_override
+                or env.get("SMITE_SIGNED_NODE_ORIGINS_PATH") !=
+                   "/etc/smite-panel/trusted-nodes/approved-origins.json"
+                or origins.get("version") != 1
+                or not isinstance(origins.get("nodes"), dict)
+                or origins["nodes"].get(identity.get("node_id")) != {
+                    "role": "iran",
+                    "node_name": state.get("SMITE_NODE_NAME"),
+                    "origin": "http://127.0.0.1:8888",
+                    "control_url": "http://127.0.0.1:8888/api/agent",
+                }):
             deny()
         pairing = json.loads(records["pairing-secrets"])
         if (pairing.get("schema") != 1

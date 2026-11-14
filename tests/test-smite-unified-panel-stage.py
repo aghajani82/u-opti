@@ -72,6 +72,7 @@ class Prepare(unittest.TestCase):
                 "SMITE_NODE_REGISTRATION_MODE=signed\n"
                 "SMITE_PANEL_AGENT_AUTH_MODE=signed\n"
                 "SMITE_NODE_PAIRING_PREVIEW_ENABLED=true\n"
+                "SMITE_SIGNED_NODE_ORIGINS_PATH=/etc/smite-panel/trusted-nodes/approved-origins.json\n"
                 f"SMITE_NODE_PAIRING_MASTER_KEY={MASTER}\n"
                 f"SMITE_NODE_PAIRING_INGRESS_TOKEN={TOKEN}\n"
             ).encode(),
@@ -80,7 +81,16 @@ class Prepare(unittest.TestCase):
                 stage.OLD_PANEL+"\n    network_mode: host\n"
                 "  smite-node:\n    image: ghcr.io/aghajani82/smite-node@sha256:"+"e"*64+"\n").encode(),
             stage.NGINX_REL:nginx(),
-            stage.STATE_REL:b"SMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=panel.example.com\n",
+            stage.SIGNED_COMPOSE_REL: (
+                b"services:\n  smite-panel:\n    volumes:\n"
+                b"      - /etc/u-opti/smite/panel-trusted-nodes:/etc/smite-panel/trusted-nodes:ro\n"
+            ),
+            stage.ORIGINS_REL: json.dumps({"version": 1, "nodes": {
+                "iran-node-1234": {"role": "iran", "node_name": "node-ir",
+                                   "origin": "http://127.0.0.1:8888",
+                                   "control_url": "http://127.0.0.1:8888/api/agent"}
+            }}).encode(),
+            stage.STATE_REL:b"SMITE_NODE_NAME=node-ir\nSMITE_ROLE=panel-iran\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=panel.example.com\n",
             stage.SECRET_REL:('proxy_set_header X-Smite-Pairing-Ingress "'+TOKEN+'";\n').encode(),
             stage.PAIRING_REL:json.dumps({"schema":1,"master_key":MASTER,"ingress_token":TOKEN}).encode(),
             stage.IR_ID_REL:json.dumps({"version":1,"node_id":"iran-node-1234","node_secret":NODE}).encode(),
@@ -90,7 +100,7 @@ class Prepare(unittest.TestCase):
             dest.parent.mkdir(parents=True,exist_ok=True)
             dest.write_bytes(raw)
             dest.chmod(0o600 if path in (stage.PANEL_REL,stage.SECRET_REL,
-                         stage.PAIRING_REL,stage.IR_ID_REL) else 0o644)
+                         stage.PAIRING_REL,stage.IR_ID_REL,stage.SIGNED_COMPOSE_REL,stage.ORIGINS_REL) else 0o644)
             self.original[path]=raw
         self.db=self.root/stage.DB_REL
         self.db.parent.mkdir(parents=True,exist_ok=True)
@@ -167,6 +177,32 @@ class Prepare(unittest.TestCase):
         with sqlite3.connect(folder/"iran-replay.sqlite3") as conn:
             self.assertEqual(conn.execute("SELECT nonce FROM agent_nonces").fetchone()[0],"replay-nonce")
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone(),(1,))
+
+    def test_stage_requires_unrevoked_iran_identity_in_the_panel_database(self):
+        for update in (
+            "UPDATE smite_node_identities SET revoked_at=200",
+            "UPDATE smite_node_identities SET node_role='foreign'",
+            "UPDATE nodes SET name='replacement'",
+        ):
+            with self.subTest(update=update), sqlite3.connect(self.db) as conn:
+                conn.execute("BEGIN")
+                conn.execute(update)
+                # The preflight uses an independent read-only connection.
+                conn.commit()
+                with self.assertRaises(stage.StageHold):
+                    self.panel.prepare(stage.CONFIRM)
+                self.assertFalse(self.panel.staging.exists())
+                conn.execute("UPDATE smite_node_identities SET revoked_at=NULL,node_role='iran'")
+                conn.execute("UPDATE nodes SET name='node-ir'")
+
+    def test_stage_rejects_changed_iran_origin_before_creating_snapshot(self):
+        path = self.root / stage.ORIGINS_REL
+        origins = json.loads(path.read_text())
+        origins["nodes"]["iran-node-1234"]["control_url"] = "http://127.0.0.1:9999/api/agent"
+        path.write_text(json.dumps(origins))
+        with self.assertRaises(stage.StageHold):
+            self.panel.prepare(stage.CONFIRM)
+        self.assertFalse(self.panel.staging.exists())
 
     def test_confirmation_required_without_any_snapshot(self):
         with self.assertRaises(stage.StageHold):
