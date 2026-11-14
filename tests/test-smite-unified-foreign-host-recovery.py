@@ -81,6 +81,11 @@ class HostRecovery(unittest.TestCase):
         self.states["sanaei"] = "READY"
         if self.fail_sanaei == "crash":
             raise KeyboardInterrupt("simulate process interrupted after install")
+        if self.fail_sanaei == "crash_before_ready":
+            self.states["sanaei"] = "ABSENT"
+            raise KeyboardInterrupt("simulate crash during Sanaei mount")
+        if self.fail_sanaei == "error_after_ready":
+            raise OSError("simulate lost success acknowledgement")
         if self.fail_sanaei == "error":
             self.states["sanaei"] = "ABSENT"
             raise OSError("simulate incomplete Sanaei operation")
@@ -90,9 +95,28 @@ class HostRecovery(unittest.TestCase):
         self.states["gateway"] = "READY"
         if self.fail_gateway == "crash":
             raise KeyboardInterrupt("simulate process interrupted after Nginx applied")
+        if self.fail_gateway == "error_after_ready":
+            raise OSError("simulate lost reply after Nginx changed")
+        if self.fail_gateway == "crash_before_ready":
+            self.states["gateway"] = "ABSENT"
+            raise KeyboardInterrupt("simulate crash during Gateway")
         if self.fail_gateway == "error":
             self.states["gateway"] = "ABSENT"
             raise OSError("simulate incomplete Gateway operation")
+
+    def rollback_sanaei(self, scope):
+        self.events.append("rollback_sanaei")
+        self.assertEqual(scope["node_id"], self.doc["node_id"])
+        self.assertEqual(self.states["gateway"], "ABSENT")
+        self.states["sanaei"] = "ABSENT"
+        return "ROLLED_BACK_VERIFIED"
+
+    def rollback_gateway(self, scope):
+        self.events.append("rollback_gateway")
+        self.assertEqual(scope["node_id"], self.doc["node_id"])
+        self.assertEqual(self.states["sanaei"], "READY")
+        self.states["gateway"] = "ABSENT"
+        return "ROLLED_BACK_VERIFIED"
 
     def tx(self, **changes):
         kwargs = dict(
