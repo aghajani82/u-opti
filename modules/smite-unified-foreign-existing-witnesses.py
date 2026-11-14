@@ -46,11 +46,11 @@ def load(name, filename):
 
 
 TRIAL_NODE = ("ghcr.io/aghajani82/smite-node@sha256:"
-              "587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483")
+              "2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b")
 TRIAL_PANEL = ("ghcr.io/aghajani82/smite-panel@sha256:"
-               "1b03d0d865ba4abd6fe45899d2ccd6d34f300b4804acd2c6690a52b68fb26289")
-SOURCE = "b865be93e22153c60769f6329e6e55e781494ded"
-MANIFEST_SHA = "e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608"
+               "a4142110b058b02a5325e8f2130f2faa5daa5fc0aa3faad82bb4389948d4385f")
+SOURCE = "de0677d015a00160970ed57bba565adc4fafe8eb"
+MANIFEST_SHA = "61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84"
 IMAGE_ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 
 

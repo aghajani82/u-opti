@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: b865be93e22153c60769f6329e6e55e781494ded
+          ref: de0677d015a00160970ed57bba565adc4fafe8eb
           path: companion-smite
       - uses: actions/setup-python@v5
         with:

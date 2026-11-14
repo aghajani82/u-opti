@@ -222,7 +222,7 @@ smite_install_selected_pair_journal_review "$PAIR_ROOT" >/dev/null 2>&1 || statu
 [ "$status" -eq 2 ]
 cp "$ROOT/modules/smite-unified-trial-registry-pair.json" "$PAIR_ROOT/"
 status=0
-SMITE_FIELD_TRIAL_SOURCE_SHA=b865be93e22153c60769f6329e6e55e781494ded \
+SMITE_FIELD_TRIAL_SOURCE_SHA=de0677d015a00160970ed57bba565adc4fafe8eb \
     smite_install_selected_pair_journal_review "$PAIR_ROOT" >/dev/null 2>&1 || status=$?
 [ "$status" -eq 2 ]
 python3 - "$ROOT/modules/smite-install.sh" <<'PY_REVIEW_ORDER'

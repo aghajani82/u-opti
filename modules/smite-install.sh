@@ -2376,7 +2376,7 @@ PY_UNIFIED_FOREIGN_RELEASE
 smite_install_unified_foreign_node_image_review() {
     local image running_id pinned_id
     # Exact immutable reference AND effective running image ID must match.
-    image='ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483'
+    image='ghcr.io/aghajani82/smite-node@sha256:2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b'
     if [ "$(docker inspect -f '{{.Config.Image}}' smite-node 2>/dev/null)" != "$image" ]; then
         echo 'HOLD: Foreign Node does not use the exact signed trial digest.' >&2
         return 2
@@ -2690,7 +2690,7 @@ try:
             or not re.fullmatch("[a-f0-9]{64}",pin)
             or hashlib.sha256(raw_official).hexdigest()!=pin
             or hashlib.sha256(raw_trial).hexdigest()!=
-                "e13f0708b1de5eef112b955f4b6efe4e1efa5520d404458646bb6e1e76c96608"):
+                "61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84"):
         hold()
     expected=json.loads(raw_official,object_pairs_hook=unique)
     separate=json.loads(raw_trial,object_pairs_hook=unique)
@@ -2714,7 +2714,7 @@ try:
                             "smite-node":expected["images"]["node"]}
             or mod.CANDIDATES.get(source)!=(version,mod.IMAGES)):
         hold()
-    if (separate.get("source_commit")!="b865be93e22153c60769f6329e6e55e781494ded"
+    if (separate.get("source_commit")!="de0677d015a00160970ed57bba565adc4fafe8eb"
             or separate.get("kind")!="smite_unified_install_signed_trial_candidate"
             or separate.get("publish_ref")!="refs/heads/trial/unified-smite-install"
             or separate.get("release_approved") is not False

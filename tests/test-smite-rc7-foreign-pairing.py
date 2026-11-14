@@ -22,7 +22,7 @@ class ForeignRC7Tests(unittest.TestCase):
         self.assertEqual(p._FOREIGN_NODE_IMAGE_RC7,
             "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263")
         self.assertEqual(p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL,
-            "ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483")
+            "ghcr.io/aghajani82/smite-node@sha256:2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b")
 
     def test_rc7_compose_preserves_owner_before_recreate_and_rollback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -706,7 +706,7 @@ class ForeignRC7Tests(unittest.TestCase):
 
     def test_unified_pair_release_refuses_even_valid_signed_trial_before_mutation(self):
         import subprocess
-        source="b865be93e22153c60769f6329e6e55e781494ded"
+        source="de0677d015a00160970ed57bba565adc4fafe8eb"
         commands=[]
         def signed_trial(command, **kwargs):
             commands.append(command)

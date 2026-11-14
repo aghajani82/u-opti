@@ -59,7 +59,7 @@ docker() {
                { [ "$MODE" = post_wrong_image ] && [ -f "$SMITE_STATE_DIR/foreign-gateway.env" ]; }; then
                 echo 'ghcr.io/aghajani82/smite-node:latest'
             else
-                echo 'ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483'
+                echo 'ghcr.io/aghajani82/smite-node@sha256:2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b'
             fi
             ;;
         'inspect -f {{.Image}} smite-node')
@@ -70,7 +70,7 @@ docker() {
                 printf '%s\n' "$NODE_ID"
             fi
             ;;
-        'image inspect -f {{.Id}} ghcr.io/aghajani82/smite-node@sha256:587a131156736961c86fa91f33f013d28eb85e606ab0ab4335969fabfd881483')
+        'image inspect -f {{.Id}} ghcr.io/aghajani82/smite-node@sha256:2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b')
             printf '%s\n' "$NODE_ID"
             ;;
         *) return 99 ;;
