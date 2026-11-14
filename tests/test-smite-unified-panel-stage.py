@@ -425,6 +425,60 @@ class Prepare(unittest.TestCase):
         with self.assertRaises(stage.StageHold):self.panel.status()
         self.assert_untouched()
 
+    def test_forged_candidate_and_rehashed_journal_still_hold(self):
+        # The previous stage status only checked the expected HASH values.
+        # An attacker able to alter the private stage and its own journal
+        # could previously bless changed Panel flags, image or ingress.
+        import hashlib
+        for name, replacement in (
+            ("candidate-panel-env",
+             lambda b: b.replace(b"SMITE_FOREIGN_INSTALL_ENABLED=true",
+                                 b"SMITE_FOREIGN_INSTALL_ENABLED=false")),
+            ("candidate-panel-compose",
+             lambda b: b.replace(stage.NEW_PANEL.encode(),
+                                 b"ghcr.io/foreign/unsigned:latest")),
+            ("candidate-nginx-backend",
+             lambda b: b.replace(b"proxy_cache off;", b"proxy_cache on;")),
+        ):
+            with self.subTest(candidate=name):
+                # Reset a complete, original signed stage, not any host files.
+                if self.panel.staging.exists():
+                    import shutil
+                    shutil.rmtree(self.panel.staging)
+                self.stage()
+                before = self.panel.status()
+                self.assertEqual(before["state"], "PREPARED_ONLY")
+                dest = self.panel.staging / name
+                changed = replacement(dest.read_bytes())
+                self.assertNotEqual(changed, dest.read_bytes())
+                dest.write_bytes(changed)
+                journal = self.panel.staging / "journal.json"
+                recorded = json.loads(journal.read_text())
+                recorded["candidates"][name] = hashlib.sha256(changed).hexdigest()
+                journal.write_text(json.dumps(recorded, sort_keys=True) + "\n")
+                self.assertEqual(
+                    hashlib.sha256(dest.read_bytes()).hexdigest(),
+                    recorded["candidates"][name])
+                with self.assertRaises(stage.StageHold):
+                    self.panel.status()
+                self.assert_untouched()
+
+    def test_forged_preimage_and_matching_digest_do_not_override_renderer(self):
+        import hashlib
+        self.stage()
+        original = self.panel.staging / "before-panel-compose"
+        fake = original.read_bytes().replace(
+            stage.OLD_PANEL.encode(), b"ghcr.io/unreviewed/foreign:latest")
+        self.assertNotEqual(original.read_bytes(), fake)
+        original.write_bytes(fake)
+        journal = self.panel.staging / "journal.json"
+        record = json.loads(journal.read_text())
+        record["snapshots"][original.name] = hashlib.sha256(fake).hexdigest()
+        journal.write_text(json.dumps(record, sort_keys=True) + "\n")
+        with self.assertRaises(stage.StageHold):
+            self.panel.status()
+        self.assert_untouched()
+
     def test_extra_state_or_sqlite_wal_sidecar_halts_status(self):
         self.stage()
         sidecar=self.panel.staging/"panel-db.sqlite3-wal"
