@@ -186,5 +186,54 @@ with sqlite3.connect(backup.as_uri() + '?mode=ro', uri=True) as db:
     assert db.execute('SELECT node_id FROM smite_node_identities').fetchall() == [('ci-iran-node',)]
     assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='smite_foreign_install_grants'").fetchone()
 PY
+# After verifying an empty-grant rollback, reapply the same candidate
+# against the retained database. Exercise the REAL Smite grant store inside
+# that upgraded container, not a synthetic sqlite INSERT. This is an
+# isolated runner only: it does not promote a production image or invoke
+# the Foreign host installer.
+PANEL_IMAGE="$new_panel" SMITE_FOREIGN_INSTALL_ENABLED=true \
+    SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true \
+    "${compose[@]}" up -d --no-deps --no-build --pull never smite-panel
+wait_panel 2.0.0-unified-install-trial
+"${compose[@]}" exec -T smite-panel python3 - <<'PY'
+from app import foreign_install_grants as grants
+from app.config import settings
+import sqlite3
+
+db = './data/smite.db'
+with sqlite3.connect(db) as conn:
+    conn.execute(
+        "INSERT INTO nodes(id,name,fingerprint,status,metadata) VALUES(?,?,?,?,?)",
+        ("foreign-node-1234", "node-kh", "", "pending",
+         '{"role":"foreign","provisioning":"reserved_for_pairing"}'))
+grant = grants.issue(
+    db,
+    master_key=settings.smite_node_pairing_master_key,
+    admin_id="ci-admin",
+    node_id="foreign-node-1234",
+    node_name="node-kh",
+    domain="kh.example.com",
+    now=1850000000,
+)
+assert grant.node_id == "foreign-node-1234"
+assert grant.control_url.startswith(
+    "https://kh.example.com:443/smite-node/")
+assert grant.code.startswith("smi1_")
+# The code is never logged or stored in a plain text file.
+with sqlite3.connect(db) as conn:
+    assert conn.execute(
+        "SELECT count(*) FROM smite_foreign_install_grants").fetchone() == (1,)
+    assert conn.execute(
+        "SELECT count(*) FROM smite_foreign_install_origins").fetchone() == (0,)
+    assert conn.execute(
+        "SELECT node_role,encrypted_secret FROM smite_node_identities "
+        "WHERE node_id='ci-iran-node'").fetchone() == (
+        "iran", "fixture-ciphertext")
+PY
+# Issuing a grant does not authorize rollback to the old Panel or
+# activate the Foreign Node. The disposable project is destroyed at exit.
+[[ "$("${compose[@]}" ps -q smite-node)" == "$node_id" ]]
+[[ "$(docker inspect -f '{{.State.StartedAt}}' "$node_id")" == "$node_started" ]]
 echo 'DISPOSABLE_PANEL_COMPOSE_UPGRADE_AND_ROLLBACK=PASS'
 echo 'RETAINED_NODE_CONTAINER_AND_START_TIME=PASS'
+echo 'ACTUAL_UPGRADED_PANEL_FOREIGN_GRANT_ISSUE=PASS_DISPOSABLE_ONLY'
