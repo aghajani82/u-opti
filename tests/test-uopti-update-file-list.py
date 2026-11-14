@@ -90,6 +90,36 @@ class UpdaterFileListTests(unittest.TestCase):
         self.assertLessEqual(manifests, quoted_names(array_body(self.installer, "MODULES")))
         self.assertLessEqual(manifests, quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
 
+    def test_foreign_install_helpers_import_from_packaged_modules(self):
+        names = (
+            "smite-unified-foreign-packet-intake.py",
+            "smite-unified-foreign-gateway-plan.py",
+            "smite-unified-trial-pair-admission.py",
+        )
+        for source, array in ((self.installer, "MODULES"), (self.source, "UPDATE_FILE_NAMES")):
+            with self.subTest(array=array), tempfile.TemporaryDirectory() as temp:
+                installed = quoted_names(array_body(source, array))
+                for name in installed:
+                    shutil.copyfile(ROOT / "modules" / name, Path(temp) / name)
+                for name in names:
+                    result = subprocess.run(
+                        [sys.executable, "-B", str(Path(temp) / name), "--help"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                result = subprocess.run(
+                    [sys.executable, "-B", "-c",
+                     "import runpy, sys; from pathlib import Path; "
+                     "d = Path(sys.argv[1]); "
+                     "intake = runpy.run_path(str(d/'smite-unified-foreign-packet-intake.py')); "
+                     "intake['client_module'](); "
+                     "plan = runpy.run_path(str(d/'smite-unified-foreign-gateway-plan.py')); "
+                     "plan['load_module']('installed_promotion', 'smite-foreign-install-promotion.py')",
+                     temp],
+                    capture_output=True, text=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rc7_frp_enrollment_in_installer_and_updater(self):
         helper = "smite-rc7-frp-enrollment.py"
         for name in ("UPDATE_FILE_NAMES",):
