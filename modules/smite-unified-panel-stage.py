@@ -40,6 +40,7 @@ DB_REL = "opt/smite/panel/data/smite.db"
 IR_ID_REL = "etc/u-opti/smite/identities/node-identity.json"
 REPLAY_MARKER_REL = "etc/u-opti/smite/identities/replay-enrollment.json"
 REPLAY_DB_REL = "var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3"
+RUNTIME_EVIDENCE = "iran-node-runtime.json"
 INSTALL_REF_REL = "usr/local/lib/u-opti/INSTALL_REF"
 FILE_MAP = {
     "panel-env": (PANEL_REL, 0o600, 65536),
@@ -154,8 +155,11 @@ def _candidate_compose(raw: bytes) -> bytes:
 
 
 class PanelStage:
-    def __init__(self, root: Path = Path("/"), admission=None):
+    def __init__(self, root: Path = Path("/"), admission=None, *, runtime_reader=None):
         self.root = Path(root)
+        if self.root == Path("/") and runtime_reader is not None:
+            deny()  # The real Docker witness cannot be injected or faked.
+        self._runtime_reader = runtime_reader
         if not self.root.is_absolute() or self.root.is_symlink() or not self.root.is_dir():
             deny()
         self.staging = self.root / STAGE_REL
@@ -256,6 +260,123 @@ class PanelStage:
         if (len(rows) != 1 or rows[0][:3] != (node_name, "iran", None)
                 or not rows[0][3]):
             deny()
+
+    @staticmethod
+    def _check_runtime_evidence(proof):
+        """Validate the non-secret retained Node container fingerprint."""
+        install = _module("smite-rc6-install-journal")
+        expected = {"schema", "install_source", "project_id", "container_id",
+                    "image_reference", "image_id", "started_at", "created_at",
+                    "compose_files"}
+        if (not isinstance(proof, dict) or set(proof) != expected
+                or type(proof["schema"]) is not int or proof["schema"] != 1
+                or proof["install_source"] != install.SOURCE
+                or proof["image_reference"] != install.IMAGES["smite-node"]
+                or not isinstance(proof["project_id"], str)
+                or not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", proof["project_id"])
+                or not isinstance(proof["container_id"], str)
+                or not re.fullmatch(r"[a-f0-9]{64}", proof["container_id"])
+                or not isinstance(proof["image_id"], str)
+                or not re.fullmatch(r"sha256:[a-f0-9]{64}", proof["image_id"])
+                or any(not isinstance(proof[k], str)
+                       or not re.fullmatch(
+                           r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z",
+                           proof[k]) for k in ("created_at", "started_at"))
+                or proof["compose_files"] not in (
+                    "/opt/smite-node/docker-compose.yml",
+                    "/opt/smite-node/docker-compose.yml,"
+                    "/opt/smite-node/docker-compose.security-candidate.yml")):
+            deny()
+        return proof
+
+    def _iran_node_runtime(self):
+        """Read the SAME RC7 Node ID and StartedAt, even after Panel upgrade.
+
+        Do not use the original both-container install witness after the
+        Panel changes image. This independently checks ONLY the retained
+        Node and the original install project, without Docker mutations.
+        """
+        if self.root != Path("/"):
+            deny()
+        if any(os.environ.get(k) for k in (
+                "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+                "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "COMPOSE_FILE",
+                "COMPOSE_PROFILES", "COMPOSE_ENV_FILES")):
+            deny()
+        install = _module("smite-rc6-install-journal")
+        try:
+            journal = install.Journal()
+            for folder in (journal.folder, *journal.folder.parents):
+                install.trusted(folder, True)
+            record = journal.load()
+            if (record.get("role") != "panel-iran"
+                    or record.get("source") != install.SOURCE
+                    or record.get("state") != "COMMITTED"
+                    or record.get("ir_resumable_version") != 1
+                    or record.get("ir_phase") != "COMPLETE"):
+                deny()
+            journal._ir_container_witness(
+                record, "smite-node", install.IMAGES["smite-node"])
+            objects = json.loads(journal.docker("inspect", "smite-node"))
+            if not isinstance(objects, list) or len(objects) != 1:
+                deny()
+            node = objects[0]
+            if not isinstance(node, dict):
+                deny()
+            state = node.get("State") or {}
+            config = node.get("Config") or {}
+            labels = config.get("Labels") or {}
+            if (node.get("Name") != "/smite-node"
+                    or state.get("Running") is not True
+                    or state.get("Restarting") is True
+                    or labels.get("com.docker.compose.project") != record["id"]
+                    or labels.get("com.docker.compose.service") != "smite-node"):
+                deny()
+            # A digest string alone is not proof of the effective image.
+            image_id = journal.docker(
+                "image", "inspect", "-f", "{{.Id}}",
+                install.IMAGES["smite-node"]).strip()
+            if node.get("Image") != image_id:
+                deny()
+            if not any(
+                x.get("Type") == "bind"
+                and x.get("Source") == "/opt/smite-node/config"
+                and x.get("Destination") == "/etc/smite-node"
+                for x in (node.get("Mounts") or []) if isinstance(x, dict)
+            ):
+                deny()
+            return self._check_runtime_evidence({
+                "schema": 1,
+                "install_source": install.SOURCE,
+                "project_id": record["id"],
+                "container_id": node.get("Id"),
+                "image_reference": config.get("Image"),
+                "image_id": node.get("Image"),
+                "started_at": state.get("StartedAt"),
+                "created_at": node.get("Created"),
+                "compose_files": labels.get(
+                    "com.docker.compose.project.config_files"),
+            })
+        except (OSError, ValueError, TypeError, KeyError, IndexError,
+                AttributeError, subprocess.SubprocessError, install.Hold):
+            deny()
+
+    def _runtime_proof(self):
+        if self._runtime_reader is not None:
+            return self._check_runtime_evidence(self._runtime_reader())
+        return self._iran_node_runtime()
+
+    def _check_retained_runtime(self):
+        """Refuse Node recreation/restart; do not read any private secret."""
+        if self.root != Path("/") and self._runtime_reader is None:
+            return "DISPOSABLE_ONLY_NO_RUNTIME"
+        saved = json.loads(
+            self._read(STAGE_REL + "/" + RUNTIME_EVIDENCE,
+                       mode=0o600, limit=2048),
+            object_pairs_hook=_unique_journal_fields)
+        if self._check_runtime_evidence(saved) != self._runtime_proof():
+            deny()
+        return "RETAINED_IRAN_NODE_CONTAINER_UNCHANGED"
 
     def _preflight_database(self):
         db = self._at(DB_REL)
@@ -532,6 +653,9 @@ class PanelStage:
             deny()
         if self.root == Path("/"):
             self.verify_live_baseline()
+        runtime_proof = (self._runtime_proof()
+                         if self.root == Path("/") or self._runtime_reader is not None
+                         else None)
         originals, candidates = self._collect()
         # Reject missing/drifted DB schema before creating ANY transaction state.
         self._preflight_database()
@@ -551,6 +675,11 @@ class PanelStage:
             manifest["snapshots"]["panel-db.sqlite3"] = _sha(database)
             replay = self._replay_snapshot()
             manifest["snapshots"]["iran-replay.sqlite3"] = _sha(replay)
+            if runtime_proof is not None:
+                raw = (json.dumps(runtime_proof, sort_keys=True,
+                                  separators=(",", ":")) + "\n").encode("ascii")
+                self._write(RUNTIME_EVIDENCE, raw)
+                manifest["snapshots"][RUNTIME_EVIDENCE] = _sha(raw)
             for label,content in candidates.items():
                 name = "candidate-" + label
                 self._write(name, content)
@@ -620,8 +749,12 @@ class PanelStage:
                 or journal.get("panel_image") != NEW_PANEL
                 or journal.get("node_image") != NEW_NODE
                 or journal.get("live_write") is not False
-                or set(journal.get("snapshots",{})) !=
-                    {"before-" + label for label in FILE_MAP} | {"panel-db.sqlite3","iran-replay.sqlite3"}
+                or set(journal.get("snapshots",{})) != (
+                    {"before-" + label for label in FILE_MAP} |
+                    {"panel-db.sqlite3","iran-replay.sqlite3"} |
+                    ({RUNTIME_EVIDENCE}
+                     if self.root == Path("/") or self._runtime_reader is not None
+                     else set()))
                 or set(journal.get("candidates",{})) !=
                     {"candidate-panel-env","candidate-panel-compose","candidate-nginx-backend"}):
             deny()
@@ -642,6 +775,7 @@ class PanelStage:
         # Recompute the exact three candidate files from the sealed preimages.
         # This also rejects a forged checksum plus attacker-written candidate.
         self._sealed_candidate_consistency()
+        self._check_retained_runtime()
         return {"state":"PREPARED_ONLY", "signature_pair":"EXACT_PINNED",
                 "live_writes":"NONE", "activation_allowed":False}
 
