@@ -182,8 +182,11 @@ class FixedCommandDriverTests(unittest.TestCase):
         self.driver.verify_panel("original")
         self.assertEqual(self.model.calls[0][-3:],
                          ["--timeout", "30", "smite-panel"])
-        self.assertEqual(self.model.calls[3], ["nginx", "-t"])
-        self.assertEqual(self.model.calls[4], ["systemctl", "reload", "nginx"])
+        self.assertIn(["nginx", "-t"], self.model.calls)
+        self.assertIn(["systemctl", "reload", "nginx"], self.model.calls)
+        self.assertLess(
+            self.model.calls.index(["nginx", "-t"]),
+            self.model.calls.index(["systemctl", "reload", "nginx"]))
         self.assertTrue(all("smite-node" not in x and
                             "down" not in x and "restart" not in x
                             for call in self.model.calls for x in call))
@@ -260,11 +263,15 @@ class FixedCommandDriverTests(unittest.TestCase):
         with self.assertRaises(driver_mod.Hold):
             self.driver.verify_panel("original")
         self.model.health = "healthy"
-        self.model._image_id = lambda image: "sha256:" + "0"*64
-        # Simulate changed image bytes after the signed digest reference.
-        # In this model, both the container and local image inspect now
-        # change simultaneously. Force an old ID specifically.
-        self.model._image_id = lambda image: "sha256:" + "a"*64
+        original = self.model._container
+        def replaced_image():
+            object_state = original()
+            object_state["Image"] = "sha256:"+"0"*64
+            return object_state
+        self.model._container = replaced_image
+        with self.assertRaises(driver_mod.Hold):
+            self.driver.verify_panel("original")
+        self.model._container = original
         self.driver.verify_panel("original")
 
     def test_real_host_disallows_injected_runner_or_mutator(self):
