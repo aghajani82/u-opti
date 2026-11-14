@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exact multiline UI JSON -> bounded private Foreign terminal intake."""
 import importlib.util
+import fcntl
+import hashlib
 import io
 import json
 import os
@@ -75,6 +77,141 @@ class OperatorPacketIntake(unittest.TestCase):
         original = self.file.read_bytes()
         data={**self.grant,"installation_code":"smi1_"+"c"*43}
         with self.assertRaises(module.Hold):self.operator_paste(data)
+        self.assertEqual(self.file.read_bytes(), original)
+
+    def _owned_host_checkpoint(self, *, phase="GATEWAY_443_VERIFIED"):
+        """Existing recovery journal from a verified, non-promoted host stage."""
+        original = self.file.read_bytes()
+        packet = module.client_module().parse_packet(original)
+        (self.stage / "unified-foreign-host.lock").write_bytes(b"")
+        (self.stage / "unified-foreign-host.lock").chmod(0o600)
+        journal = {
+            "schema": 2,
+            "scope": packet.scope,
+            "expires_at": packet.expires_at,
+            "packet_sha256": hashlib.sha256(original).hexdigest(),
+            "phase": phase,
+        }
+        receipt = self.stage / "unified-foreign-host-journal.json"
+        receipt.write_text(json.dumps(journal, sort_keys=True))
+        receipt.chmod(0o600)
+        return receipt
+
+    def _renewed(self, **change):
+        renewed = {**self.grant,
+                   "installation_code": "smi1_" + "c" * 43,
+                   "expires_at": self.now + 14400, **change}
+        return self.operator_paste(renewed, now=self.now + 7200,
+                                   allow_expired_renewal=True)
+
+    def test_expired_packet_renewal_preserves_owned_checkpoint_and_node_secret(self):
+        self.operator_paste()
+        checkpoint = self._owned_host_checkpoint()
+        original_journal = checkpoint.read_bytes()
+        scope = module.client_module().parse_packet(self.file.read_bytes()).scope
+        identity = {"schema":1,"scope":scope,"node_secret":"d"*64}
+        secret_path = self.stage / "foreign-install-identity.json"
+        secret_path.write_text(json.dumps(identity))
+        secret_path.chmod(0o600)
+        before_identity = secret_path.read_bytes()
+        result = self._renewed()
+        self.assertEqual(result["status"], "RENEWED_PRIVATE")
+        self.assertEqual(result["expires_at"], self.now+14400)
+        self.assertFalse(result["connected"])
+        self.assertNotIn(self.grant["installation_code"], repr(result))
+        self.assertEqual(json.loads(self.file.read_text())["installation_code"],
+                         "smi1_" + "c" * 43)
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(checkpoint.read_bytes(), original_journal)
+        self.assertEqual(secret_path.read_bytes(), before_identity)
+        self.assertFalse(list(self.stage.glob(".packet-renew-*")))
+        # The existing recovery flow reads this packet and can adopt its
+        # newer expiry after independently re-verifying host witnesses.
+
+    def test_no_renewal_before_expiry_or_without_owned_checkpoint(self):
+        self.operator_paste()
+        original = self.file.read_bytes()
+        with self.assertRaises(module.Hold):
+            self.operator_paste(
+                {**self.grant,"installation_code":"smi1_"+"c"*43},
+                allow_expired_renewal=True)
+        with self.assertRaises(module.Hold):
+            self._renewed()
+        self.assertEqual(self.file.read_bytes(), original)
+
+    def test_exact_repaste_of_still_valid_packet_is_idempotent(self):
+        self.operator_paste()
+        original = self.file.read_bytes()
+        result = self.operator_paste(allow_expired_renewal=True)
+        self.assertEqual(result["status"], "ALREADY_STAGED_PRIVATE")
+        self.assertEqual(self.file.read_bytes(), original)
+        self.assertFalse((self.stage/"unified-foreign-host-journal.json").exists())
+
+    def test_renewal_refuses_scope_change_code_reuse_and_bad_checkpoint(self):
+        self.operator_paste()
+        checkpoint = self._owned_host_checkpoint()
+        original = self.file.read_bytes()
+        cases = (
+            {"node_id": "foreign-replacement"},
+            {"origin": "https://wrong.example.com:443",
+             "control_url": "https://wrong.example.com:443/smite-node/"+"a"*32},
+            {"panel_url":"https://different.example.com:443"},
+            {"control_url":"https://kh.example.com:443/smite-node/"+"d"*32},
+            {"installation_code":self.grant["installation_code"]},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes), self.assertRaises(module.Hold):
+                self._renewed(**changes)
+            self.assertEqual(self.file.read_bytes(), original)
+        prior = checkpoint.read_bytes()
+        checkpoint.write_text("{}")
+        with self.assertRaises(module.Hold):
+            self._renewed()
+        self.assertEqual(self.file.read_bytes(), original)
+        checkpoint.write_bytes(prior)
+        checkpoint.chmod(0o600)
+        stored = json.loads(prior)
+        stored["packet_sha256"] = "0"*64
+        checkpoint.write_text(json.dumps(stored))
+        with self.assertRaises(module.Hold):
+            self._renewed()
+        self.assertEqual(self.file.read_bytes(), original)
+
+    def test_renewal_refuses_promotion_and_untrusted_secret(self):
+        self.operator_paste()
+        self._owned_host_checkpoint()
+        original = self.file.read_bytes()
+        prepared = self.stage/"foreign-install-promotion-prepared.json"
+        prepared.write_text("{}")
+        prepared.chmod(0o600)
+        with self.assertRaises(module.Hold): self._renewed()
+        prepared.unlink()
+        identity = self.stage/"foreign-install-identity.json"
+        identity.write_text('{"schema":1,"scope":{},"node_secret":"spoof"}')
+        identity.chmod(0o600)
+        with self.assertRaises(module.Hold): self._renewed()
+        self.assertEqual(self.file.read_bytes(), original)
+
+    def test_renewal_refuses_symlink_hardlink_and_locked_stage(self):
+        self.operator_paste()
+        self._owned_host_checkpoint()
+        original = self.file.read_bytes()
+        linked = self.fixture / "packet-original"
+        linked.write_bytes(original)
+        linked.chmod(0o600)
+        self.file.unlink()
+        os.link(linked, self.file)
+        with self.assertRaises(module.Hold): self._renewed()
+        self.file.unlink()
+        self.file.symlink_to(linked)
+        with self.assertRaises(module.Hold): self._renewed()
+        self.file.unlink()
+        self.file.write_bytes(original)
+        self.file.chmod(0o600)
+        lock = self.stage/"unified-foreign-host.lock"
+        with open(lock, "rb") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(module.Hold): self._renewed()
         self.assertEqual(self.file.read_bytes(), original)
 
     def test_expired_or_not_yet_issued_code_refused_before_write(self):
