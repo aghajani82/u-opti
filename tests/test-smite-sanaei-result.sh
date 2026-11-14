@@ -104,3 +104,48 @@ result=0
 smite_install_sanaei_retained || result=$?
 [ "$result" = 3 ]
 echo 'SANAEI_RETAINED_READ_ONLY_ATTACHMENT=PASS'
+
+project=uopti_rc6_0123456789abcdef0123456789abcdef
+chmod 0600 "$SMITE_NODE_DIR/.env"
+pending="$SMITE_NODE_DIR/.sanaei-attachment.pending"
+cp "$SMITE_NODE_DIR/.env" "$TMP/baseline"
+smite_install_sanaei_retained() {
+    if grep -qx 'SMITE_SANAEI_INVENTORY_ENABLED=false' "$SMITE_NODE_DIR/.env"; then
+        return 3
+    fi
+    [ "$CASE" = applied ]
+}
+python3() {
+    case "$*" in
+        *smite-rc5-xhttp-sanaei-mount.py*)
+            sed -i 's/INVENTORY_ENABLED=false/INVENTORY_ENABLED=true/' "$6"
+            ;;
+        *smite-compose-safe.py*)
+            if [ "$CASE" = interrupted ]; then exit 77; fi
+            ;;
+        *) return 99 ;;
+    esac
+}
+CASE=interrupted
+result=0
+smite_install_sanaei_attachment_stage "$project" 07 || result=$?
+[ "$result" = 77 ]
+[ -f "$pending/before" ]
+grep -qx 'SMITE_SANAEI_INVENTORY_ENABLED=true' "$SMITE_NODE_DIR/.env"
+printf 'INDEPENDENT_EDIT=true\n' >> "$SMITE_NODE_DIR/.env"
+CASE=rollback
+result=0
+smite_install_sanaei_attachment_stage "$project" || result=$?
+[ "$result" = 2 ]
+grep -qx 'INDEPENDENT_EDIT=true' "$SMITE_NODE_DIR/.env"
+cp -a "$pending/after" "$SMITE_NODE_DIR/.env"
+result=0
+smite_install_sanaei_attachment_stage "$project" || result=$?
+[ "$result" = 3 ]
+cmp "$TMP/baseline" "$SMITE_NODE_DIR/.env"
+[ ! -e "$pending" ]
+CASE=applied
+smite_install_sanaei_attachment_stage "$project" 07
+[ ! -e "$pending" ]
+grep -qx 'SMITE_SANAEI_INVENTORY_ENABLED=true' "$SMITE_NODE_DIR/.env"
+echo 'SANAEI_ATTACHMENT_RECOVERY_AND_RETRY=PASS'

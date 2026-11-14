@@ -1879,9 +1879,78 @@ smite_install_sanaei_retained() {
     smite_wait_healthy smite-node 90 && smite_install_sanaei_probe || return 2
 }
 
+# Persist the exact environment change before applying it. This is scoped
+# to the fresh, paused unified Node; the Sanaei container and DB stay live.
+smite_install_sanaei_attachment_stage() (
+    local project="$1" instance="${2:-}" module_dir pending scratch="" temp="" lock
+    local node_env="$SMITE_NODE_DIR/.env" identity="$SMITE_STATE_DIR/identities/node-identity.json"
+    pending="$SMITE_NODE_DIR/.sanaei-attachment.pending"
+    [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
+    [ ! -L "$SMITE_NODE_DIR" ] && [ ! -L "$node_env" ] &&
+    [ ! -e "$identity" ] && [ ! -L "$identity" ] &&
+    [ ! -L "$SMITE_NODE_DIR/.sanaei-attachment.lock" ] || return 2
+    [ "$(stat -c '%u:%a' "$node_env")" = "${EUID}:600" ] || return 2
+    module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    umask 077
+    exec {lock}>> "$SMITE_NODE_DIR/.sanaei-attachment.lock" || return 2
+    flock -n "$lock" || return 2
+    trap 'if [ -n "$scratch" ]; then rm -rf -- "$scratch"; fi; if [ -n "$temp" ]; then rm -f -- "$temp"; fi' EXIT
+
+    local ownership
+    ownership="$(sha256sum -- "$SMITE_NODE_COMPOSE")" || return 2
+    if [ -e "$pending" ] || [ -L "$pending" ]; then
+        [ ! -L "$pending" ] && [ "$(stat -c '%u:%a' "$pending")" = "${EUID}:700" ] &&
+        [ -f "$pending/before" ] && [ ! -L "$pending/before" ] &&
+        [ -f "$pending/after" ] && [ ! -L "$pending/after" ] &&
+        [ -f "$pending/owner" ] && [ ! -L "$pending/owner" ] &&
+        cmp -s -- "$pending/owner" <(printf '%s\n' "$project" "$ownership") || return 2
+        if cmp -s -- "$node_env" "$pending/after" && smite_install_sanaei_retained; then
+            rm -rf -- "$pending" && sync -f "$SMITE_NODE_DIR" || return 2
+            echo 'KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED'
+            return 0
+        fi
+        if ! cmp -s -- "$node_env" "$pending/before" && ! cmp -s -- "$node_env" "$pending/after"; then
+            echo 'HOLD: Node settings changed outside the interrupted Sanaei attachment.' >&2
+            return 2
+        fi
+        temp="$(mktemp "$SMITE_NODE_DIR/.sanaei-restore.XXXXXX")" || return 2
+        cp -a -- "$pending/before" "$temp" && sync -f "$temp" &&
+        mv -fT -- "$temp" "$node_env" && sync -f "$SMITE_NODE_DIR" &&
+        COMPOSE_PROJECT_NAME="$project" python3 -B "$module_dir/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node &&
+        smite_wait_healthy smite-node 90 || return 2
+        local retained=0
+        smite_install_sanaei_retained || retained=$?
+        [ "$retained" = 3 ] && rm -rf -- "$pending" && sync -f "$SMITE_NODE_DIR" || return 2
+        echo 'KH_SANAEI_ATTACHMENT=ROLLED_BACK'
+        return 3
+    fi
+
+    [ -n "$instance" ] || return 3
+    local baseline=0
+    smite_install_sanaei_retained || baseline=$?
+    [ "$baseline" = 3 ] || return 2
+    scratch="$(mktemp -d "$SMITE_NODE_DIR/.sanaei-attachment.XXXXXX")" || return 2
+    cp -a -- "$node_env" "$scratch/before" && cp -a -- "$node_env" "$scratch/after" &&
+    python3 -B "$module_dir/smite-rc5-xhttp-sanaei-mount.py" --instance-id "$instance" \
+        --node-env "$scratch/after" --node-compose "$SMITE_NODE_COMPOSE" --confirm-foreign-node &&
+    printf '%s\n' "$project" "$ownership" > "$scratch/owner" &&
+    sync -f "$scratch" && mv -T -- "$scratch" "$pending" && sync -f "$SMITE_NODE_DIR" || return 2
+    temp="$(mktemp "$SMITE_NODE_DIR/.sanaei-apply.XXXXXX")" || return 2
+    cp -a -- "$pending/after" "$temp" && sync -f "$temp" &&
+    mv -fT -- "$temp" "$node_env" && sync -f "$SMITE_NODE_DIR" &&
+    COMPOSE_PROJECT_NAME="$project" python3 -B "$module_dir/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config --quiet &&
+    COMPOSE_PROJECT_NAME="$project" python3 -B "$module_dir/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build smite-node &&
+    smite_wait_healthy smite-node 90 && smite_install_sanaei_retained || {
+        echo 'HOLD: Sanaei attachment incomplete; retry to recover the pending stage.' >&2
+        return 2
+    }
+    rm -rf -- "$pending" && sync -f "$SMITE_NODE_DIR" || return 2
+    echo 'KH_SANAEI_INVENTORY=PASS_READ_ONLY_SCHEMA'
+)
+
 smite_install_sanaei_foreign() {
     local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
-    local signed_foreign=0 compose_project="" compose_service="" compose_files=""
+    local signed_foreign=0 compose_project="" compose_service="" compose_files="" unified_attachment=0
     local staged_identity=0 staged_identity_sha="" staged_identity_file=""
     local pairing_helper="" recover_confirmation=""
     local -a instance_ids=() usable_ids=()
@@ -2027,6 +2096,16 @@ smite_install_sanaei_foreign() {
 
     if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" = 1 ] &&
        [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] && [ "$SMITE_MANAGED_VERSION" = 2.0.0-rc.7 ]; then
+        unified_attachment=1
+        if [ -e "$SMITE_NODE_DIR/.sanaei-attachment.pending" ] || [ -L "$SMITE_NODE_DIR/.sanaei-attachment.pending" ]; then
+            local recovery_result=0
+            smite_install_sanaei_attachment_stage "$compose_project" || recovery_result=$?
+            case "$recovery_result" in
+                0) return 0 ;;
+                3) ;;
+                *) return 2 ;;
+            esac
+        fi
         local retained_result=0
         smite_install_sanaei_retained || retained_result=$?
         case "$retained_result" in
@@ -2098,6 +2177,10 @@ smite_install_sanaei_foreign() {
         smite_install_pause
         return 2
     }
+    if [ "$unified_attachment" = 1 ]; then
+        smite_install_sanaei_attachment_stage "$compose_project" "$selected"
+        return $?
+    fi
     backup="$SMITE_NODE_DIR/.env.pre-sanaei-mount-$(date +%Y%m%d%H%M%S).bak"
     cp -a "$SMITE_NODE_DIR/.env" "$backup" || {
         echo "HOLD: Could not retain the Node environment rollback copy." >&2
