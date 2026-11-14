@@ -384,19 +384,45 @@ class PanelTransaction:
             self.stage._signed_pair()
             self.stage._preflight_database()
             self.stage._preflight_replay()
-            if self._tables() != {
-                    "smite_foreign_install_grants",
-                    "smite_foreign_install_origins"}:
+            tables = self._tables()
+            canonical = {"smite_foreign_install_grants",
+                         "smite_foreign_install_origins"}
+            if tables not in (set(), canonical):
                 deny()
             if self._live_continuity() != "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT":
                 deny()
-            # Require a FULL verified candidate at this decision boundary;
-            # don't invent a phase for mixed/stale config during a crash.
-            for name in self.stage_mod.FILE_MAP:
-                required = (self._candidate(name) if name in CONFIG
-                            else self._snapshot(name))
-                if self._live(name) != required:
+            # After a power loss, each owned atomic rename has exactly
+            # one of two valid preimages: sealed old OR sealed candidate.
+            # Reconstruct the interrupted *existing* step ordering from
+            # the actual config bytes, not a user-provided phase label.
+            for name in self.stage_mod.FILE_MAP.keys() - CONFIG.keys():
+                if self._live(name) != self._snapshot(name):
                     deny()
+            names = ("panel-compose", "panel-env", "nginx-backend")
+            candidate = {}
+            for name in names:
+                observed = self._live(name)
+                old, new = self._snapshot(name), self._candidate(name)
+                if old == new or observed not in (old, new):
+                    deny()
+                candidate[name] = observed == new
+            signature = tuple(candidate[name] for name in names)
+            ordered = {
+                (False, False, False): "CONFIG_RESTORED_SCHEMA_RETAINED",
+                (True, False, False): "AFTER_COMPOSE",
+                (True, True, False): "AFTER_ENV",
+                (True, True, True): "AFTER_NGINX",
+            }
+            if signature not in ordered:
+                deny()
+            # Schema can be absent only immediately after the Compose
+            # image candidate was staged, BEFORE the additive migration.
+            # Every later step requires both exact, empty tables.
+            if (not tables and signature != (True, False, False)
+                    or signature == (False, False, False) and not tables):
+                deny()
+            recovery_state = ordered[signature]
+            to_restore = [name for name in reversed(names) if candidate[name]]
         except (OSError, ValueError, KeyError, TypeError, sqlite3.Error,
                 self.stage_mod.StageHold):
             deny()
@@ -405,6 +431,9 @@ class PanelTransaction:
             "production_apply_allowed": False,
             "production_rollback_allowed": False,
             "runtime_health_verified": False,
+            "recovery_state": recovery_state,
+            "config_restore_order": to_restore,
+            "retained_node_witness": self.stage._check_retained_runtime(),
             "database_rewind_allowed": False,
             "replay_rewind_allowed": False,
             "iran_node_recreate_allowed": False,
