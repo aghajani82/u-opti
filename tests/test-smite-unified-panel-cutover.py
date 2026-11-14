@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -266,6 +267,41 @@ class PanelServiceCutover(unittest.TestCase):
         self.assertEqual(self._journal()["phase"], "BEFORE_ROLLBACK")
         self.assertEqual(self._rollback()["status"], "ROLLED_BACK_PANEL_ONLY")
         self._untouched()
+        self._config(False)
+
+    def test_realistic_signed_iran_heartbeats_survive_cutover_and_rollback(self):
+        with self.assertRaises(cut.Hold):
+            self._apply(fail_after="SCHEMA")
+        expiry = int(time.time()) + 1800
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_inbound_nonces VALUES(?,?,?)",
+                       ("iran-node-1234", "signed-cutover-nonce", expiry))
+            db.execute("UPDATE nodes SET last_seen=? WHERE id=?",
+                       ("2026-11-14T12:05:00Z", "iran-node-1234"))
+        with sqlite3.connect(self.replay) as db:
+            db.execute("INSERT INTO agent_nonces VALUES(?,?,?)",
+                       ("iran-node-1234", "signed-replay-cutover", expiry))
+        self.assertEqual(self._apply()["status"],
+                         "REHEARSED_WITH_PANEL_SERVICE")
+        self.assertEqual(self._rollback()["status"],
+                         "ROLLED_BACK_PANEL_ONLY")
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT node_id,nonce,expires_at "
+                "FROM smite_node_inbound_nonces WHERE nonce=?",
+                ("signed-cutover-nonce",)).fetchone(),
+                ("iran-node-1234", "signed-cutover-nonce", expiry))
+        with sqlite3.connect(self.replay) as db:
+            self.assertEqual(db.execute(
+                "SELECT node_id,nonce,expires_at "
+                "FROM agent_nonces WHERE nonce=?",
+                ("signed-replay-cutover",)).fetchone(),
+                ("iran-node-1234", "signed-replay-cutover", expiry))
+        self.assertEqual(
+            (self.root / fixture.stage.IR_ID_REL).read_bytes(), self.identity)
+        self.assertEqual(
+            self.panel._check_retained_runtime(),
+            "RETAINED_IRAN_NODE_CONTAINER_UNCHANGED")
         self._config(False)
 
     def test_outside_config_change_blocks_apply_and_rollback(self):
