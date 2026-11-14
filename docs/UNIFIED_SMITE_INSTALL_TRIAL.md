@@ -29,8 +29,27 @@ runtime, retained Iran identity and replay, an existing admin, the loopback
 Panel endpoint and certificate-verified local HTTPS/443. It prints only
 allowlisted values. A branch-only `INSTALL_REF` reports `UNKNOWN` for the
 installed U-OPTI SHA. Use the original install output's `Verified revision`
-when available. The operator still needs to verify the Iran Node in the
-Panel and establish fresh two-way signed evidence separately.
+when available.
+
+**Field baseline accepted on 2026-11-14 for the existing Iran host.**
+The operator reported exact installed U-OPTI revision
+`8d9ec336af10b60c488d4d90a78325f1b4998c94`, and the install journal
+reported `panel-iran / COMMITTED / COMPLETE` for Smite source
+`9a1270b31e8d44f13d09b71ab6b9798410b09c12`. Both pinned RC7
+containers were running and healthy in the journal's Compose project.
+The loopback Panel API and certificate-verified local HTTPS/443 each
+returned HTTP 200. Pairing was `ENABLED`, credentials `STAGED` and
+Replay enrollment `READY`. The operator's Panel screenshot showed
+`node-ir` as `Connected`.
+
+At the installed revision the installer requires signed Node check-in,
+the Panel-to-Iran HMAC status probe and the local replay probe before
+advancing to `COMPLETE`. The journal supplies evidence that these gates
+passed at install time. Repeat the signed probes after a Panel upgrade
+to establish current bidirectional evidence for that version. The next
+repository milestone is the reviewed transactional Panel upgrade for
+Foreign grant issuance. The public Foreign option 2 remains on hold
+pending the approved release and the live upgrade and connectivity gates.
 
 ## Resume/checkpoint design — Iran selected option 1 (2026-11-13)
 
