@@ -2315,3 +2315,58 @@ Audited **both existing selected menu choices**. Iran option 1 now completes its
 The internal Foreign `smite_install_unified_foreign_after_core` previously treated **valid trial signatures alone** as sufficient to proceed to Sanaei/Gateway, despite `activation_allowed:false`. It now reuses the exact existing signed Panel+Node **release decision** from `smite-node-pairing.py`, not a second ad hoc verifier. The currently pinned unapproved trial therefore HOLDs **before Sanaei, Gateway, TLS changes or enrollment**. The original 18 simulated post-core failure/rollback sequences remain in CI, with a 19th actual-gate negative test proving that no downstream host function is called. This is not a public option-2 install or live activation.
 
 Remaining blockers are the same concrete release steps: approved and newly signed compatible Panel+Node pair (not a hand-edited trial manifest), matching selected Iran and Foreign source/images and rollback journal, production-safe Panel transaction, full already-existing Foreign enrollment/identity/signed-activation orchestration, and isolated real-host bidirectional Connected/rollback proof. No change to main or running nodes/tunnels.
+
+## Consolidation checkpoint — exact Signed Trial artifact + ACME webroot no-clobber (2026-11-14)
+
+Continued from the **actual** trial branch after `d7fdb016...`, rather than
+restarting the selected Iran installation or adopting the older handoff HEAD.
+The operator's **reported** Iran option-1 install was sourced from U-OPTI
+`8d9ec336af10b60c488d4d90a78325f1b4998c94`; their recorded local
+Pairing status was `ENABLED/STAGED/READY`. This is not a fresh two-way
+signed-control proof from this checkpoint and does not authorize a Panel
+upgrade or any Iran/Foreign host mutation.
+
+Read the actual Smite signed-trial workflow artifact from run
+`43585094525` (artifact `14109777192`, expires 2026-11-21), not a mutable
+registry tag. The complete ZIP SHA-256 is
+`17addb0036afbf60349e7f9289ad5b392ffadd43f57710f2feeeaff03c249c40`.
+The inner `registry-pair.json` SHA-256 is
+`61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84`.
+It names Smite source `de0677d015a00160970ed57bba565adc4fafe8eb`,
+Panel digest `a4142110b058b02a5325e8f2130f2faa5daa5fc0aa3faad82bb4389948d4385f`,
+and Node digest `2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b`.
+These exactly match the U-OPTI trial candidate's declared source and image
+references. **Both `release_approved` and `activation_allowed` are false.**
+The published CI verified signatures; artifact comparison is not new
+production release approval, nor a claim of a live trusted-root verification.
+Do not modify the flags or use `latest` to bypass the existing Pairing gate.
+
+Audit of the existing Foreign ACME preparation found two avoidable mutations
+before its stage could safely proceed: a pre-existing shared webroot was
+chmodded to 0755, and a hostile ancestor/permission drift was rejected only
+after creating a complete Nginx include. Existing `smite-foreign-gateway.sh`
+now checks the entire selected ACME path for symlinks and verifies existing
+owner/mode **before** writing that vhost. It creates mode-0755 directories
+only when absent and stage-owned; it never repairs independent directories
+by chmod. Added three negative fixture cases: changed root mode, changed
+child mode, and symlinked ancestor; each HOLDs before vhost publication.
+The original foreign Gateway/renewal-hook rollback and repeated attempt
+cases remain in place. This is a targeted safety improvement, **not** an
+operational Foreign option-2 activation or a claim of full ACME stage rollback
+under every kill signal.
+
+- Source change: `e40eec598e3766844407062c7410648533015f0a`.
+- Failure-injection tests: `e2e984718a9baf2b45a23c0660b40cb63d46e806`.
+- U-OPTI trial CI on the tested code HEAD: `43611398037`, all jobs SUCCESS:
+  https://github.com/aghajani82/u-opti/actions/runs/43611398037
+- Smite trial source unchanged; signed trial workflow and other HEAD checks
+  were successful: https://github.com/aghajani82/Smite/actions/runs/43585094525
+- `main`, live Iran/Foreign hosts, retained Node identities, FRP/Backhaul,
+  Sanaei and managed tunnels were not touched.
+
+**Next actual blockers** (do not paper over): obtain an independently
+approved compatible immutable Panel/Node release; complete a production-safe
+Iran Panel upgrade/rollback retaining its existing RC7 Node and DB; bind
+Foreign public option 2 to the existing signed, resumable transaction only
+after that admission; finally prove signed two-way Connected and scoped
+rollback on disposable two-host field tests before release/merge.
