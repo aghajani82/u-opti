@@ -197,8 +197,10 @@ grep -q -- '--force-recreate smite-node' "$TMP/compose-calls"
 echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (6 scenarios + no-recreate witness)'
 
 # Run the selected Gateway through the real write and compensation boundary.
-# Only Gateway files in the fixture may change.
+# Only Gateway files in the fixture may change. The shared TLS renewal
+# hook is also stage-owned and must never survive a failed fresh setup.
 UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$PACKET"
+SMITE_FOREIGN_RENEW_HOOK="$TMP/renew-hook"
 smite_foreign_gateway_require_node() { :; }
 smite_foreign_gateway_require_rc_paused() { :; }
 smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/site"; }
@@ -220,7 +222,13 @@ systemctl() {
 }
 smite_foreign_gateway_verify_local() { [ "$FAULT" != tls ]; }
 smite_foreign_gateway_recreate_node() { [ "$FAULT" != node ]; }
-smite_foreign_gateway_write_renew_hook() { [ "$FAULT" != hook ]; }
+smite_foreign_gateway_write_renew_hook() {
+    # Simulate a hook writer that fails AFTER modifying the shared file,
+    # which exposed the original missing preimage compensation.
+    smite_foreign_gateway_render_renew_hook > "$SMITE_FOREIGN_RENEW_HOOK" || return 1
+    chmod 0755 "$SMITE_FOREIGN_RENEW_HOOK" || return 1
+    [ "$FAULT" != hook ]
+}
 mv() {
     if [ "$FAULT" = write ] && [ "${*: -1}" = "$TMP/site" ]; then return 1; fi
     if [ "$FAULT" = receipt ] && [ "${*: -1}" = "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]; then
@@ -240,6 +248,7 @@ for FAULT in write tls node hook receipt; do
     [ "$status" = 2 ]
     grep -qx 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' "$TMP/rollback-log" || { cat "$TMP/rollback-log"; exit 1; }
     [ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
+    [ ! -e "$SMITE_FOREIGN_RENEW_HOOK" ]
     if [ "$FAULT" = write ]; then
         [ ! -e "$TMP/site" ] && [ ! -L "$TMP/enabled" ]
     else
@@ -247,6 +256,31 @@ for FAULT in write tls node hook receipt; do
         [ "$(readlink "$TMP/enabled")" = "$TMP/original-link" ]
     fi
 done
+# An unrelated shared TLS renewal script is never overwritten, even if
+# its pathname is valid and the Gateway site would otherwise be writable.
+printf '#!/bin/sh\nexit 0\n' > "$SMITE_FOREIGN_RENEW_HOOK"
+FAULT=
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/unrelated-hook" 2>&1 || status=$?
+[ "$status" = 2 ]
+grep -q 'independent certificate renewal hook' "$TMP/unrelated-hook"
+grep -qx 'exit 0' "$SMITE_FOREIGN_RENEW_HOOK"
+[ ! -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+rm -f "$SMITE_FOREIGN_RENEW_HOOK"
+
+# Existing canonical U-OPTI shared hook must survive a failed stage as-is.
+smite_foreign_gateway_render_renew_hook > "$SMITE_FOREIGN_RENEW_HOOK"
+chmod 0755 "$SMITE_FOREIGN_RENEW_HOOK"
+before_hook="$(sha256sum "$SMITE_FOREIGN_RENEW_HOOK" | cut -d' ' -f1)"
+FAULT=hook
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/existing-hook-rollback" 2>&1 || status=$?
+[ "$status" = 2 ]
+[ "$(sha256sum "$SMITE_FOREIGN_RENEW_HOOK" | cut -d' ' -f1)" = "$before_hook" ]
+[ "$(stat -c %a "$SMITE_FOREIGN_RENEW_HOOK")" = 755 ]
+[ ! -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+rm -f "$SMITE_FOREIGN_RENEW_HOOK"
+
 # Exit the stage subprocess after the new site is installed and before commit.
 FAULT=interrupted
 status=0
@@ -255,7 +289,19 @@ smite_foreign_gateway_configure <<< "" > "$TMP/interrupted" 2>&1 || status=$?
 [ -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
 [ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
 grep -qx 'candidate vhost' "$TMP/site"
+[ ! -e "$SMITE_FOREIGN_RENEW_HOOK" ]
+# Independently edited hook after the crash must HOLD before rolling back
+# the staged Nginx site or touching the independent hook.
+printf '#!/bin/sh\nexit 9\n' > "$SMITE_FOREIGN_RENEW_HOOK"
 FAULT=
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/renew-drift" 2>&1 || status=$?
+[ "$status" = 2 ]
+grep -q 'Shared renewal hook changed outside' "$TMP/renew-drift"
+grep -qx 'candidate vhost' "$TMP/site"
+grep -qx 'exit 9' "$SMITE_FOREIGN_RENEW_HOOK"
+[ -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+rm -f "$SMITE_FOREIGN_RENEW_HOOK"
 printf 'independent edit\n' > "$TMP/site"
 status=0
 smite_foreign_gateway_configure <<< "" > "$TMP/drift" 2>&1 || status=$?
@@ -270,4 +316,7 @@ grep -qx 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/retry-log"
 grep -qx 'candidate vhost' "$TMP/site"
 [ "$(readlink "$TMP/enabled")" = "$TMP/site" ]
 [ "$(stat -c %a "$SMITE_FOREIGN_GATEWAY_STATE_FILE")" = 600 ]
-echo 'UNIFIED_GATEWAY_SITE_ROLLBACK_AND_RETRY=PASS'
+[ -f "$SMITE_FOREIGN_RENEW_HOOK" ]
+smite_foreign_gateway_render_renew_hook | cmp -s - "$SMITE_FOREIGN_RENEW_HOOK"
+[ "$(stat -c %a "$SMITE_FOREIGN_RENEW_HOOK")" = 755 ]
+echo 'UNIFIED_GATEWAY_SITE_AND_RENEW_HOOK_ROLLBACK_AND_RETRY=PASS'
