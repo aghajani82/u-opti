@@ -288,7 +288,7 @@ EOF
 }
 
 smite_foreign_gateway_prepare_acme() {
-    local domain="$1" acme_conf="" parent="" candidate="" created=0
+    local domain="$1" acme_conf="" parent="" candidate=""
     local attempt=1
     smite_foreign_gateway_validate_domain "$domain" || return 1
     acme_conf="$(smite_foreign_gateway_acme_conf_path "$domain")" || return 1
@@ -297,7 +297,7 @@ smite_foreign_gateway_prepare_acme() {
     # entire Foreign Node. NEVER replace a same-named file owned by
     # another service, even while the Foreign installer is interrupted.
     [ -d "$parent" ] && [ ! -L "$parent" ] &&
-    [ "$(stat -c %u "$parent" 2>/dev/null)" = 0 ] &&
+    [ "$(stat -c %u "$parent" 2>/dev/null)" = "$EUID" ] &&
     [ ! -L "$acme_conf" ] &&
     { [ ! -e "$acme_conf" ] || [ -f "$acme_conf" ]; } || return 1
     candidate="$(mktemp "$parent/.u-opti-foreign-acme.XXXXXX")" || return 1
@@ -310,7 +310,7 @@ smite_foreign_gateway_prepare_acme() {
     if [ -e "$acme_conf" ]; then
         # Existing exact managed ACME preimage is an idempotent retry.
         # A different file is independent and is never overwritten.
-        if [ "$(stat -c %u "$acme_conf" 2>/dev/null)" != 0 ] ||
+        if [ "$(stat -c %u "$acme_conf" 2>/dev/null)" != "$EUID" ] ||
            [ "$(stat -c %h "$acme_conf" 2>/dev/null)" != 1 ] ||
            [ "$(stat -c %a "$acme_conf" 2>/dev/null)" != 644 ] ||
            ! cmp -s -- "$candidate" "$acme_conf"; then
@@ -326,7 +326,7 @@ smite_foreign_gateway_prepare_acme() {
             rm -f -- "$candidate" || true
             return 1
         fi
-        created=1
+
     fi
     rm -f -- "$candidate" || return 1
     sync -f "$parent" || return 1
