@@ -70,6 +70,7 @@ class Cutover:
         self.tx_mod = module("smite-unified-panel-transaction.py",
                              "cutover_panel_transaction")
         self.stage = stage if stage is not None else self.stage_mod.PanelStage()
+        self.stage_hold = sys.modules[self.stage.__class__.__module__].StageHold
         if self.stage.root != self.root:
             deny()
         self.tx = self.tx_mod.PanelTransaction(
@@ -103,8 +104,8 @@ class Cutover:
             raw = self.stage._read(STAGING_REL + "/journal.json",
                                    mode=0o600, limit=8192)
             doc = self.tx_mod.checked_json(raw)
-        except (OSError, ValueError, self.stage_mod.StageHold,
-                self.tx_mod.Hold):
+        except (OSError, ValueError, self.stage_hold,
+                self.stage_mod.StageHold, self.tx_mod.Hold):
             deny()
         if (not isinstance(doc, dict)
                 or set(doc) != {"schema", "kind", "source", "stage_hash",
@@ -169,7 +170,7 @@ class Cutover:
                                      "smite_foreign_install_origins"}):
                 deny()
             return tables
-        except (self.tx_mod.Hold, self.stage_mod.StageHold):
+        except (self.tx_mod.Hold, self.stage_hold, self.stage_mod.StageHold):
             deny()
 
     def _check_ordered_config(self, phase, *, rolling_back=False):
@@ -272,9 +273,12 @@ class Cutover:
                 deny()
             start = STEPS.index(step) + int(boundary == "AFTER")
             for step in STEPS[start:]:
-                doc["phase"] = "BEFORE_" + step
+                proposed = "BEFORE_" + step
+                # A drifted config must NEVER advance the durable journal.
+                # Validate the step's pre/post image BEFORE the checkpoint.
+                self._prewrite(proposed)
+                doc["phase"] = proposed
                 self._write(doc)
-                self._prewrite(doc["phase"])
                 self._step(step)
                 self._prewrite(doc["phase"])
                 doc["phase"] = "AFTER_" + step
