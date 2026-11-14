@@ -1,4 +1,5 @@
 """No-network trial pair verification tests; NEVER deploy."""
+import ast
 import importlib.util
 import hashlib
 import json
@@ -138,6 +139,120 @@ class TrialPair(unittest.TestCase):
         self.assertIn("WORKFLOW = \"https://github.com/aghajani82/Smite/.github/workflows/publish-images.yml@\"",official)
         self.assertIn("Independent release tag required",official)
         self.assertNotIn("smite_trial=unified-install",official)
+
+
+class SealedRepositoryPinContract(unittest.TestCase):
+    """No-network consistency check across existing signed trial consumers.
+
+    A new signed Panel/Node pair must update EVERY consuming path together.
+    A green isolated component suite does not prove source/digest alignment.
+    This checks source literals WITHOUT importing or executing host helpers.
+    """
+
+    @staticmethod
+    def constants(path):
+        values = {}
+        tree = ast.parse((ROOT / path).read_text(encoding="utf-8"),
+                         filename=str(path))
+        for statement in tree.body:
+            if (isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)):
+                try:
+                    values[statement.targets[0].id] = ast.literal_eval(statement.value)
+                except (ValueError, TypeError, SyntaxError, MemoryError,
+                        RecursionError):
+                    pass
+        return values
+
+    def repository_contract(self, *, overrides=None):
+        modules = ROOT / "modules"
+        path = modules / "smite-unified-trial-registry-pair.json"
+        raw = path.read_bytes()
+        manifest = json.loads(raw)
+        source = manifest["source_commit"]
+        expected_sha = hashlib.sha256(raw).hexdigest()
+        panel = manifest["images"]["panel"]
+        node = manifest["images"]["node"]
+        self.assertEqual(manifest["publish_ref"], v.REF)
+        self.assertIs(manifest["release_approved"], False)
+        self.assertIs(manifest["activation_allowed"], False)
+
+        contracts = {
+            "modules/smite-unified-panel-stage.py": {
+                "SOURCE": source, "MANIFEST_HASH": expected_sha,
+                "NEW_PANEL": panel, "NEW_NODE": node,
+            },
+            "modules/smite-unified-panel-transaction.py": {
+                "SOURCE_SHA": source,
+            },
+            "modules/smite-unified-foreign-activation-review.py": {
+                "SOURCE": source, "MANIFEST_SHA": expected_sha,
+                "PANEL": panel, "NODE": node,
+            },
+            "modules/smite-unified-foreign-existing-witnesses.py": {
+                "SOURCE": source, "MANIFEST_SHA": expected_sha,
+                "TRIAL_PANEL": panel, "TRIAL_NODE": node,
+            },
+            "modules/smite-node-pairing.py": {
+                "_FOREIGN_NODE_IMAGE_UNIFIED_TRIAL": node,
+            },
+        }
+        if overrides is not None:
+            target, key, value = overrides
+            contracts[target][key] = value
+        for filename, expected in contracts.items():
+            actual = self.constants(filename)
+            for key, correct_value in expected.items():
+                with self.subTest(file=filename, pin=key):
+                    self.assertIn(key, actual)
+                    self.assertEqual(actual[key], correct_value)
+
+        pairing = (modules / "smite-node-pairing.py").read_text()
+        release_gate = pairing.split(
+            "def _require_unified_foreign_release()", 1)[1].split(
+            "\ndef activate_foreign_node_field_trial(", 1)[0]
+        for value in (source, expected_sha, panel):
+            self.assertIn(value, release_gate)
+        self.assertIn("host_activation_allowed", release_gate)
+        self.assertIn("is not True", release_gate)
+
+        installer = (modules / "smite-install.sh").read_text()
+        for value in (source, expected_sha, node):
+            self.assertIn(value, installer)
+        self.assertIn("FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES", installer)
+        # The original RC7 Panel and Node remain independent of this new
+        # trial pair. Updating only the trial manifest cannot overwrite them.
+        official = json.loads(
+            (modules / "smite-rc7-registry-pair.json").read_bytes())
+        self.assertNotEqual(official["images"]["panel"], panel)
+        self.assertNotEqual(official["images"]["node"], node)
+
+        client = (ROOT / ".github/workflows/foreign-install-client-trial.yml").read_text()
+        signed = (ROOT / ".github/workflows/smite-unified-trial-signed-pair-review.yml").read_text()
+        panel_ci = client.split("\n  panel-compose-upgrade:", 1)[1]
+        for workflow in (client, signed):
+            self.assertIn("--manifest-sha256 " + expected_sha, workflow)
+            self.assertIn("--source-sha " + source, workflow)
+        self.assertIn("ref: " + source, client)
+        self.assertIn("--manifest-sha256 " + expected_sha, panel_ci)
+        self.assertIn("--source-sha " + source, panel_ci)
+        self.assertIn("HOST_INSTALL_ALLOWED=NO", signed)
+        return True
+
+    def test_actual_trial_source_images_and_all_consumers_are_one_pair(self):
+        self.assertTrue(self.repository_contract())
+
+    def test_mismatched_manifest_consumer_is_detected(self):
+        with self.assertRaises(AssertionError):
+            self.repository_contract(overrides=(
+                "modules/smite-unified-panel-stage.py", "NEW_PANEL",
+                "ghcr.io/aghajani82/smite-panel@sha256:" + "0" * 64))
+        with self.assertRaises(AssertionError):
+            self.repository_contract(overrides=(
+                "modules/smite-node-pairing.py",
+                "_FOREIGN_NODE_IMAGE_UNIFIED_TRIAL",
+                "ghcr.io/aghajani82/smite-node@sha256:" + "0" * 64))
 
 
 if __name__=="__main__":
