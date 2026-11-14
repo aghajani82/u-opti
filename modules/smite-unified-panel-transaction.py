@@ -278,7 +278,9 @@ class PanelTransaction:
                         or baseline.get("IR_GATEWAY_TLS443") != "PASS"
                         or baseline.get("IR_PANEL_LOOPBACK") != "PASS"
                         or baseline.get("IR_ADMIN") != "PRESENT"
-                        or baseline.get("IR_SIGNED_RUNTIME_AND_REPLAY") != "VERIFIED_READ_ONLY"):
+                        or baseline.get("IR_SIGNED_RUNTIME_AND_REPLAY") != "VERIFIED_READ_ONLY"
+                        or baseline.get("IR_SIGNED_TWO_WAY") !=
+                            "PASS_EXISTING_SIGNED_CONTROL_PROBES"):
                     deny()
                 self._live_continuity()
             elif self._new_enrollment() or self._replay_drift():
