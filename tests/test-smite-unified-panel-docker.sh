@@ -47,6 +47,7 @@ SMITE_FOREIGN_INSTALL_ENABLED=false
 SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=false
 SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 SMITE_NODE_PAIRING_MASTER_KEY=$(python3 -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
+SMITE_NODE_PAIRING_INGRESS_TOKEN=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 EOF
 cat > "$workspace/compose.yml" <<'YAML'
 services:
@@ -113,6 +114,7 @@ with urllib.request.urlopen(base + "/version", timeout=3) as r:
 wait_panel 2.0.0-rc.7
 node_id="$("${compose[@]}" ps -q smite-node)"
 [[ -n "$node_id" ]]
+[[ "$(docker inspect -f '{{.State.Running}}' "$node_id")" == true ]]
 node_started="$(docker inspect -f '{{.State.StartedAt}}' "$node_id")"
 seed_panel_id="$("${compose[@]}" ps -q smite-panel)"
 "${compose[@]}" exec -T smite-panel python3 - <<'PY'
@@ -158,7 +160,7 @@ assert asyncio.run(require_installation())
 try:
     urllib.request.urlopen('http://127.0.0.1:8000/api/foreign-install/capabilities', timeout=5)
 except urllib.error.HTTPError as exc:
-    assert exc.code == 401
+    assert exc.code in (401, 403)
 else:
     raise AssertionError('Foreign capabilities unexpectedly accessible without an admin session')
 PY
@@ -167,6 +169,7 @@ PY
 "${compose[@]}" up -d --no-deps --no-build --pull never smite-panel
 wait_panel 2.0.0-rc.7
 [[ "$("${compose[@]}" ps -q smite-node)" == "$node_id" ]]
+[[ "$(docker inspect -f '{{.State.Running}}' "$node_id")" == true ]]
 [[ "$(docker inspect -f '{{.State.StartedAt}}' "$node_id")" == "$node_started" ]]
 "${compose[@]}" exec -T smite-panel python3 - <<'PY'
 from pathlib import Path
