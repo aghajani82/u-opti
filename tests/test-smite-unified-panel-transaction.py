@@ -524,7 +524,7 @@ class LiveHeartbeatContinuity(unittest.TestCase):
             "IR_PANEL_LOOPBACK": "PASS",
             "IR_ADMIN": "PRESENT",
             "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
-            "IR_SIGNED_TWO_WAY": "NOT_CHECKED",
+            "IR_SIGNED_TWO_WAY": "PASS_EXISTING_SIGNED_CONTROL_PROBES",
         }
         # The real root/ service is NEVER accessed. Mock only the root
         # selector, while sealed stage and original config stay disposable.
@@ -540,6 +540,28 @@ class LiveHeartbeatContinuity(unittest.TestCase):
                 self.executor.review()["status"], "REVIEWED_PREIMAGES_ONLY")
             report.assert_called_once_with()
             reconcile.assert_called_once_with()
+
+    def test_root_read_only_review_refuses_missing_signed_control_proof(self):
+        baseline = {
+            "IR_INSTALL_CHECKPOINT": "COMPLETE",
+            "IR_GATEWAY_TLS443": "PASS",
+            "IR_PANEL_LOOPBACK": "PASS",
+            "IR_ADMIN": "PRESENT",
+            "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
+            "IR_SIGNED_TWO_WAY": "NOT_CHECKED",
+        }
+        # Pinned signatures, a healthy container and HTTPS/443 alone are
+        # insufficient to authorize a running Iran Panel migration.
+        with (patch.object(self.executor, "root", Path("/")),
+              patch.object(self.executor, "_live",
+                           side_effect=self.executor._snapshot),
+              patch.object(self.executor, "_tables", return_value=set()),
+              patch.object(self.panel, "live_baseline_report",
+                           return_value=baseline),
+              patch.object(self.executor, "_live_continuity") as reconcile):
+            with self.assertRaises(trans.Hold):
+                self.executor.review()
+            reconcile.assert_not_called()
 
     def test_root_read_only_review_refuses_missing_live_gateway_evidence(self):
         invalid = {
