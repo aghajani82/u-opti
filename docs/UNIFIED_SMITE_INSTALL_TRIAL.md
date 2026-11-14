@@ -16,6 +16,51 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### Continuation checkpoint — signed Iran heartbeat-aware Panel review (2026-11-14)
+
+**Purpose:** close an existing pre-production Panel migration gap, not add
+an installer option. The already-staged RC7 → unified Panel review formerly
+either (a) failed on every legitimate signed Node heartbeat/replay nonce or
+(b) on the real-root path skipped comparing the live databases entirely.
+The existing `PanelTransaction.review()` now uses the already-established
+`PanelStage.live_baseline_report()` when evaluating a real-root sealed
+stage. It requires a COMMITTED+COMPLETE Iran install, original Compose
+ownership, a healthy old signed runtime, installed admin, loopback Panel
+HTTP 200 and certificate-verified local HTTPS/443 before considering
+database continuity. The report **still says signed two-way =
+NOT_CHECKED**; this separate active signed proof remains a requirement
+for a production executor after any future Panel change.
+
+A new internal, **read-only** `PanelTransaction._live_continuity()`
+compares the original, private WAL-consistent Panel and replay database
+snapshots to their current counterparts. It permits ONLY:
+- monotonic presence changes of fresh/expired nonce records for the same
+  existing signed Iran identity, without changing the expiry of a retained
+  nonce, in the known inbound/replay schemas;
+- `last_seen` updates for that same existing Iran Node;
+- changes to the existing Iran Node's `frp_connected` /
+  `frp_remote_port` **telemetry only**, not metadata role or Pairing state.
+
+It HOLDS on any changed encrypted identity, signed Pairing code,
+registration/role/status, additional reserved Foreign Node, new Foreign
+grant/origin, arbitrary metadata, replay ownership, invalid schema, or
+unknown nonce owner. The original offline/rehearsal rollback remains
+**strict** and is not weakened. The new read-only review does not lock,
+stop, recreate or mutate a running Node and cannot authorize an
+already-active release. A future production executor MUST repeat runtime
+and database evidence **under its own exclusive transaction lock**,
+perform independently approved release admission and actual HMAC probes
+after Panel reload, and HOLD if provenance/grants changed in the meantime.
+
+The original `tests/test-smite-unified-panel-transaction.py` now
+injects ordinary signed Iran heartbeat/FRP telemetry, nonce expiry and
+replay transitions, as well as malicious/unsafe identity, node,
+Pairing, grant, schema and gateway-witness changes. The existing GitHub
+suite exercises these tests together with real disposable Docker
+Panel upgrade, rollback and Foreign grant issue. This is **read-only
+admission proof**, NOT a live Panel apply/rollback or two-host Connected
+claim.
+
 ### Continuation checkpoint — one sealed source and real disposable Foreign grant after Panel upgrade (2026-11-14)
 
 This iteration builds on the worker's newer release-source synchronization
