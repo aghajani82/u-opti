@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -423,6 +424,18 @@ class LiveHeartbeatContinuity(unittest.TestCase):
                 "UPDATE nodes SET metadata=?, status=?, last_seen=?",
                 ('{"role":"iran","provisioning":"signed_checkin"}',
                  "active", "2026-11-14 10:00:00"))
+        # Both retained snapshots include a live unexpired signed nonce.
+        # An attacker or interrupted upgrade must not be allowed to erase
+        # either nonce while the original HMAC/replay validity window remains.
+        self.unexpired_nonce = int(time.time()) + 3600
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_inbound_nonces VALUES (?,?,?)",
+                       ("iran-node-1234", "unexpired-inbound",
+                        self.unexpired_nonce))
+        with sqlite3.connect(self.root/fixture.stage.REPLAY_DB_REL) as db:
+            db.execute("INSERT INTO agent_nonces VALUES (?,?,?)",
+                       ("iran-node-1234", "unexpired-replay",
+                        self.unexpired_nonce))
         self.panel.prepare(fixture.stage.CONFIRM)
         self.executor = trans.PanelTransaction(
             self.root, stager=self.panel, fixture_capability=True)
@@ -450,6 +463,36 @@ class LiveHeartbeatContinuity(unittest.TestCase):
         self.assertTrue(self.executor._new_enrollment())
         self.assertTrue(self.executor._replay_drift())
         self.assertEqual(self.panel.status()["state"],"PREPARED_ONLY")
+
+    def test_live_inbound_nonce_cannot_be_deleted_before_expiry(self):
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
+        with sqlite3.connect(self.db) as db:
+            db.execute("DELETE FROM smite_node_inbound_nonces WHERE nonce=?",
+                       ("unexpired-inbound",))
+        with self.assertRaises(trans.Hold):
+            self.check()
+
+    def test_live_replay_nonce_cannot_be_deleted_before_expiry(self):
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
+        with sqlite3.connect(self.root/fixture.stage.REPLAY_DB_REL) as db:
+            db.execute("DELETE FROM agent_nonces WHERE nonce=?",
+                       ("unexpired-replay",))
+        with self.assertRaises(trans.Hold):
+            self.check()
+
+    def test_expired_inbound_nonce_cleanup_remains_admitted(self):
+        # The legacy fixture nonce has already expired; housekeeping may
+        # remove it, but must leave the unexpired one untouched.
+        with sqlite3.connect(self.db) as db:
+            db.execute("DELETE FROM smite_node_inbound_nonces WHERE nonce=?",
+                       ("nonce",))
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
+
+    def test_expired_replay_nonce_cleanup_remains_admitted(self):
+        with sqlite3.connect(self.root/fixture.stage.REPLAY_DB_REL) as db:
+            db.execute("DELETE FROM agent_nonces WHERE nonce=?",
+                       ("replay-nonce",))
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
 
     def test_pending_pairing_code_is_not_heartbeat(self):
         with sqlite3.connect(self.db) as db:
