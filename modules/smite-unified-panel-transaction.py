@@ -680,12 +680,18 @@ class PanelTransaction:
         except sqlite3.Error:
             return True
 
-    def rollback_rehearsal(self, *, confirm: str):
-        """Restore ONLY owned config files; never rewind DB, replay or identity."""
-        with self._operation(confirm):
-            return self._rollback_locked()
+    def rollback_rehearsal(self, *, confirm: str,
+                           allow_iran_heartbeat=False):
+        """Restore ONLY owned config; optionally model live signed heartbeats.
 
-    def _rollback_locked(self):
+        The heartbeat setting is FIXTURE-ONLY, behind the original disposable
+        root + confirmation gate. The production CLI exposes no rollback.
+        """
+        with self._operation(confirm):
+            return self._rollback_locked(
+                allow_iran_heartbeat=allow_iran_heartbeat)
+
+    def _rollback_locked(self, *, allow_iran_heartbeat=False):
         # The original staged SQLite snapshot and replay evidence must still
         # match the sealed journal before ANY config restoration is attempted.
         try:
@@ -698,8 +704,18 @@ class PanelTransaction:
         # An interrupted/partial migration with missing uniqueness is not
         # safe to treat as completed just because its tables are empty.
         # Verify schema BEFORE restoring even one owned config file.
-        self._tables()
-        if self._new_enrollment() or self._replay_drift():
+        tables = self._tables()
+        if allow_iran_heartbeat:
+            # Reuse the SAME already-reviewed read-only continuity witness
+            # as prospective production rollback, but never rewind replay.
+            # Strictly require the canonical additive schema and reject
+            # any new reservation, pending code, grant or identity drift.
+            if (tables != {"smite_foreign_install_grants",
+                           "smite_foreign_install_origins"}
+                    or self._live_continuity() !=
+                        "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT"):
+                deny()
+        elif self._new_enrollment() or self._replay_drift():
             deny()
         # Refuse to restore any old config if security identities or replay
         # history drifted; a new grant or key must never be disconnected.
