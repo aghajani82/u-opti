@@ -16,6 +16,59 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### Continuation checkpoint — Foreign step-scoped compensation and same-option resume (2026-11-14)
+
+The established Iran core/Gateway/Pairing/Admin rollback path is **not rebuilt**.
+This checkpoint closes a different gap in the **existing Foreign** disposable
+Sanaei → Gateway host-stage recovery journal.
+
+The current `smite-unified-foreign-host-recovery.py` previously entered
+`SANAEI_INTENT` or `GATEWAY_INTENT` before applying an externally owned
+stage. After an error or crash, its next invocation could accept a genuinely
+READY result, but an ABSENT/partial result always HOLDed indefinitely.
+The same `rehearse()` entry now accepts *optional* callbacks for the
+**original stage owner's** preimage-based `rollback_sanaei` and
+`rollback_gateway` operations, subject to the already-held private lock:
+
+- After a reported stage failure, attempt the corresponding owned rollback
+  and independently verify the signed/paused Core and restored state.
+  `rollback_sanaei` cannot run if a Foreign Gateway is present;
+  `rollback_gateway` cannot alter already-verified Sanaei.
+- For a process crash that leaves an `*_INTENT` journal and ABSENT stage,
+  the next invocation calls the same scoped rollback, checks a
+  `ROLLED_BACK_VERIFIED` receipt **and independent external witnesses**,
+  durably rewinds only that stage's checkpoint, then returns HOLD. The
+  **next same-option invocation** may start just that stage anew.
+- If a crashed stage is already independently `READY`, the existing
+  idempotent READY reconciliation still advances the checkpoint without
+  repeating a host operation. If drift is untrusted, no owned rollback
+  callback is available, compensation fails, or post-rollback verification
+  fails, the original INTENT is retained and the system HOLDs; it does not
+  run another installation blindly.
+- The original signing, one-use packet scope, Node identity, private
+  journal permissions, pending/finished stage checks and "no Connected"
+  guarantee remain intact. Existing Sanaei installations and FRP/Backhaul
+  are never targets of a compensating callback.
+
+**Tests:** `tests/test-smite-unified-foreign-host-recovery.py` now includes
+fault injections for failure after Sanaei and Gateway writes, lost-success
+replies, sudden interruption and next-call rollback, callback success that
+does NOT match actual state, failed compensation, stage drift and invalid
+callback types. Original no-callback HOLD regression cases continue to
+pass. Trial CI: https://github.com/aghajani82/u-opti/actions/runs/43604956908
+(three jobs successful). **This is a disposable contract only**;
+callbacks are NOT connected to production Foreign menu option 2, because
+the pair release is still `activation_allowed:false`.
+
+**Integration work remaining:** after the separately authorized immutable
+Panel/Node release and Panel Iran upgrade, bind only the existing reviewed
+Sanaei/Gateway site-specific snapshot/rollback functions and their exact
+ownership witnesses to these callbacks. Preserve journals over interrupted
+runs. The external Foreign option 2 must remain HOLD until *all* stages
+(owned signed Core, Sanaei, Gateway, redemption/identity and runtime
+activation/Connected) are admitted and recovery-tested end to end.
+There is no claim of a live Foreign installation.
+
 ### Continuation checkpoint — signed Iran heartbeat-aware Panel review (2026-11-14)
 
 **Purpose:** close an existing pre-production Panel migration gap, not add
