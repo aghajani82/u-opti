@@ -2256,12 +2256,22 @@ smite_install_unified_foreign_capture_packet() {
     [ ! -L "$module_dir/smite-unified-foreign-packet-intake.py" ] &&
     [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
     [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
-    mkdir -m 0700 -p -- "$workspace/foreign-fixture/foreign-staging" || return 2
+    # Both directories must be 0700 even under an inherited umask 022.
+    # The private packet intake independently checks owner, permissions and
+    # symlinks; it alone may atomically accept an expired same-scope reissue
+    # after validating the pre-existing host recovery journal.
+    local child
+    for child in "$workspace/foreign-fixture" "$workspace/foreign-fixture/foreign-staging"; do
+        if [ ! -e "$child" ] && [ ! -L "$child" ]; then
+            mkdir -m 0700 -- "$child" || return 2
+        fi
+        [ -d "$child" ] && [ ! -L "$child" ] &&
+        [ "$(stat -c '%a:%u' "$child" 2>/dev/null)" = "700:$(id -u)" ] || {
+            echo 'HOLD: Foreign staging directory is not private and owned.' >&2
+            return 2
+        }
+    done
     packet="$workspace/foreign-fixture/foreign-staging/foreign-install-packet.json"
-    [ ! -e "$packet" ] && [ ! -L "$packet" ] || {
-        echo 'HOLD: Previously staged Panel information cannot be replaced.' >&2
-        return 2
-    }
     python3 -B "$module_dir/smite-unified-foreign-packet-intake.py" \
         --capture-selected-foreign "$workspace" || return 2
     # The same immutable one-use packet supplies the core's three values.
