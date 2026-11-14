@@ -110,6 +110,133 @@ class PanelTransaction:
         limit = self.stage_mod.FILE_MAP[name][2]
         return self.stage._read(rel, mode=mode, limit=limit)
 
+    def _live_continuity(self):
+        """Read-only *candidate* reconciliation for a running Iran Panel.
+
+        Heartbeats advance signed inbound/replay nonces and last_seen while
+        an operator stages a Panel upgrade. They are not new Foreign grants.
+        This is NOT permission to mutate a running Panel or to roll it back:
+        the existing fixture rollback remains stricter. Every persistent
+        identity, reservation, pairing code, origin and other Node field
+        must remain exact. No live service or database is modified.
+        """
+        db = self.root / self.stage_mod.DB_REL
+        old_db = self.stage.staging / "panel-db.sqlite3"
+        replay = self.root / self.stage_mod.REPLAY_DB_REL
+        old_replay = self.stage.staging / "iran-replay.sqlite3"
+
+        def open_ro(path):
+            self.stage._parents(path)
+            if path.is_symlink() or not path.is_file():
+                deny()
+            return sqlite3.connect(path.absolute().as_uri() + "?mode=ro",
+                                   uri=True, timeout=5)
+
+        def schema(conn, table):
+            return conn.execute("PRAGMA table_info(" + table + ")").fetchall()
+
+        def rows(conn, table):
+            return conn.execute("SELECT * FROM " + table + " ORDER BY 1").fetchall()
+
+        def nonce_drift_only(live, old, table, iran_ids):
+            expected = {"node_id", "nonce", "expires_at"}
+            left_cols = [r[1] for r in schema(old, table)]
+            right_cols = [r[1] for r in schema(live, table)]
+            if (schema(old, table) != schema(live, table)
+                    or not expected <= set(left_cols)):
+                deny()
+            def keyed(conn):
+                result = {}
+                for node, nonce, expiry in conn.execute(
+                        "SELECT node_id,nonce,expires_at FROM " + table):
+                    if (node not in iran_ids or not isinstance(nonce, str)
+                            or not nonce or type(expiry) is not int
+                            or (node, nonce) in result):
+                        deny()
+                    result[(node, nonce)] = expiry
+                return result
+            past, current = keyed(old), keyed(live)
+            # A nonce may expire or a fresh Iran nonce may be added, but
+            # the same nonce's lifetime must never be rewritten.
+            if any(current[key] != expiry for key, expiry in past.items()
+                   if key in current):
+                deny()
+
+        try:
+            with closing(open_ro(db)) as live, closing(open_ro(old_db)) as old:
+                for table in ("smite_node_identities", "smite_node_pairing_codes"):
+                    if schema(live, table) != schema(old, table) or rows(live, table) != rows(old, table):
+                        deny()
+                identities = old.execute(
+                    "SELECT node_id FROM smite_node_identities "
+                    "WHERE node_role='iran' AND revoked_at IS NULL").fetchall()
+                iran_ids = {row[0] for row in identities}
+                if len(iran_ids) != 1:
+                    deny()
+                before_cols = [row[1] for row in schema(old, "nodes")]
+                after_cols = [row[1] for row in schema(live, "nodes")]
+                if before_cols != after_cols or "id" not in before_cols:
+                    deny()
+                def node_map(conn):
+                    data = {}
+                    for entry in rows(conn, "nodes"):
+                        mapping = dict(zip(before_cols, entry))
+                        key = mapping["id"]
+                        if not isinstance(key, str) or key in data:
+                            deny()
+                        data[key] = mapping
+                    return data
+                past, current = node_map(old), node_map(live)
+                if set(past) != set(current) or not iran_ids <= set(past):
+                    deny()
+                for node_id in past:
+                    a, b = past[node_id], current[node_id]
+                    for key in before_cols:
+                        if key in ("last_seen", "metadata"):
+                            continue
+                        if a[key] != b[key]:
+                            deny()
+                    if a.get("metadata") != b.get("metadata"):
+                        if node_id not in iran_ids:
+                            deny()
+                        # Only FRP *telemetry* may change on a previously
+                        # signed Iran Node. No role, provisioning, control
+                        # URL or other metadata field can be rewritten.
+                        ma = json.loads(a["metadata"] or "{}")
+                        mb = json.loads(b["metadata"] or "{}")
+                        if (not isinstance(ma, dict) or not isinstance(mb, dict)
+                                or ma.get("role") != "iran"
+                                or ma.get("provisioning") != "signed_checkin"):
+                            deny()
+                        for item in ("frp_connected", "frp_remote_port"):
+                            ma.pop(item, None)
+                            mb.pop(item, None)
+                        if ma != mb:
+                            deny()
+                    if (node_id not in iran_ids and a.get("last_seen") != b.get("last_seen")):
+                        deny()
+                nonce_drift_only(live, old, "smite_node_inbound_nonces", iran_ids)
+                optional = {"smite_foreign_install_grants", "smite_foreign_install_origins"}
+                present = {row[0] for row in live.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                if present & optional not in (set(), optional):
+                    deny()
+                for table in present & optional:
+                    if live.execute("SELECT count(*) FROM " + table).fetchone()[0]:
+                        deny()
+
+            with closing(open_ro(replay)) as live, closing(open_ro(old_replay)) as old:
+                if (schema(old, "replay_store_identity") !=
+                        schema(live, "replay_store_identity")
+                        or rows(old, "replay_store_identity") !=
+                            rows(live, "replay_store_identity")):
+                    deny()
+                nonce_drift_only(live, old, "agent_nonces", iran_ids)
+        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error,
+                json.JSONDecodeError, self.stage_mod.StageHold):
+            deny()
+        return "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT"
+
     def _tables(self):
         db = self.root / self.stage_mod.DB_REL
         with closing(sqlite3.connect(db.absolute().as_uri() + "?mode=ro",
@@ -129,10 +256,20 @@ class PanelTransaction:
                     deny()
             self.stage._preflight_database()
             self.stage._preflight_replay()
-            # The disposable transaction expects a quiet fixture. On a live
-            # read-only review, signed heartbeats and nonces can advance
-            # after staging. Live application needs its own reconciliation.
-            if self.root != Path("/") and (self._new_enrollment() or self._replay_drift()):
+            # The same sealed stage is reviewed differently on an active
+            # Panel: tolerate ONLY ephemeral signed Iran heartbeats, never
+            # new identities, grants, pairing codes or altered metadata.
+            # No actual production apply path is enabled.
+            if self.root == Path("/"):
+                baseline = self.stage.live_baseline_report()
+                if (baseline.get("IR_INSTALL_CHECKPOINT") != "COMPLETE"
+                        or baseline.get("IR_GATEWAY_TLS443") != "PASS"
+                        or baseline.get("IR_PANEL_LOOPBACK") != "PASS"
+                        or baseline.get("IR_ADMIN") != "PRESENT"
+                        or baseline.get("IR_SIGNED_RUNTIME_AND_REPLAY") != "VERIFIED_READ_ONLY"):
+                    deny()
+                self._live_continuity()
+            elif self._new_enrollment() or self._replay_drift():
                 deny()
             if resume_rolled_back:
                 if self._journal_read()["phase"] != "ROLLED_BACK":
@@ -148,7 +285,7 @@ class PanelTransaction:
                 deny()
             if not resume_rolled_back and (self.rehearsal.exists() or self.rehearsal.is_symlink()):
                 deny()
-        except (OSError, ValueError, KeyError, sqlite3.Error,
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error,
                 self.stage_mod.StageHold):
             deny()
         return {
