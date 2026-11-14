@@ -510,9 +510,57 @@ class OfflineRollout(unittest.TestCase):
         self.assertEqual(self._undo()["status"],"ROLLED_BACK_OFFLINE")
         self._assert_originals()
 
+    def test_rollback_review_requires_full_signed_candidate_not_partial_steps(self):
+        # A partially interrupted Compose/SQLite phase is not silently
+        # interpreted as completed just because the schema now exists.
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="SCHEMA")
+        before = {k:self.executor._live(k) for k in trans.CONFIG}
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+        self.assertEqual({k:self.executor._live(k) for k in trans.CONFIG},
+                         before)
+        self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
+
+    def test_rollback_read_only_review_of_complete_rehearsal(self):
+        self._invoke()
+        panel = {name:self.executor._live(name) for name in trans.CONFIG}
+        with patch.object(self.executor, "_replace",
+                          side_effect=AssertionError("review wrote live config")):
+            report = self.executor.review_retained_config_rollback()
+        self.assertEqual(report["status"],
+                         "RETAINED_CONFIG_ROLLBACK_PREFLIGHT_READ_ONLY")
+        self.assertFalse(report["production_rollback_allowed"])
+        self.assertFalse(report["runtime_health_verified"])
+        self.assertFalse(report["database_rewind_allowed"])
+        self.assertFalse(report["replay_rewind_allowed"])
+        self.assertEqual(
+            {name:self.executor._live(name) for name in trans.CONFIG}, panel)
+        self.assertEqual(self._ledger()["phase"], "REHEARSED")
+
+    def test_rollback_read_only_review_refuses_unknown_gateway_edit(self):
+        self._invoke()
+        path = self.root / trans.CONFIG["nginx-backend"]
+        path.write_bytes(b"unreviewed drift")
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+        self.assertEqual(path.read_bytes(), b"unreviewed drift")
+        self.assertEqual(self._ledger()["phase"], "REHEARSED")
+
+    def test_rollback_read_only_review_refuses_invalid_additive_schema(self):
+        self._invoke()
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE smite_foreign_install_origins")
+            db.execute("CREATE TABLE smite_foreign_install_origins("
+                       "node_id TEXT PRIMARY KEY, node_name TEXT)")
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+        self.assertEqual(self._ledger()["phase"], "REHEARSED")
+
     def test_disabled_prod_cli_has_no_apply_or_rollback(self):
         script=(ROOT / "modules" / "smite-unified-panel-transaction.py").read_text()
-        self.assertIn("parser.add_argument(\"--review\"",script)
+        self.assertIn('action.add_argument("--review"',script)
+        self.assertIn('action.add_argument("--review-rollback"',script)
         self.assertNotIn('parser.add_argument("--apply"',script)
         self.assertNotIn('parser.add_argument("--rollback"',script)
         self.assertNotIn("docker compose up",script)
@@ -570,6 +618,73 @@ class LiveHeartbeatContinuity(unittest.TestCase):
         self.assertTrue(self.executor._new_enrollment())
         self.assertTrue(self.executor._replay_drift())
         self.assertEqual(self.panel.status()["state"],"PREPARED_ONLY")
+
+    def test_rollback_preview_accepts_iran_heartbeats_but_never_rewinds(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        original_db = (self.root / fixture.stage.REPLAY_DB_REL)
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE nodes SET last_seen=?, metadata=?",
+                       ("2026-11-14 10:10:00",
+                        '{"role":"iran","provisioning":"signed_checkin",'
+                        '"frp_connected":true,"frp_remote_port":20182}'))
+            db.execute("INSERT INTO smite_node_inbound_nonces "
+                       "VALUES(?,?,?)", ("iran-node-1234", "new-inbound",
+                                        self.unexpired_nonce+30))
+        with sqlite3.connect(original_db) as db:
+            db.execute("INSERT INTO agent_nonces VALUES(?,?,?)",
+                       ("iran-node-1234", "new-outbound",
+                        self.unexpired_nonce+30))
+        before = {name:self.executor._live(name) for name in trans.CONFIG}
+        with patch.object(self.executor, "_replace",
+                          side_effect=AssertionError("preflight wrote config")):
+            verdict = self.executor.review_retained_config_rollback()
+        self.assertEqual(verdict["status"],
+                         "RETAINED_CONFIG_ROLLBACK_PREFLIGHT_READ_ONLY")
+        self.assertFalse(verdict["production_rollback_allowed"])
+        self.assertFalse(verdict["iran_node_recreate_allowed"])
+        self.assertEqual(before,
+                         {name:self.executor._live(name) for name in trans.CONFIG})
+        with sqlite3.connect(original_db) as db:
+            self.assertIn(("iran-node-1234", "new-outbound",
+                           self.unexpired_nonce+30),
+                          db.execute("SELECT * FROM agent_nonces").fetchall())
+        with sqlite3.connect(self.db) as db:
+            self.assertIn(("iran-node-1234", "new-inbound",
+                           self.unexpired_nonce+30),
+                          db.execute("SELECT * FROM smite_node_inbound_nonces").fetchall())
+        # In contrast, fixture ROLLBACK remains intentionally conservative.
+        with self.assertRaises(trans.Hold):
+            self.executor.rollback_rehearsal(confirm=trans.CONFIRM)
+
+    def test_rollback_preview_refuses_new_pending_pairing_code(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_pairing_codes VALUES (?,?,NULL)",
+                       ("unreviewed", "iran-node-1234"))
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+
+    def test_rollback_preview_refuses_foreign_grant_even_if_iran_still_checks_in(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        with sqlite3.connect(self.db) as db:
+            db.execute(
+                "INSERT INTO smite_foreign_install_grants "
+                "(code_hash,node_id,node_name,origin,control_url,issued_by,"
+                "issued_at,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                ("f"*64, "foreign-node-1234", "node-kh",
+                 "https://kh.example.com:443",
+                 "https://kh.example.com:443/smite-node/"+"e"*32,
+                 "admin", 1850000000, 1850007200))
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+
+    def test_rollback_preview_refuses_secret_rotation(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE smite_node_identities "
+                       "SET encrypted_secret='unreviewed' WHERE node_role='iran'")
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
 
     def test_live_inbound_nonce_cannot_be_deleted_before_expiry(self):
         self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
