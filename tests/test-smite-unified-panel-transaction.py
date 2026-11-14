@@ -548,9 +548,10 @@ class OfflineRollout(unittest.TestCase):
         self.assertEqual(self._undo()["status"],"ROLLED_BACK_OFFLINE")
         self._assert_originals()
 
-    def test_rollback_review_requires_full_signed_candidate_not_partial_steps(self):
-        # A partially interrupted Compose/SQLite phase is not silently
-        # interpreted as completed just because the schema now exists.
+    def test_rollback_read_only_review_rejects_unsigned_fixture_even_with_schema(self):
+        # The ordinary offline fixture has metadata='{}', NOT a signed Iran
+        # enrollment. It cannot be mistaken for a production Node merely
+        # because a Compose/SQLite upgrade reached AFTER_SCHEMA.
         with self.assertRaises(trans.Hold):
             self._invoke(fail_after="SCHEMA")
         before = {k:self.executor._live(k) for k in trans.CONFIG}
@@ -811,6 +812,78 @@ class LiveHeartbeatContinuity(unittest.TestCase):
                 confirm=trans.CONFIRM, allow_iran_heartbeat=True)
         self.assertEqual(
             {name:self.executor._live(name) for name in trans.CONFIG}, before)
+
+    def test_rollback_review_accepts_each_ordered_interruption_phase(self):
+        for phase, expected, restore in (
+            ("COMPOSE", "AFTER_COMPOSE", ["panel-compose"]),
+            ("SCHEMA", "AFTER_COMPOSE", ["panel-compose"]),
+            ("ENV", "AFTER_ENV", ["panel-env", "panel-compose"]),
+            ("NGINX", "AFTER_NGINX",
+             ["nginx-backend", "panel-env", "panel-compose"]),
+        ):
+            with self.subTest(phase=phase):
+                # Keep each phase isolated, replaying the existing sealed
+                # stage and additive SQLite transaction in a clean fixture.
+                fixture.Prepare.setUp(self)
+                with sqlite3.connect(self.db) as db:
+                    db.execute("ALTER TABLE nodes ADD COLUMN status TEXT")
+                    db.execute("ALTER TABLE nodes ADD COLUMN last_seen TEXT")
+                    db.execute(
+                        "UPDATE nodes SET metadata=?,status=?,last_seen=?",
+                        ('{"role":"iran","provisioning":"signed_checkin"}',
+                         "active", "2026-11-14 10:00:00"))
+                self.panel.prepare(fixture.stage.CONFIRM)
+                self.executor = trans.PanelTransaction(
+                    self.root, stager=self.panel, fixture_capability=True)
+                with self.assertRaises(trans.Hold):
+                    self.executor.rehearse(
+                        confirm=trans.CONFIRM, fail_after=phase)
+                old_journal = (self.executor.rehearsal / "journal.json").read_bytes()
+                record = {k:self.executor._live(k) for k in trans.CONFIG}
+                status = self.executor.review_retained_config_rollback()
+                self.assertEqual(status["status"],
+                                 "RETAINED_CONFIG_ROLLBACK_PREFLIGHT_READ_ONLY")
+                self.assertEqual(status["recovery_state"], expected)
+                self.assertEqual(status["config_restore_order"], restore)
+                self.assertFalse(status["production_rollback_allowed"])
+                self.assertEqual(old_journal, (
+                    self.executor.rehearsal / "journal.json").read_bytes())
+                self.assertEqual(record, {
+                    k:self.executor._live(k) for k in trans.CONFIG})
+
+    def test_rollback_review_infers_restored_config_after_signed_heartbeat(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self._ordinary_signed_heartbeat_after_upgrade()
+        self.executor.rollback_rehearsal(
+            confirm=trans.CONFIRM, allow_iran_heartbeat=True)
+        result = self.executor.review_retained_config_rollback()
+        self.assertEqual(result["recovery_state"],
+                         "CONFIG_RESTORED_SCHEMA_RETAINED")
+        self.assertEqual(result["config_restore_order"], [])
+        self.assertFalse(result["production_rollback_allowed"])
+
+    def test_rollback_review_refuses_out_of_order_config_mix(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        self.executor._replace(
+            "panel-compose", self.executor._snapshot("panel-compose"))
+        baseline = {k:self.executor._live(k) for k in trans.CONFIG}
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+        self.assertEqual(baseline, {
+            k:self.executor._live(k) for k in trans.CONFIG})
+
+    def test_rollback_review_refuses_missing_schema_after_flags(self):
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE smite_foreign_install_origins")
+            db.execute("DROP TABLE smite_foreign_install_grants")
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+
+    def test_rollback_review_refuses_unmodified_preupgrade_state(self):
+        with self.assertRaises(trans.Hold):
+            self.executor.review_retained_config_rollback()
+        self.assertFalse(self.executor.rehearsal.exists())
 
     def test_rollback_preview_refuses_new_pending_pairing_code(self):
         self.executor.rehearse(confirm=trans.CONFIRM)
