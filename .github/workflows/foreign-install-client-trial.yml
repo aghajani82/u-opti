@@ -22,6 +22,8 @@ on:
       - tests/test-smite-unified-foreign-identity-phase.py
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
+      - modules/smite-unified-trial-registry-pair.json
+      - tests/test-smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
       - modules/smite-install.sh
       - modules/smite-rc6-install-journal.py
@@ -64,6 +66,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Confirm companion checkout is the exact sealed Panel/Node source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY_CHECK_COMPANION'
+          import json, subprocess
+          from pathlib import Path
+          manifest=json.loads(Path('modules/smite-unified-trial-registry-pair.json').read_bytes())
+          expected=manifest['source_commit']
+          observed=subprocess.check_output(
+              ['git', '-C', 'companion-smite', 'rev-parse', 'HEAD'], text=True).strip()
+          if observed != expected:
+              raise SystemExit('HOLD: companion Smite source does not match signed pair')
+          if manifest['release_approved'] is not False or manifest['activation_allowed'] is not False:
+              raise SystemExit('HOLD: unreviewed release flag')
+          print('EXACT_SIGNED_COMPANION_SOURCE=PASS_READ_ONLY')
+          PY_CHECK_COMPANION
+      - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -m pip install -r companion-smite/panel/requirements.txt
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-foreign-packet-intake.py -v
