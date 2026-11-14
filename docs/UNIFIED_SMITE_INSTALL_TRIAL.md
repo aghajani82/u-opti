@@ -16,6 +16,67 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### Continuation checkpoint — signed Iran control preflight and Foreign ACME no-clobber (2026-11-14)
+
+This checkpoint advances two **existing** release prerequisites; it does
+not introduce a new menu, change the Iran/Foreign Node image, bypass the
+signed trial release HOLD, or touch either live server.
+
+**Iran Panel upgrade admission:** `smite-unified-panel-stage.py` now uses
+the already-shipped Smite Node Pairing probes *after* the exact RC7
+Compose/identity, signed runtime, existing admin, HTTP loopback and
+certificate-verified HTTPS/443 checks. The read-only review requires:
+- the existing signed Node's authenticated local HMAC GET and replay-reject
+  test, using the actual paused/active Node runtime;
+- the existing signed check-in receipt for the same recorded Iran Node;
+- the existing Panel → Iran authenticated NodeClient HMAC operation.
+
+No identity, master key, Compose or container is recreated by this
+review. The HMAC GET **normally consumes a replay nonce**, so it is not
+database-write-free; the already-established live nonce continuity logic
+admits only that same Iran Node's ordinary replay transitions. The result
+`IR_SIGNED_TWO_WAY=PASS_EXISTING_SIGNED_CONTROL_PROBES` means *the
+preexisting local control checks passed*, NOT that a Foreign Node exists
+or that Iran↔Foreign `Connected` has been proven. In
+`smite-unified-panel-transaction.py`, **production-root review now
+refuses** the candidate if this evidence is absent, even when basic
+HTTPS and Docker health are good. Fault-injected tests confirm that
+failure of any signed probe is a hard HOLD before any migration writes.
+
+**Foreign Gateway ACME preparation:** before the existing Certificate/
+Nginx setup, the original `smite-foreign-gateway.sh` now renders a
+**complete candidate** for its own managed ACME vhost, validates the
+hostname and webroot syntax, and creates a previously absent site through
+exclusive atomic hard-link publication. A preexisting **exact managed**
+root-owned `0644` site is reused byte-for-byte on retry; an unrelated
+file, symlink, wrong ownership/mode or changed candidate is never
+overwritten. The ACME challenge is a unique non-secret file for each
+attempt, deleted on normal success/failure, and symlinked webroots or
+unsafe Nginx root interpolation are refused. On interruption after an
+ACME vhost has been durably created, the *same* install choice may
+verify/reuse the exact preexisting managed configuration; incomplete
+generated files cannot be adopted. No new certificate is deleted on
+failure, and package installation is not rolled back.
+
+**Tests:** existing `tests/test-smite-unified-panel-stage.py` and
+`tests/test-smite-unified-panel-transaction.py` now require signed
+HMAC/replay evidence, and the new
+`tests/test-smite-foreign-acme-safe.sh` tests exact reuse, conflicting
+site, symlink, interrupted render, failed exclusive publication, failed
+Nginx validation followed by same-option retry, challenge uniqueness and
+malicious paths. This is **CI-only fixture evidence**, NOT a live
+certificate issuance, Panel production upgrade or Foreign activation.
+
+**Open release blockers (unchanged):** an *independently approved* exact
+Panel/Node release; a production-safe transactional Panel-only
+apply/restart/rollback executor with signed post-upgrade proofs and no
+Iran Node recreation; public Foreign option-2 wiring to the reviewed
+Sanaei/Gateway/grant/identity/runtime stages; recovery of any partial
+Foreign signed grant; real two-server `Connected` and FRP/Sanaei
+continuity witnesses. The official option-1 RC7 remains unchanged and
+the public option-2 release guard remains
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+
 ### Continuation checkpoint — Foreign Gateway TLS renewal hook now stage-owned (2026-11-14)
 
 This phase **extends the existing Foreign Nginx Gateway rollback**, not
