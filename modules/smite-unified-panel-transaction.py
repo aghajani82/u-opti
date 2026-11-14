@@ -286,11 +286,15 @@ class PanelTransaction:
                     "PRAGMA table_info(" + table + ")").fetchall()
                 indexes = connection.execute(
                     "PRAGMA index_list(" + table + ")").fetchall()
-                details = [
-                    (row, connection.execute(
-                        "PRAGMA index_xinfo(" + row[1] + ")").fetchall())
-                    for row in indexes
-                ]
+                details = []
+                for row in indexes:
+                    # Names come from the live SQLite schema; never interpret
+                    # arbitrary index names as SQL syntax.
+                    if not isinstance(row[1], str) or not re.fullmatch(
+                            r"[A-Za-z0-9_]{1,128}", row[1]):
+                        deny()
+                    details.append((row, connection.execute(
+                        "PRAGMA index_xinfo(" + row[1] + ")").fetchall()))
                 return columns, details
 
             with closing(sqlite3.connect(":memory:")) as template:
@@ -637,6 +641,10 @@ class PanelTransaction:
             deny()
         journal = self._journal_read()
         rolled_back = journal["phase"] == "ROLLED_BACK"
+        # An interrupted/partial migration with missing uniqueness is not
+        # safe to treat as completed just because its tables are empty.
+        # Verify schema BEFORE restoring even one owned config file.
+        self._tables()
         if self._new_enrollment() or self._replay_drift():
             deny()
         # Refuse to restore any old config if security identities or replay
