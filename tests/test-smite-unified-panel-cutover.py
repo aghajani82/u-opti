@@ -131,8 +131,33 @@ class PanelServiceCutover(unittest.TestCase):
             self.engine.tx._tables(),
             {"smite_foreign_install_grants", "smite_foreign_install_origins"})
         self._untouched()
+        before = list(self.driver.calls)
         self.assertEqual(self._apply()["status"], "ALREADY_REHEARSED")
-        self.assertEqual(len(self.driver.calls), 5)
+        self.assertEqual(self.driver.calls, before + ["health-candidate"])
+        self.assertEqual(self.driver.calls.count("start-candidate"), 1)
+
+    def test_committed_journal_never_substitutes_for_live_panel_health(self):
+        self._apply()
+        self.driver.running = None
+        calls = list(self.driver.calls)
+        with self.assertRaises(AssertionError):
+            self._apply()
+        self.assertEqual(self._journal()["phase"], "COMMITTED")
+        self.assertEqual(self.driver.calls, calls)
+        self.assertNotIn("start-original", self.driver.calls)
+
+    def test_already_rolled_back_requires_original_panel_and_config(self):
+        self._apply()
+        self._rollback()
+        self.driver.running = "candidate"
+        with self.assertRaises(AssertionError):
+            self._rollback()
+        self.driver.running = "original"
+        self.engine.tx._replace(
+            "panel-compose", self.engine.tx._candidate("panel-compose"))
+        with self.assertRaises(cut.Hold):
+            self._rollback()
+        self._untouched()
 
     def test_cutover_and_rollback_keep_additive_schema_and_never_rewind_replay(self):
         self._apply()
