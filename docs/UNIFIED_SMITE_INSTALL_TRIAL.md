@@ -2370,3 +2370,33 @@ Iran Panel upgrade/rollback retaining its existing RC7 Node and DB; bind
 Foreign public option 2 to the existing signed, resumable transaction only
 after that admission; finally prove signed two-way Connected and scoped
 rollback on disposable two-host field tests before release/merge.
+
+## Consolidation checkpoint — compensating failed Foreign ACME issuance (2026-11-14)
+
+Added a **bounded compensation** to the existing Foreign Gateway certificate
+path, without creating an installer, enabling option 2 or changing the Sanaei
+vhost. The same `smite_foreign_gateway_prepare_acme` records whether THIS
+invocation exclusively published a new complete ACME include. If ACME
+preflight, certificate issuance or post-issue certificate proof fails, the
+certificate caller may remove only THAT new include, after exact generated
+content, 0644 mode, owner, hard-link count and parent ownership are checked.
+Nginx syntax and reload are reverified after deletion. Any drift or failed
+compensation reports CRITICAL, never silently deletes an independently
+retained include or reports success. An exact include from a prior attempt
+is reused and retained on this invocation's failure. The certificate data,
+renewal hooks, FRP, Backhaul, existing Node and shared Sanaei sites are
+never rolled back by this helper.
+
+This compensates normal command failures **only**. SIGKILL may leave a
+fully rendered ACME include; the next attempt checks exact ownership and
+resumes. It does **not** prove complete host-wide transaction rollback.
+
+- `bafe7eefdca8c8e51c3dfefb7d0f84448d27b5f8`: code change.
+- `87ac766818302fee17731ff7185496884de4bd05`: isolated fault
+  injections for Certbot failure after a new include, failed retry after
+  an already-managed include, Nginx failure after new publication and drifted
+  include compensation HOLD.
+- CI for tested code commit: https://github.com/aghajani82/u-opti/actions/runs/43612119569
+- The public Foreign option 2 still exits `HOLD_BEFORE_HOST_CHANGES` and
+  the immutable signed trial still has `activation_allowed:false`.
+
