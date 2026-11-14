@@ -238,9 +238,15 @@ class Cutover:
                     "panel-compose", self.tx._candidate("panel-compose"))
         elif step == "STOP":
             self.driver.stop_panel()  # NO smite-node actions
+            self.driver.require_panel_stopped()
         elif step == "SCHEMA":
+            # Real execution will use the pinned new Panel image's existing
+            # migration command; the disposable driver delegates only to
+            # the pre-existing fixture migration implementation. NEVER run
+            # it while the old Panel process can write SQLite concurrently.
+            self.driver.require_panel_stopped()
             if not self.tx._tables():
-                self.tx._schema_rehearsal()
+                self.driver.migrate_schema(self.tx._schema_rehearsal)
             if self.tx._tables() != {"smite_foreign_install_grants",
                                     "smite_foreign_install_origins"}:
                 deny()
@@ -312,6 +318,7 @@ class Cutover:
             self._write(doc)
             # Stop ONLY Panel. Each action is idempotent after a crash.
             self.driver.stop_panel()
+            self.driver.require_panel_stopped()
             if fail_after == "STOP":
                 raise Hold("Injected disposal-only rollback interruption")
             self._prewrite("BEFORE_ROLLBACK", rollback=True)
