@@ -214,6 +214,76 @@ class OperatorPacketIntake(unittest.TestCase):
             with self.assertRaises(module.Hold): self._renewed()
         self.assertEqual(self.file.read_bytes(), original)
 
+    def test_renewed_grant_is_adopted_by_existing_host_recovery_without_reinstall(self):
+        self.operator_paste()
+        journal = self._owned_host_checkpoint()
+        self.assertEqual(self._renewed()["status"], "RENEWED_PRIVATE")
+        spec = importlib.util.spec_from_file_location(
+            "uopti_packet_renew_host_recovery",
+            ROOT / "modules/smite-unified-foreign-host-recovery.py")
+        host = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = host
+        spec.loader.exec_module(host)
+        calls = []
+        def only_verify(label, result):
+            def probe(_scope):
+                calls.append(label)
+                return result
+            return probe
+        def forbidden(_scope):
+            self.fail("A renewed grant must not reinstall an existing stage")
+        result = host.rehearse(
+            directory=self.stage, packet_path=self.file,
+            now=self.now+7200,
+            expected_panel="https://panel.example.com:443",
+            expected_foreign="https://kh.example.com:443",
+            expected_node="node-kh",
+            verify_core=only_verify("core", True),
+            verify_sanaei=only_verify("sanaei", "READY"),
+            verify_gateway=only_verify("gateway", "READY"),
+            install_sanaei=forbidden, install_gateway=forbidden,
+            disposable_capability=True)
+        self.assertEqual(result["phase"], "GATEWAY_443_VERIFIED")
+        self.assertFalse(result["connected"])
+        self.assertGreaterEqual(calls.count("core"), 2)
+        self.assertEqual(json.loads(journal.read_text())["expires_at"],
+                         self.now+14400)
+        self.assertEqual(json.loads(journal.read_text())["packet_sha256"],
+                         hashlib.sha256(self.file.read_bytes()).hexdigest())
+
+    def test_selected_hidden_pty_renewal_keeps_echo_off_and_checkpoint(self):
+        self.operator_paste()
+        checkpoint = self._owned_host_checkpoint()
+        original = checkpoint.read_bytes()
+        renewed = {**self.grant,
+                   "installation_code":"smi1_"+"c"*43,
+                   "expires_at":self.now+14400}
+        master, slave = pty.openpty()
+        initial = termios.tcgetattr(slave)
+        try:
+            with os.fdopen(os.dup(slave), "r", encoding="utf-8",
+                           newline="") as tty:
+                def paste():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master,
+                             (json.dumps(renewed)+"\\n\\n").encode("utf-8"))
+                result = module.capture_selected_hidden_tty(
+                    tty, target=self.file, now=self.now+7200,
+                    confirm_scope=lambda s: s["node_id"] == self.grant["node_id"],
+                    ready=paste)
+            self.assertEqual(result["status"], "RENEWED_PRIVATE")
+            self.assertFalse(result["connected"])
+            self.assertEqual(checkpoint.read_bytes(), original)
+            self.assertEqual(termios.tcgetattr(slave), initial)
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                reflected = os.read(master, 8192)
+                self.assertNotIn(renewed["installation_code"].encode(), reflected)
+        finally:
+            self.assertEqual(termios.tcgetattr(slave), initial)
+            os.close(master)
+            os.close(slave)
+
     def test_expired_or_not_yet_issued_code_refused_before_write(self):
         for stamp in (self.now-1, self.now, self.now+7201):
             with self.subTest(stamp=stamp),self.assertRaises(module.Hold):
