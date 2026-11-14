@@ -37,6 +37,7 @@ on:
       - tests/test-smite-unified-sanaei-continuation.sh
       - modules/smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-transaction.py
+      - tests/test-smite-unified-panel-docker.sh
       - tests/test-smite-unified-panel-stage.py
       - tests/test-smite-unified-trial-pair-admission.py
       - modules/smite-foreign-install-promotion.py
@@ -48,6 +49,7 @@ on:
       - .github/workflows/foreign-install-client-trial.yml
 permissions:
   contents: read
+  packages: read
 jobs:
   staged-client-and-panel-contract:
     runs-on: ubuntu-24.04
@@ -103,3 +105,35 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nginx openssl
       - name: Exercise exact HTTPS POST admission and forged-header denial
         run: python -B tests/test-smite-foreign-install-real-nginx.py -v
+
+  panel-compose-upgrade:
+    if: github.repository == 'aghajani82/u-opti' && github.event_name == 'push' && github.ref == 'refs/heads/trial/unified-smite-install'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Verify published RC7 and trial image signatures
+        run: |
+          set -euo pipefail
+          python3 -B modules/smite-registry-pair-admission.py \
+            --manifest modules/smite-rc7-registry-pair.json \
+            --manifest-sha256 58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e \
+            --source-sha 9a1270b31e8d44f13d09b71ab6b9798410b09c12 \
+            --publish-ref refs/tags/v2.0.0-rc.7
+          python3 -B modules/smite-unified-trial-pair-admission.py \
+            --manifest modules/smite-unified-trial-registry-pair.json \
+            --manifest-sha256 61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84 \
+            --source-sha de0677d015a00160970ed57bba565adc4fafe8eb \
+            --trusted-root modules/smite-rc7-sigstore-trusted-root.json
+      - name: Exercise retained Panel migration and rollback with real Compose
+        run: bash tests/test-smite-unified-panel-docker.sh
