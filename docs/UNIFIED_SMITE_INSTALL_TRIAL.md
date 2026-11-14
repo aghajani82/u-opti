@@ -16,6 +16,52 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### Continuation checkpoint — Foreign Gateway TLS renewal hook now stage-owned (2026-11-14)
+
+This phase **extends the existing Foreign Nginx Gateway rollback**, not
+Iran's already-tested rollbacks and not a new certificate manager.
+
+The selected one-choice Gateway stage previously backed up the managed
+Nginx site and enabled symlink, but wrote the **shared Let's Encrypt
+renewal hook** outside that stage snapshot. A failure at the subsequent
+durable receipt write could thus report successful rollback of the site
+while leaving the hook changed. A SIGKILL during the original in-place
+hook write could also leave a truncated shell script.
+
+The original `smite-foreign-gateway.sh` now:
+- Includes the preexisting hook (or an explicit absent marker) and exact
+  managed hook candidate in the **same private, fsynced**
+  `foreign-gateway.pending` staging area as the site and enabled link.
+- Before starting the selected Gateway write, refuses a custom/unknown or
+  symlinked **shared** renewal script instead of overwriting another
+  service's configuration.
+- On an inline error or interrupted-stage retry, verifies that the hook
+  has not changed independently, restores the original hook state along
+  with Nginx site and enabled link, and retains the pending stage if any
+  compensation fails. No later step is marked complete prematurely.
+- Atomically writes the canonical renewal hook through a temporary file
+  with fsync and same-directory rename; a process crash can therefore
+  leave only the old file or the complete managed candidate, not a
+  partially truncated hook.
+- Never rekeys/recreates the already-pinned paused Foreign Node through
+  this renewal-hook fix; does not touch FRP or Backhaul.
+
+Regression tests were added to the existing
+`tests/test-smite-unified-gateway-menu-boundary.sh` to inject:
+failure after writing the hook, failure while writing the gateway receipt,
+crash after hook write before receipt, retry via the same selected Gateway,
+unknown external hook, independently modified hook after crash, existing
+canonical hook retention, failed atomic rename and symlink refusal.
+The existing full U-OPTI CI suite must be green at the actual branch HEAD
+before considering this checkpoint verified.
+
+**Still OUTSIDE this exact transaction:** package installation and initial
+Let's Encrypt ACME bootstrap can occur *before* the managed vhost stage
+snapshot; certificate artifacts may remain safely reusable after failure.
+No claim is made that the entire Foreign one-choice install is production
+ready. Production Panel upgrade, signed release admission, final option-2
+identity/activation wiring and real two-way Connected remain HOLD.
+
 ### Continuation checkpoint — Foreign step-scoped compensation and same-option resume (2026-11-14)
 
 The established Iran core/Gateway/Pairing/Admin rollback path is **not rebuilt**.
