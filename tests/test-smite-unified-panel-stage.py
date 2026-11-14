@@ -257,7 +257,12 @@ class Prepare(unittest.TestCase):
         journal = SimpleNamespace(ir_admin_present=lambda: True)
         journal_module = SimpleNamespace(Hold=RuntimeError, VERSION="2.0.0-rc.7")
         run = unittest.mock.Mock(return_value="200")
-        pairing = SimpleNamespace(_run=run, WizardHold=RuntimeError)
+        pairing = SimpleNamespace(
+            _run=run, WizardHold=RuntimeError,
+            _local_signed_replay_probe=unittest.mock.Mock(),
+            _wait_panel_signed_checkin=unittest.mock.Mock(),
+            _panel_to_ir_signed_probe=unittest.mock.Mock(),
+        )
         ref = self.root / stage.INSTALL_REF_REL
         ref.parent.mkdir(parents=True)
         ref.write_text("trial/unified-smite-install\n")
@@ -268,7 +273,13 @@ class Prepare(unittest.TestCase):
                              if name == "smite-node-pairing" else load_module(name)):
             report = self.panel.live_baseline_report()
             self.assertEqual(report["IR_INSTALL_SOURCE_ON_HOST"], "UNKNOWN")
-            self.assertEqual(report["IR_SIGNED_TWO_WAY"], "NOT_CHECKED")
+            self.assertEqual(report["IR_SIGNED_TWO_WAY"],
+                             "PASS_EXISTING_SIGNED_CONTROL_PROBES")
+            pairing._local_signed_replay_probe.assert_called_once_with()
+            pairing._wait_panel_signed_checkin.assert_called_once_with(
+                "iran-node-1234", timeout=6)
+            pairing._panel_to_ir_signed_probe.assert_called_once_with(
+                "iran-node-1234")
             loopback, https = [call.args[0] for call in run.call_args_list]
             self.assertEqual(loopback[-1], "http://127.0.0.1:8000/api/status")
             self.assertEqual(https[-3:], ["--resolve", "panel.example.com:443:127.0.0.1",
@@ -277,8 +288,20 @@ class Prepare(unittest.TestCase):
             ref.write_text("c" * 40 + "\n")
             self.assertEqual(self.panel.live_baseline_report()["IR_INSTALL_SOURCE_ON_HOST"], "c" * 40)
             run.return_value = "302"
+            pairing._local_signed_replay_probe.reset_mock()
             with self.assertRaises(stage.StageHold):
                 self.panel.live_baseline_report()
+            pairing._local_signed_replay_probe.assert_not_called()
+            run.return_value = "200"
+            for failing in (
+                pairing._local_signed_replay_probe,
+                pairing._wait_panel_signed_checkin,
+                pairing._panel_to_ir_signed_probe,
+            ):
+                failing.side_effect = RuntimeError("signed control unavailable")
+                with self.assertRaises(stage.StageHold):
+                    self.panel.live_baseline_report()
+                failing.side_effect = None
         self.assertFalse(self.panel.staging.exists())
         self.assert_untouched()
 
