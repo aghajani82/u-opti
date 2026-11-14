@@ -178,6 +178,48 @@ MODE=post_wrong_runtime_id; run 2 signed,paused,compose,sanaei,gateway
 MODE=post_bad_paused; run 2 signed,paused,compose,sanaei,gateway,paused
 MODE=post_bad_compose; run 2 signed,paused,compose,sanaei,gateway,paused,compose
 
+# Retry a completed Gateway in place to preserve the selected vhost.
+smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/foreign-site"; }
+smite_foreign_gateway_verify_local() {
+    calls+=(retained_tls)
+    [ "$MODE" != drifted_tls ]
+}
+smite_foreign_gateway_recreate_node() {
+    calls+=(retained_node)
+    [ "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" = "$PACKET" ]
+}
+MODE=ok
+run 0 signed,paused,compose,sanaei,gateway,paused,compose
+calls=()
+smite_install_unified_foreign_after_core "$PACKET" > "$TMP/retained"
+grep -qx 'UNIFIED_FOREIGN_GATEWAY=VERIFIED_RETAINED' "$TMP/retained"
+[ "$(IFS=,; echo "${calls[*]}")" = signed,paused,compose,sanaei,retained_tls,retained_node,paused,compose ]
+MODE=drifted_tls
+calls=()
+status=0
+smite_install_unified_foreign_after_core "$PACKET" > "$TMP/drifted" 2>&1 || status=$?
+[ "$status" = 2 ]
+[ "$(IFS=,; echo "${calls[*]}")" = signed,paused,compose,sanaei,retained_tls ]
+! grep -q 'PREPARED_FOR_SIGNED_ENROLLMENT' "$TMP/drifted"
+# A long Sanaei setup can exhaust the two-hour grant before Gateway changes.
+(
+    MODE=ok
+    smite_install_unified_foreign_sanaei() {
+        calls+=(sanaei)
+        python3 - "$PACKET" <<'PY_EXPIRE'
+import json, sys, time
+from pathlib import Path
+path = Path(sys.argv[1])
+packet = json.loads(path.read_text())
+packet['expires_at'] = int(time.time()) - 1
+path.write_text(json.dumps(packet))
+PY_EXPIRE
+    }
+    cp -p "$PACKET" "$TMP/packet-before-expiry"
+    run 2 signed,paused,compose,sanaei
+    grep -q 'Foreign installation code expired' "$TMP/output"
+    mv "$TMP/packet-before-expiry" "$PACKET"
+)
 MODE=ok
 SMITE_SELECTED_FRESH=0
 run 2 ""
@@ -365,4 +407,4 @@ PY
     ! grep -q 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED' "$TMP/release-hold"
     ! grep -q 'smi1_B' "$TMP/release-hold"
 )
-echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (21 scenarios)'
+echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'

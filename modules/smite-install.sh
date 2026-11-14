@@ -2272,7 +2272,8 @@ smite_install_unified_foreign_node_image_review() {
 # from the Panel-issued install instructions, never passed as a secret argv.
 # No installed/connected success message is emitted here.
 smite_install_unified_foreign_after_core() {
-    local packet="$1" helper_dir admitted="" recorded=""
+    local packet="$1" helper_dir admitted="" recorded="" domain site
+    local gateway_state="$SMITE_STATE_DIR/foreign-gateway.env"
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
        [ ! -f "$SMITE_STATE_FILE" ] || [ -L "$SMITE_STATE_FILE" ] ||
@@ -2289,7 +2290,9 @@ smite_install_unified_foreign_after_core() {
     [ -f "$helper_dir/smite-unified-foreign-gateway-plan.py" ] &&
     [ ! -L "$helper_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
     for required in smite_foreign_gateway_configure \
-        smite_foreign_gateway_require_rc_paused smite_foreign_gateway_rc7_compose; do
+        smite_foreign_gateway_require_rc_paused smite_foreign_gateway_rc7_compose \
+        smite_foreign_gateway_domain smite_foreign_gateway_site_path \
+        smite_foreign_gateway_verify_local smite_foreign_gateway_recreate_node; do
         declare -F "$required" >/dev/null 2>&1 || {
             echo 'HOLD: Existing signed Foreign Gateway or Compose helper unavailable.' >&2
             return 2
@@ -2312,7 +2315,7 @@ smite_install_unified_foreign_after_core() {
     admitted="$(python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
         --packet-file "$packet" \
         --state-file "$SMITE_STATE_FILE" \
-        --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env")" || {
+        --gateway-state-file "$gateway_state")" || {
         echo 'HOLD: Foreign installation packet is not bound to this fresh Node.' >&2
         return 2
     }
@@ -2324,19 +2327,42 @@ smite_install_unified_foreign_after_core() {
         echo 'HOLD: Sanaei and Node inventory were not both verified.' >&2
         return 2
     }
-    UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet"       smite_foreign_gateway_configure || {
-        echo 'HOLD: Foreign SSL/443 Gateway incomplete; retain reviewed state.' >&2
-        return 2
-    }
+    # Select the shared Sanaei vhost after attaching inventory. An already
+    # committed Gateway is verified in place on retry.
+    domain="$(smite_foreign_gateway_domain)" || return 2
+    smite_foreign_gateway_validate_domain "$domain" || return 2
+    site="$(smite_foreign_gateway_site_path "$domain")" || return 2
+    if [ -e "$gateway_state" ] || [ -L "$gateway_state" ]; then
+        python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$packet" --state-file "$SMITE_STATE_FILE" \
+            --gateway-state-file "$gateway_state" --site-file "$site" >/dev/null &&
+        smite_foreign_gateway_verify_local "$domain" "$admitted" &&
+        UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet" smite_foreign_gateway_recreate_node || {
+            echo 'HOLD: Retained Foreign Gateway failed verification.' >&2
+            return 2
+        }
+        echo 'UNIFIED_FOREIGN_GATEWAY=VERIFIED_RETAINED'
+    else
+        # Sanaei may have taken most of the grant lifetime. Check it
+        # again immediately before the first Gateway write.
+        python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$packet" --precore-fields >/dev/null || {
+            echo 'HOLD: Foreign installation code expired; issue a new code for the same Node.' >&2
+            return 2
+        }
+        UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet" smite_foreign_gateway_configure || {
+            echo 'HOLD: Foreign SSL/443 Gateway incomplete; retain reviewed state.' >&2
+            return 2
+        }
+    fi
     # Do not declare Gateway readiness unless the persisted control path
     # still matches the exact Panel issue; this never exposes the raw code.
-    recorded="$(smite_foreign_gateway_state_value         SMITE_FOREIGN_CONTROL_PATH "$SMITE_STATE_DIR/foreign-gateway.env")" || return 2
+    recorded="$(smite_foreign_gateway_state_value SMITE_FOREIGN_CONTROL_PATH "$gateway_state")" || return 2
     [ "$recorded" = "$admitted" ] || {
         echo 'HOLD: Foreign Gateway path differs from the Panel-issued grant.' >&2
         return 2
     }
-    # The existing Gateway may recreate the paused Node to apply its
-    # control address. Never advance from this phase based on an old
+    # Never advance from this phase based on an old
     # pre-Gateway image/Compose check or a successful Nginx reload alone.
     # Reuse the SAME signed-image, paused and Compose checks already
     # performed before installing Sanaei/Gateway; no extra installer.
@@ -2350,6 +2376,11 @@ smite_install_unified_foreign_after_core() {
     }
     smite_foreign_gateway_rc7_compose config --quiet || {
         echo 'HOLD: Foreign Node Compose ownership changed during Gateway setup.' >&2
+        return 2
+    }
+    python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" --precore-fields >/dev/null || {
+        echo 'HOLD: Foreign installation code expired; issue a new code for the same Node.' >&2
         return 2
     }
     echo 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED_FOR_SIGNED_ENROLLMENT'
