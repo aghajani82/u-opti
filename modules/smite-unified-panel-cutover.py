@@ -360,8 +360,24 @@ class Cutover:
         """Only public interface: inspect the sealed stage; do NOT execute."""
         self.stage.status()
         if self.root == Path("/"):
-            self.stage._signed_pair()  # verified trial, NOT deployment permit
-            return {"status": "READ_ONLY_RELEASE_HOLD", "production": False}
+            # Even the root read-only CLI must validate the same fixed
+            # Docker/Compose project and signed-control overlay as the
+            # service driver, AND independently verify both Cosign digests.
+            # These facts never convert a trial into a release approval.
+            driver_module = module(
+                "smite-unified-panel-host-driver.py",
+                "cutover_panel_fixed_driver")
+            checked = driver_module.PanelServiceDriver(
+                stage=self.stage).review_plan()
+            if (checked.get("state") != "FIXED_COMMAND_PLAN_ONLY"
+                    or checked.get("panel_service") != "smite-panel"
+                    or checked.get("node_recreate_allowed") is not False
+                    or checked.get("prod_apply_allowed") is not False
+                    or checked.get("prod_rollback_allowed") is not False):
+                deny()
+            return {"status": "READ_ONLY_RELEASE_HOLD",
+                    "driver": "FIXED_COMMAND_PLAN_VERIFIED",
+                    "production": False}
         doc = self._state()
         return {"status": "READ_ONLY_DISPOSABLE_REVIEW",
                 "phase": None if doc is None else doc["phase"],
