@@ -49,6 +49,7 @@ class DockerCommandModel:
         self.calls = []
         self.fail = None
         self.health = "healthy"
+        self.serve_status = True
 
     def _image_id(self, image):
         return "sha256:" + ("a" if image == self.old else "b")*64
@@ -106,6 +107,19 @@ class DockerCommandModel:
                 self.current = self.new if self.new in source else self.old
                 self.running = True
                 self.created += 1
+            elif rest in (
+                ["exec", "-T", "smite-panel", "python3", "-c",
+                 driver_mod.STATUS_PROBE, version]
+                for version in driver_mod.PANEL_VERSIONS.values()
+            ):
+                expected_version = (
+                    driver_mod.PANEL_VERSIONS["candidate"] if
+                    self.current == self.new else
+                    driver_mod.PANEL_VERSIONS["original"])
+                if (not self.running or not self.serve_status
+                        or rest[-1] != expected_version):
+                    return SimpleNamespace(
+                        returncode=4, stdout="", stderr="health endpoint unavailable")
             elif rest == [
                 "run", "--rm", "--no-deps", "-T", "--pull", "never",
                 "smite-panel", *driver_mod.MIGRATION,
@@ -245,6 +259,29 @@ class FixedCommandDriverTests(unittest.TestCase):
         self.assertFalse(self.model.calls)
         with self.assertRaises(driver_mod.Hold):
             self.driver.start_panel("smite-node")
+        self.assertFalse(self.model.calls)
+
+    def test_http_status_and_version_are_required_after_image_and_docker_health(self):
+        self.model.serve_status = False
+        with self.assertRaises(driver_mod.Hold):
+            self.driver.verify_panel("original")
+        self.assertTrue(any(
+            "exec" in call and driver_mod.STATUS_PROBE in call
+            for call in self.model.calls))
+        self.model.serve_status = True
+        self.driver.verify_panel("original")
+        self.assertEqual(self.model.calls[-1][-1],
+                         driver_mod.PANEL_VERSIONS["original"])
+        self.assertIn("/api/status", driver_mod.STATUS_PROBE)
+        self.assertIn("/version", driver_mod.STATUS_PROBE)
+
+    def test_http_probe_cannot_be_replaced_with_unverified_command(self):
+        other = [*self.driver._command(),
+                 "exec", "-T", "smite-panel",
+                 "python3", "-c", "print('skip signed health')",
+                 "2.0.0-rc.7"]
+        with self.assertRaises(driver_mod.Hold):
+            self.driver._run(other)
         self.assertFalse(self.model.calls)
 
     def test_model_denies_process_not_stopped_before_migration(self):
