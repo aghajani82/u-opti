@@ -362,6 +362,12 @@ smite_foreign_gateway_prepare_acme() {
             rm -f -- "$candidate" || true
             return 1
         fi
+        # Bash dynamic scope: only the certificate transaction that called
+        # this helper may compensate its OWN newly published ACME include.
+        # Reusing a previously managed include must never authorize deletion.
+        if [ "${acme_newly_published+x}" ]; then
+            acme_newly_published=1
+        fi
 
     fi
     rm -f -- "$candidate" || return 1
@@ -395,18 +401,56 @@ smite_foreign_gateway_prepare_acme() {
     echo "ERROR: Local ACME webroot validation failed."
     return 1
 }
+# Compensate only an ACME include exclusively CREATED by this certificate
+# attempt. On interruption a complete include can be reused by option 2;
+# do not infer ownership merely from matching bytes on a later invocation.
+smite_foreign_gateway_rollback_new_acme() {
+    local domain="$1" acme_conf parent
+    smite_foreign_gateway_validate_domain "$domain" || return 2
+    acme_conf="$(smite_foreign_gateway_acme_conf_path "$domain")" || return 2
+    parent="$(dirname -- "$acme_conf")" || return 2
+    [ -d "$parent" ] && [ ! -L "$parent" ] &&
+    [ "$(stat -c %u "$parent" 2>/dev/null)" = "$EUID" ] &&
+    [ -f "$acme_conf" ] && [ ! -L "$acme_conf" ] &&
+    [ "$(stat -c '%u:%a:%h' "$acme_conf" 2>/dev/null)" = "${EUID}:644:1" ] &&
+    smite_foreign_gateway_render_acme "$domain" | cmp -s - "$acme_conf" || {
+        echo 'CRITICAL: ACME include drifted; retain evidence for reviewed recovery.' >&2
+        return 2
+    }
+    # Never remove an unrelated include, the existing Sanaei vhost, TLS
+    # renewal hook, or an older ACME include adopted by a retry.
+    rm -- "$acme_conf" && sync -f "$parent" &&
+    nginx -t && systemctl reload nginx || {
+        echo 'CRITICAL: ACME compensation incomplete; review Nginx state.' >&2
+        return 2
+    }
+    echo 'FOREIGN_ACME=ROLLED_BACK_CURRENT_ATTEMPT'
+}
+
 smite_foreign_gateway_ensure_certificate() {
     local domain="$1" cert_dir="/etc/letsencrypt/live/$1"
+    local acme_newly_published=0
     if [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
         echo "Certificate: existing certificate will be used."
         return 0
     fi
 
-    smite_foreign_gateway_prepare_acme "$domain" || return 1
+    if ! smite_foreign_gateway_prepare_acme "$domain"; then
+        if [ "$acme_newly_published" = 1 ]; then
+            smite_foreign_gateway_rollback_new_acme "$domain" || return 2
+        fi
+        return 1
+    fi
     echo "Requesting Let's Encrypt certificate for $domain ..."
-    certbot certonly --webroot -w "$SMITE_FOREIGN_ACME_ROOT" --non-interactive --agree-tos \
-        --register-unsafely-without-email --cert-name "$domain" -d "$domain" || return 1
-    [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]
+    if certbot certonly --webroot -w "$SMITE_FOREIGN_ACME_ROOT" --non-interactive --agree-tos \
+        --register-unsafely-without-email --cert-name "$domain" -d "$domain" &&
+       [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
+        return 0
+    fi
+    if [ "$acme_newly_published" = 1 ]; then
+        smite_foreign_gateway_rollback_new_acme "$domain" || return 2
+    fi
+    return 1
 }
 
 smite_foreign_gateway_render_renew_hook() {
