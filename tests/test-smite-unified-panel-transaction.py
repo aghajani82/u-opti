@@ -197,6 +197,49 @@ class OfflineRollout(unittest.TestCase):
         with sqlite3.connect(self.db) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM smite_foreign_install_grants").fetchone()[0],0)
 
+    def test_interrupted_schema_missing_unique_blocks_resume_and_rollback(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="SCHEMA")
+        baseline = {name:self.executor._live(name) for name in trans.CONFIG}
+        # The exact Smite migration MUST retain the origin/grant binding's
+        # UNIQUE constraint; SELECT ... LIMIT 0 alone cannot detect loss.
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE smite_foreign_install_origins")
+            db.execute("""CREATE TABLE smite_foreign_install_origins (
+                node_id TEXT PRIMARY KEY, node_name TEXT NOT NULL,
+                origin TEXT NOT NULL, control_url TEXT NOT NULL,
+                grant_hash TEXT NOT NULL, approved_at INTEGER NOT NULL)""")
+        with self.assertRaises(trans.Hold):
+            self._invoke()
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
+        for name, expected in baseline.items():
+            self.assertEqual(self.executor._live(name), expected)
+
+    def test_interrupted_schema_extra_index_blocks_resume(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="SCHEMA")
+        with sqlite3.connect(self.db) as db:
+            db.execute("CREATE INDEX unreviewed_grant_index "
+                       "ON smite_foreign_install_grants(node_id)")
+        with self.assertRaises(trans.Hold):
+            self._invoke()
+        with self.assertRaises(trans.Hold):
+            self._undo()
+        self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
+
+    def test_interrupted_partial_schema_blocks_resume_before_config_update(self):
+        with self.assertRaises(trans.Hold):
+            self._invoke(fail_after="SCHEMA")
+        with sqlite3.connect(self.db) as db:
+            db.execute("DROP TABLE smite_foreign_install_origins")
+        with patch.object(self.executor, "_replace",
+                          side_effect=AssertionError("unexpected config write")):
+            with self.assertRaises(trans.Hold):
+                self._invoke()
+        self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
+
     def test_interrupted_after_flags_restores_two_flags_without_key_rotation(self):
         with self.assertRaises(trans.Hold):self._invoke(fail_after="ENV")
         self.assertEqual(self._ledger()["phase"],"AFTER_ENV")
@@ -471,6 +514,16 @@ class LiveHeartbeatContinuity(unittest.TestCase):
                        ("unexpired-inbound",))
         with self.assertRaises(trans.Hold):
             self.check()
+
+    def test_nonce_at_exact_expiry_still_blocks_early_deletion(self):
+        # Both pinned Smite replay stores prune only when expires_at < now;
+        # equality must remain replay-protected.
+        with sqlite3.connect(self.db) as db:
+            db.execute("DELETE FROM smite_node_inbound_nonces WHERE nonce=?",
+                       ("unexpired-inbound",))
+        with patch.object(trans.time, "time", return_value=self.unexpired_nonce):
+            with self.assertRaises(trans.Hold):
+                self.check()
 
     def test_live_replay_nonce_cannot_be_deleted_before_expiry(self):
         self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
