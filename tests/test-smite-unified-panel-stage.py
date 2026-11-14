@@ -479,6 +479,38 @@ class Prepare(unittest.TestCase):
             self.panel.status()
         self.assert_untouched()
 
+    def test_staging_journal_duplicate_nested_or_unreviewed_fields_hold(self):
+        self.stage()
+        journal = self.panel.staging / "journal.json"
+        original = journal.read_bytes()
+        variants = (
+            original.rstrip().removesuffix(b"}") +
+                b',"source_sha":"0000000000000000000000000000000000000000"}\n',
+            original.replace(b'"snapshots":{',
+                             b'"snapshots":{"before-panel-env":"0",'),
+            original.rstrip().removesuffix(b"}") +
+                b',"production_apply":true}\n',
+            original.replace(b'"candidates":{',b'"candidates":[],"unused":{'),
+        )
+        for forged in variants:
+            with self.subTest(forged=forged[:48]):
+                journal.write_bytes(forged)
+                with self.assertRaises((stage.StageHold, ValueError, TypeError)):
+                    self.panel.status()
+                self.assert_untouched()
+        journal.write_bytes(original)
+        self.assertEqual(self.panel.status()["state"], "PREPARED_ONLY")
+
+    def test_staging_journal_invalid_digest_type_holds_cleanly(self):
+        self.stage()
+        journal = self.panel.staging / "journal.json"
+        saved = json.loads(journal.read_text())
+        saved["candidates"]["candidate-panel-env"] = None
+        journal.write_text(json.dumps(saved))
+        with self.assertRaises(stage.StageHold):
+            self.panel.status()
+        self.assert_untouched()
+
     def test_extra_state_or_sqlite_wal_sidecar_halts_status(self):
         self.stage()
         sidecar=self.panel.staging/"panel-db.sqlite3-wal"
