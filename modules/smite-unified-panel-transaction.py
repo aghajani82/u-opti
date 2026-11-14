@@ -27,7 +27,7 @@ import time
 STAGE_MODULE = "smite-unified-panel-stage"
 REHEARSAL_REL = "var/lib/u-opti/unified-panel-trial-rehearsal"
 CONFIRM = "REHEARSE-UNIFIED-PANEL-ON-DISPOSABLE-ROOT"
-SOURCE_SHA = "0f03ad84a3ad57d89b99bbfb8e3af898de77f677"
+SOURCE_SHA = "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
 CONFIG = {
     "panel-compose": "opt/smite/docker-compose.yml",
     "panel-env": "opt/smite/.env",

@@ -35,7 +35,7 @@ DENIED_ENV = (
 ALLOWED_STATES = ("candidate", "original")
 PANEL_VERSIONS = {
     "original": "2.0.0-rc.7",
-    "candidate": "2.0.0-unified-install-trial",
+    "candidate": "2.0.0-rc.9",
 }
 # This is the same local HTTP/status/version readiness contract already
 # exercised by the disposable real Docker Compose upgrade job.

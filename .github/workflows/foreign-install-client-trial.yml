@@ -23,6 +23,7 @@ on:
       - tests/test-smite-unified-foreign-identity-phase.py
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
+      - modules/smite-registry-pair-admission.py
       - modules/smite-unified-trial-registry-pair.json
       - tests/test-smite-unified-trial-pair-admission.py
       - modules/smite-unified-panel-stage.py
@@ -67,7 +68,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aghajani82/Smite
-          ref: 0f03ad84a3ad57d89b99bbfb8e3af898de77f677
+          ref: e7f76185e9a7da51d7069d5d0a829dc192cc1e06
           path: companion-smite
       - uses: actions/setup-python@v5
         with:
@@ -152,7 +153,7 @@ jobs:
       - uses: sigstore/cosign-installer@v4.1.0
         with:
           cosign-release: 'v3.0.6'
-      - name: Verify published RC7 and trial image signatures
+      - name: Verify published RC7 baseline and RC9 candidate signatures
         run: |
           set -euo pipefail
           python3 -B modules/smite-registry-pair-admission.py \
@@ -162,8 +163,8 @@ jobs:
             --publish-ref refs/tags/v2.0.0-rc.7
           python3 -B modules/smite-unified-trial-pair-admission.py \
             --manifest modules/smite-unified-trial-registry-pair.json \
-            --manifest-sha256 1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0 \
-            --source-sha 0f03ad84a3ad57d89b99bbfb8e3af898de77f677 \
+            --manifest-sha256 f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60 \
+            --source-sha e7f76185e9a7da51d7069d5d0a829dc192cc1e06 \
             --trusted-root modules/smite-rc7-sigstore-trusted-root.json
       - name: Exercise retained Panel migration and rollback with real Compose
         run: bash tests/test-smite-unified-panel-docker.sh

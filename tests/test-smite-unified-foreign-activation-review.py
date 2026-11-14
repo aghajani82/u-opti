@@ -27,6 +27,9 @@ pairing_spec.loader.exec_module(pairing_core)
 
 class ForeignActivationReview(unittest.TestCase):
     def setUp(self):
+        cosign = patch("shutil.which", return_value="/usr/bin/cosign")
+        cosign.start()
+        self.addCleanup(cosign.stop)
         self.calls = []
         self.pairing_calls = []
         self.state = {
@@ -64,7 +67,7 @@ class ForeignActivationReview(unittest.TestCase):
         self.assertIn("--trusted-root", command)
         self.assertIn(
             "--certificate-github-workflow-sha=" + reviewer.SOURCE, command)
-        self.assertIn("smite_trial=unified-install", command)
+        self.assertIn("--certificate-github-workflow-trigger=workflow_dispatch", command)
         role = "panel" if "smite_role=panel" in command else "node"
         ref = reviewer.PANEL if role == "panel" else reviewer.NODE
         digest = ref.rsplit("@",1)[1]
@@ -80,8 +83,7 @@ class ForeignActivationReview(unittest.TestCase):
             "critical": {"type":"cosign container image signature",
                          "image":{"docker-manifest-digest":digest}},
             "optional": {"smite_source_sha":reviewer.SOURCE,
-                         "smite_role":signed_role,
-                         "smite_trial":"unified-install"},
+                         "smite_role":signed_role},
         }
         return subprocess.CompletedProcess(command,0,json.dumps([doc]),"")
 

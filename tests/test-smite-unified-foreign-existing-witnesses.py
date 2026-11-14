@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,9 @@ recovery = load("uopti_host_recovery_for_witness_test", "smite-unified-foreign-h
 
 class ForeignReadOnlyWitnesses(unittest.TestCase):
     def setUp(self):
+        cosign = patch("shutil.which", return_value="/usr/bin/cosign")
+        cosign.start()
+        self.addCleanup(cosign.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -140,7 +144,7 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
             "critical":{"type":"cosign container image signature",
                         "image":{"docker-manifest-digest":digest}},
             "optional":{"smite_source_sha":w.SOURCE,
-                        "smite_role":role,"smite_trial":"unified-install"},
+                        "smite_role":role},
         }
         return subprocess.CompletedProcess(args,0,json.dumps([result]),"")
 

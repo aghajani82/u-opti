@@ -6,6 +6,7 @@ on:
     paths:
       - 'modules/smite-unified-trial-registry-pair.json'
       - 'modules/smite-unified-trial-pair-admission.py'
+      - 'modules/smite-registry-pair-admission.py'
       - 'modules/smite-rc7-sigstore-trusted-root.json'
       - 'tests/test-smite-unified-trial-pair-admission.py'
       - '.github/workflows/smite-unified-trial-signed-pair-review.yml'
@@ -32,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo '1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
+          echo 'f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
           python3 -B tests/test-smite-unified-trial-pair-admission.py -v
       - uses: docker/login-action@v3
         with:
@@ -42,14 +43,14 @@ jobs:
       - uses: sigstore/cosign-installer@v4.1.0
         with:
           cosign-release: 'v3.0.6'
-      - name: Independently verify BOTH registry signatures and branch OIDC claims
+      - name: Independently verify BOTH registry signatures and tagged publisher OIDC claims
         shell: bash
         run: |
           set -euo pipefail
           python3 -B modules/smite-unified-trial-pair-admission.py \
             --manifest modules/smite-unified-trial-registry-pair.json \
-            --manifest-sha256 1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0 \
-            --source-sha 0f03ad84a3ad57d89b99bbfb8e3af898de77f677 \
+            --manifest-sha256 f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60 \
+            --source-sha e7f76185e9a7da51d7069d5d0a829dc192cc1e06 \
             --trusted-root modules/smite-rc7-sigstore-trusted-root.json
           echo HOST_INSTALL_ALLOWED=NO
           echo OFFICIAL_RELEASE_APPROVED=NO

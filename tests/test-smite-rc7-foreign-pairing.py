@@ -22,7 +22,7 @@ class ForeignRC7Tests(unittest.TestCase):
         self.assertEqual(p._FOREIGN_NODE_IMAGE_RC7,
             "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263")
         self.assertEqual(p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL,
-            "ghcr.io/aghajani82/smite-node@sha256:527d096fa6557eb8b3409c0f90c507ccf64826b02545636ebd1b9e79baaafa5b")
+            "ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2")
 
     def test_rc7_compose_preserves_owner_before_recreate_and_rollback(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -706,7 +706,7 @@ class ForeignRC7Tests(unittest.TestCase):
 
     def test_unified_pair_release_refuses_even_valid_signed_trial_before_mutation(self):
         import subprocess
-        source="0f03ad84a3ad57d89b99bbfb8e3af898de77f677"
+        source="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
         commands=[]
         def signed_trial(command, **kwargs):
             commands.append(command)
@@ -725,7 +725,8 @@ class ForeignRC7Tests(unittest.TestCase):
             "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.7",
             "SMITE_CONNECTION_MODE":"standard", "SMITE_NODE_NAME":"node-kh",
         }
-        with patch("subprocess.run", side_effect=signed_trial), \
+        with patch("shutil.which", return_value="/usr/bin/cosign"), \
+             patch("subprocess.run", side_effect=signed_trial), \
              patch.object(p,"_field_trial_gate"), \
              patch.object(p,"_require_no_active_engine_overlays") as overlays, \
              patch.object(p,"_foreign_gateway_preflight") as gateway, \

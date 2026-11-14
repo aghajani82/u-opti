@@ -147,7 +147,7 @@ PANEL_IMAGE="$new_panel" "${compose[@]}" run --rm --no-deps -T smite-panel \
 PANEL_IMAGE="$new_panel" SMITE_FOREIGN_INSTALL_ENABLED=true \
     SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true \
     "${compose[@]}" up -d --no-deps --no-build --pull never smite-panel
-wait_panel 2.0.0-unified-install-trial
+wait_panel 2.0.0-rc.9
 candidate_id="$("${compose[@]}" ps -q smite-panel)"
 [[ -n "$candidate_id" && "$candidate_id" != "$seed_panel_id" ]]
 [[ "$(docker inspect -f '{{.Image}}' "$candidate_id")" == "$(docker image inspect -f '{{.Id}}' "$new_panel")" ]]
@@ -200,7 +200,7 @@ PY
 PANEL_IMAGE="$new_panel" SMITE_FOREIGN_INSTALL_ENABLED=true \
     SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true \
     "${compose[@]}" up -d --no-deps --no-build --pull never smite-panel
-wait_panel 2.0.0-unified-install-trial
+wait_panel 2.0.0-rc.9
 "${compose[@]}" exec -T smite-panel python3 - <<'PY'
 from app import foreign_install_grants as grants
 from app.config import settings

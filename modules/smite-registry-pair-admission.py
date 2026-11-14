@@ -152,9 +152,18 @@ def _review_cosign(*, source_sha: str, publish_ref: str,
         yield str(binary)
 
 
+def _unique_fields(pairs):
+    fields = {}
+    for key, value in pairs:
+        if key in fields:
+            raise AdmissionHold("Duplicate JSON field")
+        fields[key] = value
+    return fields
+
+
 def verify_pair(*, manifest: Path, manifest_sha256: str,
                 source_sha: str, publish_ref: str,
-                trusted_root: Path | None = None) -> dict:
+                trusted_root: Path | None = None, runner=None) -> dict:
     if not isinstance(manifest_sha256, str) or not HASH.fullmatch(manifest_sha256):
         raise AdmissionHold("Independent manifest SHA256 required")
     if not isinstance(source_sha, str) or not SHA.fullmatch(source_sha):
@@ -170,7 +179,7 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
     if hashlib.sha256(raw).hexdigest() != manifest_sha256:
         raise AdmissionHold("Manifest SHA256 does not match trusted checkpoint")
     try:
-        doc = json.loads(raw)
+        doc = json.loads(raw, object_pairs_hook=_unique_fields)
     except (ValueError, UnicodeError) as exc:
         raise AdmissionHold("Malformed JSON") from exc
     if (not isinstance(doc, dict)
@@ -206,6 +215,7 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
 
     trust_root_path = _validated_trusted_root(trusted_root)
     identity = WORKFLOW + publish_ref
+    run = subprocess.run if runner is None else runner
     # No ignore-tlog, no ignore-sct, no --check-claims=false or trust in tags.
     with _review_cosign(source_sha=source_sha, publish_ref=publish_ref,
                         trusted_root=trust_root_path) as cosign:
@@ -223,14 +233,14 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
                 refs[role],
             ]
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                result = run(cmd, capture_output=True, text=True, timeout=60,
                                         check=False)
             except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
                 raise AdmissionHold("Trusted cosign verification unavailable") from exc
             if result.returncode != 0 or len(result.stdout) > 512_000:
                 raise AdmissionHold("Signature check failed for " + role)
             try:
-                signed = json.loads(result.stdout)
+                signed = json.loads(result.stdout, object_pairs_hook=_unique_fields)
             except (ValueError, UnicodeError) as exc:
                 raise AdmissionHold("Invalid signature payload for " + role) from exc
             if not _signed_payload_match(signed, digest=digests[role],

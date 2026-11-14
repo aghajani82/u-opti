@@ -22,11 +22,11 @@ import stat
 import subprocess
 import sys
 
-SOURCE = "0f03ad84a3ad57d89b99bbfb8e3af898de77f677"
-MANIFEST_HASH = "1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0"
+SOURCE = "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+MANIFEST_HASH = "f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60"
 OLD_PANEL = "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8"
-NEW_PANEL = "ghcr.io/aghajani82/smite-panel@sha256:a1aeac5cf280748238abadd057debdf380085366fa0c475cf619b730928a0e40"
-NEW_NODE = "ghcr.io/aghajani82/smite-node@sha256:527d096fa6557eb8b3409c0f90c507ccf64826b02545636ebd1b9e79baaafa5b"
+NEW_PANEL = "ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"
+NEW_NODE = "ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"
 STAGE_REL = "var/lib/u-opti/unified-panel-trial-stage"
 PANEL_REL = "opt/smite/.env"
 COMPOSE_REL = "opt/smite/docker-compose.yml"
