@@ -2455,3 +2455,88 @@ independently approved release and a production-safe bounded Panel
 transaction only after host baseline and rollback/restore readiness are
 proven; do not rebuild the existing Iran Node and do not bypass HOLD.
 
+
+## Integration consolidation checkpoint — expired Foreign Panel grant (2026-11-14)
+
+### Existing inconsistency closed (no new feature)
+
+The **existing** disposable host recovery supported reissued Panel grant
+packets after expiry for the same Panel, Node ID, node name, Foreign domain
+and exact Gateway control URL. But selected Foreign packet intake rejected
+all existing packet files, even when their grant had expired and a signed
+host recovery cursor already retained CORE/SANAEI/GATEWAY checkpoints.
+
+Within the **same** internal packet intake, an expired grant can now be
+atomically replaced **only** if:
+
+1. The previous private packet is a regular 0600 single-link owned file;
+   its grant has expired and its parsed scope exactly matches the newly
+   issued packet; the bearer installation code is different.
+2. The existing private schema-v2 host recovery journal is intact,
+   unchanged and bound to the original packet SHA-256, exact expiry, exact
+   scope and an existing recognized stage. No journal is created for a
+   forged replacement.
+3. The original host recovery lock and enrollment lock are both held;
+   no already prepared/completed runtime identity promotion exists.
+   A previously staged, unpromoted secret is verified and **retained**,
+   not regenerated.
+4. The new packet is privately fsynced and atomically published only to
+   the same original path; all host checkpoints, Sanaei/RO inventory,
+   Gateway/443, Node image and FRP/Backhaul are left **unchanged**.
+   The host recovery owner then independently re-verifies actual external
+   state and adopts the renewed packet without replaying completed steps.
+
+Exact re-paste of the same still-valid packet is read-only and idempotent,
+including before the first host recovery lock exists. Reissue with any
+scope/ID/control-path change, premature renewal, missing/tampered journal,
+unreviewed promotion, bad staged identity, symlink/hardlink target or held
+lock is a hard HOLD, with the previous packet retained.
+
+The selected installer helper now delegates existing/expired packet handling
+to this original private intake instead of unconditionally refusing any
+pre-existing file. Its two private staging directories are each owner-only
+0700 even when launched with shell umask 022; no separate menu, UI or
+credential storage engine was added.
+
+### Regression and contract tests
+
+- Initial and repeat exact packet intake/hidden TTY, echo restoration,
+  no bearer-code output, no second live code overwrite.
+- Same-scope expired reissue preserves the original recovery journal and
+  staged Node secret, with denial for different Node/control/domain or
+  untrusted schema/lock/identity.
+- The pre-existing recovery transaction accepts the renewed code only
+  after independently witnessing CORE, Sanaei RO and exact Gateway READY;
+  neither Sanaei nor Gateway installer is called.
+- The original Shell selected helper is tested with umask 022 and no TTY:
+  private directories are 0700, no packet is written and no success or
+  Connected is falsely reported.
+- Source commits:
+  `c066266796e6c240b48ead8ce9af669b8a7834aa`,
+  `cba3b12042a3129a8b469d186718eed687296056`,
+  `05d2e9221aa16a1ed5baffc674a700586b19bd46`,
+  `944a7f40ffb8d277c5dd168328f229158b8d443f`,
+  `76733cd25af8909d54f64f7a794bdca429abdb90`,
+  `bcaeed4cce32f2911850f462588a7d3ccd1f22a0`.
+- Final code/test CI: https://github.com/aghajani82/u-opti/actions/runs/43615091126
+  (check the run conclusion before treating this checkpoint as green).
+
+### Remaining release blockers (do not bypass)
+
+The public Foreign option 2 still intentionally returns
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`: the immutable
+Smite pair `de0677d015a00160970ed57bba565adc4fafe8eb` is a
+**trial-only signed candidate** with release approval and activation both
+false. The Iran Panel production apply/rollback executor also remains
+unimplemented (offline fixture rehearsals are not live migration).
+The private disposable Foreign recovery/renewal preparation is **not**
+a production host installation.
+
+Next close the two real release/transaction gaps with explicit, proven
+operator-owned rollback before wiring Foreign public option 2 or merging
+trial to `main`. Then complete independent Iran and Foreign live
+read-only baselines, controlled two-host signed acceptance, and retained
+FRP/Backhaul/Sanaei verification. No new modules, menus, tunnel engines
+or unrelated UI are required. Do not claim Connected before both signed
+directions are actually proven.
+
