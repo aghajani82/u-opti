@@ -2858,3 +2858,77 @@ proof, plus safe actual-host rollback acceptance. Only then link
 Foreign option 2 and verify two-host `Connected`, retaining the
 existing FRP/Backhaul/Sanaei state. No `main` or live host changes
 were performed by this trial stage.
+
+
+## Fixed Docker/Compose/Nginx Panel service driver contract (2026-11-14)
+
+This milestone closes the previous cutover transaction's missing
+**fixed-command service-driver boundary**, using the exact original RC7
+installer journal and sealed Iran Node identity. No user menu, tunnel
+feature, new credentials or API is introduced.
+
+**Code:** `modules/smite-unified-panel-host-driver.py` is now packaged
+in both the fresh installer and updater and required by the existing
+three-job trial CI. It is integrated with the earlier disposable
+`smite-unified-panel-cutover.py` service transaction. A deterministic
+Docker-command model exercises the SAME interface, with no production
+host/daemon access.
+
+The driver builds its Compose prefix exclusively from the sealed
+`iran-node-runtime.json` proof (original `uopti_rc6_<32 hex>` project)
+plus the exact pinned Panel base and signed control-overlay file paths.
+It verifies the signed read-only Node mount and the original/pinned
+Panel image lines. It refuses ambient Docker daemon/context/Compose
+overrides and runs subprocesses with a minimal static environment.
+
+The ONLY subprocess sequences permitted by its strict exact-argv
+allowlist are:
+- `docker --host unix:///var/run/docker.sock compose --project-name <sealed> -f <base> -f <signed> stop --timeout 30 smite-panel`
+- `... ps -q smite-panel`, plus `docker ... inspect smite-panel`
+- `... run --rm --no-deps -T --pull never smite-panel python3 -m app.foreign_install_migration --migrate --confirm PREPARE-FOREIGN-INSTALL-TRIAL-SCHEMA`
+- `... up -d --no-deps --no-build --pull never smite-panel`
+- Exact image-ID lookup for only the pinned original/trial Panel digests
+- `nginx -t` followed by `systemctl reload nginx` (reload only after
+  a successful syntax check)
+- A fixed `docker compose exec -T smite-panel python3 -c ...`
+  loopback `/api/status` HTTP 200 and `/api/status/version` exact-version
+  health probe. The same Python probe is now used in the **real disposable
+  Compose image-upgrade/rollback job**, not only in the fake Docker model.
+
+Every service action additionally checks active Compose ownership
+labels, exact project and config-files, effective pinned image ID,
+running/healthy container state, current API/version, and the sealed
+Iran Node Docker ID/StartedAt. New grant/Pairing/replay security drift
+continues to fail at the existing transaction's continuity gate.
+
+Commands not exactly on the allowlist (such as `compose down`,
+`down --volumes`, unrestricted `up`, `restart smite-node`,
+`systemctl restart nginx` or arbitrary Python health code) fail before
+any subprocess. The read-only root `--review` also requires this
+fixed-driver plan to be verified with the signed trial pair.
+
+The actual server root `/` **cannot** instantiate the driver with an
+injected runner/capability or call any mutating method; every internal
+mutator checks the fixture-only authorization. The trial images still
+have `release_approved=false` and `activation_allowed=false`.
+No real production operation is enabled, and these tests are not
+proof of live host readiness or a two-way authenticated connection.
+
+**CI checkpoints:**
+
+- Initial full fixed-driver integration and old/new Panel rollback:
+  https://github.com/aghajani82/u-opti/actions/runs/43626706708
+- Health check with the same status/version code in the real disposable
+  Docker Compose job:
+  https://github.com/aghajani82/u-opti/actions/runs/43627046262
+- Root read-only review/driver plan contract:
+  https://github.com/aghajani82/u-opti/actions/runs/43627287153
+  (check latest conclusion before calling it green)
+
+**Remaining for production:** an independently approved and signed
+Panel/Node release; an audited production capability and fixed host
+service executor which performs the same stages with live post-cutover
+signed two-way probes, durable verification and compensation; then
+Foreign option 2 orchestration and real Iran/Foreign `Connected`
+evidence, preserving existing FRP, Backhaul and Sanaei. Keep `main`
+untouched until these gates are satisfied.
