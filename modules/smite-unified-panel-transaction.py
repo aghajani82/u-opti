@@ -280,6 +280,15 @@ class PanelTransaction:
                 return names
             if names != expected:
                 deny()
+            # The pinned additive Smite schema defines no triggers. An
+            # unrelated trigger could intercept one-use grant issuance or
+            # change origin binding even when columns/indexes look intact.
+            if conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+                    "AND tbl_name IN "
+                    "('smite_foreign_install_grants','smite_foreign_install_origins') "
+                    "LIMIT 1").fetchone() is not None:
+                deny()
 
             def shape(connection, table):
                 columns = connection.execute(
