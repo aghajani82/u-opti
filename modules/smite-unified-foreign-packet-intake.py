@@ -129,8 +129,19 @@ def _renew_expired_disposable(*, target, data, packet, now, client):
     files = load("foreign_existing_promotion_file_admission", promotion)
     try:
         with files.private_directory(target.parent) as directory:
-            lock = os.open(journal_owner.LOCK, os.O_RDWR | os.O_NOFOLLOW |
-                           os.O_NONBLOCK, dir_fd=directory)
+            try:
+                lock = os.open(journal_owner.LOCK, os.O_RDWR | os.O_NOFOLLOW |
+                               os.O_NONBLOCK, dir_fd=directory)
+            except FileNotFoundError:
+                # Before the first host recovery stage, its owner lock does
+                # not exist. Re-pasting byte-for-byte identical live input is
+                # read-only/idempotent; a DIFFERENT grant is never admitted.
+                old = files.read_optional(directory, target.name, client)
+                if old == data and now < client.parse_packet(old).expires_at:
+                    return {"status": "ALREADY_STAGED_PRIVATE",
+                            "node_name": packet.scope["node_name"],
+                            "expires_at": packet.expires_at, "connected": False}
+                deny()
             try:
                 client.private_file(lock)
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
