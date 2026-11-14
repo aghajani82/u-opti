@@ -146,6 +146,89 @@ class Prepare(unittest.TestCase):
     def stage(self):
         return self.panel.prepare(stage.CONFIRM)
 
+    def _signed_node_runtime(self):
+        install = stage._module("smite-rc6-install-journal")
+        return {
+            "schema": 1,
+            "install_source": install.SOURCE,
+            "project_id": "uopti_rc6_" + "f"*32,
+            "container_id": "d"*64,
+            "image_reference": install.IMAGES["smite-node"],
+            "image_id": "sha256:" + "e"*64,
+            "started_at": "2026-11-14T16:10:11.123456789Z",
+            "created_at": "2026-11-14T16:00:01.123456789Z",
+            "compose_files": "/opt/smite-node/docker-compose.yml,"
+                             "/opt/smite-node/docker-compose.security-candidate.yml",
+        }
+
+    def test_retained_iran_node_proof_is_sealed_and_read_only(self):
+        identity = self._signed_node_runtime()
+        calls = []
+        def fixture():
+            calls.append("read-only")
+            return dict(identity)
+        self.panel = stage.PanelStage(
+            self.root, admission=admission, runtime_reader=fixture)
+        self.stage()
+        self.assertEqual(self.panel.status()["state"], "PREPARED_ONLY")
+        proof = self.panel.staging / stage.RUNTIME_EVIDENCE
+        self.assertEqual(proof.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(proof.read_text()), identity)
+        self.assertEqual(self.panel._check_retained_runtime(),
+                         "RETAINED_IRAN_NODE_CONTAINER_UNCHANGED")
+        self.assertGreaterEqual(len(calls), 3)
+        self.assert_untouched()
+
+    def test_node_recreate_or_restart_blocks_stage_resume_before_config_write(self):
+        identity = self._signed_node_runtime()
+        self.panel = stage.PanelStage(
+            self.root, admission=admission, runtime_reader=lambda: dict(identity))
+        self.stage()
+        original = dict(identity)
+        for key, altered in (
+            ("container_id", "a"*64),
+            ("started_at", "2026-11-14T17:30:11.123456789Z"),
+            ("created_at", "2026-11-14T17:00:01.123456789Z"),
+            ("image_id", "sha256:"+"a"*64),
+            ("project_id", "uopti_rc6_"+"a"*32),
+            ("compose_files", "/opt/smite-node/docker-compose.yml"),
+        ):
+            with self.subTest(key=key):
+                identity[key] = altered
+                with self.assertRaises(stage.StageHold):
+                    self.panel.status()
+                self.assert_untouched()
+                identity[key] = original[key]
+                self.assertEqual(self.panel.status()["state"], "PREPARED_ONLY")
+
+    def test_missing_tampered_or_symlink_runtime_proof_holds(self):
+        identity = self._signed_node_runtime()
+        self.panel = stage.PanelStage(
+            self.root, admission=admission, runtime_reader=lambda: dict(identity))
+        self.stage()
+        proof = self.panel.staging / stage.RUNTIME_EVIDENCE
+        original = proof.read_bytes()
+        proof.write_bytes(original.replace(b'"container_id":"'+b"d"*64,
+                                           b'"container_id":"'+b"a"*64))
+        with self.assertRaises(stage.StageHold):
+            self.panel.status()
+        proof.unlink()
+        proof.symlink_to(self.root / stage.IR_ID_REL)
+        with self.assertRaises(stage.StageHold):
+            self.panel.status()
+        proof.unlink()
+        with self.assertRaises(stage.StageHold):
+            self.panel.status()
+        proof.write_bytes(original)
+        proof.chmod(0o600)
+        self.assertEqual(self.panel.status()["state"], "PREPARED_ONLY")
+        self.assert_untouched()
+
+    def test_forbidden_root_runtime_provider_cannot_spoof_docker(self):
+        with self.assertRaises(stage.StageHold):
+            stage.PanelStage(Path("/"), runtime_reader=self._signed_node_runtime)
+        self.assert_untouched()
+
     def test_prepare_consistent_snapshots_candidates_and_status(self):
         result=self.stage()
         self.assertEqual(result["state"],"PREPARED_ONLY")
