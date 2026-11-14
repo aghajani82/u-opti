@@ -91,17 +91,23 @@ volumes:
   panel-certs:
 YAML
 
+# The REAL container health check on the disposable Docker runner uses
+# exactly the immutable Python/status/version probe in the fixed-command
+# Panel driver. Prevent independent, weaker CI-only health logic from
+# diverging from the future approved live driver.
+panel_probe="$(python3 -B - "$repo/modules/smite-unified-panel-host-driver.py" <<'PY'
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location("cutover_driver_probe", sys.argv[1])
+driver = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(driver)
+print(driver.STATUS_PROBE, end="")
+PY
+)"
 wait_panel() {
     local version="$1" attempt
     for attempt in {1..45}; do
-        if "${compose[@]}" exec -T smite-panel python3 -c '
-import json, sys, urllib.request
-base = "http://127.0.0.1:8000/api/status"
-with urllib.request.urlopen(base, timeout=3) as r:
-    assert r.status == 200
-with urllib.request.urlopen(base + "/version", timeout=3) as r:
-    assert json.load(r)["version"] == sys.argv[1]
-' "$version" >/dev/null 2>&1; then
+        if "${compose[@]}" exec -T smite-panel python3 -c "$panel_probe" "$version" >/dev/null 2>&1; then
             return 0
         fi
         sleep 2
