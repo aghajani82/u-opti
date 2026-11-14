@@ -157,7 +157,9 @@ import json,sys,time
 from pathlib import Path
 p=Path(sys.argv[1])
 doc=json.loads(p.read_text())
-doc['expires_at']=int(time.time())+7201
+# Leave a safety margin beyond the two-hour grant limit. A fixture
+# using now+7201 can become valid when the CI runner crosses one second.
+doc['expires_at']=int(time.time())+7800
 p.write_text(json.dumps(doc))
 PY_FUTURE
 chmod 0600 "$PACKET"
