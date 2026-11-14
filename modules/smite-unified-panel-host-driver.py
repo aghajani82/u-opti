@@ -121,13 +121,18 @@ class PanelServiceDriver:
             deny()
         mod = util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        if (proof["install_source"] != "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
-                or mod.OLD_PANEL not in (
-                    self.stage._read(mod.COMPOSE_REL, limit=262144).decode("utf-8"),
-                    self.stage._read(mod.STAGE_REL + "/before-panel-compose",
-                                     mode=0o600, limit=262144).decode("utf-8"),
-                ) and mod.NEW_PANEL not in self.stage._read(
-                    mod.COMPOSE_REL, limit=262144).decode("utf-8")):
+        current = self.stage._read(mod.COMPOSE_REL, limit=262144).decode("utf-8")
+        original = self.stage._read(
+            mod.STAGE_REL + "/before-panel-compose",
+            mode=0o600, limit=262144).decode("utf-8")
+        old_line = "    image: " + mod.OLD_PANEL
+        new_line = "    image: " + mod.NEW_PANEL
+        if (proof["install_source"] !=
+                "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+                or original.splitlines().count(old_line) != 1
+                or original.splitlines().count(new_line) != 0
+                or (current.splitlines().count(old_line),
+                    current.splitlines().count(new_line)) not in ((1, 0), (0, 1))):
             deny()
         return {
             "source": mod.SOURCE,
