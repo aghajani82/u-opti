@@ -304,6 +304,38 @@ smite_foreign_gateway_prepare_acme() {
     [ "$(stat -c %u "$parent" 2>/dev/null)" = "$EUID" ] &&
     [ ! -L "$acme_conf" ] &&
     { [ ! -e "$acme_conf" ] || [ -f "$acme_conf" ]; } || return 1
+    # The ACME webroot belongs to this stage, not to arbitrary services.
+    # Check EVERY ancestor for symlinks, including parents of the selected
+    # root. Validate the webroot BEFORE publishing a new Nginx include: a
+    # hostile or permission-drifted directory must not leave a new vhost.
+    local ancestor="$SMITE_FOREIGN_ACME_ROOT"
+    while [ "$ancestor" != "/" ]; do
+        [ ! -L "$ancestor" ] || {
+            echo 'HOLD: ACME webroot traverses a symlink.' >&2
+            return 1
+        }
+        ancestor="$(dirname -- "$ancestor")" || return 1
+    done
+    for folder in "$SMITE_FOREIGN_ACME_ROOT" \
+                  "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
+                  "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge"; do
+        if [ -e "$folder" ]; then
+            # NEVER chmod a pre-existing shared directory. An unexpected
+            # owner/mode is an independent service or prior drift: HOLD.
+            [ ! -L "$folder" ] && [ -d "$folder" ] &&
+            [ "$(stat -c %u "$folder" 2>/dev/null)" = "$EUID" ] &&
+            [ "$(stat -c %a "$folder" 2>/dev/null)" = 755 ] || {
+                echo 'HOLD: Existing ACME webroot permissions or owner differ.' >&2
+                return 1
+            }
+        else
+            mkdir -- "$folder" || return 1
+            [ ! -L "$folder" ] && [ -d "$folder" ] &&
+            [ "$(stat -c %u "$folder" 2>/dev/null)" = "$EUID" ] || return 1
+            chmod 0755 "$folder" || return 1
+        fi
+    done
+
     candidate="$(mktemp "$parent/.u-opti-foreign-acme.XXXXXX")" || return 1
     if ! smite_foreign_gateway_render_acme "$domain" > "$candidate" ||
        ! chmod 0644 "$candidate" ||
@@ -334,18 +366,6 @@ smite_foreign_gateway_prepare_acme() {
     fi
     rm -f -- "$candidate" || return 1
     sync -f "$parent" || return 1
-
-    # The ACME directory is shared with the HTTP server. Refuse any
-    # symlink/foreign non-directory before chmod or writing a challenge.
-    for folder in "$SMITE_FOREIGN_ACME_ROOT" \
-                  "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
-                  "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge"; do
-        [ ! -L "$folder" ] &&
-        { [ ! -e "$folder" ] || [ -d "$folder" ]; } || return 1
-    done
-    mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
-    chmod 0755 "$SMITE_FOREIGN_ACME_ROOT" "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
-        "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
 
     nginx -t || return 1
     systemctl reload nginx || return 1
