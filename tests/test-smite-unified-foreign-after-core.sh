@@ -348,8 +348,15 @@ smite_install_unified_foreign_capture_packet "$TMP" > "$TMP/intake-not-selected"
 [ "$result" = 2 ] && [ ! -d "$TMP/foreign-fixture" ]
 SMITE_SELECTED_FRESH=1
 result=0
+saved_umask="$(umask)"
+umask 022
 smite_install_unified_foreign_capture_packet "$TMP" > "$TMP/intake-no-tty" 2>&1 || result=$?
+umask "$saved_umask"
 [ "$result" = 2 ]
+# Parent + staging path must stay owner-private even if the caller's shell
+# inherited a permissive umask. The stopped input never writes bearer data.
+[ "$(stat -c '%a:%u' "$TMP/foreign-fixture")" = "700:$(id -u)" ]
+[ "$(stat -c '%a:%u' "$TMP/foreign-fixture/foreign-staging")" = "700:$(id -u)" ]
 [ ! -e "$TMP/foreign-fixture/foreign-staging/foreign-install-packet.json" ]
 ! grep -q 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED' "$TMP/intake-no-tty"
 ! grep -q 'smi1_B' "$TMP/intake-no-tty"
