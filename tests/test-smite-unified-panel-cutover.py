@@ -9,6 +9,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 import sys
 import time
 import unittest
@@ -365,6 +366,46 @@ class PanelServiceCutover(unittest.TestCase):
             self._rollback()
         self.assertEqual(self.driver.calls, calls)
         self._config(True)
+
+    def test_root_read_only_review_includes_fixed_driver_contract(self):
+        report = {
+            "state": "FIXED_COMMAND_PLAN_ONLY",
+            "panel_service": "smite-panel",
+            "node_recreate_allowed": False,
+            "prod_apply_allowed": False,
+            "prod_rollback_allowed": False,
+        }
+        class ReadOnlyDriver:
+            def __init__(self, *, stage):
+                self.stage = stage
+            def review_plan(self):
+                return dict(report)
+        fake = SimpleNamespace(PanelServiceDriver=ReadOnlyDriver)
+        snapshot = self.panel.status()
+        with (patch.object(self.engine, "root", Path("/")),
+              patch.object(cut, "module", return_value=fake)):
+            outcome = self.engine.review()
+            self.assertEqual(outcome["status"], "READ_ONLY_RELEASE_HOLD")
+            self.assertEqual(outcome["driver"], "FIXED_COMMAND_PLAN_VERIFIED")
+            self.assertFalse(outcome["production"])
+            for wrong in (
+                {"panel_service": "smite-node"},
+                {"node_recreate_allowed": True},
+                {"prod_apply_allowed": True},
+                {"prod_rollback_allowed": True},
+            ):
+                with self.subTest(wrong=wrong):
+                    original = dict(report)
+                    report.update(wrong)
+                    try:
+                        with self.assertRaises(cut.Hold):
+                            self.engine.review()
+                    finally:
+                        report.clear()
+                        report.update(original)
+        self.assertEqual(self.panel.status(), snapshot)
+        self.assertFalse(self.driver.calls)
+        self.assertFalse(self.engine.folder.exists())
 
     def test_no_user_callable_production_apply_or_rollback(self):
         program = (ROOT / "modules" /
