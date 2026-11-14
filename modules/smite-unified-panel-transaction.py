@@ -168,7 +168,7 @@ class PanelTransaction:
             # it could admit an otherwise still valid replay/HMAC request.
             # Never accept changed expiry values for the same nonce.
             if any(
-                (current[key] != expiry if key in current else expiry > now)
+                (current[key] != expiry if key in current else expiry >= now)
                 for key, expiry in past.items()
             ):
                 deny()
@@ -260,12 +260,45 @@ class PanelTransaction:
         return "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT"
 
     def _tables(self):
+        """Refuse partial/wrong Foreign schema during a resumed transaction.
+
+        A SELECT ... LIMIT 0 proves column spelling but NOT the UNIQUE
+        constraints needed for single-use grants and exact origin binding.
+        Compare the *whole* table and index layouts with the pinned Smite
+        migration schema already represented by GRANT_DDL. Never change the
+        live database; the scratch template exists only in memory.
+        """
         db = self.root / self.stage_mod.DB_REL
+        expected = {"smite_foreign_install_grants",
+                    "smite_foreign_install_origins"}
         with closing(sqlite3.connect(db.absolute().as_uri() + "?mode=ro",
                                      uri=True, timeout=5)) as conn:
             names = {row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name IN ('smite_foreign_install_grants','smite_foreign_install_origins')")}
+            if not names:
+                return names
+            if names != expected:
+                deny()
+
+            def shape(connection, table):
+                columns = connection.execute(
+                    "PRAGMA table_info(" + table + ")").fetchall()
+                indexes = connection.execute(
+                    "PRAGMA index_list(" + table + ")").fetchall()
+                details = [
+                    (row, connection.execute(
+                        "PRAGMA index_xinfo(" + row[1] + ")").fetchall())
+                    for row in indexes
+                ]
+                return columns, details
+
+            with closing(sqlite3.connect(":memory:")) as template:
+                for ddl in GRANT_DDL:
+                    template.execute(ddl)
+                for table in sorted(expected):
+                    if shape(conn, table) != shape(template, table):
+                        deny()
             return names
 
     def review(self, *, resume_rolled_back=False):
