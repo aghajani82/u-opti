@@ -147,13 +147,15 @@ class Cutover:
     @contextmanager
     def _operation(self, confirm):
         self._check_fixture(confirm)
-        self.stage.status()
         folder_fd = os.open(self.stage.staging, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             try:
                 fcntl.flock(folder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 deny()
+            # Verify the signed stage AND original Node ID *inside* our
+            # nonblocking lock, not just before obtaining it.
+            self.stage.status()
             yield
         finally:
             os.close(folder_fd)
@@ -216,6 +218,9 @@ class Cutover:
             deny()
 
     def _initial(self):
+        # Internal entrypoints must NOT bypass the public operation gate.
+        # In particular, never mkdir a real host journal without approval.
+        self._check_fixture(CONFIRM)
         self.tx.review()
         self._continuity()
         self.stage._parents(self.folder)
@@ -232,6 +237,7 @@ class Cutover:
         return doc
 
     def _step(self, step):
+        self._check_fixture(CONFIRM)
         if step == "COMPOSE":
             if self.tx._live("panel-compose") != self.tx._candidate("panel-compose"):
                 self.tx._replace(
