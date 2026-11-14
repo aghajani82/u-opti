@@ -443,6 +443,7 @@ class PanelTransaction:
             os.close(descriptor)
 
     def _journal_write(self, journal):
+        self._check_fixture(CONFIRM)
         raw = (json.dumps(journal, sort_keys=True, separators=(",", ":")) + "\n").encode()
         # Private fsynced temp file; durable rename and directory sync. Never
         # change the signed original stage journal.
@@ -492,6 +493,7 @@ class PanelTransaction:
 
     def _replace(self, name, content):
         """Replace only a previously reviewed fixture config with matching mode."""
+        self._check_fixture(CONFIRM)
         live_path = self.root / CONFIG[name]
         self.stage._parents(live_path)
         if self._live(name) not in (self._snapshot(name), self._candidate(name)):
@@ -513,6 +515,7 @@ class PanelTransaction:
                 os.unlink(tmp)
 
     def _schema_rehearsal(self):
+        self._check_fixture(CONFIRM)
         db = self.root / self.stage_mod.DB_REL
         if self.fixture_migration is not None:
             if self.fixture_migration(db) not in ("READY", "ALREADY_READY"):
@@ -543,6 +546,7 @@ class PanelTransaction:
             return self._rehearse_locked(fail_after)
 
     def _rehearse_locked(self, fail_after):
+        self._check_fixture(CONFIRM)
         if os.path.lexists(self.rehearsal):
             journal = self._journal_read()
             phase = journal["phase"]
@@ -692,6 +696,7 @@ class PanelTransaction:
                 allow_iran_heartbeat=allow_iran_heartbeat)
 
     def _rollback_locked(self, *, allow_iran_heartbeat=False):
+        self._check_fixture(CONFIRM)
         # The original staged SQLite snapshot and replay evidence must still
         # match the sealed journal before ANY config restoration is attempted.
         try:
