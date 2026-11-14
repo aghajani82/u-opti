@@ -329,6 +329,115 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
         deny()
 
 
+def rehearse_option2(*, directory, packet_path, state_path,
+                     gateway_path, node_env_path, live_identity,
+                     now, expected_panel, expected_foreign, expected_node,
+                     verify_core, verify_sanaei, verify_gateway,
+                     install_sanaei, install_gateway, transport,
+                     rollback_sanaei=None, rollback_gateway=None,
+                     disposable_capability=False):
+    """Compose the TWO EXISTING Foreign per-stage journals in option-2 order.
+
+    Disposable-only continuation. Never introduces a second pairing
+    identity or a second Sanaei/Gateway installer. The Host journal owns
+    only core/Sanaei/Gateway; the Identity journal owns code redemption,
+    verified signed proof and atomic identity promotion.
+
+    The identities/paths/transport boundary is proved BEFORE the first
+    potentially mutating host callback. No real host execution is
+    exposed, no foreign Node runtime is started, and Connected is NEVER
+    claimed merely from a Panel redeem result.
+    """
+    if (disposable_capability is not True or type(now) is not int
+            or not callable(transport)):
+        deny()
+    # Validate BOTH independent existing operation boundaries BEFORE
+    # the host stage executor can install anything. The identity phase
+    # has a stricter path contract, not a substitute for the host check.
+    fixture_scope(directory, packet_path)
+    identity = load("uopti_option2_existing_identity",
+                    "smite-unified-foreign-identity-phase.py")
+    try:
+        identity._fixture_boundary(
+            directory=directory, live_identity=live_identity,
+            packet_path=packet_path, state_path=state_path,
+            gateway_path=gateway_path, node_env_path=node_env_path)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+    # All predicates are the EXISTING signed/owned RC7 adapters. A failed
+    # or interrupted Sanaei/Gateway stage is compensated only under its
+    # durable HOST_INTENT checkpoint. The identity code is not consumed
+    # until both host stages have been independently verified.
+    host = rehearse(
+        directory=directory, packet_path=packet_path, now=now,
+        expected_panel=expected_panel, expected_foreign=expected_foreign,
+        expected_node=expected_node, verify_core=verify_core,
+        verify_sanaei=verify_sanaei, verify_gateway=verify_gateway,
+        install_sanaei=install_sanaei, install_gateway=install_gateway,
+        rollback_sanaei=rollback_sanaei, rollback_gateway=rollback_gateway,
+        disposable_capability=True)
+    if (host.get("phase") != "GATEWAY_443_VERIFIED"
+            or host.get("identity_promoted") is not False
+            or host.get("runtime_activation") != "NOT_PERFORMED"
+            or host.get("connected") is not False):
+        deny()
+
+    # Reuse original grant client, signed HMAC proof and non-overwrite
+    # identity promoter. The identity module owns its own private lock
+    # and resumption journal; no additional secret or duplicate identity.
+    result = identity.rehearse_transaction(
+        packet_path=packet_path, state_path=state_path,
+        gateway_path=gateway_path, node_env_path=node_env_path,
+        directory=directory, live_identity=live_identity,
+        transport=transport, now=now, disposable_capability=True)
+    if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
+            or result.get("journal") != "IDENTITY_PROMOTED_OFFLINE"
+            or result.get("signed_panel_proof") != "PASS"
+            or result.get("node_id") != host.get("node_id")
+            or result.get("runtime_activation") != "NOT_PERFORMED"
+            or result.get("activation_allowed") is not False
+            or result.get("connected") is not False):
+        deny()
+
+    # Independently recheck the same retained Node and live-like host
+    # witnesses after signed promotion. A post-redeem Gateway or mount
+    # drift cannot silently become a successful unified install receipt.
+    client = load("uopti_option2_packet_client",
+                  "smite-foreign-install-client.py")
+    promotion = load("uopti_option2_packet_promotion",
+                     "smite-foreign-install-promotion.py")
+    try:
+        with promotion.private_directory(directory) as fd:
+            raw = promotion.read_optional(
+                fd, "foreign-install-packet.json", client)
+        if raw is None:
+            deny()
+        packet = client.parse_packet(raw)
+        if (packet.scope["node_id"] != host["node_id"]
+                or packet.scope["node_name"] != expected_node
+                or packet.scope["panel_url"] != client.origin(expected_panel)
+                or packet.scope["origin"] != client.origin(expected_foreign)
+                or verify_core(packet.scope) is not True
+                or verify_sanaei(packet.scope) != "READY"
+                or verify_gateway(packet.scope) != "READY"):
+            deny()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+    return {
+        "phase": "FOREIGN_OPTION2_OFFLINE_READY",
+        "host_journal": "GATEWAY_443_VERIFIED",
+        "identity_journal": "IDENTITY_PROMOTED_OFFLINE",
+        "node_id": host["node_id"],
+        "sanaei": "READ_ONLY_VERIFIED",
+        "gateway": "EXACT_HTTPS_443_VERIFIED",
+        "signed_panel_proof": "PASS",
+        "runtime_activation": "NOT_PERFORMED",
+        "activation_allowed": False,
+        "connected": False,
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--status", action="store_true", required=True)
