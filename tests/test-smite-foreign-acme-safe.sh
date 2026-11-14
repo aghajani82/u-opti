@@ -154,4 +154,52 @@ for bad in '../etc/passwd' '-invalid.example.org' 'kh.example.org/other'; do
         echo 'FAIL: unsafe foreign ACME domain accepted'; exit 1
     fi
 done
+# Certificate failure compensates only the ACME include created in THIS
+# invocation, without removing an unrelated Nginx include.
+printf '# keep unrelated site\n' > "$TMP/nginx/independent.conf"
+certbot() { return 7; }
+rm -f -- "$SITE"
+if smite_foreign_gateway_ensure_certificate "$DOMAIN" > "$TMP/cert-new-fail" 2>&1; then
+    echo 'FAIL: unsuccessful certificate issue was accepted'; exit 1
+fi
+[ ! -e "$SITE" ]
+grep -qx '# keep unrelated site' "$TMP/nginx/independent.conf"
+grep -qx 'FOREIGN_ACME=ROLLED_BACK_CURRENT_ATTEMPT' "$TMP/cert-new-fail"
+
+# A byte-for-byte pre-existing ACME include must NEVER be removed by a
+# failed retry: it may belong to a previous completed/crashed invocation.
+smite_foreign_gateway_prepare_acme "$DOMAIN"
+before="$(sha256sum "$SITE" | cut -d' ' -f1)"
+if smite_foreign_gateway_ensure_certificate "$DOMAIN" > "$TMP/cert-retry-fail" 2>&1; then
+    echo 'FAIL: failed certificate retry accepted'; exit 1
+fi
+[ -f "$SITE" ] && [ "$(sha256sum "$SITE" | cut -d' ' -f1)" = "$before" ]
+! grep -q 'FOREIGN_ACME=ROLLED_BACK_CURRENT_ATTEMPT' "$TMP/cert-retry-fail"
+
+# Even when Nginx rejects a newly published include, compensate its
+# exact bytes on a best-effort normal failure path, not a blind unlink.
+rm -- "$SITE"
+(
+    nginx_checks=0
+    nginx() {
+        nginx_checks=$((nginx_checks+1))
+        [ "$nginx_checks" -gt 1 ]
+    }
+    if smite_foreign_gateway_ensure_certificate "$DOMAIN" > "$TMP/new-nginx-fail" 2>&1; then
+        echo 'FAIL: broken Nginx config accepted'; exit 1
+    fi
+)
+[ ! -e "$SITE" ]
+grep -qx 'FOREIGN_ACME=ROLLED_BACK_CURRENT_ATTEMPT' "$TMP/new-nginx-fail"
+
+# A candidate changed outside the current transaction is evidence,
+# not permission to delete a shared Nginx file during compensation.
+smite_foreign_gateway_prepare_acme "$DOMAIN"
+printf '# tampered include\n' > "$SITE"
+if smite_foreign_gateway_rollback_new_acme "$DOMAIN" > "$TMP/drifted-compensation" 2>&1; then
+    echo 'FAIL: drifted ACME include was deleted'; exit 1
+fi
+grep -qx '# tampered include' "$SITE"
+grep -q 'CRITICAL: ACME include drifted' "$TMP/drifted-compensation"
+rm -- "$SITE"
 echo 'FOREIGN_ACME_NO_CLOBBER_ATOMIC_AND_RETRY=PASS'
