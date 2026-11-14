@@ -143,7 +143,8 @@ class PanelTransaction:
             left_cols = [r[1] for r in schema(old, table)]
             right_cols = [r[1] for r in schema(live, table)]
             if (schema(old, table) != schema(live, table)
-                    or not expected <= set(left_cols)):
+                    or set(left_cols) != expected
+                    or set(right_cols) != expected):
                 deny()
             def keyed(conn):
                 result = {}
@@ -191,6 +192,17 @@ class PanelTransaction:
                     deny()
                 for node_id in past:
                     a, b = past[node_id], current[node_id]
+                    if node_id in iran_ids:
+                        # Both snapshots must already identify the original
+                        # authenticated local Iran Node; this is not an
+                        # admission for an unpaired legacy/foreign record.
+                        ma = json.loads(a.get("metadata") or "{}")
+                        mb = json.loads(b.get("metadata") or "{}")
+                        if (not isinstance(ma, dict) or not isinstance(mb, dict)
+                                or any(meta.get("role") != "iran" or
+                                       meta.get("provisioning") != "signed_checkin"
+                                       for meta in (ma, mb))):
+                            deny()
                     for key in before_cols:
                         if key in ("last_seen", "metadata"):
                             continue
