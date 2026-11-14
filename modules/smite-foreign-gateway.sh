@@ -335,13 +335,24 @@ EOF
 }
 
 smite_foreign_gateway_write_renew_hook() {
-    mkdir -p "$(dirname "$SMITE_FOREIGN_RENEW_HOOK")" || return 1
-    # The shared hook cannot be replaced through a symlink or with an
-    # unrelated administrator's script by selected Foreign step recovery.
+    local parent tmp=""
+    parent="$(dirname -- "$SMITE_FOREIGN_RENEW_HOOK")" || return 1
+    mkdir -p -- "$parent" || return 1
+    # No in-place truncation of a shared renewal hook: a SIGKILL while
+    # writing must leave EITHER its exact old content OR the sealed new
+    # candidate that the existing Gateway stage can compensate safely.
+    [ -d "$parent" ] && [ ! -L "$parent" ] &&
     [ ! -L "$SMITE_FOREIGN_RENEW_HOOK" ] &&
     { [ ! -e "$SMITE_FOREIGN_RENEW_HOOK" ] || [ -f "$SMITE_FOREIGN_RENEW_HOOK" ]; } || return 1
-    smite_foreign_gateway_render_renew_hook > "$SMITE_FOREIGN_RENEW_HOOK" || return 1
-    chmod 0755 "$SMITE_FOREIGN_RENEW_HOOK"
+    tmp="$(mktemp "$parent/.u-opti-nginx-reload.XXXXXX")" || return 1
+    if smite_foreign_gateway_render_renew_hook > "$tmp" &&
+       chmod 0755 "$tmp" && sync -f "$tmp" &&
+       mv -fT -- "$tmp" "$SMITE_FOREIGN_RENEW_HOOK" &&
+       sync -f "$parent"; then
+        return 0
+    fi
+    rm -f -- "$tmp" || true
+    return 1
 }
 
 smite_foreign_gateway_resolve_panel_ipv4() {
