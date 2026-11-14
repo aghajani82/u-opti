@@ -2400,3 +2400,58 @@ resumes. It does **not** prove complete host-wide transaction rollback.
 - The public Foreign option 2 still exits `HOLD_BEFORE_HOST_CHANGES` and
   the immutable signed trial still has `activation_allowed:false`.
 
+
+## Consolidation checkpoint — Iran Panel signed-replay and migration-resume integrity (2026-11-14)
+
+Continued **within the already existing** `smite-unified-panel-transaction.py`
+read-only review and disposable rehearsal, not a new upgrade engine or a
+live Panel upgrade. The installed Iran RC7 Node, Node ID, signed replay,
+Pairing master key, existing FRP/Backhaul, Gateway and signed Compose
+overlays are still not modified by this code.
+
+The original live Panel continuity review admitted disappearing NONCES in
+both `smite_node_inbound_nonces` and Node `agent_nonces`, even if the
+original nonce had not yet expired. In the pinned Smite source, both
+backends delete only entries with `expires_at < now`; accepting earlier
+removal would reduce replay protection. The existing live review now
+rejects deletion at or **before** the expiration boundary, while allowing
+natural deletion once the expiry is past, new signed Iran nonces and
+unchanged nonce expiry values. No replay DB rows are modified by review.
+The offline rollback continues its stricter existing no-nonce-drift rule.
+
+An interrupted Foreign additive migration was previously considered
+present when two table names existed, even if the unique `grant_hash`
+constraint (or other schema constraints) were absent. The existing
+transaction's read-only `_tables` path now checks exact
+`PRAGMA table_info`, `PRAGMA index_list`, `PRAGMA index_xinfo` against
+the schema of its pinned Smite DDL, and rejects partial tables and
+unreviewed triggers. It is applied both to resume checks and **before any
+config restore** in the rehearsal rollback. No live migration occurs.
+
+New disposable failure-injection tests cover deletion of unexpired
+Panel and Node replay nonces, the exact expiry boundary, valid expired
+cleanup, a missing UNIQUE constraint, extra index, partial schema and
+unreviewed grant trigger; each unsafe case HOLDs without advancing the
+rehearsal or overwriting retained configuration.
+
+**Changes (U-OPTI trial only):**
+
+- `c851900fa7718b6c167986119a18a6e7d36d7fd5`: preserve live nonces.
+- `75311e83ed936849e2404b6fec725eb23c30505c`: nonce regression tests.
+- `e93c2466579e46d01de375f877244a52a5395923`: full trial DDL/index review.
+- `60fbedb13428f1b48ac62b90e84c04200e030b55`: schema check before rollback.
+- `9cef5388ddf484ecc6dc687690e873a0baeef68d`: schema/expiry tests.
+- `782d2434a0ad47979e206bde88433286ba3d066c`: reject Foreign grant triggers.
+- `c05ac908a8ab60818e0c17300fc64f3785f0d4d2`: trigger fault injection.
+- CI for code+tests: https://github.com/aghajani82/u-opti/actions/runs/43613413822
+
+**Actual status:** the Iran production Panel apply/rollback executor still
+does not exist; public Foreign option 2 is still
+`HOLD_BEFORE_HOST_CHANGES`; signed unified trial source
+`de0677d015a00160970ed57bba565adc4fafe8eb` still has
+`release_approved:false` and `activation_allowed:false`. Branch
+code and CI do **not** prove a two-host Connected state. Continue with
+independently approved release and a production-safe bounded Panel
+transaction only after host baseline and rollback/restore readiness are
+proven; do not rebuild the existing Iran Node and do not bypass HOLD.
+
