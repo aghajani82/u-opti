@@ -503,6 +503,63 @@ class LiveHeartbeatContinuity(unittest.TestCase):
             db.execute("ALTER TABLE nodes ADD COLUMN unreviewed TEXT")
         with self.assertRaises(trans.Hold): self.check()
 
+    def test_actual_foreign_grant_row_blocks_even_if_signing_identity_unchanged(self):
+        with sqlite3.connect(self.db) as db:
+            for sql in trans.GRANT_DDL:
+                db.execute(sql)
+            db.execute(
+                "INSERT INTO smite_foreign_install_grants "
+                "(code_hash,node_id,node_name,origin,control_url,issued_by,"
+                "issued_at,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                ("f"*64, "foreign-node-1234", "node-kh",
+                 "https://kh.example.com:443",
+                 "https://kh.example.com:443/smite-node/"+"e"*32,
+                 "admin", 1850000000, 1850007200))
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_root_read_only_review_requires_baseline_and_live_continuity(self):
+        baseline = {
+            "IR_INSTALL_CHECKPOINT": "COMPLETE",
+            "IR_GATEWAY_TLS443": "PASS",
+            "IR_PANEL_LOOPBACK": "PASS",
+            "IR_ADMIN": "PRESENT",
+            "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
+            "IR_SIGNED_TWO_WAY": "NOT_CHECKED",
+        }
+        # The real root/ service is NEVER accessed. Mock only the root
+        # selector, while sealed stage and original config stay disposable.
+        with (patch.object(self.executor, "root", Path("/")),
+              patch.object(self.executor, "_live",
+                           side_effect=self.executor._snapshot),
+              patch.object(self.executor, "_tables", return_value=set()),
+              patch.object(self.panel, "live_baseline_report",
+                           return_value=baseline) as report,
+              patch.object(self.executor, "_live_continuity",
+                           return_value="HEARTBEAT_ONLY_NO_NEW_ENROLLMENT") as reconcile):
+            self.assertEqual(
+                self.executor.review()["status"], "REVIEWED_PREIMAGES_ONLY")
+            report.assert_called_once_with()
+            reconcile.assert_called_once_with()
+
+    def test_root_read_only_review_refuses_missing_live_gateway_evidence(self):
+        invalid = {
+            "IR_INSTALL_CHECKPOINT": "COMPLETE",
+            "IR_GATEWAY_TLS443": "HOLD",
+            "IR_PANEL_LOOPBACK": "PASS",
+            "IR_ADMIN": "PRESENT",
+            "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",
+        }
+        with (patch.object(self.executor, "root", Path("/")),
+              patch.object(self.executor, "_live",
+                           side_effect=self.executor._snapshot),
+              patch.object(self.executor, "_tables", return_value=set()),
+              patch.object(self.panel, "live_baseline_report",
+                           return_value=invalid),
+              patch.object(self.executor, "_live_continuity") as reconcile):
+            with self.assertRaises(trans.Hold):
+                self.executor.review()
+            reconcile.assert_not_called()
+
 
 if __name__=="__main__":
     unittest.main(verbosity=2)
