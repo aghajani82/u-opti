@@ -70,3 +70,37 @@ printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n' > "$SMITE_STATE_
 CASE=unowned_rc7
 expect_result 2
 echo 'SANAEI_RESULT_CONTRACT=PASS (10 scenarios)'
+
+# Exercise the retained inventory check with all paths inside the fixture.
+sed "s@\^/opt/3x-ui/instances/@^$TMP/instances/@" "$ROOT/modules/smite-install.sh" > "$TMP/fixture-installer.sh"
+source "$TMP/fixture-installer.sh"
+mkdir -p "$TMP/instances/07/db"
+printf 'fixture\n' > "$TMP/instances/07/db/x-ui.db"
+source_db="$TMP/instances/07/db"
+runtime_flag=true
+mount_mode=false
+docker() {
+    case "$*" in
+        *Config.Env*) printf 'SMITE_SANAEI_INVENTORY_ENABLED=%s\n' "$runtime_flag" ;;
+        *Mounts*) printf 'bind %s %s\n' "$source_db" "$mount_mode" ;;
+        'exec '*) [ "$CASE" != schema_failure ] ;;
+        *) return 99 ;;
+    esac
+}
+printf 'SMITE_SANAEI_INVENTORY_ENABLED=true\nSMITE_SANAEI_DB_HOST_PATH=%s\n' "$source_db" > "$SMITE_NODE_DIR/.env"
+CASE=normal
+smite_install_sanaei_retained
+for CASE in schema_failure writable_mount; do
+    if [ "$CASE" = writable_mount ]; then mount_mode=true; fi
+    result=0
+    smite_install_sanaei_retained || result=$?
+    [ "$result" = 2 ]
+done
+mount_mode=false
+runtime_flag=false
+source_db="$SMITE_NODE_DIR/.sanaei-empty"
+printf 'SMITE_SANAEI_INVENTORY_ENABLED=false\nSMITE_SANAEI_DB_HOST_PATH=%s\n' "$source_db" > "$SMITE_NODE_DIR/.env"
+result=0
+smite_install_sanaei_retained || result=$?
+[ "$result" = 3 ]
+echo 'SANAEI_RETAINED_READ_ONLY_ATTACHMENT=PASS'

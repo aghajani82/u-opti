@@ -1849,6 +1849,36 @@ smite_install_foreign_node() {
 # Result contract for unified installation: 0 = verified attachment (signed
 # lane), 2 = failure/cancelled, 3 = Sanaei installed but attachment still pending.
 # The legacy non-signed lane continues returning its original installer result.
+smite_install_sanaei_probe() {
+    docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols'
+}
+
+# Return 0 for a verified existing attachment, 3 for the untouched
+# placeholder, and 2 for an ambiguous or changed attachment.
+smite_install_sanaei_retained() {
+    local env_file="$SMITE_NODE_DIR/.env" source expected runtime
+    local -a flags=() sources=()
+    mapfile -t flags < <(sed -n 's/^SMITE_SANAEI_INVENTORY_ENABLED=//p' "$env_file")
+    mapfile -t sources < <(sed -n 's/^SMITE_SANAEI_DB_HOST_PATH=//p' "$env_file")
+    [ "${#flags[@]}" -eq 1 ] && [ "${#sources[@]}" -eq 1 ] || return 2
+    source="${sources[0]}"
+    if [ "${flags[0]}" = false ]; then
+        [ "$source" = "$SMITE_NODE_DIR/.sanaei-empty" ] || return 2
+        expected=false
+    else
+        [ "${flags[0]}" = true ] &&
+        [[ "$source" =~ ^/opt/3x-ui/instances/[0-9]{2}/db$ ]] || return 2
+        expected=true
+    fi
+    runtime="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' smite-node)" || return 2
+    [ "$(printf '%s\n' "$runtime" | grep '^SMITE_SANAEI_INVENTORY_ENABLED=')" = "SMITE_SANAEI_INVENTORY_ENABLED=$expected" ] || return 2
+    runtime="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/run/smite-sanaei-ro"}}{{println .Type .Source .RW}}{{end}}{{end}}' smite-node)" || return 2
+    [ "$runtime" = "bind $source false" ] || return 2
+    [ "$expected" = true ] || return 3
+    [ -s "$source/x-ui.db" ] && [ ! -L "$source/x-ui.db" ] &&
+    smite_wait_healthy smite-node 90 && smite_install_sanaei_probe || return 2
+}
+
 smite_install_sanaei_foreign() {
     local current_role="" helper selected="" backup="" choice="" index="" runtime_env=""
     local signed_foreign=0 compose_project="" compose_service="" compose_files=""
@@ -1995,6 +2025,17 @@ smite_install_sanaei_foreign() {
         return 2
     fi
 
+    if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" = 1 ] &&
+       [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] && [ "$SMITE_MANAGED_VERSION" = 2.0.0-rc.7 ]; then
+        local retained_result=0
+        smite_install_sanaei_retained || retained_result=$?
+        case "$retained_result" in
+            0) echo 'KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED'; return 0 ;;
+            3) ;;
+            *) echo 'HOLD: Sanaei attachment state differs between disk and the running Node.' >&2; return 2 ;;
+        esac
+    fi
+
     # The existing Sanaei installer relaunches U-OPTI when it completes.
     # On the next visit this same action discovers the registered instance and
     # installs the approved read-only database mount into the KH Node.
@@ -2076,7 +2117,7 @@ smite_install_sanaei_foreign() {
     if ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" config >/dev/null ||
        ! COMPOSE_PROJECT_NAME="$compose_project" python3 -B "$(dirname "${BASH_SOURCE[0]}")/smite-compose-safe.py" "$SMITE_NODE_COMPOSE" up -d --no-build --force-recreate smite-node ||
        ! smite_wait_healthy smite-node 90 ||
-       ! docker exec smite-node python -c 'import os,sqlite3,stat,urllib.parse; p="/run/smite-sanaei-ro/x-ui.db"; d="/run/smite-sanaei-ro"; s=os.stat(p); assert stat.S_ISREG(s.st_mode); target=urllib.parse.quote(d,safe="/"); rows=[x.split() for x in open("/proc/self/mountinfo") if len(x.split()) > 5]; assert any(urllib.parse.unquote(x[4])==target and "ro" in x[5].split(",") for x in rows); c=sqlite3.connect("file:"+p+"?mode=ro",uri=True,timeout=1); c.execute("PRAGMA query_only=ON"); cols={r[1] for r in c.execute("PRAGMA table_info(inbounds)")}; assert {"port","listen","protocol","stream_settings","enable"} <= cols' ||
+       ! smite_install_sanaei_probe ||
        { [ "$staged_identity" -eq 1 ] &&
          { [ "$(sha256sum "$staged_identity_file" | awk '{print $1}')" != "$staged_identity_sha" ] ||
            ! UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B "$pairing_helper" \
