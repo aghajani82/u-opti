@@ -16,6 +16,51 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** independently approved, rebuilt and signed paired Panel/Node release; exact release image/journal consistency for both choices; safely reviewed *production* Panel transactional apply/rollback; public option-2 wiring and interrupted-install recovery; isolated two-server tests proving signed bidirectional Connected and retained FRP/Sanaei/Backhaul; explicit final operator acceptance. No installation command or merge to `main` until all are proven.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### Continuation checkpoint — one sealed source and real disposable Foreign grant after Panel upgrade (2026-11-14)
+
+This iteration builds on the worker's newer release-source synchronization
+and the already-green real-Docker Panel Compose rollback suite; it adds
+**verification across existing components**, not another installer or UI.
+
+1. `tests/test-smite-unified-trial-pair-admission.py` now cross-checks the
+   **single committed manifest** against the Panel stage, Panel transaction,
+   Foreign runtime admission, existing Foreign witnesses, Node Pairing image
+   reference, selected installer and both GitHub workflow pins. It covers
+   **source SHA + SHA-256(manifest) + immutable Panel/Node digests** and asserts
+   `release_approved:false`, `activation_allowed:false`. Deliberate
+   wrong-Panel and wrong-Node negative controls must fail. The official
+   RC7 pair remains different and unchanged.
+2. The existing Foreign client CI now rejects a `companion-smite` checkout
+   if its actual Git commit differs from `source_commit` in the sealed
+   manifest, even if someone later changes the checkout ref alone.
+   Cross-repository Python/ASGI tests therefore cannot silently run against
+   another Smite source after updating an image pin.
+3. The existing isolated `tests/test-smite-unified-panel-docker.sh` now
+   repeats the tested RC7 → newer Panel transition **after** it has already
+   proved that an empty-grant rollback to RC7 preserves the original
+   Iran Node container ID/start time and SQLite identity. In the renewed
+   candidate Panel, it invokes the **actual bundled Smite Foreign grant
+   store**, issues a scoped `smi1` grant for a newly reserved Foreign Node,
+   and verifies the original Iran identity and container still exist.
+   It never prints the one-use secret and **does not** revert the Panel
+   after a grant exists. The whole Docker project is disposable, has no
+   attached network or published ports, and is destroyed after the test.
+4. GitHub Actions test evidence for the verified code:
+   https://github.com/aghajani82/u-opti/actions/runs/43601511950
+   (three jobs successful, including image-signature + real-Docker
+   Panel upgrade/rollback and grant issuance). This is **offline/disposable
+   proof only**, not approval to deploy either trial image on Iran or KH.
+
+**Next release-critical actions:** review a production-safe, explicit
+Panel-only apply/rollback executor using existing preimages and journal;
+verify the new Panel through real signed Iran HMAC/Replay and HTTPS/443
+witnesses before enabling Foreign issuance; separately approve a **release**
+with exact signed Panel/Node images (trial signature is insufficient);
+only then wire option 2 Foreign into the already-existing host
+Sanaei/Gateway/identity/activation recovery chain and prove live two-way
+Connected on isolated hosts. Do not weaken the hard `HOLD` or merge to
+`main` on the strength of these disposable tests.
+
 ### Read-only evidence for the existing Iran installation
 
 On an Iran host with the current trial verifier already installed, run as root:
