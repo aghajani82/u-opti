@@ -85,6 +85,11 @@ class UpdaterFileListTests(unittest.TestCase):
                     self.assertIn(helper, quoted_names(array_body(self.source, array)))
             self.assertIn(helper, quoted_names(array_body(self.installer, "MODULES")))
 
+    def test_selected_smite_install_packages_both_reviewed_manifests(self):
+        manifests = {"smite-rc7-registry-pair.json", "smite-unified-trial-registry-pair.json"}
+        self.assertLessEqual(manifests, quoted_names(array_body(self.installer, "MODULES")))
+        self.assertLessEqual(manifests, quoted_names(array_body(self.source, "UPDATE_FILE_NAMES")))
+
     def test_rc7_frp_enrollment_in_installer_and_updater(self):
         helper = "smite-rc7-frp-enrollment.py"
         for name in ("UPDATE_FILE_NAMES",):

@@ -4,6 +4,9 @@ on:
     branches: [trial/unified-smite-install]
   pull_request:
     paths:
+      - install.sh
+      - u-opti
+      - tests/test-uopti-update-file-list.py
       - modules/smite-foreign-install-client.py
       - modules/smite-unified-foreign-packet-intake.py
       - tests/test-smite-unified-foreign-packet-intake.py
@@ -74,6 +77,7 @@ jobs:
       - run: python -B tests/test-smite-unified-foreign-gateway-plan.py -v
       - run: bash tests/test-smite-unified-gateway-menu-boundary.sh
       - run: bash -n modules/smite-foreign-gateway.sh
+      - run: python -B tests/test-uopti-update-file-list.py
       - run: sudo bash tests/test-smite-selected-install.sh
       - run: bash tests/test-smite-integrated-ir-flow.sh
       - run: sudo bash tests/test-smite-ir-gateway-stage-rollback.sh

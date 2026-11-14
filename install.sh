@@ -93,6 +93,7 @@ MODULES=(
     "smite-rc6-install-journal.py"
     "smite-selected-candidate.json"
     "smite-rc7-registry-pair.json"
+    "smite-unified-trial-registry-pair.json"
     "smite-rc7-sigstore-trusted-root.json"
     "smite-panel-ui.py"
     "smite-panel-ui.json"
