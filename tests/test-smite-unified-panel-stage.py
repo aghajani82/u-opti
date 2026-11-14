@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -203,6 +204,46 @@ class Prepare(unittest.TestCase):
         with self.assertRaises(stage.StageHold):
             self.panel.prepare(stage.CONFIRM)
         self.assertFalse(self.panel.staging.exists())
+
+    def test_live_baseline_requires_completed_owner_and_exact_active_overlay(self):
+        project = "uopti_rc6_" + "a" * 32
+        complete = {"ir_phase": "COMPLETE", "id": project}
+        command = [
+            "docker", "compose", "--project-name", project,
+            "-f", "/" + stage.COMPOSE_REL, "-f", "/" + stage.SIGNED_COMPOSE_REL,
+        ]
+        journal = SimpleNamespace(
+            folder=self.root, load=lambda: complete, _ir_witness=lambda record: None,
+        )
+        journal_module = SimpleNamespace(
+            Journal=lambda: journal, trusted=lambda *args: None, Hold=RuntimeError,
+        )
+        runner = unittest.mock.Mock()
+        pairing = SimpleNamespace(
+            _panel_compose_command=unittest.mock.Mock(return_value=command),
+            _run=runner, WizardHold=RuntimeError,
+        )
+        live = stage.PanelStage()
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            stage, "_module", side_effect=lambda name: journal_module
+            if name == "smite-rc6-install-journal" else pairing
+        ):
+            live.verify_live_baseline()
+            runner.assert_called_once_with(command + ["config", "--quiet"], timeout=30)
+            runner.reset_mock()
+            pairing._panel_compose_command.return_value = command[:-2]
+            with self.assertRaises(stage.StageHold):
+                live.verify_live_baseline()
+            runner.assert_not_called()
+            pairing._panel_compose_command.return_value = command
+            complete["ir_phase"] = "ADMIN_CREATED"
+            with self.assertRaises(stage.StageHold):
+                live.verify_live_baseline()
+            runner.assert_not_called()
+            with patch.dict(os.environ, {"DOCKER_HOST": "tcp://remote.example:2375"}):
+                with self.assertRaises(stage.StageHold):
+                    live.verify_live_baseline()
+            runner.assert_not_called()
 
     def test_confirmation_required_without_any_snapshot(self):
         with self.assertRaises(stage.StageHold):

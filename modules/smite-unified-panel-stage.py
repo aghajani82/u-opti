@@ -425,6 +425,38 @@ class PanelStage:
         }
         return records, live
 
+    def verify_live_baseline(self):
+        """Inspect the running transaction before preparing a live-host snapshot."""
+        if self.root != Path("/"):
+            deny()
+        if any(os.environ.get(name) for name in (
+                "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY",
+                "DOCKER_CERT_PATH", "COMPOSE_FILE", "COMPOSE_PROFILES",
+                "COMPOSE_ENV_FILES")):
+            deny()
+        journal_module = _module("smite-rc6-install-journal")
+        pairing = _module("smite-node-pairing")
+        journal = journal_module.Journal()
+        try:
+            for folder in (journal.folder, *journal.folder.parents):
+                journal_module.trusted(folder, True)
+            if stat.S_IMODE(journal.folder.lstat().st_mode) != 0o700:
+                deny()
+            record = journal.load()
+            journal._ir_witness(record)
+            if record["ir_phase"] != "COMPLETE":
+                deny()
+            command = pairing._panel_compose_command()
+            if command != [
+                "docker", "compose", "--project-name", record["id"],
+                "-f", "/" + COMPOSE_REL, "-f", "/" + SIGNED_COMPOSE_REL,
+            ]:
+                deny()
+            pairing._run(command + ["config", "--quiet"], timeout=30)
+        except (OSError, ValueError, TypeError, KeyError, IndexError,
+                journal_module.Hold, pairing.WizardHold):
+            deny()
+
     def prepare(self, confirm: str):
         if confirm != CONFIRM:
             deny()
@@ -432,6 +464,8 @@ class PanelStage:
         self._signed_pair()
         if self.staging.exists() or self.staging.is_symlink():
             deny()
+        if self.root == Path("/"):
+            self.verify_live_baseline()
         originals, candidates = self._collect()
         # Reject missing/drifted DB schema before creating ANY transaction state.
         self._preflight_database()
@@ -502,13 +536,21 @@ def main(argv=None):
     action=parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--stage",action="store_true")
     action.add_argument("--status",action="store_true")
+    action.add_argument("--verify-live-baseline",action="store_true")
     parser.add_argument("--confirm",default="")
     args=parser.parse_args(argv)
     try:
         if os.geteuid() != 0:
             deny()
         manager=PanelStage()
-        status=manager.prepare(args.confirm) if args.stage else manager.status()
+        if args.verify_live_baseline:
+            manager.verify_live_baseline()
+            manager._collect()
+            manager._preflight_database()
+            manager._preflight_replay()
+            status = {"state":"LIVE_BASELINE_VERIFIED"}
+        else:
+            status=manager.prepare(args.confirm) if args.stage else manager.status()
     except (StageHold,OSError,ValueError,KeyError,sqlite3.Error):
         print("UNIFIED_PANEL_TRANSACTION=HOLD")
         return 2
