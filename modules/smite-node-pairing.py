@@ -1352,7 +1352,7 @@ _FOREIGN_NODE_IMAGE_RC7 = "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d51637
 # is not accepted by the existing foreign runtime activation or rollback path.
 _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL = (
     "ghcr.io/aghajani82/smite-node@sha256:"
-    "2f63b5e1b3d262bf29bd2feaeec11b30b910c14e4d4b31ce4bb17e4fb24e2f4b"
+    "527d096fa6557eb8b3409c0f90c507ccf64826b02545636ebd1b9e79baaafa5b"
 )
 _FOREIGN_RC2_COMPOSE_SHA = "8339ee07dcc3fe68da65dd8cb993b11d8da20b69b0470c032f8d504b0ea9de4e"
 _FOREIGN_PATH = re.compile(r"/smite-node/[A-Za-z0-9_-]{16,80}\Z")
@@ -1958,8 +1958,8 @@ def _require_unified_foreign_release() -> None:
     try:
         approved = signed.verify(
             manifest=manifest,
-            manifest_sha256="61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84",
-            source_sha="de0677d015a00160970ed57bba565adc4fafe8eb",
+            manifest_sha256="1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0",
+            source_sha="0f03ad84a3ad57d89b99bbfb8e3af898de77f677",
             trusted_root=trust)
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
             signed.Hold) as exc:
@@ -1967,7 +1967,7 @@ def _require_unified_foreign_release() -> None:
     if (approved.get("status") != "verified_trial_pair"
             or approved.get("node") != _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
             or approved.get("panel") !=
-              "ghcr.io/aghajani82/smite-panel@sha256:a4142110b058b02a5325e8f2130f2faa5daa5fc0aa3faad82bb4389948d4385f"
+              "ghcr.io/aghajani82/smite-panel@sha256:a1aeac5cf280748238abadd057debdf380085366fa0c475cf619b730928a0e40"
             or approved.get("host_activation_allowed") is not True):
         raise WizardHold("Unified signed pair NOT released for host activation")
 

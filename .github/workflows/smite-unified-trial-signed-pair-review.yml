@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo '61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
+          echo '1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
           python3 -B tests/test-smite-unified-trial-pair-admission.py -v
       - uses: docker/login-action@v3
         with:
@@ -48,8 +48,8 @@ jobs:
           set -euo pipefail
           python3 -B modules/smite-unified-trial-pair-admission.py \
             --manifest modules/smite-unified-trial-registry-pair.json \
-            --manifest-sha256 61149003bbf966445bb25d0f94a4e666bb57b4544a5565703af55b30afa41c84 \
-            --source-sha de0677d015a00160970ed57bba565adc4fafe8eb \
+            --manifest-sha256 1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0 \
+            --source-sha 0f03ad84a3ad57d89b99bbfb8e3af898de77f677 \
             --trusted-root modules/smite-rc7-sigstore-trusted-root.json
           echo HOST_INSTALL_ALLOWED=NO
           echo OFFICIAL_RELEASE_APPROVED=NO
