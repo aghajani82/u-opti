@@ -33,6 +33,20 @@ DENIED_ENV = (
     "COMPOSE_ENV_FILES", "COMPOSE_PROJECT_DIRECTORY",
 )
 ALLOWED_STATES = ("candidate", "original")
+PANEL_VERSIONS = {
+    "original": "2.0.0-rc.7",
+    "candidate": "2.0.0-unified-install-trial",
+}
+# This is the same local HTTP/status/version readiness contract already
+# exercised by the disposable real Docker Compose upgrade job.
+STATUS_PROBE = (
+    "import json,sys,urllib.request\n"
+    "base='http://127.0.0.1:8000/api/status'\n"
+    "with urllib.request.urlopen(base,timeout=3) as r:\n"
+    " assert r.status==200\n"
+    "with urllib.request.urlopen(base+'/version',timeout=3) as r:\n"
+    " assert json.load(r)['version']==sys.argv[1]\n"
+)
 CANONICAL = {
     "source", "project", "node_id", "node_started_at",
     "old_panel", "new_panel", "base_compose", "signed_compose",
@@ -166,6 +180,9 @@ class PanelServiceDriver:
         allowed = (
             base + ["stop", "--timeout", "30", PANEL],
             base + ["ps", "-q", PANEL],
+            *([*base, "exec", "-T", PANEL, "python3", "-c",
+               STATUS_PROBE, version]
+              for version in PANEL_VERSIONS.values()),
             base + ["run", "--rm", "--no-deps", "-T", "--pull", "never",
                     PANEL, *MIGRATION],
             base + ["up", "-d", "--no-deps", "--no-build",
@@ -296,6 +313,13 @@ class PanelServiceDriver:
                 if (self._compose("ps", "-q", PANEL, capture=True, timeout=15)
                         != obj.get("Id")):
                     deny()
+                # Container health and image equality alone do NOT
+                # prove that the Panel serves the expected API/version.
+                # Check the existing loopback status through the SAME Panel
+                # container; this command never hits a public interface.
+                self._compose(
+                    "exec", "-T", PANEL, "python3", "-c", STATUS_PROBE,
+                    PANEL_VERSIONS[selected], timeout=12)
                 self.stage._check_retained_runtime()
                 return
             if attempt < 9:
@@ -304,6 +328,8 @@ class PanelServiceDriver:
 
     def review_plan(self):
         """No Docker/Nginx execution and no host file writes."""
+        if self.root == Path("/"):
+            self.stage._signed_pair()  # signed trial, NOT release approval
         plan = self.plan()
         return {
             "state": "FIXED_COMMAND_PLAN_ONLY",
