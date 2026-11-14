@@ -10,6 +10,7 @@ SMITE_STATE_DIR="$TMP/state"
 SMITE_STATE_FILE="$SMITE_STATE_DIR/state.env"
 SMITE_NODE_DIR="$TMP/node"
 mkdir -m 0700 -p "$SMITE_STATE_DIR/staging" "$SMITE_NODE_DIR"
+chmod 0700 "$SMITE_STATE_DIR"
 cat > "$SMITE_STATE_FILE" <<'EOF'
 SMITE_ROLE=foreign
 SMITE_MANAGED_VERSION=2.0.0-rc.7
@@ -211,14 +212,17 @@ mkdir() {
 }
 smite_foreign_gateway_write_site() {
     printf 'candidate vhost\n' > "$4"
-    [ "$FAULT" != write ]
 }
 nginx() { [ "$*" = "-t" ]; }
-systemctl() { [ "$*" = "reload nginx" ]; }
+systemctl() {
+    [ "$*" = "reload nginx" ] || return 1
+    if [ "$FAULT" = interrupted ]; then exit 77; fi
+}
 smite_foreign_gateway_verify_local() { [ "$FAULT" != tls ]; }
 smite_foreign_gateway_recreate_node() { [ "$FAULT" != node ]; }
 smite_foreign_gateway_write_renew_hook() { [ "$FAULT" != hook ]; }
 mv() {
+    if [ "$FAULT" = write ] && [ "${*: -1}" = "$TMP/site" ]; then return 1; fi
     if [ "$FAULT" = receipt ] && [ "${*: -1}" = "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]; then
         return 1
     fi
@@ -243,8 +247,25 @@ for FAULT in write tls node hook receipt; do
         [ "$(readlink "$TMP/enabled")" = "$TMP/original-link" ]
     fi
 done
+# Exit the stage subprocess after the new site is installed and before commit.
+FAULT=interrupted
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/interrupted" 2>&1 || status=$?
+[ "$status" = 77 ]
+[ -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+[ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
+grep -qx 'candidate vhost' "$TMP/site"
 FAULT=
+printf 'independent edit\n' > "$TMP/site"
+status=0
+smite_foreign_gateway_configure <<< "" > "$TMP/drift" 2>&1 || status=$?
+[ "$status" = 2 ]
+grep -qx 'independent edit' "$TMP/site"
+[ -d "$SMITE_STATE_DIR/foreign-gateway.pending" ]
+cp "$SMITE_STATE_DIR/foreign-gateway.pending/candidate" "$TMP/site"
 smite_foreign_gateway_configure <<< "" > "$TMP/retry-log" 2>&1
+grep -qx 'FOREIGN_GATEWAY_SITE=ROLLED_BACK_AFTER_INTERRUPTION' "$TMP/retry-log"
+[ ! -e "$SMITE_STATE_DIR/foreign-gateway.pending" ]
 grep -qx 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/retry-log"
 grep -qx 'candidate vhost' "$TMP/site"
 [ "$(readlink "$TMP/enabled")" = "$TMP/site" ]

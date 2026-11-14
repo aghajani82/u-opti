@@ -782,10 +782,11 @@ EOF
         rm -f -- "$staged"
         return 1
     fi
-    if ! mv -fT -- "$staged" "$SMITE_FOREIGN_GATEWAY_STATE_FILE"; then
+    if ! sync -f "$staged" || ! mv -fT -- "$staged" "$SMITE_FOREIGN_GATEWAY_STATE_FILE"; then
         rm -f -- "$staged"
         return 1
     fi
+    sync -f "$SMITE_STATE_DIR"
 }
 
 smite_foreign_gateway_status() {
@@ -870,10 +871,107 @@ smite_foreign_gateway_restore_inline_site() {
     [ "$failed" = 0 ] && nginx -t && systemctl reload nginx
 }
 
+# Keep the rendered site and original bytes together so a retry can prove
+# which changes belonged to this stage, even after the shell was killed.
+smite_foreign_gateway_inline_stage() (
+    local domain="$1" panel_domain="$2" panel_ip="$3" control_path="$4"
+    local control_url="$5" site="$6" enabled="$7" lock staging work="" scratch="" backup="" original_link=""
+    staging="$SMITE_STATE_DIR/foreign-gateway.pending"
+    [ -d "$SMITE_STATE_DIR" ] && [ ! -L "$SMITE_STATE_DIR" ] &&
+    [ "$(stat -c '%u:%a' "$SMITE_STATE_DIR")" = "${EUID}:700" ] || return 2
+    [ ! -L "$SMITE_STATE_DIR/foreign-gateway.lock" ] || return 2
+    umask 077
+    exec {lock}>> "$SMITE_STATE_DIR/foreign-gateway.lock" || return 2
+    flock -n "$lock" || return 2
+    [ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ] && [ ! -L "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ] || return 2
+
+    if [ -e "$staging" ] || [ -L "$staging" ]; then
+        [ -d "$staging" ] && [ ! -L "$staging" ] &&
+        [ "$(stat -c '%u:%a' "$staging")" = "${EUID}:700" ] &&
+        [ -f "$staging/scope" ] && [ ! -L "$staging/scope" ] &&
+        cmp -s "$staging/scope" <(printf '%s\n' "$control_url" "$site" "$enabled") &&
+        [ -f "$staging/candidate" ] && [ ! -L "$staging/candidate" ] &&
+        [ -f "$staging/link" ] && [ ! -L "$staging/link" ] || return 2
+        [ ! -L "$staging/site" ] || return 2
+        if [ -e "$staging/site" ]; then
+            [ -f "$staging/site" ] || return 2
+            backup="$staging/site"
+        fi
+        original_link="$(cat "$staging/link")" || return 2
+        if [ -L "$site" ] || { [ -e "$site" ] && [ ! -f "$site" ]; } ||
+           { [ -e "$enabled" ] && [ ! -L "$enabled" ]; }; then
+            return 2
+        fi
+        if [ -f "$site" ] && ! cmp -s "$staging/candidate" "$site" &&
+            { [ -z "$backup" ] || ! cmp -s "$backup" "$site"; }; then
+            echo 'HOLD: Foreign Gateway site changed outside the interrupted stage.' >&2
+            return 2
+        fi
+        if [ -L "$enabled" ]; then
+            local current_link
+            current_link="$(readlink -- "$enabled")" || return 2
+            [ "$current_link" = "$site" ] || [ "$current_link" = "$original_link" ] || return 2
+        fi
+        smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$backup" "$original_link" || return 2
+        rm -rf -- "$staging" || return 2
+        echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK_AFTER_INTERRUPTION'
+        backup=""
+    fi
+
+    [ ! -L "$site" ] && { [ ! -e "$site" ] || [ -f "$site" ]; } &&
+    { [ ! -e "$enabled" ] || [ -L "$enabled" ]; } || return 2
+    scratch="$(mktemp -d "$SMITE_STATE_DIR/.foreign-gateway-stage.XXXXXX")" || return 2
+    trap 'if [ -n "$scratch" ]; then rm -rf -- "$scratch"; fi; if [ -n "$scratch" ]; then rm -f -- "$scratch"; fi' EXIT
+    if [ -L "$enabled" ]; then
+        readlink -- "$enabled" > "$scratch/link" || return 2
+    else
+        : > "$scratch/link" || return 2
+    fi
+    original_link="$(cat "$scratch/link")" || return 2
+    if [ -f "$site" ]; then
+        cp -a -- "$site" "$scratch/site" && cp -a -- "$site" "$scratch/candidate" || return 2
+        backup="$staging/site"
+    fi
+    smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$scratch/candidate" || return 2
+    printf '%s\n' "$control_url" "$site" "$enabled" > "$scratch/scope" || return 2
+    sync -f "$scratch" && mv -T -- "$scratch" "$staging" && sync -f "$SMITE_STATE_DIR" || return 2
+
+    # Rename a complete file on the destination filesystem. A crash can
+    # leave only the preimage or the exact staged candidate at the site.
+    work="$(mktemp "${site}.u-opti-write.XXXXXX")" || return 2
+    if cp -a -- "$staging/candidate" "$work" &&
+       cmp -s "$staging/candidate" "$work" && sync -f "$work" &&
+       mv -fT -- "$work" "$site" && ln -sfnT -- "$site" "$enabled" &&
+       sync -f "$(dirname "$site")" && sync -f "$(dirname "$enabled")" &&
+       nginx -t && systemctl reload nginx &&
+       smite_foreign_gateway_verify_local "$domain" "$control_path" &&
+       smite_foreign_gateway_set_node_control_address "$control_url" "" &&
+       smite_foreign_gateway_recreate_node &&
+       smite_foreign_gateway_write_renew_hook &&
+       smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
+        rm -rf -- "$staging" || return 2
+        echo 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY'
+        echo 'FOREIGN_RC_NODE_RUNTIME=PAUSED_STRICT'
+        echo 'FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING'
+        return 0
+    fi
+    if [ -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ] || [ -L "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]; then
+        echo 'HOLD: Foreign Gateway receipt exists but durability was not confirmed; verify on retry.' >&2
+        return 2
+    fi
+    if smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$backup" "$original_link" &&
+        rm -rf -- "$staging"; then
+        echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' >&2
+    else
+        echo 'CRITICAL: Foreign Gateway site rollback could not be verified.' >&2
+    fi
+    return 2
+)
+
 smite_foreign_gateway_configure() {
     local role domain panel_domain node_name site enabled control_path control_url
     local detected_ip stored_ip panel_ip panel_ip_input confirm
-    local site_backup="" env_backup="" module_dir="" enabled_before=""
+    local site_backup="" env_backup="" module_dir=""
 
     # Never use an untrusted environment path to authorize the Gateway.
     # This branch is opt-in for an owned FRESH RC7 install; it validates
@@ -1004,45 +1102,14 @@ smite_foreign_gateway_configure() {
     mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return 2; }
 
     if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-        if [ -L "$site" ] || { [ -e "$site" ] && [ ! -f "$site" ]; } ||
-           { [ -e "$enabled" ] && [ ! -L "$enabled" ]; }; then
-            echo 'HOLD: Unexpected Foreign Gateway site or enabled-link type.' >&2
-            return 2
-        fi
-        if [ -L "$enabled" ]; then enabled_before="$(readlink -- "$enabled")" || return 2; fi
-    else
-        smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return 2; }
+        smite_foreign_gateway_inline_stage "$domain" "$panel_domain" "$panel_ip" "$control_path" "$control_url" "$site" "$enabled"
+        return $?
     fi
 
+    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return 2; }
     if [ -f "$site" ]; then
-        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-            site_backup="$(mktemp "${site}.u-opti-inline.XXXXXX")" || return 2
-        else
-            site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
-        fi
+        site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
         cp -a "$site" "$site_backup" || { echo "ERROR: Could not back up existing Foreign site."; smite_foreign_gateway_pause; return 2; }
-    fi
-
-    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-        if smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" &&
-           ln -sfnT -- "$site" "$enabled" &&
-           nginx -t && systemctl reload nginx &&
-           smite_foreign_gateway_verify_local "$domain" "$control_path" &&
-           smite_foreign_gateway_set_node_control_address "$control_url" "" &&
-           smite_foreign_gateway_recreate_node &&
-           smite_foreign_gateway_write_renew_hook &&
-           smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
-            echo 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY'
-            echo 'FOREIGN_RC_NODE_RUNTIME=PAUSED_STRICT'
-            echo 'FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING'
-            return 0
-        fi
-        if smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$site_backup" "$enabled_before"; then
-            echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' >&2
-        else
-            echo 'CRITICAL: Foreign Gateway site rollback could not be verified.' >&2
-        fi
-        return 2
     fi
 
     smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to update Foreign Nginx site without replacing existing content."; smite_foreign_gateway_pause; return 2; }
