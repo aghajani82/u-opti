@@ -411,5 +411,98 @@ class OfflineRollout(unittest.TestCase):
         self.assertNotIn("systemctl restart",script)
 
 
+class LiveHeartbeatContinuity(unittest.TestCase):
+    """Real disposable SQLite; no live host, no Docker or network writes."""
+
+    def setUp(self):
+        fixture.Prepare.setUp(self)
+        with sqlite3.connect(self.db) as db:
+            db.execute("ALTER TABLE nodes ADD COLUMN status TEXT")
+            db.execute("ALTER TABLE nodes ADD COLUMN last_seen TEXT")
+            db.execute(
+                "UPDATE nodes SET metadata=?, status=?, last_seen=?",
+                ('{"role":"iran","provisioning":"signed_checkin"}',
+                 "active", "2026-11-14 10:00:00"))
+        self.panel.prepare(fixture.stage.CONFIRM)
+        self.executor = trans.PanelTransaction(
+            self.root, stager=self.panel, fixture_capability=True)
+
+    def check(self):
+        return self.executor._live_continuity()
+
+    def test_signed_iran_heartbeat_and_replay_nonce_changes_admitted(self):
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE nodes SET last_seen=?, metadata=?",
+                       ("2026-11-14 10:01:00",
+                        '{"role":"iran","provisioning":"signed_checkin",'
+                        '"frp_connected":true,"frp_remote_port":20182}'))
+            db.execute("INSERT INTO smite_node_inbound_nonces "
+                       "VALUES('iran-node-1234','fresh-hmac',7777)")
+            db.execute("DELETE FROM smite_node_inbound_nonces "
+                       "WHERE nonce='nonce'")
+        with sqlite3.connect(self.root/fixture.stage.REPLAY_DB_REL) as db:
+            db.execute("INSERT INTO agent_nonces "
+                       "VALUES('iran-node-1234','fresh-replay',8888)")
+            db.execute("DELETE FROM agent_nonces WHERE nonce='replay-nonce'")
+        self.assertEqual(self.check(), "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT")
+        # The original offline fixture rollback deliberately stays stricter.
+        self.assertTrue(self.executor._new_enrollment())
+        self.assertTrue(self.executor._replay_drift())
+        self.assertEqual(self.panel.status()["state"],"PREPARED_ONLY")
+
+    def test_pending_pairing_code_is_not_heartbeat(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_pairing_codes VALUES "
+                       "('new-code','iran-node-1234',NULL)")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_identity_secret_change_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE smite_node_identities "
+                       "SET encrypted_secret='rotated' WHERE node_role='iran'")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_node_metadata_change_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE nodes SET metadata=?",
+                       ('{"role":"foreign","provisioning":"signed_checkin"}',))
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_node_status_change_is_not_heartbeat(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE nodes SET status='inactive'")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_new_foreign_reservation_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute(
+                "INSERT INTO nodes(id,name,metadata,status,last_seen) VALUES"
+                "('foreign-new','node-kh','{}','pending',NULL)")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_new_nonce_for_wrong_node_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO smite_node_inbound_nonces VALUES "
+                       "('foreign-new','forged',9000)")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_changed_nonce_expiry_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE smite_node_inbound_nonces SET expires_at=9999")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_replay_identity_drift_blocks(self):
+        with sqlite3.connect(self.root/fixture.stage.REPLAY_DB_REL) as db:
+            db.execute(
+                "UPDATE replay_store_identity SET node_id='another-node'")
+        with self.assertRaises(trans.Hold): self.check()
+
+    def test_node_schema_change_blocks(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("ALTER TABLE nodes ADD COLUMN unreviewed TEXT")
+        with self.assertRaises(trans.Hold): self.check()
+
+
 if __name__=="__main__":
     unittest.main(verbosity=2)
