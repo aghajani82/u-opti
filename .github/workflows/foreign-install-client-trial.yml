@@ -40,6 +40,8 @@ on:
       - tests/test-smite-unified-sanaei-continuation.sh
       - modules/smite-unified-panel-transaction.py
       - modules/smite-unified-panel-cutover.py
+      - modules/smite-unified-panel-host-driver.py
+      - tests/test-smite-unified-panel-host-driver.py
       - tests/test-smite-unified-panel-cutover.py
       - tests/test-smite-unified-panel-transaction.py
       - tests/test-smite-unified-panel-docker.sh
@@ -113,6 +115,7 @@ jobs:
       - run: bash tests/test-smite-sanaei-result.sh
       - run: python -B tests/test-smite-unified-panel-transaction.py -v
       - run: python -B tests/test-smite-unified-panel-cutover.py -v
+      - run: python -B tests/test-smite-unified-panel-host-driver.py -v
       - run: python -B tests/test-smite-foreign-install-promotion.py -v
       - run: python -B tests/test-smite-foreign-install-panel-ingress.py -v
       - run: python -B tests/test-smite-foreign-install-integration.py -v
