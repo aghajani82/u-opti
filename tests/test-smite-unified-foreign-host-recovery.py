@@ -236,6 +236,30 @@ class HostRecovery(unittest.TestCase):
         with self.assertRaises(mod.Hold): self.tx()
         self.assert_no_install()
 
+    def test_new_code_after_expiry_retains_completed_host_stages(self):
+        self.tx()
+        expired = self.doc["expires_at"]
+        self.doc["expires_at"] = expired + 7200
+        self.doc["installation_code"] = "smi1_" + "c" * 43
+        self.save_packet()
+        self.events.clear()
+        self.assertEqual(self.tx(now=expired)["phase"], "GATEWAY_443_VERIFIED")
+        self.assert_no_install()
+        self.assertEqual(self.journal()["expires_at"], self.doc["expires_at"])
+
+    def test_new_code_after_expiry_cannot_replace_reserved_node(self):
+        self.tx()
+        expired = self.doc["expires_at"]
+        self.doc["expires_at"] = expired + 7200
+        self.doc["node_id"] = "foreign-node-replacement"
+        self.doc["installation_code"] = "smi1_" + "c" * 43
+        self.save_packet()
+        self.events.clear()
+        with self.assertRaises(mod.Hold):
+            self.tx(now=expired)
+        self.assert_no_install()
+        self.assertEqual(self.journal()["scope"]["node_id"], "foreign-node-1234")
+
     def test_corrupt_journal_refuses_external_stage_ops(self):
         self.tx()
         self.journal_path().write_text("{}")

@@ -156,19 +156,33 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
                 if locked_raw != raw:
                     deny()
                 baseline = {
-                    "schema": 1,
+                    "schema": 2,
                     "packet_sha256": hashlib.sha256(raw).hexdigest(),
+                    "expires_at": packet.expires_at,
                     "scope": packet.scope,
                 }
                 old = promotion.read_optional(fd, JOURNAL, client)
                 if old is not None:
                     current = client.decode(old)
                     if (not isinstance(current, dict)
-                            or set(current) != set(baseline) | {"phase"}
-                            or any(current[k] != val for k, val in baseline.items())
-                            or current["phase"] not in PHASES):
+                            or current.get("phase") not in PHASES):
                         deny()
                     phase = current["phase"]
+                    if current.get("schema") == 1:
+                        legacy = {key: value for key, value in baseline.items() if key != "expires_at"}
+                        legacy["schema"] = 1
+                        if current != {**legacy, "phase": phase}:
+                            deny()
+                    elif (set(current) != set(baseline) | {"phase"}
+                          or current["schema"] != 2
+                          or current["scope"] != packet.scope
+                          or type(current["expires_at"]) is not int):
+                        deny()
+                    elif current["packet_sha256"] != baseline["packet_sha256"]:
+                        if current["expires_at"] > now:
+                            deny()
+                    elif current["expires_at"] != packet.expires_at:
+                        deny()
                 else:
                     phase = "CORE_VERIFIED"
                     write_journal(fd, {**baseline, "phase": phase})
@@ -197,6 +211,11 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
                 if (PHASES.index(phase) >= PHASES.index("GATEWAY_443_VERIFIED")
                         and gateway != "READY"):
                     deny()
+
+                # Preserve the existing cursor when accepting a replacement
+                # code for the same reserved Node after expiry.
+                if old is not None and current != {**baseline, "phase": phase}:
+                    advance(phase)
 
                 if sanaei == "ABSENT":
                     if phase != "CORE_VERIFIED":
