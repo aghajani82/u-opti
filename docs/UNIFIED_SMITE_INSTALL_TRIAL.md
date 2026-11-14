@@ -2517,9 +2517,12 @@ credential storage engine was added.
   `05d2e9221aa16a1ed5baffc674a700586b19bd46`,
   `944a7f40ffb8d277c5dd168328f229158b8d443f`,
   `76733cd25af8909d54f64f7a794bdca429abdb90`,
-  `bcaeed4cce32f2911850f462588a7d3ccd1f22a0`.
-- Final code/test CI: https://github.com/aghajani82/u-opti/actions/runs/43615091126
-  (check the run conclusion before treating this checkpoint as green).
+  `bcaeed4cce32f2911850f462588a7d3ccd1f22a0`,
+  `412143b5e955d435c563c2f74b631744708ed99b`
+  (correct the private TTY fixture's actual newline terminator).
+- Final verified code/test CI: https://github.com/aghajani82/u-opti/actions/runs/43615389317
+  (**all three** jobs completed successfully: staged client/Panel contract,
+  real Nginx/443, and signed Panel Compose upgrade).
 
 ### Remaining release blockers (do not bypass)
 
