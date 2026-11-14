@@ -522,18 +522,16 @@ class OfflineRollout(unittest.TestCase):
                          before)
         self.assertEqual(self._ledger()["phase"], "AFTER_SCHEMA")
 
-    def test_rollback_read_only_review_of_complete_rehearsal(self):
+    def test_rollback_review_refuses_unpaired_legacy_iran_metadata(self):
+        # The old unpaired schema fixture uses metadata='{}'. A successfully
+        # rehearsed config is NOT sufficient to authorize live rollback if
+        # the original Node wasn't marked signed_checkin / Iran.
         self._invoke()
         panel = {name:self.executor._live(name) for name in trans.CONFIG}
         with patch.object(self.executor, "_replace",
                           side_effect=AssertionError("review wrote live config")):
-            report = self.executor.review_retained_config_rollback()
-        self.assertEqual(report["status"],
-                         "RETAINED_CONFIG_ROLLBACK_PREFLIGHT_READ_ONLY")
-        self.assertFalse(report["production_rollback_allowed"])
-        self.assertFalse(report["runtime_health_verified"])
-        self.assertFalse(report["database_rewind_allowed"])
-        self.assertFalse(report["replay_rewind_allowed"])
+            with self.assertRaises(trans.Hold):
+                self.executor.review_retained_config_rollback()
         self.assertEqual(
             {name:self.executor._live(name) for name in trans.CONFIG}, panel)
         self.assertEqual(self._ledger()["phase"], "REHEARSED")
