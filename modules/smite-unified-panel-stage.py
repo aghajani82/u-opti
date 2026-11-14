@@ -315,13 +315,24 @@ class PanelStage:
                     or record.get("ir_resumable_version") != 1
                     or record.get("ir_phase") != "COMPLETE"):
                 deny()
+            # A Node recreated between two Docker inspections must never
+            # be adopted merely because the new container has the same
+            # name, Compose labels and image. Read on BOTH sides of the
+            # existing RC7 owner check, then bind exact ID/StartedAt.
+            before = json.loads(journal.docker("inspect", "smite-node"))
             journal._ir_container_witness(
                 record, "smite-node", install.IMAGES["smite-node"])
             objects = json.loads(journal.docker("inspect", "smite-node"))
-            if not isinstance(objects, list) or len(objects) != 1:
+            if (not isinstance(before, list) or len(before) != 1
+                    or not isinstance(before[0], dict)
+                    or not isinstance(objects, list) or len(objects) != 1):
                 deny()
             node = objects[0]
-            if not isinstance(node, dict):
+            if (not isinstance(node, dict)
+                    or before[0].get("Id") != node.get("Id")
+                    or (before[0].get("State") or {}).get("StartedAt") !=
+                       (node.get("State") or {}).get("StartedAt")
+                    or before[0].get("Image") != node.get("Image")):
                 deny()
             state = node.get("State") or {}
             config = node.get("Config") or {}
