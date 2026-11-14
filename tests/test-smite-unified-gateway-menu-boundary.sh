@@ -348,4 +348,35 @@ grep -qx 'candidate vhost' "$TMP/site"
 [ -f "$SMITE_FOREIGN_RENEW_HOOK" ]
 smite_foreign_gateway_render_renew_hook | cmp -s - "$SMITE_FOREIGN_RENEW_HOOK"
 [ "$(stat -c %a "$SMITE_FOREIGN_RENEW_HOOK")" = 755 ]
+# Also run the REAL shared hook writer against disposable paths. Failed
+# atomic rename leaves the previous script byte-for-byte intact, and
+# symlink targets from another service can never be followed.
+(
+    source "$ROOT/modules/smite-foreign-gateway.sh"
+    SMITE_FOREIGN_RENEW_HOOK="$TMP/atomic-renew.sh"
+    smite_foreign_gateway_write_renew_hook
+    [ "$(stat -c %a "$SMITE_FOREIGN_RENEW_HOOK")" = 755 ]
+    smite_foreign_gateway_render_renew_hook | cmp -s - "$SMITE_FOREIGN_RENEW_HOOK"
+    before_hook="$(sha256sum "$SMITE_FOREIGN_RENEW_HOOK" | cut -d' ' -f1)"
+    mv() {
+        if [ "${*: -1}" = "$SMITE_FOREIGN_RENEW_HOOK" ]; then return 1; fi
+        command mv "$@"
+    }
+    status=0
+    smite_foreign_gateway_write_renew_hook || status=$?
+    [ "$status" = 1 ]
+    [ "$(sha256sum "$SMITE_FOREIGN_RENEW_HOOK" | cut -d' ' -f1)" = "$before_hook" ]
+    [ "$(find "$TMP" -maxdepth 1 -name '.u-opti-nginx-reload.*' | wc -l)" -eq 0 ]
+    unset -f mv
+    protected="$TMP/protected-script"
+    printf '#!/bin/sh\nexit 9\n' > "$protected"
+    rm -f "$SMITE_FOREIGN_RENEW_HOOK"
+    ln -s "$protected" "$SMITE_FOREIGN_RENEW_HOOK"
+    if smite_foreign_gateway_write_renew_hook; then
+        echo 'FAIL: atomic renew writer followed an independent symlink'; exit 1
+    fi
+    grep -qx 'exit 9' "$protected"
+    [ -L "$SMITE_FOREIGN_RENEW_HOOK" ]
+)
 echo 'UNIFIED_GATEWAY_SITE_AND_RENEW_HOOK_ROLLBACK_AND_RETRY=PASS'
+echo 'UNIFIED_GATEWAY_RENEW_HOOK_ATOMIC_REPLACE=PASS'
