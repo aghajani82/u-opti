@@ -15,7 +15,10 @@ smite_foreign_gateway_acme_conf_path() {
 }
 nginx() { [ "$*" = "-t" ]; }
 systemctl() { [ "$*" = "reload nginx" ]; }
-curl() { printf 'u-opti-smite-foreign-acme-test\n'; }
+curl() {
+    printf '%s\n' "${*: -1}" >> "$TMP/curl-targets"
+    printf 'u-opti-smite-foreign-acme-test\n'
+}
 sleep() { :; }
 
 # A complete, identical managed file is safe to reuse on next option-2
@@ -27,6 +30,9 @@ smite_foreign_gateway_render_acme "$DOMAIN" | cmp -s - "$SITE"
 before="$(sha256sum "$SITE" | cut -d' ' -f1)"
 smite_foreign_gateway_prepare_acme "$DOMAIN"
 [ "$(sha256sum "$SITE" | cut -d' ' -f1)" = "$before" ]
+# Each attempt has a unique challenge path, never a shared fixed probe.
+[ "$(sort -u "$TMP/curl-targets" | wc -l)" -eq 2 ]
+! grep -q 'http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-foreign-test$' "$TMP/curl-targets"
 [ "$(find "$TMP/nginx" -name '.u-opti-foreign-acme.*' | wc -l)" -eq 0 ]
 [ ! -e "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" ]
 
@@ -93,6 +99,24 @@ if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/mode-fail" 2>&1; then
     echo 'FAIL: permission-drifted candidate accepted'; exit 1
 fi
 chmod 0644 "$SITE"
+
+# Another owner's webroot symlink must not be followed or chmod'd.
+mkdir -p "$TMP/protected-webroot"
+printf 'protected\n' > "$TMP/protected-webroot/proof"
+rm -rf "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+ln -s "$TMP/protected-webroot" "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/webroot-symlink" 2>&1; then
+    echo 'FAIL: shared webroot symlink was traversed'; exit 1
+fi
+grep -qx protected "$TMP/protected-webroot/proof"
+[ -L "$SMITE_FOREIGN_ACME_ROOT/.well-known" ]
+rm "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known"
+SMITE_FOREIGN_ACME_ROOT="$TMP/acme;include /etc/passwd;"
+if smite_foreign_gateway_prepare_acme "$DOMAIN" > "$TMP/bad-root" 2>&1; then
+    echo 'FAIL: injected Nginx ACME root was accepted'; exit 1
+fi
+SMITE_FOREIGN_ACME_ROOT="$TMP/acme"
 
 # Never accept malformed traversal or hostname strings as ACME files.
 for bad in '../etc/passwd' '-invalid.example.org' 'kh.example.org/other'; do
