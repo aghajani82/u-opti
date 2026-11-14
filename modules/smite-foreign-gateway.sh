@@ -263,15 +263,13 @@ smite_foreign_gateway_ensure_packages() {
     }
 }
 
-smite_foreign_gateway_prepare_acme() {
-    local domain="$1" acme_conf="/etc/nginx/conf.d/u-opti-acme-${1}.conf"
-    local attempt=1
+smite_foreign_gateway_acme_conf_path() {
+    printf '/etc/nginx/conf.d/u-opti-acme-%s.conf\n' "$1"
+}
 
-    mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
-    chmod 0755 "$SMITE_FOREIGN_ACME_ROOT" "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
-        "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
-
-    cat > "$acme_conf" <<EOF
+smite_foreign_gateway_render_acme() {
+    local domain="$1"
+    cat <<EOF
 # U-OPTI Smite Foreign ACME webroot
 server {
     listen 80;
@@ -287,10 +285,61 @@ server {
     location / { return 404; }
 }
 EOF
+}
+
+smite_foreign_gateway_prepare_acme() {
+    local domain="$1" acme_conf="" parent="" candidate="" created=0
+    local attempt=1
+    smite_foreign_gateway_validate_domain "$domain" || return 1
+    acme_conf="$(smite_foreign_gateway_acme_conf_path "$domain")" || return 1
+    parent="$(dirname -- "$acme_conf")" || return 1
+    # The ACME vhost belongs to the Nginx installation, not to the
+    # entire Foreign Node. NEVER replace a same-named file owned by
+    # another service, even while the Foreign installer is interrupted.
+    [ -d "$parent" ] && [ ! -L "$parent" ] &&
+    [ "$(stat -c %u "$parent" 2>/dev/null)" = 0 ] &&
+    [ ! -L "$acme_conf" ] &&
+    { [ ! -e "$acme_conf" ] || [ -f "$acme_conf" ]; } || return 1
+    candidate="$(mktemp "$parent/.u-opti-foreign-acme.XXXXXX")" || return 1
+    if ! smite_foreign_gateway_render_acme "$domain" > "$candidate" ||
+       ! chmod 0644 "$candidate" ||
+       ! sync -f "$candidate"; then
+        rm -f -- "$candidate" || true
+        return 1
+    fi
+    if [ -e "$acme_conf" ]; then
+        # Existing exact managed ACME preimage is an idempotent retry.
+        # A different file is independent and is never overwritten.
+        if [ "$(stat -c %u "$acme_conf" 2>/dev/null)" != 0 ] ||
+           [ "$(stat -c %h "$acme_conf" 2>/dev/null)" != 1 ] ||
+           [ "$(stat -c %a "$acme_conf" 2>/dev/null)" != 644 ] ||
+           ! cmp -s -- "$candidate" "$acme_conf"; then
+            echo 'HOLD: Existing Foreign ACME Nginx site is not the exact managed candidate.' >&2
+            rm -f -- "$candidate" || true
+            return 1
+        fi
+    else
+        # Hard-link creation is exclusive: it cannot follow or overwrite
+        # a raced-in symlink. A crash still leaves either the complete
+        # candidate or no ACME file at all, never a truncated vhost.
+        if ! ln -- "$candidate" "$acme_conf"; then
+            rm -f -- "$candidate" || true
+            return 1
+        fi
+        created=1
+    fi
+    rm -f -- "$candidate" || return 1
+    sync -f "$parent" || return 1
+
+    mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
+    chmod 0755 "$SMITE_FOREIGN_ACME_ROOT" "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
+        "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
 
     nginx -t || return 1
     systemctl reload nginx || return 1
 
+    # Retain the existing challenge probe: only the exact managed path
+    # is used and the test file is removed on both success and failure.
     printf '%s\n' 'u-opti-smite-foreign-acme-test' > \
         "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
     chmod 0644 "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
@@ -310,7 +359,6 @@ EOF
     echo "ERROR: Local ACME webroot validation failed."
     return 1
 }
-
 smite_foreign_gateway_ensure_certificate() {
     local domain="$1" cert_dir="/etc/letsencrypt/live/$1"
     if [ -s "$cert_dir/fullchain.pem" ] && [ -s "$cert_dir/privkey.pem" ]; then
