@@ -2543,3 +2543,76 @@ FRP/Backhaul/Sanaei verification. No new modules, menus, tunnel engines
 or unrelated UI are required. Do not claim Connected before both signed
 directions are actually proven.
 
+
+## Finalization checkpoint — aligned signed Smite schema-safe pair (2026-11-14)
+
+**Scope:** close a real cross-repository mismatch in the *existing* Foreign
+SQLite migration admission and re-pin both existing U-OPTI trial installers
+to one **immutable signed** Panel/Node source. This is not a new UI or
+installer feature and does not authorize live activation.
+
+Smite trial branch at
+`0f03ad84a3ad57d89b99bbfb8e3af898de77f677` now has one canonical
+`FOREIGN_INSTALL_DDL` shared between its grant-schema writer and exact
+read-only migration review. Existing `inspect` refuses altered primary
+keys, removed grant-hash uniqueness, extra indexes, changed collation or
+defaults, unexpected foreign keys, and triggers. Six negative migration
+tests prove fail-closed behavior without overwriting the original SQLite
+data or backup. The trial-only signed pair build completed successfully:
+https://github.com/aghajani82/Smite/actions/runs/43616884015
+
+The new published **trial candidate** evidence, taken from that exact
+workflow's `registry-pair.json` artifact
+`14122851359` (not from a mutable tag):
+
+- `source_commit=0f03ad84a3ad57d89b99bbfb8e3af898de77f677`
+- `manifest_sha256=1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0`
+- `panel=ghcr.io/aghajani82/smite-panel@sha256:a1aeac5cf280748238abadd057debdf380085366fa0c475cf619b730928a0e40`
+- `node=ghcr.io/aghajani82/smite-node@sha256:527d096fa6557eb8b3409c0f90c507ccf64826b02545636ebd1b9e79baaafa5b`
+- `release_approved=false`, `activation_allowed=false`, unchanged
+  by design. There is **no** production install authorization here.
+
+U-OPTI trial commit
+`7d6ec6a6d89aaee792c9863bebb73e3d45000436` atomically replaced
+the source, manifest SHA and both digest pins across the **same existing**
+11 runtime, admission, workflow and test files, rather than mixing old
+and new Panel/Node binaries. The old official signed RC7 Iran install
+pair was intentionally **not** modified. The existing fixture test also
+checks the Smite companion's canonical DDL against U-OPTI's retained
+Panel migration/rollback contract, using the signed manifest-pinned
+checkout. No Docker host services, signed identities or FRP/Backhaul
+receipts were changed by this repository update.
+
+**Final verification for the synchronized code:**
+
+- U-OPTI independent GHCR/Cosign provenance and OIDC verification of
+  **both** new digests:
+  https://github.com/aghajani82/u-opti/actions/runs/43617477744
+- U-OPTI three-job full workflow (inert client/Panel contracts, real
+  isolated Nginx/443 tests, and disposable Docker Compose upgrade,
+  rollback and preserved Iran Node):
+  https://github.com/aghajani82/u-opti/actions/runs/43617676511
+- The expired Foreign packet continuation test now explicitly calls the
+  same production pre-core parser and requires rejection before host
+  work; the existing public option-2 HOLD is retained.
+
+**Remaining blockers before production/main:**
+
+1. The Iran production Panel apply and rollback executor is still only
+   an offline rehearsal. It must use the original signed journal, exact
+   preimages, bounded service health checks and stage-owned rollback,
+   **never** recreate the retained Iran Node or rewind replay/identity.
+2. Signed pair verification is **not** release approval. A separately
+   reviewed deployment approval/activation gate and exact acceptance
+   evidence must precede any production writes. Do not edit booleans in
+   the trial manifest to fake a release.
+3. Public Foreign option 2 still returns
+   `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. Only after the
+   approved production gate and a complete per-stage recovery can its
+   already existing private Core/Sanaei/Gateway/Identity adapters be
+   safely linked into one option.
+4. Final read-only live Iran baseline, then Foreign fresh-host execution
+   and actual **two-way signed Connected**, with preserved original
+   FRP/Backhaul/Sanaei inventories and scoped rollback evidence, remain
+   **not proven**. Until then, keep `main` unchanged.
+
