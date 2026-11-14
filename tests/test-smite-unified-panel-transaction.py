@@ -816,7 +816,7 @@ class LiveHeartbeatContinuity(unittest.TestCase):
     def test_rollback_review_accepts_each_ordered_interruption_phase(self):
         for phase, expected, restore in (
             ("COMPOSE", "AFTER_COMPOSE", ["panel-compose"]),
-            ("SCHEMA", "AFTER_COMPOSE", ["panel-compose"]),
+            ("SCHEMA", "AFTER_SCHEMA", ["panel-compose"]),
             ("ENV", "AFTER_ENV", ["panel-env", "panel-compose"]),
             ("NGINX", "AFTER_NGINX",
              ["nginx-backend", "panel-env", "panel-compose"]),
