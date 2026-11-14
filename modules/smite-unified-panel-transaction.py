@@ -366,6 +366,51 @@ class PanelTransaction:
             "live_activation_allowed": False,
         }
 
+    def review_retained_config_rollback(self):
+        """Read-only preflight for the *real* Iran Panel config-only recovery.
+
+        Unlike the disposable rollback rehearsal, a running Iran Node
+        legitimately records fresh HMAC/replay nonces and last_seen during
+        an upgrade. Rewinding either DB or requiring byte-identical replay
+        would be unsafe/impossible. Admit ONLY the already-reviewed Iran
+        heartbeat changes, and ONLY with the exact signed post-upgrade
+        config + empty canonical additive Foreign tables.
+
+        This is NOT an executor, runtime-health proof or release approval.
+        It does not edit files, Docker, Nginx, SQLite, replay or journal.
+        """
+        try:
+            self.stage.status()  # includes independently regenerated candidates
+            self.stage._signed_pair()
+            self.stage._preflight_database()
+            self.stage._preflight_replay()
+            if self._tables() != {
+                    "smite_foreign_install_grants",
+                    "smite_foreign_install_origins"}:
+                deny()
+            if self._live_continuity() != "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT":
+                deny()
+            # Require a FULL verified candidate at this decision boundary;
+            # don't invent a phase for mixed/stale config during a crash.
+            for name in self.stage_mod.FILE_MAP:
+                required = (self._candidate(name) if name in CONFIG
+                            else self._snapshot(name))
+                if self._live(name) != required:
+                    deny()
+        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error,
+                self.stage_mod.StageHold):
+            deny()
+        return {
+            "status": "RETAINED_CONFIG_ROLLBACK_PREFLIGHT_READ_ONLY",
+            "production_apply_allowed": False,
+            "production_rollback_allowed": False,
+            "runtime_health_verified": False,
+            "database_rewind_allowed": False,
+            "replay_rewind_allowed": False,
+            "iran_node_recreate_allowed": False,
+            "source_sha": SOURCE_SHA,
+        }
+
     def _check_fixture(self, confirm):
         if (not self.fixture_capability or self.root.resolve() == Path("/")
                 or confirm != CONFIRM):
@@ -682,12 +727,16 @@ class PanelTransaction:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--review", action="store_true", required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--review", action="store_true")
+    action.add_argument("--review-rollback", action="store_true")
     args = parser.parse_args(argv)
     try:
         if os.geteuid() != 0:
             deny()
-        result = PanelTransaction().review()
+        manager = PanelTransaction()
+        result = (manager.review_retained_config_rollback()
+                  if args.review_rollback else manager.review())
     except (Hold, OSError, ValueError, TypeError):
         print("UNIFIED_PANEL_EXECUTION=HOLD")
         return 2
