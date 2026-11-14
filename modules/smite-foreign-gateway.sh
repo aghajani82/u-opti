@@ -288,9 +288,12 @@ EOF
 }
 
 smite_foreign_gateway_prepare_acme() {
-    local domain="$1" acme_conf="" parent="" candidate=""
+    local domain="$1" acme_conf="" parent="" candidate="" probe="" probe_name=""
     local attempt=1
     smite_foreign_gateway_validate_domain "$domain" || return 1
+    # The ACME root is rendered into Nginx syntax. Never interpolate a
+    # caller-provided path with whitespace, semicolon or Nginx directives.
+    [[ "$SMITE_FOREIGN_ACME_ROOT" =~ ^/[a-zA-Z0-9/_-]+$ ]] || return 1
     acme_conf="$(smite_foreign_gateway_acme_conf_path "$domain")" || return 1
     parent="$(dirname -- "$acme_conf")" || return 1
     # The ACME vhost belongs to the Nginx installation, not to the
@@ -331,6 +334,14 @@ smite_foreign_gateway_prepare_acme() {
     rm -f -- "$candidate" || return 1
     sync -f "$parent" || return 1
 
+    # The ACME directory is shared with the HTTP server. Refuse any
+    # symlink/foreign non-directory before chmod or writing a challenge.
+    for folder in "$SMITE_FOREIGN_ACME_ROOT" \
+                  "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
+                  "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge"; do
+        [ ! -L "$folder" ] &&
+        { [ ! -e "$folder" ] || [ -d "$folder" ]; } || return 1
+    done
     mkdir -p "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
     chmod 0755 "$SMITE_FOREIGN_ACME_ROOT" "$SMITE_FOREIGN_ACME_ROOT/.well-known" \
         "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge" || return 1
@@ -338,24 +349,28 @@ smite_foreign_gateway_prepare_acme() {
     nginx -t || return 1
     systemctl reload nginx || return 1
 
-    # Retain the existing challenge probe: only the exact managed path
-    # is used and the test file is removed on both success and failure.
-    printf '%s\n' 'u-opti-smite-foreign-acme-test' > \
-        "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
-    chmod 0644 "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test" || return 1
+    # A unique non-secret challenge cannot collide with another renewal
+    # or a previous crashed attempt. Remove it on all normal exits.
+    probe="$(mktemp "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test.XXXXXXXX")" || return 1
+    probe_name="$(basename -- "$probe")" || { rm -f -- "$probe"; return 1; }
+    if ! printf '%s\n' 'u-opti-smite-foreign-acme-test' > "$probe" ||
+       ! chmod 0644 "$probe"; then
+        rm -f -- "$probe" || true
+        return 1
+    fi
 
     while [ "$attempt" -le 10 ]; do
         if curl -fsS --connect-timeout 2 --max-time 5 -H "Host: $domain" \
-            http://127.0.0.1/.well-known/acme-challenge/u-opti-smite-foreign-test 2>/dev/null \
+            "http://127.0.0.1/.well-known/acme-challenge/$probe_name" 2>/dev/null \
             | grep -qx 'u-opti-smite-foreign-acme-test'; then
-            rm -f "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test"
+            rm -f -- "$probe"
             return 0
         fi
         [ "$attempt" -lt 10 ] && sleep 1
         attempt=$((attempt + 1))
     done
 
-    rm -f "$SMITE_FOREIGN_ACME_ROOT/.well-known/acme-challenge/u-opti-smite-foreign-test"
+    rm -f -- "$probe"
     echo "ERROR: Local ACME webroot validation failed."
     return 1
 }
