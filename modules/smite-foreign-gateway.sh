@@ -593,7 +593,6 @@ smite_foreign_gateway_set_node_control_address() {
     local control_url="$1" backup="$2" env_file="$SMITE_NODE_DIR/.env"
     [ -f "$env_file" ] || { echo "ERROR: Smite Node environment file was not found: $env_file"; return 1; }
 
-    cp -a "$env_file" "$backup" || return 1
     # On the selected one-choice path, the exact Panel-issued control URL
     # was prebound by the existing node-files writer before its first boot.
     # Do not rewrite an unchanged env file, append a duplicate setting or
@@ -608,6 +607,7 @@ smite_foreign_gateway_set_node_control_address() {
         echo 'UNIFIED_FOREIGN_CONTROL_ADDRESS=PREBOUND_UNCHANGED'
         return 0
     fi
+    cp -a "$env_file" "$backup" || return 1
     if grep -q '^SMITE_CONTROL_ADDRESS=' "$env_file"; then
         sed -i "s|^SMITE_CONTROL_ADDRESS=.*|SMITE_CONTROL_ADDRESS=${control_url}|" "$env_file" || return 1
     else
@@ -765,9 +765,11 @@ PY
 
 smite_foreign_gateway_write_state() {
     local domain="$1" panel_domain="$2" panel_ip="$3" control_path="$4"
+    local staged
     mkdir -p "$SMITE_STATE_DIR" || return 1
     chmod 0700 "$SMITE_STATE_DIR" || return 1
-    cat > "$SMITE_FOREIGN_GATEWAY_STATE_FILE" <<EOF
+    staged="$(mktemp "$SMITE_STATE_DIR/.foreign-gateway.XXXXXX")" || return 1
+    if ! cat > "$staged" <<EOF
 # Managed by U-OPTI. No credentials are stored here.
 SMITE_FOREIGN_GATEWAY_DOMAIN=$domain
 SMITE_FOREIGN_PANEL_DOMAIN=$panel_domain
@@ -776,7 +778,14 @@ SMITE_FOREIGN_CONTROL_PATH=$control_path
 SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443
 SMITE_FOREIGN_GATEWAY_MODE=https-control-path
 EOF
-    chmod 0600 "$SMITE_FOREIGN_GATEWAY_STATE_FILE"
+    then
+        rm -f -- "$staged"
+        return 1
+    fi
+    if ! mv -fT -- "$staged" "$SMITE_FOREIGN_GATEWAY_STATE_FILE"; then
+        rm -f -- "$staged"
+        return 1
+    fi
 }
 
 smite_foreign_gateway_status() {
@@ -846,10 +855,25 @@ smite_foreign_gateway_status() {
     smite_foreign_gateway_pause
 }
 
+smite_foreign_gateway_restore_inline_site() {
+    local site="$1" enabled="$2" backup="$3" original_link="$4" failed=0
+    if [ -n "$backup" ]; then
+        cp -a -- "$backup" "$site" && cmp -s -- "$backup" "$site" || failed=1
+    else
+        rm -f -- "$site" || failed=1
+    fi
+    if [ -n "$original_link" ]; then
+        ln -sfnT -- "$original_link" "$enabled" && [ "$(readlink -- "$enabled")" = "$original_link" ] || failed=1
+    else
+        rm -f -- "$enabled" || failed=1
+    fi
+    [ "$failed" = 0 ] && nginx -t && systemctl reload nginx
+}
+
 smite_foreign_gateway_configure() {
     local role domain panel_domain node_name site enabled control_path control_url
     local detected_ip stored_ip panel_ip panel_ip_input confirm
-    local site_backup="" env_backup="" module_dir=""
+    local site_backup="" env_backup="" module_dir="" enabled_before=""
 
     # Never use an untrusted environment path to authorize the Gateway.
     # This branch is opt-in for an owned FRESH RC7 install; it validates
@@ -979,11 +1003,46 @@ smite_foreign_gateway_configure() {
 
     mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled || { echo "ERROR: Could not prepare Nginx directories."; smite_foreign_gateway_pause; return 2; }
 
-    smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return 2; }
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        if [ -L "$site" ] || { [ -e "$site" ] && [ ! -f "$site" ]; } ||
+           { [ -e "$enabled" ] && [ ! -L "$enabled" ]; }; then
+            echo 'HOLD: Unexpected Foreign Gateway site or enabled-link type.' >&2
+            return 2
+        fi
+        if [ -L "$enabled" ]; then enabled_before="$(readlink -- "$enabled")" || return 2; fi
+    else
+        smite_foreign_gateway_cleanup_stale_standalone "$domain" "$site" || { smite_foreign_gateway_pause; return 2; }
+    fi
 
     if [ -f "$site" ]; then
-        site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
+        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+            site_backup="$(mktemp "${site}.u-opti-inline.XXXXXX")" || return 2
+        else
+            site_backup="${site}.u-opti-$(date +%Y%m%d-%H%M%S).bak"
+        fi
         cp -a "$site" "$site_backup" || { echo "ERROR: Could not back up existing Foreign site."; smite_foreign_gateway_pause; return 2; }
+    fi
+
+    if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
+        if smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" &&
+           ln -sfnT -- "$site" "$enabled" &&
+           nginx -t && systemctl reload nginx &&
+           smite_foreign_gateway_verify_local "$domain" "$control_path" &&
+           smite_foreign_gateway_set_node_control_address "$control_url" "" &&
+           smite_foreign_gateway_recreate_node &&
+           smite_foreign_gateway_write_renew_hook &&
+           smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
+            echo 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY'
+            echo 'FOREIGN_RC_NODE_RUNTIME=PAUSED_STRICT'
+            echo 'FOREIGN_RC_SIGNED_CONTROL=HOLD_PENDING_PAIRING'
+            return 0
+        fi
+        if smite_foreign_gateway_restore_inline_site "$site" "$enabled" "$site_backup" "$enabled_before"; then
+            echo 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' >&2
+        else
+            echo 'CRITICAL: Foreign Gateway site rollback could not be verified.' >&2
+        fi
+        return 2
     fi
 
     smite_foreign_gateway_write_site "$domain" "$panel_ip" "$control_path" "$site" || { echo "ERROR: Failed to update Foreign Nginx site without replacing existing content."; smite_foreign_gateway_pause; return 2; }
@@ -998,11 +1057,6 @@ smite_foreign_gateway_configure() {
     fi
 
     if ! smite_foreign_gateway_write_renew_hook; then
-        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-            echo 'HOLD: Foreign Gateway certificate renewal hook was not installed.' >&2
-            smite_foreign_gateway_pause
-            return 2
-        fi
         echo 'WARNING: Could not install Nginx certificate renewal hook.'
     fi
     smite_foreign_gateway_verify_local "$domain" "$control_path" || { echo "ERROR: Local Foreign HTTPS/443 control verification failed."; smite_foreign_gateway_pause; return 2; }
@@ -1021,13 +1075,6 @@ smite_foreign_gateway_configure() {
     if ! smite_foreign_gateway_recreate_node; then
         echo "ERROR: Foreign node control application failed; restoring previous node environment."
         cp -a "$env_backup" "$SMITE_NODE_DIR/.env" || return 2
-        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-            # A failed NO-RECREATE verification must NEVER trigger the
-            # legacy forced-recreate rollback. Existing Node/keys retained.
-            echo 'HOLD: Foreign Node runtime differs; no Node recreation attempted.' >&2
-            smite_foreign_gateway_pause
-            return 2
-        fi
         if [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ]; then
             smite_foreign_gateway_rc7_compose up -d --no-build --force-recreate smite-node >/dev/null 2>&1 ||
                 echo "CRITICAL: RC7 foreign gateway Node rollback could not be verified." >&2
@@ -1039,11 +1086,6 @@ smite_foreign_gateway_configure() {
     fi
 
     if ! smite_foreign_gateway_write_state "$domain" "$panel_domain" "$panel_ip" "$control_path"; then
-        if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
-            echo 'HOLD: Foreign Gateway state could not be retained. Review backups before retry.' >&2
-            smite_foreign_gateway_pause
-            return 2
-        fi
         echo 'WARNING: Foreign gateway state could not be saved.'
     fi
 

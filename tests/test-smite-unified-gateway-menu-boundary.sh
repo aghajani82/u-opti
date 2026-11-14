@@ -194,3 +194,59 @@ smite_foreign_gateway_recreate_node > "$TMP/standalone-recreate.log"
 grep -q -- '--force-recreate smite-node' "$TMP/compose-calls"
 
 echo 'UNIFIED_GATEWAY_OPTION_TWO_PREWRITE_ADMISSION=PASS (6 scenarios + no-recreate witness)'
+
+# Run the selected Gateway through the real write and compensation boundary.
+# Only Gateway files in the fixture may change.
+UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$PACKET"
+smite_foreign_gateway_require_node() { :; }
+smite_foreign_gateway_require_rc_paused() { :; }
+smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/site"; }
+smite_foreign_gateway_enabled_path() { printf '%s\n' "$TMP/enabled"; }
+smite_foreign_gateway_resolve_panel_ipv4() { printf '1.1.1.1\n'; }
+smite_foreign_gateway_ensure_packages() { :; }
+smite_foreign_gateway_ensure_certificate() { :; }
+mkdir() {
+    if [[ "$*" == *"/etc/nginx/sites-available"* ]]; then return 0; fi
+    command mkdir "$@"
+}
+smite_foreign_gateway_write_site() {
+    printf 'candidate vhost\n' > "$4"
+    [ "$FAULT" != write ]
+}
+nginx() { [ "$*" = "-t" ]; }
+systemctl() { [ "$*" = "reload nginx" ]; }
+smite_foreign_gateway_verify_local() { [ "$FAULT" != tls ]; }
+smite_foreign_gateway_recreate_node() { [ "$FAULT" != node ]; }
+smite_foreign_gateway_write_renew_hook() { [ "$FAULT" != hook ]; }
+mv() {
+    if [ "$FAULT" = receipt ] && [ "${*: -1}" = "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]; then
+        return 1
+    fi
+    command mv "$@"
+}
+printf 'SMITE_CONTROL_ADDRESS=https://kh.example.org:443/smite-node/%s\n' "$(printf 'a%.0s' {1..32})" > "$SMITE_NODE_DIR/.env"
+for FAULT in write tls node hook receipt; do
+    rm -f "$TMP/site" "$TMP/enabled" "$SMITE_FOREIGN_GATEWAY_STATE_FILE"
+    if [ "$FAULT" != write ]; then
+        printf 'original vhost\n' > "$TMP/site"
+        ln -s "$TMP/original-link" "$TMP/enabled"
+    fi
+    status=0
+    smite_foreign_gateway_configure <<< "" > "$TMP/rollback-log" 2>&1 || status=$?
+    [ "$status" = 2 ]
+    grep -qx 'FOREIGN_GATEWAY_SITE=ROLLED_BACK' "$TMP/rollback-log" || { cat "$TMP/rollback-log"; exit 1; }
+    [ ! -e "$SMITE_FOREIGN_GATEWAY_STATE_FILE" ]
+    if [ "$FAULT" = write ]; then
+        [ ! -e "$TMP/site" ] && [ ! -L "$TMP/enabled" ]
+    else
+        grep -qx 'original vhost' "$TMP/site"
+        [ "$(readlink "$TMP/enabled")" = "$TMP/original-link" ]
+    fi
+done
+FAULT=
+smite_foreign_gateway_configure <<< "" > "$TMP/retry-log" 2>&1
+grep -qx 'FOREIGN_RC_GATEWAY_TRANSPORT=READY_ROOT_ONLY' "$TMP/retry-log"
+grep -qx 'candidate vhost' "$TMP/site"
+[ "$(readlink "$TMP/enabled")" = "$TMP/site" ]
+[ "$(stat -c %a "$SMITE_FOREIGN_GATEWAY_STATE_FILE")" = 600 ]
+echo 'UNIFIED_GATEWAY_SITE_ROLLBACK_AND_RETRY=PASS'
