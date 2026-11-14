@@ -885,6 +885,41 @@ class LiveHeartbeatContinuity(unittest.TestCase):
             self.executor.review_retained_config_rollback()
         self.assertFalse(self.executor.rehearsal.exists())
 
+    def test_live_like_container_recreation_blocks_entire_rollback_contract(self):
+        # The signed Iran Node remained active after the Panel upgrade.
+        # The sealed stage must now bind its exact Docker ID + StartedAt.
+        import shutil
+        witness = fixture.Prepare._signed_node_runtime(self)
+        shutil.rmtree(self.panel.staging)  # disposable test root ONLY
+        self.panel = fixture.stage.PanelStage(
+            self.root, admission=fixture.admission,
+            runtime_reader=lambda: dict(witness))
+        self.panel.prepare(fixture.stage.CONFIRM)
+        self.executor = trans.PanelTransaction(
+            self.root, stager=self.panel, fixture_capability=True)
+        self.executor.rehearse(confirm=trans.CONFIRM)
+        verdict = self.executor.review_retained_config_rollback()
+        self.assertEqual(verdict["retained_node_witness"],
+                         "RETAINED_IRAN_NODE_CONTAINER_UNCHANGED")
+        before = {k:self.executor._live(k) for k in trans.CONFIG}
+        proof = (self.panel.staging / fixture.stage.RUNTIME_EVIDENCE).read_bytes()
+        witness["started_at"] = "2026-11-14T17:10:11.123456789Z"
+        for action in (
+            lambda: self.executor.review_retained_config_rollback(),
+            lambda: self.executor.rollback_rehearsal(
+                confirm=trans.CONFIRM, allow_iran_heartbeat=True),
+        ):
+            with self.assertRaises((trans.Hold, fixture.stage.StageHold)):
+                action()
+        self.assertEqual(proof,
+                         (self.panel.staging / fixture.stage.RUNTIME_EVIDENCE).read_bytes())
+        self.assertEqual(before,
+                         {k:self.executor._live(k) for k in trans.CONFIG})
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT encrypted_secret FROM smite_node_identities"
+            ).fetchone(), ("secret-ciphertext",))
+
     def test_rollback_preview_refuses_new_pending_pairing_code(self):
         self.executor.rehearse(confirm=trans.CONFIRM)
         with sqlite3.connect(self.db) as db:
