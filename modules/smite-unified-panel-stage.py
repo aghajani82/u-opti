@@ -553,6 +553,43 @@ class PanelStage:
             # Do not delete partial private evidence or automatically retry.
             deny()
 
+    def _sealed_candidate_consistency(self):
+        """Derive ALL proposed writes again from the sealed old-file bytes.
+
+        A journal plus matching hashes is not authority to deploy arbitrary
+        Panel/NGINX configuration: an attacker or interrupted stage could
+        change BOTH the candidate and its recorded checksum. Production
+        apply/rollback reviews must be able to trust the original renderer.
+        No active host file or service is touched.
+        """
+        def sealed(name):
+            return self._read(STAGE_REL + "/" + name, mode=0o600,
+                              limit=32_000_000)
+
+        old_state = _env(sealed("before-smite-state"))
+        old_env = sealed("before-panel-env")
+        domain = old_state.get("SMITE_PANEL_DOMAIN")
+        if (old_state.get("SMITE_ROLE") != "panel-iran"
+                or old_state.get("SMITE_CONNECTION_MODE", "standard") != "standard"
+                or not isinstance(domain, str)
+                or _env(old_env).get("PANEL_DOMAIN") != domain):
+            deny()
+        try:
+            expected = {
+                "candidate-panel-env": _candidate_env(old_env),
+                "candidate-panel-compose": _candidate_compose(
+                    sealed("before-panel-compose")),
+                "candidate-nginx-backend": _module(
+                    "smite-foreign-install-panel-ingress").render(
+                    sealed("before-nginx-backend"), domain),
+            }
+        except (OSError, ValueError, TypeError, UnicodeError, KeyError,
+                AttributeError):
+            deny()
+        for name, rendered in expected.items():
+            if sealed(name) != rendered:
+                deny()
+
     def status(self):
         self._parents(self.staging / "journal.json")
         st = self.staging.lstat()
@@ -584,6 +621,9 @@ class PanelStage:
                                      mode=0o600,limit=32_000_000)
                 if _sha(content) != digest:
                     deny()
+        # Recompute the exact three candidate files from the sealed preimages.
+        # This also rejects a forged checksum plus attacker-written candidate.
+        self._sealed_candidate_consistency()
         return {"state":"PREPARED_ONLY", "signature_pair":"EXACT_PINNED",
                 "live_writes":"NONE", "activation_allowed":False}
 
