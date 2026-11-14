@@ -22,6 +22,7 @@ import sqlite3
 import stat
 import sys
 import tempfile
+import time
 
 STAGE_MODULE = "smite-unified-panel-stage"
 REHEARSAL_REL = "var/lib/u-opti/unified-panel-trial-rehearsal"
@@ -138,6 +139,11 @@ class PanelTransaction:
         def rows(conn, table):
             return conn.execute("SELECT * FROM " + table + " ORDER BY 1").fetchall()
 
+        # Snapshot both signed nonce tables against one bounded clock.
+        # A live, unexpired replay nonce cannot disappear from the retained
+        # baseline: that would permit reuse before its original expiry.
+        now = int(time.time())
+
         def nonce_drift_only(live, old, table, iran_ids):
             expected = {"node_id", "nonce", "expires_at"}
             left_cols = [r[1] for r in schema(old, table)]
@@ -157,10 +163,14 @@ class PanelTransaction:
                     result[(node, nonce)] = expiry
                 return result
             past, current = keyed(old), keyed(live)
-            # A nonce may expire or a fresh Iran nonce may be added, but
-            # the same nonce's lifetime must never be rewritten.
-            if any(current[key] != expiry for key, expiry in past.items()
-                   if key in current):
+            # Fresh Iran nonces and deletion of EXPIRED nonces are ordinary
+            # signed traffic. An active nonce must not vanish early: losing
+            # it could admit an otherwise still valid replay/HMAC request.
+            # Never accept changed expiry values for the same nonce.
+            if any(
+                (current[key] != expiry if key in current else expiry > now)
+                for key, expiry in past.items()
+            ):
                 deny()
 
         try:
