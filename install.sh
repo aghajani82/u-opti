@@ -98,6 +98,7 @@ MODULES=(
     "smite-foreign-install-panel-ingress.py"
     "smite-unified-panel-stage.py"
     "smite-unified-panel-transaction.py"
+    "smite-unified-panel-cutover.py"
     "smite-foreign-install-client.py"
     "smite-foreign-install-promotion.py"
     "smite-unified-foreign-packet-intake.py"
