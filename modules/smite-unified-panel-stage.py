@@ -606,9 +606,11 @@ class PanelStage:
         journal, record, journal_module = self.verify_live_baseline()
         pairing = _module("smite-node-pairing")
         curl = ["curl", "-q", "--noproxy", "*", "--fail", "--silent",
-                "--connect-timeout", "2", "--max-time", "5",
-                "--output", "/dev/null", "--write-out", "%{http_code}"]
+                "--connect-timeout", "2", "--max-time", "5"]
+        status_flags = ["--output", "/dev/null", "--write-out", "%{http_code}"]
+        version_flags = ["--max-filesize", "4096", "--write-out", "\n%{http_code}"]
         try:
+            retained = self._runtime_proof()
             originals, _ = self._collect()
             self._preflight_database()
             self._preflight_replay()
@@ -619,7 +621,17 @@ class PanelStage:
                 ["http://127.0.0.1:8000/api/status"],
                 ["--resolve", f"{domain}:443:127.0.0.1", f"https://{domain}:443/api/status"],
             ):
-                if pairing._run(curl + endpoint, timeout=10, capture=True) != "200":
+                if pairing._run(curl + status_flags + endpoint, timeout=10, capture=True) != "200":
+                    deny()
+                # Probe the running service at both boundaries. The owner
+                # journal's image reference alone cannot prove API readiness.
+                request = curl + version_flags + endpoint[:-1] + [endpoint[-1] + "/version"]
+                response = pairing._run(request, timeout=10, capture=True)
+                body, _, status = response.rpartition("\n")
+                if status != "200":
+                    deny()
+                version = json.loads(body, object_pairs_hook=_unique_journal_fields)
+                if not isinstance(version, dict) or version.get("version") != journal_module.VERSION:
                     deny()
             # Reuse the existing authenticated local Iran probes. HTTP 200
             # alone is NOT evidence that signed HMAC and replay still work.
@@ -633,7 +645,9 @@ class PanelStage:
             pairing._local_signed_replay_probe()
             pairing._wait_panel_signed_checkin(node_id, timeout=6)
             pairing._panel_to_ir_signed_probe(node_id)
-        except (journal_module.Hold, pairing.WizardHold):
+            if self._runtime_proof() != retained:
+                deny()
+        except (ValueError, TypeError, OSError, journal_module.Hold, pairing.WizardHold):
             deny()
         # Older branch installations record the selected channel in
         # INSTALL_REF. Never use today's branch head as the installed SHA.
@@ -649,6 +663,8 @@ class PanelStage:
             "IR_SMITE_SOURCE": record["source"],
             "IR_SMITE_VERSION": journal_module.VERSION,
             "IR_PANEL_LOOPBACK": "PASS",
+            "IR_PANEL_API_VERSION": journal_module.VERSION,
+            "IR_RETAINED_NODE": "UNCHANGED_DURING_BASELINE",
             "IR_GATEWAY_TLS443": "PASS",
             "IR_ADMIN": "PRESENT",
             "IR_SIGNED_RUNTIME_AND_REPLAY": "VERIFIED_READ_ONLY",

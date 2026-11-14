@@ -380,14 +380,27 @@ class PanelServiceCutover(unittest.TestCase):
                 self.stage = stage
             def review_plan(self):
                 return dict(report)
-        fake = SimpleNamespace(PanelServiceDriver=ReadOnlyDriver)
+        fake = SimpleNamespace(PanelServiceDriver=ReadOnlyDriver, Hold=RuntimeError)
         snapshot = self.panel.status()
+        accepted = {"status": "REVIEWED_PREIMAGES_ONLY",
+                    "live_activation_allowed": False}
         with (patch.object(self.engine, "root", Path("/")),
+              patch.object(self.engine.tx, "review", return_value=accepted) as review,
               patch.object(cut, "module", return_value=fake)):
             outcome = self.engine.review()
             self.assertEqual(outcome["status"], "READ_ONLY_RELEASE_HOLD")
             self.assertEqual(outcome["driver"], "FIXED_COMMAND_PLAN_VERIFIED")
+            self.assertEqual(outcome["baseline_and_preimages"], "VERIFIED")
             self.assertFalse(outcome["production"])
+            review.assert_called_once_with()
+            review.return_value = {**accepted, "live_activation_allowed": True}
+            with self.assertRaises(cut.Hold):
+                self.engine.review()
+            review.return_value = accepted
+            review.side_effect = self.engine.tx_mod.Hold("baseline unavailable")
+            with self.assertRaises(cut.Hold):
+                self.engine.review()
+            review.side_effect = None
             for wrong in (
                 {"panel_service": "smite-node"},
                 {"node_recreate_allowed": True},

@@ -1,8 +1,8 @@
 # U-OPTI × Smite — final release and rollout acceptance
 
 **Date:** 2026-11-14  
-**Target branches:** `aghajani82/Smite:trial/unified-smite-install`,
-`aghajani82/u-opti:trial/unified-smite-install`  
+**Source:** Smite `main` at the tagged RC9 commit and U-OPTI
+`trial/unified-smite-install`  
 **Scope:** finish the existing one-choice Iran/Foreign installer, signed
 HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 **No new features, menu entries, UI or network listeners.**
@@ -11,11 +11,12 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 
 | Item | Evidence / status |
 | --- | --- |
-| Smite trial source | `0f03ad84a3ad57d89b99bbfb8e3af898de77f677`; signed-trial workflow [43616884015](https://github.com/aghajani82/Smite/actions/runs/43616884015) passed |
-| Signed trial Panel | `ghcr.io/aghajani82/smite-panel@sha256:a1aeac5cf280748238abadd057debdf380085366fa0c475cf619b730928a0e40` |
-| Signed trial Node | `ghcr.io/aghajani82/smite-node@sha256:527d096fa6557eb8b3409c0f90c507ccf64826b02545636ebd1b9e79baaafa5b` |
-| Trial manifest SHA256 | `1302dedaf492ceb79de81869efe7be10ac406e313629f4f69b47972f36ad30e0` |
-| Trial release policy | `release_approved=false`, `activation_allowed=false`. Correct, deliberate HOLD. |
+| Smite RC9 source | `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`, [v2.0.0-rc.9](https://github.com/aghajani82/Smite/releases/tag/v2.0.0-rc.9) |
+| Signed RC9 Panel | `ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e` |
+| Signed RC9 Node | `ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2` |
+| RC9 manifest SHA256 | `f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60` |
+| RC9 evidence | [Publisher](https://github.com/aghajani82/Smite/actions/runs/43631138363), [independent Cosign](https://github.com/aghajani82/Smite/actions/runs/43631412672), [U-OPTI signatures](https://github.com/aghajani82/u-opti/actions/runs/43632177646), [U-OPTI rehearsal](https://github.com/aghajani82/u-opti/actions/runs/43632177665) |
+| RC9 candidate policy | `release_approved=false`, `activation_allowed=false` |
 | Iran option 1 | Existing signed RC7 install/journal; Panel + Iran Node + HTTPS/443 Pairing stages tested, with isolated real Compose upgrade and rollback |
 | Iran retained Node | Private stage binds Docker container ID, image ID, project, Created and StartedAt; stage/status and rollback fail on change |
 | Iran Panel transaction | Signed sealed stage, additive schema, durable per-step cutover and owned config-only rollback; exact, restricted Docker/Compose/Nginx command driver **fixture-only** |
@@ -23,31 +24,15 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Foreign Pairing | Existing one-time grant, signed HMAC proof and no-overwrite identity promotion with its separate private recovery journal |
 | Foreign consolidated option 2 | `smite-unified-foreign-host-recovery.py::rehearse_option2` composes the existing two journals, with 15 integration tests; **disposable-only** |
 | Public Foreign menu option 2 | Explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, unchanged |
-| Production hosts / U-OPTI and Smite main | No live deployment or merge authorized by the above trial work |
+| Production hosts and U-OPTI main | Awaiting live authorization and evidence. Smite source was merged in [PR #58](https://github.com/aghajani82/Smite/pull/58). |
 
 ## Closeout gates — in order, do not skip
 
-### Gate 1 — release source and image pair (currently HOLD)
+### Gate 1 — release source and image pair
 
-1. Review the complete Smite trial against the production base; merge
-   only the reviewed candidate, with passing Smite and U-OPTI test evidence.
-   An old trial branch SHA or untagged digest is **not** an approved release.
-2. Tag the exact reviewed Smite **merged release commit** immutably. Reuse
-   the existing owner-confirmed `.github/workflows/publish-images.yml`
-   on that tag to build/sign the new Panel+Node pair, **not**
-   `unified-install-signed-trial.yml` as a production publisher.
-3. Obtain the resulting `registry-pair.json` and independent SHA256;
-   verify **both** digests and OIDC/Cosign provenance with the existing
-   owner-confirmed `.github/workflows/verify-candidate-images.yml`
-   and U-OPTI's `smite-registry-pair-admission.py`.
-4. Record an explicit, independently reviewed deployment decision and
-   recovery boundary for that **new** immutable release. Do not edit
-   the old signed trial manifest's false fields or assume GitHub CI
-   creates deployment approval.
-
-**Evidence required:** reviewed source commit, immutable tag, exact Panel/Node
-digests, independent manifest SHA256, two signature verification results,
-explicit approved-release receipt and no regressions.
+RC9 candidate publication and independent verification passed. Deployment
+approval and the recovery boundary still require a separate decision bound
+to the exact pair and the intended host.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
@@ -55,12 +40,17 @@ explicit approved-release receipt and no regressions.
    verify console restore capability. No FRP/Backhaul downtime consent.
 2. Confirm installed U-OPTI source and signed RC7 owner journal; run
    `smite-unified-panel-stage.py --verify-live-baseline` **read-only**
-   and confirm signed Iran↔Panel control, local HTTPS/443, Node ID and
-   the last known FRP/Backhaul receipts.
+   with the reviewed U-OPTI module set. It requires the exact RC7 API version
+   over loopback and HTTPS/443, signed Iran↔Panel control and an unchanged
+   Node fingerprint across the probes. The signed read consumes a normal
+   replay nonce. Record the existing FRP/Backhaul receipts separately.
+   Share the status output only and keep private snapshots on the host.
 3. Freeze a sealed staging snapshot and exact reviewed candidate; add an
    independently reviewed **production-authorized** executor using the
    existing cutover phases and fixed Panel-only driver. Do not enable
-   the current disposable token on `/`.
+   the current disposable token on `/`. The existing cutover `--review`
+   checks this baseline and the sealed preimages together with the fixed
+   Panel-only command plan. Success reports release HOLD.
 4. After each stage verify its durable journal, Panel-only service
    change and unchanged Iran Node Docker ID/StartedAt and signed replay.
    Migration runs only while Panel is actually stopped.
@@ -113,6 +103,6 @@ two-host `Connected` witness. Until the above evidence exists, leave
 `activation_allowed=false`, `release_approved=false` and
 `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` unchanged.
 
-**Resume from:** the two current trial heads and
+**Resume from:** the RC9 tag and the U-OPTI trial head and
 `docs/UNIFIED_SMITE_INSTALL_TRIAL.md` for detailed archived test evidence;
 this file is the concise remaining-work source of truth.

@@ -339,7 +339,18 @@ class Prepare(unittest.TestCase):
                   "id": "uopti_rc6_" + "a" * 32, "source": "b" * 40}
         journal = SimpleNamespace(ir_admin_present=lambda: True)
         journal_module = SimpleNamespace(Hold=RuntimeError, VERSION="2.0.0-rc.7")
-        run = unittest.mock.Mock(return_value="200")
+        version_response = '{"version":"2.0.0-rc.7"}\n200'
+        tls_version_response = version_response
+
+        def probe(command, **kwargs):
+            endpoint = command[-1]
+            if endpoint.endswith("/version"):
+                return tls_version_response if "--resolve" in command else version_response
+            return "200"
+
+        run = unittest.mock.Mock(side_effect=probe)
+        fingerprint = {"container_id": "before"}
+        runtime = unittest.mock.Mock(return_value=fingerprint)
         pairing = SimpleNamespace(
             _run=run, WizardHold=RuntimeError,
             _local_signed_replay_probe=unittest.mock.Mock(),
@@ -350,12 +361,15 @@ class Prepare(unittest.TestCase):
         ref.parent.mkdir(parents=True)
         ref.write_text("trial/unified-smite-install\n")
         load_module = stage._module
-        with patch.object(self.panel, "verify_live_baseline",
+        with patch.object(self.panel, "_runtime_proof", runtime), \
+                patch.object(self.panel, "verify_live_baseline",
                           return_value=(journal, record, journal_module)), \
                 patch.object(stage, "_module", side_effect=lambda name: pairing
                              if name == "smite-node-pairing" else load_module(name)):
             report = self.panel.live_baseline_report()
             self.assertEqual(report["IR_INSTALL_SOURCE_ON_HOST"], "UNKNOWN")
+            self.assertEqual(report["IR_PANEL_API_VERSION"], "2.0.0-rc.7")
+            self.assertEqual(report["IR_RETAINED_NODE"], "UNCHANGED_DURING_BASELINE")
             self.assertEqual(report["IR_SIGNED_TWO_WAY"],
                              "PASS_EXISTING_SIGNED_CONTROL_PROBES")
             pairing._local_signed_replay_probe.assert_called_once_with()
@@ -363,19 +377,31 @@ class Prepare(unittest.TestCase):
                 "iran-node-1234", timeout=6)
             pairing._panel_to_ir_signed_probe.assert_called_once_with(
                 "iran-node-1234")
-            loopback, https = [call.args[0] for call in run.call_args_list]
+            loopback, local_version, https, tls_version = [
+                call.args[0] for call in run.call_args_list]
+            self.assertEqual(local_version[-1], loopback[-1] + "/version")
+            self.assertEqual(tls_version[-1], https[-1] + "/version")
             self.assertEqual(loopback[-1], "http://127.0.0.1:8000/api/status")
             self.assertEqual(https[-3:], ["--resolve", "panel.example.com:443:127.0.0.1",
                                            "https://panel.example.com:443/api/status"])
             self.assertNotIn("--insecure", https)
             ref.write_text("c" * 40 + "\n")
             self.assertEqual(self.panel.live_baseline_report()["IR_INSTALL_SOURCE_ON_HOST"], "c" * 40)
-            run.return_value = "302"
-            pairing._local_signed_replay_probe.reset_mock()
+            for bad in ('{"version":"2.0.0-rc.9"}\n200',
+                        '{"version":"2.0.0-rc.7"}\n302',
+                        '{"version":"2.0.0-rc.9","version":"2.0.0-rc.7"}\n200',
+                        'invalid JSON\n200'):
+                with self.subTest(response=bad):
+                    tls_version_response = bad
+                    pairing._local_signed_replay_probe.reset_mock()
+                    with self.assertRaises(stage.StageHold):
+                        self.panel.live_baseline_report()
+                    pairing._local_signed_replay_probe.assert_not_called()
+            tls_version_response = version_response
+            runtime.side_effect = [fingerprint, {"container_id": "after"}]
             with self.assertRaises(stage.StageHold):
                 self.panel.live_baseline_report()
-            pairing._local_signed_replay_probe.assert_not_called()
-            run.return_value = "200"
+            runtime.side_effect = None
             for failing in (
                 pairing._local_signed_replay_probe,
                 pairing._wait_panel_signed_checkin,

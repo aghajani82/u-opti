@@ -358,7 +358,6 @@ class Cutover:
 
     def review(self):
         """Only public interface: inspect the sealed stage; do NOT execute."""
-        self.stage.status()
         if self.root == Path("/"):
             # Even the root read-only CLI must validate the same fixed
             # Docker/Compose project and signed-control overlay as the
@@ -367,8 +366,15 @@ class Cutover:
             driver_module = module(
                 "smite-unified-panel-host-driver.py",
                 "cutover_panel_fixed_driver")
-            checked = driver_module.PanelServiceDriver(
-                stage=self.stage).review_plan()
+            try:
+                transaction = self.tx.review()
+                checked = driver_module.PanelServiceDriver(
+                    stage=self.stage).review_plan()
+            except (self.tx_mod.Hold, driver_module.Hold, self.stage_hold):
+                deny()
+            if (transaction.get("status") != "REVIEWED_PREIMAGES_ONLY"
+                    or transaction.get("live_activation_allowed") is not False):
+                deny()
             if (checked.get("state") != "FIXED_COMMAND_PLAN_ONLY"
                     or checked.get("panel_service") != "smite-panel"
                     or checked.get("node_recreate_allowed") is not False
@@ -377,7 +383,9 @@ class Cutover:
                 deny()
             return {"status": "READ_ONLY_RELEASE_HOLD",
                     "driver": "FIXED_COMMAND_PLAN_VERIFIED",
+                    "baseline_and_preimages": "VERIFIED",
                     "production": False}
+        self.stage.status()
         doc = self._state()
         return {"status": "READ_ONLY_DISPOSABLE_REVIEW",
                 "phase": None if doc is None else doc["phase"],
@@ -396,6 +404,7 @@ def main(argv=None):
         print("IR_PANEL_CUTOVER=HOLD")
         return 2
     print("IR_PANEL_CUTOVER=" + report["status"])
+    print("IR_PANEL_BASELINE_AND_PREIMAGES=" + report["baseline_and_preimages"])
     print("IR_NODE_RECREATE=NO")
     print("PRODUCTION_EXECUTION_AUTHORIZED=NO")
     return 0

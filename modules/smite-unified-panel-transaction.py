@@ -333,6 +333,8 @@ class PanelTransaction:
                 if (baseline.get("IR_INSTALL_CHECKPOINT") != "COMPLETE"
                         or baseline.get("IR_GATEWAY_TLS443") != "PASS"
                         or baseline.get("IR_PANEL_LOOPBACK") != "PASS"
+                        or baseline.get("IR_PANEL_API_VERSION") != "2.0.0-rc.7"
+                        or baseline.get("IR_RETAINED_NODE") != "UNCHANGED_DURING_BASELINE"
                         or baseline.get("IR_ADMIN") != "PRESENT"
                         or baseline.get("IR_SIGNED_RUNTIME_AND_REPLAY") != "VERIFIED_READ_ONLY"
                         or baseline.get("IR_SIGNED_TWO_WAY") !=
