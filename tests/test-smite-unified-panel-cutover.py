@@ -324,6 +324,47 @@ class PanelServiceCutover(unittest.TestCase):
                 self.engine._write({"phase": "BEFORE_COMPOSE"})
         self.assertFalse(self.engine.folder.exists())
 
+    def test_internal_cutover_entrypoints_refuse_root_and_missing_capability(self):
+        with patch.object(self.engine, "root", Path("/")):
+            for action in (
+                self.engine._initial,
+                lambda: self.engine._step("STOP"),
+                lambda: self.engine._write({"phase": "BEFORE_COMPOSE"}),
+            ):
+                with self.assertRaises(cut.Hold):
+                    action()
+        previous = self.engine.fixture_capability
+        self.engine.fixture_capability = False
+        try:
+            for action in (
+                self.engine._initial,
+                lambda: self.engine._step("SCHEMA"),
+                lambda: self.engine._write({"phase": "BEFORE_COMPOSE"}),
+            ):
+                with self.assertRaises(cut.Hold):
+                    action()
+        finally:
+            self.engine.fixture_capability = previous
+        self.assertFalse(self.engine.folder.exists())
+        self.assertFalse(self.driver.calls)
+        self._untouched()
+
+    def test_apply_and_rollback_use_one_nonblocking_stage_lock(self):
+        import os
+        import fcntl
+        fd = os.open(self.panel.staging, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(cut.Hold):
+                self._apply()
+            with self.assertRaises(cut.Hold):
+                self._rollback()
+        finally:
+            os.close(fd)
+        self.assertFalse(self.engine.folder.exists())
+        self.assertFalse(self.driver.calls)
+        self.assertEqual(self._apply()["status"], "REHEARSED_WITH_PANEL_SERVICE")
+
     def test_journal_symlink_or_extra_key_blocks_resume(self):
         with self.assertRaises(cut.Hold):
             self._apply(fail_after="COMPOSE")
