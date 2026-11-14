@@ -207,10 +207,7 @@ class PanelServiceCutover(unittest.TestCase):
     def test_outside_config_change_blocks_apply_and_rollback(self):
         with self.assertRaises(cut.Hold):
             self._apply(fail_after="ENV")
-        nginx = self.root / cut.CONFIG_STEPS["NGINX"].replace(
-            "nginx-backend", cut.Cutover(
-                self.root, stage=self.panel, driver=self.driver,
-                fixture_capability=True).tx_mod.CONFIG["nginx-backend"])
+        nginx = self.root / self.engine.tx_mod.CONFIG["nginx-backend"]
         nginx.write_bytes(b"unreviewed external operator change")
         log = self._journal()
         with self.assertRaises(cut.Hold):
