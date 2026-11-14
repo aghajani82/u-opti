@@ -103,7 +103,8 @@ class Cutover:
             raw = self.stage._read(STAGING_REL + "/journal.json",
                                    mode=0o600, limit=8192)
             doc = self.tx_mod.checked_json(raw)
-        except (OSError, ValueError, self.stage_mod.StageHold):
+        except (OSError, ValueError, self.stage_mod.StageHold,
+                self.tx_mod.Hold):
             deny()
         if (not isinstance(doc, dict)
                 or set(doc) != {"schema", "kind", "source", "stage_hash",
@@ -157,25 +158,28 @@ class Cutover:
             os.close(folder_fd)
 
     def _continuity(self):
-        self.stage.status()   # includes exact Docker ID + StartedAt witness
-        self.stage._preflight_database()
-        self.stage._preflight_replay()
-        if self.tx._live_continuity() != "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT":
+        try:
+            self.stage.status()   # exact Docker ID + StartedAt witness
+            self.stage._preflight_database()
+            self.stage._preflight_replay()
+            if self.tx._live_continuity() != "HEARTBEAT_ONLY_NO_NEW_ENROLLMENT":
+                deny()
+            tables = self.tx._tables()
+            if tables not in (set(), {"smite_foreign_install_grants",
+                                     "smite_foreign_install_origins"}):
+                deny()
+            return tables
+        except (self.tx_mod.Hold, self.stage_mod.StageHold):
             deny()
-        tables = self.tx._tables()
-        if tables not in (set(), {"smite_foreign_install_grants",
-                                 "smite_foreign_install_origins"}):
-            deny()
-        return tables
 
     def _check_ordered_config(self, phase, *, rolling_back=False):
         """Validate all owned files before executing *any* service callback."""
         if phase in ("COMMITTED", "BEFORE_ROLLBACK", "ROLLED_BACK"):
             if rolling_back:
-                allowed = {
-                    self.tx._snapshot(name), self.tx._candidate(name)
-                }
                 for name in self.tx_mod.CONFIG:
+                    allowed = {
+                        self.tx._snapshot(name), self.tx._candidate(name)
+                    }
                     if self.tx._live(name) not in allowed:
                         deny()
                 return
