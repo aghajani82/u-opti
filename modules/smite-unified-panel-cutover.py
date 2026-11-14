@@ -178,6 +178,11 @@ class Cutover:
     def _check_ordered_config(self, phase, *, rolling_back=False):
         """Validate all owned files before executing *any* service callback."""
         if phase in ("COMMITTED", "BEFORE_ROLLBACK", "ROLLED_BACK"):
+            if phase == "ROLLED_BACK":
+                for name in self.tx_mod.CONFIG:
+                    if self.tx._live(name) != self.tx._snapshot(name):
+                        deny()
+                return
             if rolling_back:
                 for name in self.tx_mod.CONFIG:
                     allowed = {
@@ -278,6 +283,10 @@ class Cutover:
                 deny()  # after rollback require a new operator review
             if doc["phase"] == "COMMITTED":
                 self._prewrite("COMMITTED")
+                # A durable journal records past success; it is never
+                # substitute for CURRENT running Panel health.
+                self.driver.verify_panel("candidate")
+                self._continuity()
                 return {"status": "ALREADY_REHEARSED", "production": False}
             phase = doc["phase"]
             boundary, _, step = phase.partition("_")
@@ -312,6 +321,7 @@ class Cutover:
             if doc["phase"] == "ROLLED_BACK":
                 self._continuity()
                 self._check_ordered_config("ROLLED_BACK", rolling_back=True)
+                self.driver.verify_panel("original")
                 return {"status": "ALREADY_ROLLED_BACK", "production": False}
             if doc["phase"] == "BEFORE_ROLLBACK":
                 self._prewrite(doc["phase"], rollback=True)
