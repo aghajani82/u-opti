@@ -2325,7 +2325,9 @@ smite_install_unified_foreign_begin_core_from_panel() {
     # Always fail BEFORE Core/host writes unless the original signed Pairing
     # release gate gives an actual positive host-activation decision. RC9's
     # current trial policy is FALSE; this cannot authorize live installation.
-    smite_install_unified_signed_pair_review || return 2
+    # Keep the release witness separate from the exact machine-readable
+    # FOREIGN_CORE_OWNER / FOREIGN_CORE_STAGE receipt.
+    smite_install_unified_signed_pair_review >/dev/null || return 2
     python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
         --packet-file "$packet" --precore-fields >/dev/null || {
         echo 'HOLD: Panel-issued Foreign code is invalid or expired; no Core transaction started.' >&2
@@ -2361,7 +2363,9 @@ smite_install_unified_foreign_core_stage() {
     fi
     # A missing/replaced signed release is a HOLD before opening the Core
     # Journal, creating any directories or running Docker.
-    smite_install_unified_signed_pair_review || return 2
+    # Keep the release witness separate from the exact machine-readable
+    # FOREIGN_CORE_OWNER / FOREIGN_CORE_STAGE receipt.
+    smite_install_unified_signed_pair_review >/dev/null || return 2
     module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
     [ -f "$module_dir/smite-rc6-install-journal.py" ] &&
     [ ! -L "$module_dir/smite-rc6-install-journal.py" ] || return 2
