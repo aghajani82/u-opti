@@ -1992,8 +1992,21 @@ smite_install_sanaei_foreign() {
     # existing Sanaei must be ATTACHED instead of installed again.
     case "${SMITE_MANAGED_VERSION:-}" in
         2.0.0-rc.1|2.0.0-rc.7) signed_foreign=1 ;;
+        2.0.0-rc.9)
+            # Reuse the original Sanaei installer only inside the selected
+            # new RC9 Foreign option-2 transaction. Never treat an RC9 Node
+            # as an unsigned legacy Node or accept an unpinned source.
+            if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+               [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" != 1 ] ||
+               [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
+               [ "$(grep -Fxc 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06' "$SMITE_STATE_FILE")" != 1 ]; then
+                echo 'HOLD: Foreign RC9 Sanaei requires exact signed source and selected option 2.' >&2
+                return 2
+            fi
+            signed_foreign=1 ;;
     esac
-    if [ "$SMITE_MANAGED_VERSION" = "2.0.0-rc.7" ]; then
+    if [ "$SMITE_MANAGED_VERSION" = "2.0.0-rc.7" ] ||
+       [ "$SMITE_MANAGED_VERSION" = "2.0.0-rc.9" ]; then
         compose_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' smite-node 2>/dev/null)" || compose_project=""
         compose_service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' smite-node 2>/dev/null)" || compose_service=""
         compose_files="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' smite-node 2>/dev/null)" || compose_files=""
@@ -2095,7 +2108,9 @@ smite_install_sanaei_foreign() {
     fi
 
     if [ "${UOPTI_SMITE_UNIFIED_RETURN_TO_CALLER:-0}" = 1 ] &&
-       [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] && [ "$SMITE_MANAGED_VERSION" = 2.0.0-rc.7 ]; then
+       [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+       { [ "$SMITE_MANAGED_VERSION" = 2.0.0-rc.7 ] ||
+         [ "$SMITE_MANAGED_VERSION" = 2.0.0-rc.9 ]; }; then
         unified_attachment=1
         if [ -e "$SMITE_NODE_DIR/.sanaei-attachment.pending" ] || [ -L "$SMITE_NODE_DIR/.sanaei-attachment.pending" ]; then
             local recovery_result=0
@@ -2290,11 +2305,22 @@ smite_install_unified_foreign_sanaei() {
     local result=0
 
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
        [ ! -f "$SMITE_STATE_FILE" ] ||
        [ -L "$SMITE_STATE_FILE" ] ||
-       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE" ||
-       ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
-        echo 'HOLD: One-choice Sanaei continuation requires an owned fresh RC7 Foreign installation.' >&2
+       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: One-choice Sanaei continuation requires an owned fresh Foreign installation.' >&2
+        return 2
+    fi
+    # RC7 retained behavior stays unchanged; RC9 is admitted only with
+    # the exact same pinned source as the signed Panel/Node candidate.
+    if grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.9' "$SMITE_STATE_FILE"; then
+        [ "$(grep -Fxc 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06' "$SMITE_STATE_FILE")" = 1 ] || {
+            echo 'HOLD: Foreign RC9 Sanaei source does not match the signed candidate.' >&2
+            return 2
+        }
+    elif ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: Foreign Sanaei continuation version is not reviewed.' >&2
         return 2
     fi
 
