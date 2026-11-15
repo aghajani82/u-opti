@@ -100,6 +100,56 @@ def _private_fixture(path, *, allow_existing=False):
 
 
 
+_SELECTED_ROOT_PACKET = Path(
+    "/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json")
+
+
+def _selected_root_target(path, *, allow_existing=False):
+    """Exact original option-2 private root packet, no second stager.
+
+    Both signed release approval and the ORIGINAL root-owned operation
+    directory are required. This is an admission guard, not authorization
+    to install a Node or activate a Panel pair.
+    """
+    target = Path(path)
+    if (os.geteuid() != 0 or target != _SELECTED_ROOT_PACKET
+            or ".." in target.parts or
+            (not allow_existing and os.path.lexists(target))):
+        deny()
+    pairing_file = Path(__file__).with_name("smite-node-pairing.py")
+    if pairing_file.is_symlink() or not pairing_file.is_file():
+        deny()
+    spec = importlib.util.spec_from_file_location(
+        "uopti_existing_selected_release_gate", pairing_file)
+    if spec is None or spec.loader is None:
+        deny()
+    pairing = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = pairing
+    spec.loader.exec_module(pairing)
+    try:
+        # RC9 currently fails this immutable verified policy, so this
+        # function cannot write to a host until separately released.
+        pairing._require_unified_foreign_release()
+        promotion_file = Path(__file__).with_name(
+            "smite-foreign-install-promotion.py")
+        if promotion_file.is_symlink() or not promotion_file.is_file():
+            deny()
+        spec = importlib.util.spec_from_file_location(
+            "uopti_original_selected_private_directory", promotion_file)
+        if spec is None or spec.loader is None:
+            deny()
+        promotion = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = promotion
+        spec.loader.exec_module(promotion)
+        # Existing no-follow, owner+mode 0700 directory-fd walk.
+        with promotion.private_directory(target.parent):
+            pass
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            RuntimeError):
+        deny()
+    return target
+
+
 def _renew_expired_disposable(*, target, data, packet, now, client):
     """Repair the existing Foreign resume path for one expired Panel grant.
 
@@ -250,15 +300,22 @@ def _renew_expired_disposable(*, target, data, packet, now, client):
 
 def capture_disposable(reader, *, target, expected_panel, expected_domain,
                        expected_node, now, disposable_capability=False,
-                       allow_expired_renewal=False):
+                       allow_expired_renewal=False, selected_capability=False):
     """Write the exact validated packet once in a PRIVATE disposable fixture.
 
     No host path, overwrite, reuse of a consumed code, secret output, child
     process, network access or implicit Node activation is permitted.
     """
-    if not disposable_capability or type(now) is not int:
+    if type(now) is not int:
         deny()
-    target = _private_fixture(target, allow_existing=allow_expired_renewal)
+    if selected_capability is True and disposable_capability is False:
+        target = _selected_root_target(
+            target, allow_existing=allow_expired_renewal)
+    elif selected_capability is False and disposable_capability is True:
+        target = _private_fixture(
+            target, allow_existing=allow_expired_renewal)
+    else:
+        deny()
     c = client_module()
     try:
         raw = read_multiline(reader)
@@ -336,7 +393,8 @@ def read_hidden_tty(stream, *, ready=None):
 
 def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
                          expected_panel=None, expected_domain=None,
-                         expected_node=None, allow_expired_renewal=False):
+                         expected_node=None, allow_expired_renewal=False,
+                         selected_host=False):
     """One verified hidden paste for BOTH existing intake callers.
 
     Always validate the private destination and grant expiry BEFORE showing
@@ -346,7 +404,12 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
     """
     if type(now) is not int or not callable(confirm_scope):
         deny()
-    _private_fixture(target, allow_existing=allow_expired_renewal)
+    if selected_host is True:
+        _selected_root_target(target, allow_existing=allow_expired_renewal)
+    elif selected_host is False:
+        _private_fixture(target, allow_existing=allow_expired_renewal)
+    else:
+        deny()
     raw = read_hidden_tty(tty, ready=ready)
     packet = client_module().parse_packet(raw)
     scope = packet.scope
@@ -367,7 +430,8 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
         expected_panel=scope["panel_url"],
         expected_domain=scope["origin"],
         expected_node=scope["node_name"],
-        now=now, disposable_capability=True,
+        now=now, disposable_capability=not selected_host,
+        selected_capability=selected_host,
         allow_expired_renewal=allow_expired_renewal)
 
 
@@ -384,11 +448,12 @@ def capture_disposable_hidden_tty(tty, *, confirm_scope, ready=None, **kwargs):
 
 
 def capture_selected_hidden_tty(tty, *, target, now, confirm_scope,
-                                ready=None):
-    """Existing selected option-2 intake using the SAME hidden/staging path."""
+                                ready=None, selected_host=False):
+    """Existing selected intake; root only after original signed release."""
     return _capture_hidden_once(
         tty, target=target, now=now, confirm_scope=confirm_scope,
-        ready=ready, allow_expired_renewal=True)
+        ready=ready, allow_expired_renewal=True,
+        selected_host=selected_host)
 
 
 def _confirm_selected_scope(tty, scope):
