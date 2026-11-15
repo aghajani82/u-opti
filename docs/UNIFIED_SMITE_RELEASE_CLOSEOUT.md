@@ -380,7 +380,16 @@ Journal or printed in a status receipt.
 The original Host/Identity journals **remain responsible for later
 Sanaei RO, Gateway/443, one-use HMAC enrollment, activation and
 stage-owned compensation**; these read-only Core states are not a
-replacement for those journals. No public option-2 activation has
+replacement for those journals.
+
+The existing internal selected Foreign Core handoff also captures the
+**installer's parent BASHPID before shell command substitution**, so
+its original journal retains the real process ownership lease instead
+of accidentally recording the transient Python helper's PID.
+An isolated test verifies that exact same-option installer PID and
+that an unapproved signed release performs zero packet/Core commands.
+No new systemd service, menu entry, listener, identity or live
+host permission was added. No public option-2 activation has
 been authorized. Tested with the actual Core Journal and its
 pre-existing signed Host/Identity integration tests, including
 interruption, drift, rollback refusal, exact packet reissue,
