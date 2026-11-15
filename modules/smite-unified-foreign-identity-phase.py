@@ -278,36 +278,41 @@ def _selected_expired_packet_resume(packet, raw, *, client, promotion,
         with promotion.private_directory(live_identity.parent) as fd:
             identity_raw = promotion.read_optional(
                 fd, live_identity.name, client, limit=4096)
-        receipt = None
-        if identity_raw is not None:
-            identity_doc = client.decode(identity_raw)
-            if (identity_doc != {
-                    "version": 1,
-                    "node_id": packet.scope["node_id"],
-                    "node_secret": staged["node_secret"]}):
-                deny()
-            receipt = {
-                "schema": 1, "scope": packet.scope,
-                "destination": str(live_identity),
-                "sha256": hashlib.sha256(identity_raw).hexdigest(),
-            }
+        # The ORIGINAL promoter writes its PREPARED receipt *before*
+        # linking live identity. Reconstruct that exact prospective payload
+        # solely from the already persisted 0600 staged secret. This is
+        # read-only, never creates a key/file and never trusts a bare receipt.
+        # A crash can leave PREPARED without live identity, or COMPLETED
+        # before the separate transaction journal reaches PROMOTED_OFFLINE.
+        payload = json.dumps({
+            "version": 1,
+            "node_id": packet.scope["node_id"],
+            "node_secret": staged["node_secret"],
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+        receipt = {
+            "schema": 1, "scope": packet.scope,
+            "destination": str(live_identity),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        if identity_raw is not None and identity_raw != payload:
+            deny()
         if prepared_raw is not None:
-            if receipt is None or client.decode(prepared_raw) != receipt:
+            if client.decode(prepared_raw) != receipt:
                 deny()
         elif identity_raw is not None:
-            # Original promotion writes PREPARED before any live identity.
+            # The original promoter must write PREPARED first.
             deny()
         if completed_raw is not None:
-            if (receipt is None or prepared_raw is None
+            if (identity_raw is None or prepared_raw is None
                     or client.decode(completed_raw) !=
                     {**receipt, "status": "completed"}):
                 deny()
         if tx["phase"] == "IDENTITY_PROMOTED_OFFLINE":
             if completed_raw is None or identity_raw is None:
                 deny()
-        elif completed_raw is not None:
-            # Original transaction must have recorded promotion commit.
-            deny()
+        # A valid COMPLETED receipt with INTENT means a crash happened
+        # between two original fsynced journals. Resume may finish that
+        # journal only after a fresh signed Panel STATUS proof.
         return True
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()

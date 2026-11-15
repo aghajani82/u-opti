@@ -368,6 +368,62 @@ class IdentityPhase(unittest.TestCase):
                 target.write_bytes(original)
                 target.chmod(0o600)
 
+    def test_expired_prepared_without_live_identity_recovers_original_secret(self):
+        # Reproduce crash after PREPARED was fsynced, before the original
+        # promoter linked the live identity. No fresh bearer is issued.
+        self.tx()
+        staged = (self.stage/"foreign-install-identity.json").read_bytes()
+        prepared = (self.stage/"foreign-install-promotion-prepared.json").read_bytes()
+        (self.stage/"foreign-install-promotion-completed.json").unlink()
+        self.live.unlink()
+        j = json.loads(self.journal().read_text())
+        j["phase"] = "INTENT"
+        self.write(self.journal(), json.dumps(j, sort_keys=True))
+        self.calls.clear()
+        self.assertTrue(self.expired_owned_receipt())
+        self.assertFalse(self.live.exists())
+        self.assertEqual(self.calls, [])
+        result = self.tx(now=self.doc["expires_at"] + 60)
+        self.assertEqual(result["journal"], "IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.calls, [
+            "/api/node-control/installation-status",
+            "/api/node-control/installation-status"])
+        self.assertEqual((self.stage/"foreign-install-identity.json").read_bytes(), staged)
+        self.assertEqual((self.stage/"foreign-install-promotion-prepared.json").read_bytes(), prepared)
+        self.assertEqual(json.loads(self.live.read_text())["node_secret"], self.secret)
+
+    def test_expired_completed_before_intent_commit_recovers_without_redeem(self):
+        # Original promoter finished all receipts but the independent
+        # transaction journal was not yet advanced when the process died.
+        self.tx()
+        live = self.live.read_bytes()
+        j = json.loads(self.journal().read_text())
+        j["phase"] = "INTENT"
+        self.write(self.journal(), json.dumps(j, sort_keys=True))
+        self.calls.clear()
+        self.assertTrue(self.expired_owned_receipt())
+        self.assertEqual(self.tx(now=self.doc["expires_at"]+90)["journal"],
+                         "IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.calls, ["/api/node-control/installation-status"])
+        self.assertEqual(self.live.read_bytes(), live)
+
+    def test_expired_prepared_unbound_hash_denied_without_live_identity(self):
+        self.tx()
+        (self.stage/"foreign-install-promotion-completed.json").unlink()
+        self.live.unlink()
+        j = json.loads(self.journal().read_text())
+        j["phase"] = "INTENT"
+        self.write(self.journal(), json.dumps(j, sort_keys=True))
+        receipt = self.stage/"foreign-install-promotion-prepared.json"
+        current = json.loads(receipt.read_text())
+        current["sha256"] = "0"*64
+        self.write(receipt, json.dumps(current, sort_keys=True))
+        self.calls.clear()
+        with self.assertRaises(module.Hold):
+            self.expired_owned_receipt()
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.live.exists())
+
     def test_completed_transaction_recheck_uses_signed_proof_only(self):
         self.tx()
         original=self.live.read_bytes()

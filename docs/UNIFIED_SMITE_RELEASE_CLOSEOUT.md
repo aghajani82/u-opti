@@ -339,6 +339,21 @@ then merge to `main` only with those records. No server rebuild is
 requested before these release gates. The original legacy FRP/backhaul
 and Sanaei installations remain outside the installation transaction.
 
+#### Exact crash windows for two-hour grant — 2026-11-15
+
+The retained private `smi1` code may expire after the original signed
+enrolment but **before** one of the two original fsynced identity journals
+commits. The recovery verifier now accepts only these same-scope,
+cryptographically bound interruption windows: original
+`INTENT + staged secret + PREPARED` without live identity, and
+`INTENT + staged secret + PREPARED + live identity + COMPLETED`.
+It recomputes the canonical original promotion payload digest in memory;
+a forged PREPARED hash, changed secret/Node, absent INTENT or mismatched
+COMPLETED still HOLD. Replaying the original code or generating another
+identity is forbidden. The original enrolment/promoter must obtain a new
+signed Panel STATUS witness before it can finish the retained stage. The
+companion offline tests inject crashes at both boundaries.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
