@@ -59,80 +59,14 @@ smite_install_ir_foreign_schema_stage > "$TMP/second"
 [ "$(grep -c -- '--review' "$TMP/calls")" = 2 ]
 ! grep -q -- '--migrate' "$TMP/calls"
 grep -qx 'IR_FOREIGN_SCHEMA=VERIFIED_RETAINED' "$TMP/second"
-[ "$(grep -c '^foreign-readyfor line in 'SMITE_ROLE=foreign' 'SMITE_MANAGED_VERSION=2.0.0-rc.7' \
-            'SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000'; do
-    cp "$SMITE_STATE_FILE" "$TMP/backup-state"
-    key="${line%%=*}"
-    sed -i "s/^$key=.*/$line/" "$SMITE_STATE_FILE"
-    : > "$TMP/calls"
-    if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then
-        echo 'FAIL: untrusted source/role accepted' >&2; exit 1
-    fi
-    [ ! -s "$TMP/calls" ]
-    mv "$TMP/backup-state" "$SMITE_STATE_FILE"
-done
-ln -s "$SMITE_STATE_FILE" "$TMP/link.env"
-SMITE_STATE_FILE="$TMP/link.env"
-: > "$TMP/calls"
-if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ ! -s "$TMP/calls" ]
-SMITE_STATE_FILE="$TMP/state.env"
-: > "$TMP/calls"
-if BAD_REVIEW=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-! grep -q -- '--migrate' "$TMP/calls"
-rm -f "$TMP/ready"
-: > "$TMP/calls"
-if FAIL_MIGRATE=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ ! -f "$TMP/ready" ]
-: > "$TMP/calls"
-if BAD_RECEIPT=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ -f "$TMP/ready" ]
-: > "$TMP/calls"
-smite_install_ir_foreign_schema_stage > "$TMP/retry"
-! grep -q -- '--migrate' "$TMP/calls"
-grep -qx 'IR_FOREIGN_SCHEMA=READY' "$TMP/retry"
-echo 'IR_OPTION_1_RC9_FOREIGN_SCHEMA_AND_SIGNED_443=PASS_ISOLATED_RETRY_AND_HOLD'
- "$TMP/calls")" = 1 ]
+[ "$(grep -c '^foreign-ready$' "$TMP/calls")" = 1 ]
 : > "$TMP/calls"
 if FAIL_FOREIGN_443=1 smite_install_ir_foreign_schema_stage > "$TMP/blocked" 2>&1; then
     echo 'FAIL: post-schema ingress rejection swallowed' >&2
     exit 1
 fi
 ! grep -q -- '--migrate' "$TMP/calls"
-[ "$(grep -c '^foreign-readyfor line in 'SMITE_ROLE=foreign' 'SMITE_MANAGED_VERSION=2.0.0-rc.7' \
-            'SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000'; do
-    cp "$SMITE_STATE_FILE" "$TMP/backup-state"
-    key="${line%%=*}"
-    sed -i "s/^$key=.*/$line/" "$SMITE_STATE_FILE"
-    : > "$TMP/calls"
-    if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then
-        echo 'FAIL: untrusted source/role accepted' >&2; exit 1
-    fi
-    [ ! -s "$TMP/calls" ]
-    mv "$TMP/backup-state" "$SMITE_STATE_FILE"
-done
-ln -s "$SMITE_STATE_FILE" "$TMP/link.env"
-SMITE_STATE_FILE="$TMP/link.env"
-: > "$TMP/calls"
-if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ ! -s "$TMP/calls" ]
-SMITE_STATE_FILE="$TMP/state.env"
-: > "$TMP/calls"
-if BAD_REVIEW=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-! grep -q -- '--migrate' "$TMP/calls"
-rm -f "$TMP/ready"
-: > "$TMP/calls"
-if FAIL_MIGRATE=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ ! -f "$TMP/ready" ]
-: > "$TMP/calls"
-if BAD_RECEIPT=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
-[ -f "$TMP/ready" ]
-: > "$TMP/calls"
-smite_install_ir_foreign_schema_stage > "$TMP/retry"
-! grep -q -- '--migrate' "$TMP/calls"
-grep -qx 'IR_FOREIGN_SCHEMA=READY' "$TMP/retry"
-echo 'IR_OPTION_1_RC9_FOREIGN_SCHEMA=PASS_ISOLATED_RETRY_AND_FLAGS_UNCHANGED'
- "$TMP/calls")" = 1 ]
+[ "$(grep -c '^foreign-ready$' "$TMP/calls")" = 1 ]
 ! grep -q 'IR_FOREIGN_FLAGS=ENABLED_SIGNED_443' "$TMP/blocked"
 for line in 'SMITE_ROLE=foreign' 'SMITE_MANAGED_VERSION=2.0.0-rc.7' \
             'SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000'; do
@@ -166,4 +100,4 @@ if BAD_RECEIPT=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exi
 smite_install_ir_foreign_schema_stage > "$TMP/retry"
 ! grep -q -- '--migrate' "$TMP/calls"
 grep -qx 'IR_FOREIGN_SCHEMA=READY' "$TMP/retry"
-echo 'IR_OPTION_1_RC9_FOREIGN_SCHEMA=PASS_ISOLATED_RETRY_AND_FLAGS_UNCHANGED'
+echo 'IR_OPTION_1_RC9_FOREIGN_SCHEMA_AND_SIGNED_443=PASS_ISOLATED_RETRY_AND_HOLD'
