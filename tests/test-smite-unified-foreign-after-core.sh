@@ -505,6 +505,14 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     RELEASE_FIXTURE=HOLD
     FIX_STAGE=CORE_PENDING
     MOCK_NODE_FAIL=0
+    SANAEI_RO_READY=0
+    smite_install_sanaei_retained() {
+        if [ "$SANAEI_RO_READY" = 1 ]; then
+            printf 'witness-ro\n' >> "$TMP/core-stage-calls"
+            return 0
+        fi
+        return 3
+    }
     smite_install_unified_signed_pair_review() {
         printf 'release\n' >> "$TMP/core-stage-calls"
         [ "$RELEASE_FIXTURE" = pass ] || return 2
@@ -523,6 +531,9 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     python3() {
         case "$*" in
+            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET --attached-sanaei")
+                printf 'resume-ro\n' >> "$TMP/core-stage-calls"
+                printf 'FOREIGN_CORE_STAGE=%s\nFOREIGN_CORE_PROJECT=%s\n' "$FIX_STAGE" "$PROJECT" ;;
             *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET")
                 printf 'resume\n' >> "$TMP/core-stage-calls"
                 printf 'FOREIGN_CORE_STAGE=%s\nFOREIGN_CORE_PROJECT=%s\n' "$FIX_STAGE" "$PROJECT" ;;
@@ -574,6 +585,9 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     case_core 0 "$(printf 'release\nresume\ncommit')"
     FIX_STAGE=CORE_COMMITTED
     case_core 0 "$(printf 'release\nresume')"
+    SANAEI_RO_READY=1
+    case_core 0 "$(printf 'release\nwitness-ro\nresume-ro')"
+    SANAEI_RO_READY=0
     FIX_STAGE=INVALID
     case_core 2 "$(printf 'release\nresume')"
     PROJECT=not_an_owned_project
