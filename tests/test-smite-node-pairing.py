@@ -548,8 +548,8 @@ class PreviewTests(unittest.TestCase):
         control = "https://kh.kolbe1.ir/smite-node/322983983580c8eb"
         node_id = "22222222-3333-4444-5555-666666666666"
 
-        for approval in (True, False):
-            with self.subTest(signed_panel_approves=approval):
+        for approval, replay_valid in ((True, True), (False, True), (True, False)):
+            with self.subTest(signed_panel_approves=approval, replay_valid=replay_valid):
                 commands = []
                 active = [False]
                 def fake_run(command, **kwargs):
@@ -580,13 +580,14 @@ class PreviewTests(unittest.TestCase):
                     patch.object(pairing, "_regular", return_value=b""),
                     patch.object(pairing, "_prepare_security_candidate") as stage,
                     patch.object(pairing, "_provision_replay_once") as replay,
+                    patch.object(pairing, "_replay_artifacts_valid", return_value=replay_valid),
                     patch.object(pairing, "_wait_container") as wait,
                     patch.object(pairing, "_local_signed_replay_probe") as hmac_probe,
                     patch.object(pairing, "_run", side_effect=fake_run),
                     patch.object(pairing.time, "sleep") as sleeper,
                     patch("sys.stdout", io.StringIO()) as display,
                 ):
-                    if approval:
+                    if approval and replay_valid:
                         pairing.activate_foreign_node_field_trial(current)
                         self.assertIn(
                             "KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS",
@@ -608,7 +609,7 @@ class PreviewTests(unittest.TestCase):
                             len([x for x in commands
                                  if x[:2] == ["docker","compose"] and "up" in x]), 2,
                         )
-                        self.assertEqual(sleeper.call_count, 7)
+                        self.assertEqual(sleeper.call_count, 0 if approval else 7)
                     stage.assert_called_once()
                     replay.assert_called_once()
                     hmac_probe.assert_called_once()
