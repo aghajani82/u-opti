@@ -476,7 +476,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.status:
         print("PANEL_FOREIGN_PACKET_INTAKE=DISPOSABLE_REHEARSAL_ONLY")
-        print("REAL_HOST_CAPTURE=SIGNED_RELEASE_HOLD")
+        print("REAL_HOST_CAPTURE=NOT_AUTHORIZED")
         print("NODE_ACTIVATION=NOT_PERFORMED")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
