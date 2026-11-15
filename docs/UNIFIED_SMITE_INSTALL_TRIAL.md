@@ -16,6 +16,38 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 signed Panel packet is now the sole Core owner input
+
+In the existing trial branch, Foreign Core ownership no longer needs
+separately retyped Node-ID/Panel-origin/Gateway-path values. The
+already-required private `foreign-install-packet.json` is validated
+through the original Smite packet/TTL/0600 parser, which yields only
+the five nonsecret source-of-truth fields for the original
+`smite-rc6-install-journal.py`. A conflicting caller-supplied owner
+scope, expired code or unsafe packet path fails before any fresh
+Journal record. The original 4-line Foreign Core prompt output and
+Panel-issued control path prebinding remain unchanged.
+
+The internal `smite_install_unified_foreign_begin_core_from_panel`
+helper reuses the original signed Pairing release gate, then the same
+private packet and original Core Journal begin. A protected offline
+shell fixture proves failed release approval causes **zero** packet
+or Core commands, and tests ensure only the packet pathname (never
+the code) appears on argv. The gate remains default-off for actual
+hosts and the public option-2 menu still HOLDS.
+
+CI full PASS:
+https://github.com/aghajani82/u-opti/actions/runs/43705948424
+
+The next legitimate code stage is the **real-root, signed-release
+authorized Foreign host executor**, which must combine exactly the
+existing paused Node, Sanaei read-only DB, HTTPS/443 Gateway and HMAC
+one-use Pairing stage-owned rollback/retry. Coordinate the Iran Panel
+Foreign flags only after that release gate; the current installed Iran
+Panel was observed with both Foreign flags OFF. Test both hosts using
+one U-OPTI immutable SHA once ready, rather than manually rebuilding
+Iran after each offline CI change.
+
 ### 2026-11-15 exact RC9 original Core→Host→Identity Journal handoff
 
 The original RC9 Foreign Core Journal and the existing separate

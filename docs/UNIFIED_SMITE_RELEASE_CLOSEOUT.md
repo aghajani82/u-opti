@@ -310,6 +310,51 @@ and we do **not** prematurely toggle them. The operator must then be
 able to reserve the KH Node, issue the private one-use packet and
 complete option 2 without returning to separate menu tools.
 
+#### Original Panel packet → RC9 Foreign Core Journal — 2026-11-15
+
+Closed a practical one-choice Foreign mismatch **without inventing a new
+packet, credential flow or installer**. The original U-OPTI Core Journal
+`smite-rc6-install-journal.py` now accepts the **path** of the same
+private, owner-only `foreign-install-packet.json` that the existing
+Smite Panel ForeignInstallDialog issues. It calls the original
+`smite-unified-foreign-gateway-plan.py::precore_fields` verifier and
+derives **only** Panel/Foreign domains, Node name/ID and exact HTTPS/443
+control path for its durable Core owner. No installation code or Node
+secret is passed as a shell argument, printed, or copied into the Core
+receipt. Wrong file mode, expired grant, conflicting operator-supplied
+scope, wrong image and unapproved signed release fail before Core writes.
+
+An internal helper in the **existing**
+`modules/smite-install.sh` supplies that packet to the original
+Journal `begin` only after the **existing**
+`smite_install_unified_signed_pair_review` gate and exact RC9 source and
+Node digest checks. It is **not an alternative installer or menu item**:
+the public option 2 is still
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, and the original
+Journal continues to **deny RC9 Foreign begin at root `/`**. The
+CI-approved/synthetic release response is confined to an isolated
+shell fixture; no real host is authorized by this change.
+
+Existing tests now cover the original 4-field user input unchanged,
+the 5 nonsecret Core owner fields, TTL and private-file checks, exact
+packet-to-Core-to-Host-to-Identity same-key continuation, and release
+denial before either packet parsing or Journal writes. GitHub Actions
+PASS 3/3:
+[43705948424](https://github.com/aghajani82/u-opti/actions/runs/43705948424).
+
+**Remaining release blockers are concrete and unchanged:** (1) complete
+the real-root Foreign stage executor with step-owned restoration and
+interrupted same-option resume, reusing the previously audited
+Core/Sanaei RO/HTTPS Gateway/Identity functions; (2) independently
+approve/publish and verify a signed image pair for **host activation** —
+the current `smite-unified-trial-pair-admission.py::verify` explicitly
+returns `host_activation_allowed=False`; (3) coordinate the existing
+Iran Panel Foreign-install/origin trust flags (both were OFF) with that
+approved release; and (4) prove actual signed Iran↔Foreign Connected,
+identity continuity and rollback on the two disposable servers. A
+matching fresh Iran rebuild is acceptable at that point; it is not
+needed for code-only CI work. Protect Grandoptical/FRP/Backhaul.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;
