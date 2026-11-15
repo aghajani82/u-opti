@@ -216,6 +216,9 @@ _SELECTED_ROOT_PACKET = Path(
     "/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json")
 _SELECTED_ROOT_IDENTITY = Path(
     "/etc/u-opti/smite/identities/node-identity.json")
+_SELECTED_ROOT_STATE = Path("/etc/u-opti/smite/state.env")
+_SELECTED_ROOT_GATEWAY = Path("/etc/u-opti/smite/foreign-gateway.env")
+_SELECTED_ROOT_NODE_ENV = Path("/opt/smite-node/.env")
 
 
 def prepairing_owned_expired(*, packet_path, state_path, gateway_state_path,
@@ -229,9 +232,9 @@ def prepairing_owned_expired(*, packet_path, state_path, gateway_state_path,
     This function is read-only; no host operations or credentials printed.
     """
     if (Path(packet_path) != _SELECTED_ROOT_PACKET
-            or Path(state_path) != Path("/etc/u-opti/smite/state.env")
-            or Path(gateway_state_path) != Path("/etc/u-opti/smite/foreign-gateway.env")
-            or Path(node_env_path) != Path("/opt/smite-node/.env")
+            or Path(state_path) != _SELECTED_ROOT_STATE
+            or Path(gateway_state_path) != _SELECTED_ROOT_GATEWAY
+            or Path(node_env_path) != _SELECTED_ROOT_NODE_ENV
             or not Path(site_path).is_absolute()):
         deny()
     try:

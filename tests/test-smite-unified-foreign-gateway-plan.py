@@ -314,29 +314,48 @@ class GatewayScope(unittest.TestCase):
             if filename == 'smite-foreign-install-promotion.py':
                 module.read_env = private_env
             return module
-        def invoke():
-            out=io.StringIO()
+        def invoke(*, source_drift=False):
             with (patch.object(gateway, 'load_module', side_effect=loader),
                   patch.object(gateway, '_SELECTED_ROOT_PACKET', self.packet),
                   patch.object(gateway, '_SELECTED_ROOT_IDENTITY',
                                self.root/'no-live-identity.json'),
-                  patch.object(gateway, 'time') as clock,
-                  contextlib.redirect_stdout(out)):
-                clock.time.return_value=packet.expires_at+1
-                # Paths remain pinned to production; override only this
-                # local fixture's expected roots, never installation logic.
-                # Test _prepairing_exact_scope directly with verified owner
-                # after the root-bound original proof is exercised below.
+                  patch.object(gateway, '_SELECTED_ROOT_STATE', self.state),
+                  patch.object(gateway, '_SELECTED_ROOT_GATEWAY', self.status),
+                  patch.object(gateway, '_SELECTED_ROOT_NODE_ENV', node),
+                  patch.object(gateway.time, 'time',
+                               return_value=packet.expires_at+1)):
                 return gateway.prepairing_owned_expired(
-                    packet_path=self.packet,
-                    state_path=Path('/etc/u-opti/smite/state.env'),
-                    gateway_state_path=Path('/etc/u-opti/smite/foreign-gateway.env'),
-                    node_env_path=Path('/opt/smite-node/.env'),
-                    site_path=self.site)
-        # Production fixed absolute state/Node paths prevent a positive
-        # fixture from pretending to be a real root. They are never relaxed.
+                    packet_path=self.packet, state_path=self.state,
+                    gateway_state_path=self.status,
+                    node_env_path=node, site_path=self.site)
+        # The original INTENT/staged secret and the SAME complete Gateway
+        # check are required even though the one-use bearer expired.
+        self.assertEqual(
+            invoke(), "FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY")
+        self.write(node, node.read_bytes().replace(
+            b'SMITE_AGENT_AUTH_MODE=strict',
+            b'SMITE_AGENT_AUTH_MODE=legacy'))
         with self.assertRaises(gateway.Hold):
             invoke()
+        self.write(node, node.read_bytes().replace(
+            b'SMITE_AGENT_AUTH_MODE=legacy',
+            b'SMITE_AGENT_AUTH_MODE=strict'))
+        self.write(self.status, self.status.read_bytes().replace(
+            PATH.encode(), b'/smite-node/'+b'd'*32))
+        with self.assertRaises(gateway.Hold):
+            invoke()
+        self.write(self.status, self.status.read_bytes().replace(
+            b'/smite-node/'+b'd'*32, PATH.encode()))
+        staged = stage/"foreign-install-identity.json"
+        before=staged.read_bytes()
+        self.write(staged, b'{}')
+        with self.assertRaises(gateway.Hold):
+            invoke()
+        self.write(staged, before)
+        self.assertEqual(
+            invoke(), "FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY")
+        self.assertFalse((self.root/'no-live-identity.json').exists())
+
 
     def test_valid_shared_sanaei_site_existing_managed_location(self):
         self.write(self.site,(
