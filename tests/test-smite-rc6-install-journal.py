@@ -209,6 +209,32 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(m.Hold):self.j.rollback()
         self.assertFalse(any('stop' in a for a in self.calls))
 
+    def test_option2_original_foreign_owner_lease_allows_only_same_process(self):
+        # The selected post-core stage re-verifies the original journal
+        # while its Core installer is still alive. Another process must
+        # never borrow that active owner or race the stage operation lock.
+        scope = ('panel.example.com', 'kh.example.com', 'node-kh',
+                 'foreign-node-1234', '/smite-node/' + 'a'*32)
+        self.j.rollback()
+        project = self.j.begin('foreign', source=m.RC9_SOURCE,
+                               resumable_foreign=True, foreign_inputs=scope)
+        d = self.j.load()
+        d.update(installer_pid=123, installer_start='original-start')
+        self.j.save(d)
+        with patch.object(m, 'process_start', side_effect=lambda pid:
+                          'original-start' if pid == 123 else 'other-start'):
+            with self.assertRaises(m.Hold):
+                self.j.foreign_resume()
+            with self.assertRaises(m.Hold):
+                self.j.foreign_resume(installer_pid=456)
+            self.assertEqual(
+                self.j.foreign_resume(installer_pid=123),
+                ('CORE_PENDING', project))
+        # The same source-bound ownership survives the interruption, but
+        # cannot be treated as signed Pairing or a Connected Node.
+        self.assertEqual(self.j.load()['state'], 'INSTALLING')
+        self.assert_no_stop()
+
     def test_rc9_foreign_resume_verifies_same_core_and_does_not_recreate(self):
         scope=('panel.example.com','kh.example.com','node-kh',
                'foreign-node-1234','/smite-node/'+'a'*32)
