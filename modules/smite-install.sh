@@ -2296,6 +2296,49 @@ smite_install_unified_foreign_capture_packet() {
     return 0
 }
 
+# Exact Foreign Core ownership hand-off from the ONE Panel-issued packet.
+# Reuse the existing Pairing signed-release gate and original RC6/RC9
+# fresh-install Journal; never duplicate credentials or accept operator-
+# supplied node-id/control-path arguments. Internal only: public option 2
+# is still HOLD, and the original Journal refuses root='/' RC9 Foreign
+# begin until the approved signed host executor/rollback exists.
+smite_install_unified_foreign_begin_core_from_panel() {
+    local packet="${1:-}" module_dir project source
+    source='e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+    if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
+       [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" != "$source" ] ||
+       [ "${SMITE_NODE_IMAGE:-}" != 'ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2' ] ||
+       [ -z "$packet" ] || [ ! -f "$packet" ] || [ -L "$packet" ]; then
+        echo 'HOLD: Selected Foreign Core requires the exact signed RC9 Panel packet and Node image.' >&2
+        return 2
+    fi
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
+    [ -f "$module_dir/smite-rc6-install-journal.py" ] &&
+    [ ! -L "$module_dir/smite-rc6-install-journal.py" ] || return 2
+
+    # Always fail BEFORE Core/host writes unless the original signed Pairing
+    # release gate gives an actual positive host-activation decision. RC9's
+    # current trial policy is FALSE; this cannot authorize live installation.
+    smite_install_unified_signed_pair_review || return 2
+    python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" --precore-fields >/dev/null || {
+        echo 'HOLD: Panel-issued Foreign code is invalid or expired; no Core transaction started.' >&2
+        return 2
+    }
+    # The original Journal now derives its five nonsecret Core fields
+    # directly from that SAME private 0600 packet, checking TTL a second
+    # time before committing its durable owner. Neither the code nor any
+    # identity secret is passed as argv or written to the Core receipt.
+    project="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin \
+        --role foreign --installer-pid "$BASHPID" --resumable-foreign \
+        --foreign-packet-file "$packet" --source "$source")" || return 2
+    [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+    echo "FOREIGN_CORE_OWNER=$project"
+}
+
 # Unified option-2 building block: reuse the existing Sanaei installer and
 # exact read-only DB attachment, without sending the caller back to the menu.
 # The complete Foreign enrollment/Gateway orchestration must explicitly call
