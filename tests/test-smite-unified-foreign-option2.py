@@ -197,6 +197,64 @@ class UnifiedForeignOption2(unittest.TestCase):
         self.assertEqual(self.fixture.calls,
                          ["/api/node-control/installation-status"])
 
+    def test_rc9_real_signed_readonly_witnesses_join_original_stage_and_identity_journals(self):
+        # Compose the existing, SOURCE-PINNED RC9 Docker/Compose/HTTPS witness
+        # (not a stub returning READY) with the original offline Host journal
+        # and the real one-use Panel grant/HMAC identity promotion functions.
+        # No actual Docker, network, service or server access is permitted.
+        witness_fixture = load(
+            "option2_existing_real_witness_fixture",
+            ROOT / "tests" / "test-smite-unified-foreign-existing-witnesses.py"
+        )
+        trial = witness_fixture.ForeignReadOnlyWitnesses(
+            methodName="test_exact_signed_runtime_is_read_only_witness_ready"
+        )
+        trial.setUp()
+        self.addCleanup(trial.doCleanups)
+        exact_source="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+        trial.current.update(
+            SMITE_MANAGED_VERSION="2.0.0-rc.9",
+            SMITE_UPSTREAM_REF=exact_source
+        )
+        self.fixture.write(self.fixture.state,
+            self.fixture.state.read_text().replace(
+                "SMITE_MANAGED_VERSION=2.0.0-rc.7",
+                "SMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF="+exact_source
+            ))
+        def with_existing_witness():
+            return self.run_option2(
+                verify_core=trial.observer.core,
+                verify_sanaei=trial.observer.sanaei,
+                verify_gateway=trial.observer.gateway,
+                install_sanaei=lambda scope: trial.attach(),
+                install_gateway=lambda scope: trial.serve_gateway(),
+            )
+        trial.current["SMITE_UPSTREAM_REF"]="0"*40
+        with self.assertRaises(host.Hold):
+            with_existing_witness()
+        self.assertFalse((self.fixture.stage/host.JOURNAL).exists())
+        self.assert_no_identity()
+        trial.current["SMITE_UPSTREAM_REF"]=exact_source
+        trial.image="ghcr.io/aghajani82/smite-node:latest"
+        with self.assertRaises(host.Hold):
+            with_existing_witness()
+        self.assertFalse((self.fixture.stage/host.JOURNAL).exists())
+        self.assert_no_identity()
+        trial.image=witness_fixture.w.TRIAL_NODE
+        report=with_existing_witness()
+        self.assertEqual(report["phase"],"FOREIGN_OPTION2_OFFLINE_READY")
+        self.assertEqual(report["signed_panel_proof"],"PASS")
+        self.assertFalse(report["connected"])
+        self.assertFalse(report["activation_allowed"])
+        self.assertEqual(trial.observer.sanaei(trial.scope),"READY")
+        self.assertEqual(trial.observer.gateway(trial.scope),"READY")
+        original_identity=self.fixture.live.read_bytes()
+        self.fixture.calls.clear()
+        self.assertEqual(with_existing_witness(),report)
+        self.assertEqual(self.fixture.live.read_bytes(),original_identity)
+        self.assertEqual(self.fixture.calls,
+                         ["/api/node-control/installation-status"])
+
     def test_gateway_must_be_verified_before_any_code_redeem(self):
         self.fail_after = "gateway"
         with self.assertRaises(KeyboardInterrupt):
