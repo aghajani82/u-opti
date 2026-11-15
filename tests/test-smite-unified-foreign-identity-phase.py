@@ -425,6 +425,49 @@ class IdentityPhase(unittest.TestCase):
             self.tx(directory=Path("/etc/u-opti/smite/foreign-staging"))
         self.assertFalse(self.calls)
 
+    def test_selected_root_identity_denies_without_real_release_before_network(self):
+        # The selected CLI has no bearer-code arguments. Current exact RC9
+        # release_approved=false must fail before staging a secret or
+        # contacting the Panel; no test fixture can impersonate root paths.
+        self.calls.clear()
+        self.assertRaises(
+            module.Hold,
+            module.rehearse_transaction,
+            packet_path=self.packet, state_path=self.state,
+            gateway_path=self.gateway, node_env_path=self.env,
+            directory=self.stage, live_identity=self.live,
+            transport=self.mock_panel, now=self.now,
+            selected_capability=True, installer_pid=123)
+        self.assertEqual(self.calls, [])
+        self.assertFalse((self.stage / "unified-foreign-transaction.lock").exists())
+        self.assertFalse(self.live.exists())
+
+    def test_selected_cli_does_not_expose_identity_without_signed_release(self):
+        executable = ROOT / "modules" / "smite-unified-foreign-identity-phase.py"
+        p = subprocess.run(
+            [sys.executable, "-B", str(executable),
+             "--selected-foreign", "--installer-pid", str(os.getpid())],
+            capture_output=True, text=True, timeout=20)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("UNIFIED_FOREIGN_IDENTITY=HOLD_RELEASE_OR_ORIGINAL_JOURNAL",
+                      p.stderr)
+        self.assertIn("FOREIGN_CONNECTED=NOT_PROVEN", p.stderr)
+        self.assertNotIn("SIGNED_PROOF_RETAINED_NOT_ACTIVATED", p.stdout)
+        self.assertFalse(self.calls)
+
+    def test_selected_boundary_rejects_path_or_capability_mixing(self):
+        before = set(self.stage.iterdir())
+        for kwargs in (
+            {"selected_capability": True, "disposable_capability": True},
+            {"selected_capability": True, "installer_pid": 0},
+            {"selected_capability": True, "installer_pid": 123,
+             "live_identity": Path("/etc/u-opti/smite/identities/node-identity.json")},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(module.Hold):
+                self.tx(**kwargs)
+        self.assertEqual(set(self.stage.iterdir()), before)
+        self.assertFalse(self.calls)
+
     def test_cli_has_no_production_execution(self):
         executable=ROOT/"modules"/"smite-unified-foreign-identity-phase.py"
         result=subprocess.run([sys.executable,"-B",str(executable),"--status"],
