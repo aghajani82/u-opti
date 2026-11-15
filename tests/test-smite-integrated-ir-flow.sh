@@ -254,6 +254,14 @@ selected=s.split("smite_install_selected_fresh() (",1)[1].split(
 review='smite_install_selected_pair_journal_review "$module_dir"'
 assert selected.index(review) < selected.index('smite_install_ensure_docker || return 2')
 assert selected.index(review) < selected.index('smite-rc6-install-journal.py" begin')
-assert selected.index('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES') < selected.index(review)
+# Iran option 1 keeps its existing Core journal-before-Docker admission.
+# The new Foreign option 2 is a separate scoped branch and must reject an
+# unapproved signed trial BEFORE staging Cosign or changing the Foreign host.
+foreign=s.split("smite_install_selected_foreign_fresh() (",1)[1].split(
+    "\\nsmite_install_selected_fresh() (",1)[0]
+assert foreign.index('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES') < foreign.index(
+    'smite_install_rc7_verified_cosign')
+assert foreign.index('smite_install_unified_signed_pair_review') < foreign.index(
+    'smite_install_unified_foreign_selected_stages')
 PY_REVIEW_ORDER
 echo 'SELECTED_SIGNED_RC9_JOURNAL_COHERENCE=PASS'
