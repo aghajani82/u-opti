@@ -2191,7 +2191,6 @@ def rollback_node_to_paused_field_trial(
     current = state_values() if state is None else state
     if current.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Signed rollback is Standard mode only")
-    _regular(NODE_COMPOSE, limit=256_000)
     rc7_foreign = (
         current.get("SMITE_ROLE") == "foreign"
         and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
@@ -2204,6 +2203,9 @@ def rollback_node_to_paused_field_trial(
     )
     if reviewed_unified_trial and not rc9_foreign:
         raise WizardHold("Unified rollback requires exact RC9 Foreign source")
+    # Fail before even reading another host's Compose when the RC9 owner
+    # is mismatched. Retain the original RC7 protected file check afterward.
+    _regular(NODE_COMPOSE, limit=256_000)
     managed_foreign = rc7_foreign or reviewed_unified_trial
     if managed_foreign:
         if reviewed_unified_trial:
