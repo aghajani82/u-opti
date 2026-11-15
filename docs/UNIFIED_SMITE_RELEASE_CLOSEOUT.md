@@ -17,7 +17,7 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | RC9 manifest SHA256 | `f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60` |
 | RC9 evidence | [Publisher](https://github.com/aghajani82/Smite/actions/runs/43631138363), [independent Cosign](https://github.com/aghajani82/Smite/actions/runs/43631412672), [U-OPTI signatures](https://github.com/aghajani82/u-opti/actions/runs/43632177646), [U-OPTI rehearsal](https://github.com/aghajani82/u-opti/actions/runs/43632177665) |
 | RC9 candidate policy | `release_approved=false`, `activation_allowed=false` |
-| Iran option 1 | **Trial branch:** fresh installs now pin exact signed RC9 Panel+Node and reuse original Journal/Gateway/Pairing/admin flow; selected/failure-injection tests run in CI. **main:** original RC7; RC7 retained journal never silently migrates to RC9. No live RC9 Connected evidence yet |
+| Iran option 1 | **Live disposable RC9 installed on `03.grandoptical.ir`** using U-OPTI `6946540`; operator SSH read-only audit confirms journal `COMMITTED/COMPLETE`, pinned Panel/Node images both `healthy`, signed Pairing/replay and DB identity PASS, loopback Panel/Node and HTTPS/443 HTTP 200, Nginx syntax PASS; provided UI screenshot displays `node-ir` Connected. **Not tested:** power-loss resume/restart continuity. **main:** still RC7; no in-place adoption of RC7 journal |
 | Iran retained Node | Private stage binds Docker container ID, image ID, project, Created and StartedAt; stage/status and rollback fail on change |
 | Iran Panel transaction | Signed sealed stage, additive schema, durable per-step cutover and owned config-only rollback; exact, restricted Docker/Compose/Nginx command driver **fixture-only** |
 | Foreign host stages | Existing core/Sanaei RO/Gateway 443 recovery journal: per-stage intent, verification and compensation; immutable Node/FRP preservation |
@@ -34,11 +34,55 @@ RC9 candidate publication and independent verification passed. Deployment
 approval and the recovery boundary still require a separate decision bound
 to the exact pair and the intended host.
 
-### Gate 2A — disposable fresh Iran RC9 (trial branch, awaiting live proof)
+### Gate 2A — disposable fresh Iran RC9 (live install PASS; interruption proof outstanding)
 
 Use only after the full pinned CI run passes. On the **designated disposable Iran test host** (not Grandoptical), confirm backups/rebuild window, source pin, Docker ownership and valid DNS/TLS. Fresh option 1 must install the *same* signed RC9 Panel/Node digest pair, configure Gateway on HTTPS/443, perform the original signed local Iran Pairing and create the admin account in one journaled path. Evidence must include both healthy pinned containers, Panel API RC9 over loopback and valid HTTPS, the Iran Node showing `Connected`, signed Panel↔Node probes, stable identity, and correct retry from each completed checkpoint after an interruption. Capture a redacted report, never credentials or one-time codes.
 
 The trial branch is **not** approved for production. Do not rebuild or upgrade the live RC7 installation simply because CI passed; testing a fresh RC9 install does not prove the separately gated Panel-only RC7→RC9 cutover.
+
+#### Iran operator acceptance — 2026-11-15 (read-only SSH transcript and UI screenshot)
+
+The operator rebuilt the **disposable Iran test host**, installed from U-OPTI source
+`6946540f5ac5de5d05477da085ae247a1bdb6fb2` with a new Panel domain
+`03.grandoptical.ir`, and submitted the following observed results:
+
+| Existing check | Observed |
+| --- | --- |
+| U-OPTI `INSTALL_REF` | `6946540f5ac5de5d05477da085ae247a1bdb6fb2` |
+| Role / mode / Smite source | `panel-iran` / `standard` / RC9 `e7f76185e9a7da51d7069d5d0a829dc192cc1e06` |
+| Original resumable install Journal | Source matches RC9, `COMMITTED` / `COMPLETE` / `panel-iran` |
+| Smite Panel image | Exact pinned RC9 image, running, Docker healthy |
+| Smite Iran Node image | Exact pinned RC9 image, running, Docker healthy |
+| Pairing and replay | `PANEL_PAIRING=ENABLED`, `CREDENTIALS=STAGED`, `REPLAY_ENROLLMENT=READY` |
+| Original Panel SQLite identity | Signed, active `node-ir` check passed in read-only query |
+| Service endpoints | Loopback Panel `/api/status` HTTP 200; Node `/healthz` HTTP 200; Nginx `-t` PASS; certificate-validated localhost-resolved `https://03.grandoptical.ir/api/status` HTTP 200 |
+| Admin browser page | User screenshot shows Panel RC9 and `node-ir` with `Connected` |
+
+This is **operator-supplied live evidence**, not an independently captured
+signed server witness. The browser `Connected` is consistent with the
+reviewed signed NodeClient liveness path, but was not accompanied by an
+independently exported two-way HMAC/replay receipt. Crash/power-loss
+resume, identity continuity across restart, and a real two-server Foreign
+connection remain unproven. Do not rebuild this verified Iran host while
+preparing the Foreign path.
+
+#### Foreign choice 2 release gap exposed by comparing the current modules
+
+The already existing trial adapters `smite-unified-foreign-existing-witnesses.py`,
+`smite-unified-foreign-activation-review.py`, and
+`smite-unified-foreign-gateway-plan.py` still require
+`SMITE_MANAGED_VERSION=2.0.0-rc.7` on the Foreign host even though the
+signed unified trial Node image is RC9. Their successful disposable test
+runs **do not** admit a brand-new RC9 Foreign source/journal or a live
+unified install. The public Foreign menu option 2 remains explicitly
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+
+Next safe boundary: read-only review of **existing IR Panel Foreign-install
+capability flags and database schema**, and fresh Foreign host Docker,
+Nginx, Sanaei RO DB and current U-OPTI state, without exposing passwords,
+one-time grant codes or identity files. Only then reconcile Foreign
+source/journal ownership and existing stage-by-stage rollback/activation
+before any live test. Preserve FRP/Backhaul and Grandoptical.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
