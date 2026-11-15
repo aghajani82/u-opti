@@ -217,6 +217,69 @@ rehearsal until an approved signed release, the real-root Host/Identity
 admission and live two-server Connected test are complete. No new
 PR, Workflow, feature, menu or main-branch change is requested.
 
+#### Final internal option-2 activation closure — 2026-11-15
+
+The branch's selected Foreign continuation now invokes the **existing**
+`smite-node-pairing.py::activate_foreign_node_field_trial(
+reviewed_unified_trial=True)` only **after** its original Core/Sanaei
+RO/Gateway HTTPS/443 and signed Identity transaction have passed. The
+original Pairing function, not a second controller, owns the single Node
+security-candidate Compose recreation, HMAC replay, Panel→Foreign signed
+Gateway proof, Foreign→Panel authenticated check-in and its verified
+signed→paused rollback on failure. The selected wrapper accepts
+`FOREIGN_CONNECTED=SIGNED_BIDIRECTIONAL_VERIFIED` only after the
+original Pairing printed **both** directional PASS witnesses; Docker
+healthy or an enrollment receipt alone are explicitly insufficient.
+
+**RC9-specific correction:** the original Foreign Pairing activation and
+rollback previously assumed its optional unified selector implied
+`2.0.0-rc.7`; this was inconsistent with the option-2 pinned
+`2.0.0-rc.9` source. The selected unified selector now requires
+**exactly RC9 and source
+`e7f76185e9a7da51d7069d5d0a829dc192cc1e06`**. Both activation
+and its paused rollback reuse the existing signed-image,
+`uopti_rc6_<id>` Compose-project/file-set checks with the RC9 digest,
+rather than silently using an unowned Compose project. The official RC7
+legacy selector remains unchanged. The original root-owned
+`unified-foreign-transaction.json`, promotion receipts and retained
+node-identity file are independently matched to the single IR Panel
+issued packet immediately before Pairing activation. A swapped identity
+or modified scope therefore fails before runtime mutation.
+
+**Tests:** the existing RC7/RC9 pairing regression and new isolated
+option-2 activation-order/failure tests cover exact source, no fallback
+to RC7, single owned Compose candidate, HMAC/check-in witnesses and
+signed→paused compensation. These tests inject mocked Docker/Panel
+responses and never claim live `Connected`.
+
+**Remaining actual release work / NOT DONE:**
+
+- The currently pinned RC9 tag/manifest remains `release_approved=false`
+  and `activation_allowed=false`. Moreover, the existing signed trial
+  admission explicitly returns `host_activation_allowed=False`.
+  No credible change to those bits can substitute for publishing,
+  validating and approving a **new authoritative signed release**
+  with a reviewed rollback procedure.
+- The public Foreign option 2 still intentionally emits
+  `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. Its internal
+  Core→Sanaei→Gateway→Identity→signed activation chain is **not yet
+  enabled** on live hosts. Do not bypass this with manual calls to
+  the internal modules.
+- A full **post-activation restart/resume** and the case where an
+  installation is interrupted after identity promotion and its
+  two-hour bearer code later expires still require end-to-end live
+  evidence. Do not assume a completed identity automatically means
+  the Foreign Node is `Connected`, and do not rekey it.
+- Before merging to `main`: verify original Iran option 1 live,
+  publish/approve exact signed pair, test Foreign option 2 on
+  rebuildable servers including step-local interruption/rollback,
+  observe authenticated two-way `Connected` **in the Iran Panel**,
+  and retain the existing FRP and Sanaei installations throughout.
+
+All work above is committed directly to
+`trial/unified-smite-install`; no new GitHub PR or workflow definitions
+were required.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
