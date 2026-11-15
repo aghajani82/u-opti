@@ -888,8 +888,16 @@ echo 'FOREIGN_OPTION2_ORIGINAL_SIGNED_IDENTITY_BRIDGE=PASS_ISOLATED'
         echo 'FAIL: release-hold option 2 admitted real owned packet' >&2
         exit 1
     fi
-    [ "$(cat "$TMP/owned-packet-prehost-calls")" = signed-release-review ]
-    grep -q 'Foreign private grant cannot be captured before signed release'         "$TMP/owned-packet-release-hold"
-    ! grep -q 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED'         "$TMP/owned-packet-release-hold"
+    if [ "$EUID" -eq 0 ]; then
+        [ "$(cat "$TMP/owned-packet-prehost-calls")" = signed-release-review ]
+        grep -q 'Foreign private grant cannot be captured before signed release' \
+            "$TMP/owned-packet-release-hold"
+    else
+        # GitHub's sandbox runs this job without sudo. The exact root
+        # boundary must hold BEFORE even the signed-release helper.
+        [ ! -s "$TMP/owned-packet-prehost-calls" ]
+    fi
+    ! grep -q 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED' \
+        "$TMP/owned-packet-release-hold"
 )
 echo 'FOREIGN_OPTION2_DURABLE_PACKET_RELEASE_HOLD=PASS_ISOLATED_NO_HOST_WRITES'
