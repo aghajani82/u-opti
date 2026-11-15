@@ -449,11 +449,81 @@ def selected_option2_transaction(installer_pid):
         selected_capability=True, installer_pid=installer_pid)
 
 
+def selected_option2_activate(installer_pid):
+    """Finish the ORIGINAL selected Foreign install with original Pairing.
+
+    This adapter does not create a key, a new Node, new Nginx paths, another
+    install journal or a second activation implementation. The previous
+    signed-identity transaction independently rechecks its original Core,
+    immutable Panel scope, HTTPS/443 Gateway and HMAC proof before any
+    runtime change. Existing Pairing owns the signed Node recreation,
+    dual-direction Panel check-in and verified paused rollback.
+    """
+    result = selected_option2_transaction(installer_pid)
+    if (result.get("journal") != "IDENTITY_PROMOTED_OFFLINE"
+            or result.get("signed_panel_proof") != "PASS"
+            or result.get("runtime_activation") != "NOT_PERFORMED"
+            or result.get("connected") is not False):
+        deny()
+    client = load("uopti_selected_activation_packet_client",
+                  "smite-foreign-install-client.py")
+    promotion = load("uopti_selected_activation_promotion",
+                     "smite-foreign-install-promotion.py")
+    pairing = load("uopti_selected_activation_original_pairing",
+                   "smite-node-pairing.py")
+    try:
+        # No one-time bearer code appears in the activation call or argv.
+        with promotion.private_directory(_SELECTED_PRIVATE) as folder:
+            raw = promotion.read_optional(
+                folder, "foreign-install-packet.json", client)
+            prepared = promotion.read_optional(
+                folder, "foreign-install-promotion-prepared.json", client)
+            completed = promotion.read_optional(
+                folder, "foreign-install-promotion-completed.json", client)
+            receipt_raw = promotion.read_optional(
+                folder, _TX_JOURNAL, client)
+        if None in (raw, prepared, completed, receipt_raw):
+            deny()
+        packet = client.parse_packet(raw)
+        identity = pairing._identity_record()
+        if (identity[0] != packet.scope["node_id"]
+                or result["node_id"] != identity[0]):
+            deny()
+        # The SAME original promotion and transaction receipts must remain
+        # present and agree; never adopt an unowned or swapped live identity.
+        promoted = client.decode(completed)
+        expected_prepared = client.decode(prepared)
+        journal = client.decode(receipt_raw)
+        if (promoted != {**expected_prepared, "status": "completed"}
+                or expected_prepared.get("scope") != packet.scope
+                or expected_prepared.get("destination") !=
+                   str(_SELECTED_IDENTITY)
+                or journal.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
+                or journal.get("scope") != packet.scope
+                or journal.get("packet_sha256") !=
+                   hashlib.sha256(raw).hexdigest()
+                or journal.get("node_id") != identity[0]):
+            deny()
+        pairing._require_unified_foreign_release()
+        # There is NO alternative activation: original Pairing verifies
+        # paused/strict RO-Sanaei and exact compose/digest, performs signed
+        # check-in both ways, then re-proves the same identity/replay.
+        # On failure it owns the signed->paused stage-local compensation.
+        pairing.activate_foreign_node_field_trial(
+            reviewed_unified_trial=True)
+        return {"status": "SIGNED_BIDIRECTIONAL_CONNECTED",
+                "node_id": identity[0]}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            RuntimeError, pairing.WizardHold):
+        deny()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--status", action="store_true")
     mode.add_argument("--selected-foreign", action="store_true")
+    mode.add_argument("--activate-selected-foreign", action="store_true")
     parser.add_argument("--installer-pid", type=int)
     args = parser.parse_args(argv)
     if args.status:
@@ -463,6 +533,12 @@ def main(argv=None):
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
     try:
+        if args.activate_selected_foreign:
+            activation = selected_option2_activate(args.installer_pid)
+            if activation.get("status") != "SIGNED_BIDIRECTIONAL_CONNECTED":
+                deny()
+            print("FOREIGN_CONNECTED=SIGNED_BIDIRECTIONAL_VERIFIED")
+            return 0
         result = selected_option2_transaction(args.installer_pid)
         if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
                 or result.get("journal") != "IDENTITY_PROMOTED_OFFLINE"
