@@ -137,7 +137,7 @@ docker_3xui_install() { INSTANCE_INSTALLS=$((INSTANCE_INSTALLS + 1)); return 99;
 smite_install_sanaei_retained() { return 0; }
 status=0
 smite_install_sanaei_foreign > "$TMP/rc9-owned-result" 2>&1 || status=$?
-[ "$status" -eq 0 ] && [ "$(wc -l < "$TMP/docker-calls")" -eq 3 ] &&
+[ "$status" -eq 0 ] && [ "$(wc -l < "$TMP/docker-calls")" -eq 4 ] &&
 [ "$INSTANCE_INSTALLS" -eq 0 ] &&
 grep -qx 'KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED' "$TMP/rc9-owned-result" || {
     cat "$TMP/rc9-owned-result"; echo "FAIL: exact RC9 original Sanaei stage not retained"; exit 1;
