@@ -572,6 +572,60 @@ class UnifiedForeignOption2(unittest.TestCase):
             self.assertNotIn(new_code, text)
             self.assertNotIn("node_secret", text)
 
+    def test_expired_completed_pairing_reuses_original_signed_proof_without_redeem(self):
+        """Only completed Host AND Identity journals can outlive bearer TTL.
+
+        The original Panel HMAC proof remains mandatory. This does not
+        grant another install, another identity or a Connected receipt.
+        """
+        p = self.fixture
+        report = self.run_option2()
+        original = p.live.read_bytes()
+        host_journal = (p.stage / host.JOURNAL).read_bytes()
+        identity_journal = (p.stage / "unified-foreign-transaction.json").read_bytes()
+        p.now = p.doc["expires_at"] + 1
+        p.calls.clear()
+        self.events.clear()
+        self.assertEqual(self.run_option2(), report)
+        self.assertEqual(p.calls, ["/api/node-control/installation-status"])
+        self.assertEqual(p.live.read_bytes(), original)
+        self.assertEqual((p.stage / host.JOURNAL).read_bytes(), host_journal)
+        self.assertEqual((p.stage / "unified-foreign-transaction.json").read_bytes(),
+                         identity_journal)
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertFalse(report["connected"])
+
+        p.calls.clear()
+        p.revoke = True
+        with self.assertRaises(ValueError):
+            self.run_option2()
+        self.assertEqual(p.live.read_bytes(), original)
+        self.assertEqual(p.calls, ["/api/node-control/installation-status"])
+        p.revoke = False
+
+        # Corrupting either previously completed receipt must refuse the
+        # expired-code route BEFORE calling the Panel or any host callback.
+        identity_path = p.stage / "unified-foreign-transaction.json"
+        identity_path.write_text("{}")
+        identity_path.chmod(0o600)
+        p.calls.clear()
+        self.events.clear()
+        with self.assertRaises(host.Hold):
+            self.run_option2()
+        self.assertEqual(p.calls, [])
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        identity_path.write_bytes(identity_journal)
+        identity_path.chmod(0o600)
+        self.states["gateway"] = "DRIFT"
+        p.calls.clear()
+        with self.assertRaises(host.Hold):
+            self.run_option2()
+        self.assertEqual(p.calls, [])
+        self.states["gateway"] = "READY"
+        self.assertEqual(p.live.read_bytes(), original)
+
     def test_foreign_gateway_drift_after_redeem_blocks_success_without_rekey(self):
         original = self.verify_gateway
         count = [0]
