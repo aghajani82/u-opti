@@ -2442,6 +2442,13 @@ smite_install_unified_foreign_identity_preflight() {
     module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
     [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
     [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
+    # Reuse the ORIGINAL runtime/image/Compose/RO-SQLite witnesses, not
+    # just the on-disk Gateway receipt. A drifted Node or writeable DB
+    # must HOLD before the one-use Signed Pairing/Identity transaction.
+    smite_install_unified_foreign_node_image_review >/dev/null || return 2
+    smite_foreign_gateway_require_rc_paused || return 2
+    smite_foreign_gateway_rc7_compose config --quiet || return 2
+    smite_install_sanaei_retained >/dev/null || return 2
     domain="$(smite_foreign_gateway_domain)" || return 2
     site="$(smite_foreign_gateway_site_path "$domain")" || return 2
     result="$(python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
