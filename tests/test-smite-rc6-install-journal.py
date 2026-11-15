@@ -101,6 +101,44 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('smi1_',self.j.path.read_text())
         self.assertFalse(any('stop' in call for call in self.calls))
 
+    def test_rc9_foreign_core_commit_refuses_drifted_panel_scope(self):
+        scope=('panel.example.com','kh.example.com','node-kh',
+               'foreign-node-1234','/smite-node/'+'a'*32)
+        self.j.rollback()
+        project=self.j.begin('foreign',source=m.RC9_SOURCE,
+                             resumable_foreign=True,foreign_inputs=scope)
+        node=self.root/'opt/smite-node'
+        node.mkdir(parents=True)
+        (node/'.env').write_text('SMITE_NODE_PANEL_AUTH_MODE=paused')
+        (node/'.env').chmod(0o600)
+        self.objects['a'*64]=dict(
+            Id='a'*64,Name='/smite-node',State={'Running':True},
+            Config={'Image':m.RC9_IMAGES['smite-node'],
+                    'Env':['SMITE_NODE_PANEL_AUTH_MODE=paused'],
+                    'Labels':{'com.docker.compose.project':project}},
+            HostConfig={'RestartPolicy':{'Name':'unless-stopped'}})
+        state=self.root/'etc/u-opti/smite/state.env'
+        state.parent.mkdir(parents=True)
+        def state_write(foreign):
+            state.write_text('\n'.join((
+                'SMITE_ROLE=foreign','SMITE_MANAGED_VERSION=2.0.0-rc.9',
+                'SMITE_UPSTREAM_REF='+m.RC9_SOURCE,
+                'SMITE_CONNECTION_MODE=standard',
+                'SMITE_PANEL_DOMAIN='+scope[0],
+                'SMITE_FOREIGN_DOMAIN='+foreign,
+                'SMITE_NODE_NAME='+scope[2],'')))
+            state.chmod(0o600)
+        state_write('spoofed.example.com')
+        with self.assertRaises(m.Hold):self.j.commit()
+        self.assertEqual(self.j.load()['state'],'INSTALLING')
+        self.objects['a'*64]['Config']['Image']=m.RC7_IMAGES['smite-node']
+        state_write(scope[1])
+        with self.assertRaises(m.Hold):self.j.commit()
+        self.objects['a'*64]['Config']['Image']=m.RC9_IMAGES['smite-node']
+        self.assertEqual(self.j.commit(),'RC6_INSTALL_TRANSACTION=COMMITTED')
+        with self.assertRaises(m.Hold):self.j.rollback()
+        self.assertFalse(any('stop' in a for a in self.calls))
+
     def test_retained_rc9_foreign_owner_is_readable_but_not_creatable(self):
         # This is a disposition of a FAKE retained signed image owner, not
         # permission to begin a new RC9 Foreign install on a live host.
