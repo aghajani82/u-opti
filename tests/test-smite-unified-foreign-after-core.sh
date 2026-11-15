@@ -844,7 +844,7 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
     grep -q 'requires the retained original private Panel packet' "$TMP/identity-root-guard"
     ! grep -q 'NOT_CALLED' "$TMP/identity-root-guard"
 )
-python3 - "$ROOT/modules/smite-install.sh" <<'PY_SELECTED_HMAC_BRIDGE'
+command python3 - "$ROOT/modules/smite-install.sh" <<'PY_SELECTED_HMAC_BRIDGE'
 from pathlib import Path
 import sys
 s=Path(sys.argv[1]).read_text()
