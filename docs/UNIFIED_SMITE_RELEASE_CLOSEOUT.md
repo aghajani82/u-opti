@@ -24,7 +24,8 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Foreign Pairing | Existing one-time grant, signed HMAC proof and no-overwrite identity promotion with its separate private recovery journal |
 | Iran Panel Foreign schema | **READY on live disposable Iran RC9**: operator ran existing explicit migration with private SQLite snapshot; read-only `--review` returns READY; flags/runtime unchanged. **New future option-1 installs (trial branch)** reuse that same migration automatically *after* Node/administrator verification and *before* COMPLETE, with same-option retry on failure |
 | Foreign consolidated option 2 | `smite-unified-foreign-host-recovery.py::rehearse_option2` composes the existing two journals, with 15 integration tests; **disposable-only** |
-| Foreign RC9 read-only security witnesses | Existing Gateway/activation/witness adapters now admit exact RC9 **only for read-only inspection** when `SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06`; invalid/missing source denied. RC7 legacy read-only lane remains. No actual RC9 Foreign host journal, enrollment/activation or Connected claim yet |
+| Foreign RC9 read-only security witnesses | Existing Gateway/activation/witness adapters now admit exact RC9 **only for read-only inspection** when `SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06`; invalid/missing source denied. RC7 legacy read-only lane remains. No actual RC9 Foreign host install/activation or Connected claim yet |
+| Retained RC9 Foreign Journal | In isolated CI, an existing RC9 owner receipt is read with the exact RC9 image, refuses a substituted RC7 image or enrolled identity rollback, then safely quarantines only a fresh unpaired disposable fixture. **Starting a new RC9 Foreign journal remains explicitly disallowed** until selected option-2 stage ownership and release gates are complete |
 | Public Foreign menu option 2 | Explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, unchanged |
 | Production hosts and U-OPTI main | Awaiting live authorization and evidence. Smite source was merged in [PR #58](https://github.com/aghajani82/Smite/pull/58). |
 
@@ -163,6 +164,22 @@ grant/identity journals; then test rollback and *actual*
 Panel↔Foreign signed Connected on a disposable Foreign host.
 Never leak time-limited installation codes or mutate Grandoptical,
 the FRP 20182 tunnel or retained Backhaul.
+
+#### Retained RC9 Foreign Journal guard — CI-only, no new install admission
+
+A new regression case reuses `smite-rc6-install-journal.py` with a
+**synthetic retained Foreign owner receipt**. It verifies the exact RC9
+Node image/Compose project, denies a swapped RC7 image before any stop,
+refuses rollback of an enrolled Node identity, and demonstrates the
+original quarantine-only rollback after restoring a strictly unpaired
+disposable fixture. The original `begin('foreign', source=RC9_SOURCE)`
+still returns HOLD: no new RC9 Foreign install permission was introduced.
+
+This is a prerequisite for the next integration step, **not** evidence
+that the existing public option 2 can begin or resume a real Foreign
+host. The source-aware Foreign stage owner and signed identity
+promotion remain to be integrated with the two existing host/identity
+journals before anything may reach the Panel.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 

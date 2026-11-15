@@ -16,6 +16,17 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 retained RC9 Foreign Journal guard — fixture-only
+
+The original `smite-rc6-install-journal.py` can now be exercised in
+CI against a synthetic **retained** RC9 Foreign receipt and exact
+signed RC9 Node image. It refuses an RC7 image swap and an existing
+paired identity before stopping anything; the original safe
+quarantine-only rollback works for a fully unpaired disposable fixture.
+**No new Foreign RC9 journal is permitted to start**, and the public
+option 2 still HOLDs before host writes. This extends the existing
+tests, not the product's menu or install capability.
+
 ### 2026-11-15 next integration — remove post-IR schema manual step; pin RC9 Foreign review
 
 On the trial branch, **new** Iran option-1 installs reuse the original
