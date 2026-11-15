@@ -3161,12 +3161,12 @@ smite_install_upgrade_signed_field_trial() {
 # Selected fresh-host entry. Subshell scope prevents candidate settings from leaking
 # into historical recovery/upgrade operations in this same management session.
 smite_install_selected_paths() {
-    [ "$SMITE_PANEL_DIR" = /opt/smite ] &&
-    [ "$SMITE_NODE_DIR" = /opt/smite-node ] &&
-    [ "$SMITE_OVERLAY_DIR" = /opt/u-opti-smite ] &&
-    [ "$SMITE_STATE_FILE" = /etc/u-opti/smite/state.env ] &&
-    [ "$SMITE_PANEL_COMPOSE" = /opt/smite/docker-compose.yml ] &&
-    [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
+    [ "${SMITE_PANEL_DIR:-}" = /opt/smite ] &&
+    [ "${SMITE_NODE_DIR:-}" = /opt/smite-node ] &&
+    [ "${SMITE_OVERLAY_DIR:-}" = /opt/u-opti-smite ] &&
+    [ "${SMITE_STATE_FILE:-}" = /etc/u-opti/smite/state.env ] &&
+    [ "${SMITE_PANEL_COMPOSE:-}" = /opt/smite/docker-compose.yml ] &&
+    [ "${SMITE_NODE_COMPOSE:-}" = /opt/smite-node/docker-compose.yml ]
 }
 
 # Check that the chosen signed RC9 Panel/Node source matches the ORIGINAL
