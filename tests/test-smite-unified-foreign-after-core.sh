@@ -446,7 +446,10 @@ SMITE_INSTALL_PROFILE=clean-rc
 SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
 SMITE_NODE_IMAGE=ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2
 RELEASE_FIXTURE=HOLD
-smite_install_unified_signed_pair_review() { [ "$RELEASE_FIXTURE" = pass ]; }
+smite_install_unified_signed_pair_review() {
+    [ "$RELEASE_FIXTURE" = pass ] || return 2
+    echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_RELEASE_APPROVED'
+}
 : > "$TMP/foreign-core-cli-calls"
 python3() {
     printf '%s\n' "$*" >> "$TMP/foreign-core-cli-calls"
@@ -500,7 +503,8 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     MOCK_NODE_FAIL=0
     smite_install_unified_signed_pair_review() {
         printf 'release\n' >> "$TMP/core-stage-calls"
-        [ "$RELEASE_FIXTURE" = pass ]
+        [ "$RELEASE_FIXTURE" = pass ] || return 2
+        echo 'UNIFIED_FOREIGN_IMAGE_PAIR=SIGNED_RELEASE_APPROVED'
     }
     smite_install_unified_foreign_begin_core_from_panel() {
         printf 'begin\n' >> "$TMP/core-stage-calls"
@@ -536,6 +540,7 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
             cat "$TMP/core-stage-calls"; exit 1;
         }
         if [ "$result" -eq 0 ]; then
+            ! grep -q '^UNIFIED_FOREIGN_IMAGE_PAIR=' "$TMP/core-stage-report"
             grep -qx "FOREIGN_CORE_PROJECT=$PROJECT" "$TMP/core-stage-report"
             grep -qx 'FOREIGN_CORE_STAGE=CORE_COMMITTED' "$TMP/core-stage-report"
             grep -qx 'FOREIGN_CORE_NEXT=EXISTING_SANAEI_GATEWAY_SIGNED_PAIRING' "$TMP/core-stage-report"
