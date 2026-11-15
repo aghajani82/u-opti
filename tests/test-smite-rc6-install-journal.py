@@ -67,6 +67,44 @@ class RecoveryTests(unittest.TestCase):
         self.assert_no_stop()
 
 
+    def test_retained_rc9_foreign_owner_is_readable_but_not_creatable(self):
+        # This is a disposition of a FAKE retained signed image owner, not
+        # permission to begin a new RC9 Foreign install on a live host.
+        record=self.j.load()
+        record["source"]=m.RC9_SOURCE
+        record["role"]="foreign"
+        self.j.save(record)
+        path=self.root/'opt/smite-node'
+        path.mkdir(parents=True)
+        (path/'.env').write_text('paused foreign fixture')
+        os.chmod(path/'.env',0o600)
+        self.objects['a'*64]=dict(
+            Id='a'*64, Name='/smite-node', State={'Running':True},
+            Config={'Image':m.RC9_IMAGES['smite-node'],
+                    'Env':['SMITE_NODE_PANEL_AUTH_MODE=paused'],
+                    'Labels':{'com.docker.compose.project':self.tx}},
+            HostConfig={'RestartPolicy':{'Name':'unless-stopped'}})
+        self.assertEqual(len(self.j.inspect_owned(self.j.load())),1)
+        with self.assertRaises(m.Hold):
+            self.j.begin('foreign',source=m.RC9_SOURCE)
+        self.assertEqual(self.j.load()['source'],m.RC9_SOURCE)
+        self.objects['a'*64]['Config']['Image']=m.RC7_IMAGES['smite-node']
+        with self.assertRaises(m.Hold):
+            self.j.rollback()
+        self.assert_no_stop()
+        self.objects['a'*64]['Config']['Image']=m.RC9_IMAGES['smite-node']
+        identity=self.root/'opt/smite-node/config/identity'
+        identity.mkdir(parents=True)
+        (identity/'node-identity.json').write_text('must remain')
+        with self.assertRaises(m.Hold):
+            self.j.rollback()
+        self.assert_no_stop()
+        (identity/'node-identity.json').unlink()
+        identity.rmdir()
+        self.assertIn('PASS',self.j.rollback())
+        self.assertFalse(self.objects['a'*64]['State']['Running'])
+        self.assertFalse(any('rm' in a for a in self.calls))
+
     def test_ir_broker_journal_accepts_only_matching_rc7_or_rc9_source(self):
         # The existing broker provisioner is reused by both fresh Iran
         # install versions; no host mutations or Docker are performed.
