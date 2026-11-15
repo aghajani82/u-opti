@@ -31,6 +31,42 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Public Foreign menu option 2 | Explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, unchanged |
 | Production hosts and U-OPTI main | Awaiting live authorization and evidence. Smite source was merged in [PR #58](https://github.com/aghajani82/Smite/pull/58). |
 
+#### Foreign option-2 Core stage rollback — original Iran-style compensation (2026-11-15)
+
+This integration step is now committed on the SAME trial branch, without
+altering menu option 7, creating a second installer, or relaxing the signed
+release HOLD. The original `smite-rc6-install-journal.py` has an internal
+`recover-foreign-core` action for a fresh, **uncommitted** RC9 Foreign
+Core only. It requires the original owner, exact immutable Panel-issued
+packet scope and current installer lease. It reuses the ORIGINAL
+`Journal.rollback` identity/grant/route/protected-DB and Docker
+ownership checks to quarantine only the incomplete Core. The foreign
+selected-stage shell coordinator invokes this compensation on an
+interrupted Core install, failed Core commit, or unadoptable incomplete
+Core receipt; it then reports RETRY_OPTION_2, never Connected.
+
+Already COMMITTED Core, running another install, changed Panel scope,
+foreign image/project, enrolled identity or rollback uncertainty fail
+closed. Fully committed Node and future Sanaei/Gateway/Pairing checkpoints
+are not reset by Core recovery. Original Sanaei pending attachment and
+Gateway HTTPS/443 snapshot compensation remain the next existing
+per-stage mechanisms to connect to the **real-root** selected option 2.
+
+- [Original Journal and CLI recovery](https://github.com/aghajani82/u-opti/blob/trial/unified-smite-install/modules/smite-rc6-install-journal.py)
+- [Existing Foreign selected-stage call site](https://github.com/aghajani82/u-opti/blob/trial/unified-smite-install/modules/smite-install.sh)
+- [Core auto-rollback regression suite](https://github.com/aghajani82/u-opti/actions/runs/43720715535) — **3/3 CI PASS** (fixture-only Python + actual shell dispatch)
+- The exact RC9 signed pair still has `release_approved=false` and
+  `activation_allowed=false`. The public option 2 still emits
+  `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. No real
+  Foreign host was changed and no Connected witness was claimed.
+
+**Next precise engineering work, without new capabilities:** reviewed
+real-root invocation of the existing Sanaei/Gateway stage journals with
+stage-scoped rollback, the already implemented original Identity
+promotion journal and signed activation/rollback, then an authorized
+disposable two-host Connected + restart/interruption acceptance. Only
+after this may the public option-2 guard and final merge be reviewed.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
