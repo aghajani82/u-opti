@@ -226,7 +226,14 @@ class UnifiedForeignOption2(unittest.TestCase):
         node = root / "opt/smite-node"
         node.mkdir(parents=True)
         env = node / ".env"
-        env.write_text("SMITE_NODE_PANEL_AUTH_MODE=paused\n")
+        env.write_text(
+            "NODE_NAME="+p.doc["node_name"]+"\n"
+            "NODE_ROLE=foreign\n"
+            "PANEL_ADDRESS=panel.example.com:443\n"
+            "SMITE_CONTROL_ADDRESS=https://kh.example.com:443/smite-node/"+("a"*32)+"\n"
+            "SMITE_NODE_PANEL_AUTH_MODE=paused\n"
+            "SMITE_AGENT_AUTH_MODE=strict\n"
+            "SMITE_SANAEI_INVENTORY_ENABLED=false\n")
         env.chmod(0o600)
         state = root / "etc/u-opti/smite/state.env"
         state.parent.mkdir(parents=True)
