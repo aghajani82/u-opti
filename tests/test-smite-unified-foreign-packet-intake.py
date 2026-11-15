@@ -554,6 +554,48 @@ class OperatorPacketIntake(unittest.TestCase):
         self.assertNotIn(self.grant["installation_code"],
                          check.stdout+check.stderr)
 
+    def test_owned_host_packet_cannot_be_staged_without_reviewed_release(self):
+        # The exact durable owner is not interchangeable with the
+        # disposable fixture. No credential, enrollment or host write is
+        # permitted under the signed RC9 trial release (approval=false).
+        payload = json.dumps(self.grant) + "\\n\\n"
+        with self.assertRaises(module.Hold):
+            module.capture_disposable(
+                io.StringIO(payload),
+                target=module._SELECTED_ROOT_PACKET,
+                expected_panel=self.grant["panel_url"],
+                expected_domain=self.grant["origin"],
+                expected_node=self.grant["node_name"],
+                now=self.now, selected_capability=True)
+        with self.assertRaises(module.Hold):
+            module.capture_disposable(
+                io.StringIO(payload), target=self.file,
+                expected_panel=self.grant["panel_url"],
+                expected_domain=self.grant["origin"],
+                expected_node=self.grant["node_name"],
+                now=self.now, selected_capability=True,
+                disposable_capability=True)
+        with self.assertRaises(module.Hold):
+            module.capture_selected_hidden_tty(
+                io.StringIO(payload),
+                target=module._SELECTED_ROOT_PACKET, now=self.now,
+                selected_host=True, confirm_scope=lambda _: True)
+        self.assertFalse(self.file.exists())
+
+    def test_owned_capture_cli_is_release_hold_without_tty_or_secrets(self):
+        code = ROOT / "modules/smite-unified-foreign-packet-intake.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(code), "--capture-owned-foreign"],
+            input=json.dumps(self.grant) + "\\n\\n",
+            capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("FOREIGN_PACKET=STAGED_PRIVATE", result.stdout)
+        self.assertIn("Foreign Panel installation information not admitted",
+                      result.stderr)
+        self.assertNotIn(self.grant["installation_code"],
+                         result.stdout + result.stderr)
+        self.assertFalse(self.file.exists())
+
     def test_cli_status_only_and_never_activates(self):
         code=ROOT/"modules/smite-unified-foreign-packet-intake.py"
         check=subprocess.run([sys.executable,"-B",str(code),"--status"],
