@@ -412,8 +412,16 @@ def rehearse_option2(*, directory, packet_path, state_path,
                 "node_id": packet.scope["node_id"],
                 "control_path": urlsplit(packet.scope["control_url"]).path,
             }
+            # The original Core receipt is not a live source of truth
+            # after commit. Recheck its CURRENT on-disk state with the
+            # same signed packet admission as the Host stage, so a changed
+            # source/domain/node cannot be carried into Sanaei or Gateway.
+            core_state = core_root / "etc/u-opti/smite/state.env"
+            core_control = gateway_plan.admit(
+                packet_path=packet_path, state_path=core_state)
             if (saved.get("state") != "COMMITTED"
                     or owned_scope != expected_scope
+                    or core_control != expected_scope["control_path"]
                     or {obj["name"] for obj in core_owner.inspect_owned(saved)}
                     != {"smite-node"}):
                 deny()
