@@ -2336,7 +2336,17 @@ smite_install_unified_foreign_capture_owned_packet() {
             echo 'FOREIGN_ONE_CHOICE_INPUT=REUSED_VALID_PANEL_PACKET'
             return 0
         fi
-        echo 'Foreign Panel code expired or is not independently verified.' >&2
+        # A code that was ALREADY consumed is not renewable by the
+        # original Iran Panel. Do not ask for an impossible new code:
+        # the prior INTENT/staged key and immutable Core/Identity receipts
+        # prove whether the same Node can resume with fresh HMAC status.
+        # This check is read-only and still requires signed release.
+        if python3 -B "$module_dir/smite-unified-foreign-identity-phase.py" \
+            --verify-owned-expired-resume >/dev/null 2>&1; then
+            echo 'FOREIGN_ONE_CHOICE_INPUT=REUSED_EXPIRED_ALREADY_STAGED_IDENTITY'
+            return 0
+        fi
+        echo 'Foreign Panel code expired before a verified enrollment stage.' >&2
         echo 'Issue a fresh two-hour code for the SAME reserved Foreign Node in the Iran Panel.' >&2
     fi
     # Same original hidden-TTY reader accepts a new code only when its
