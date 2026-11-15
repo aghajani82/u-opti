@@ -63,18 +63,38 @@ smite_foreign_gateway_private_ip() {
 
 # Only the pinned, signed RC.1 Field Trial uses strict, paused Node semantics.
 # Legacy v0.1.7 gateways must keep their original behavior.
+# Exact RC9 admission is available ONLY inside the selected option-2
+# one-choice transaction, bound to the Panel-issued private 443 packet.
+# RC7/RC1 and standalone Gateway routes keep their original ownership.
+smite_foreign_gateway_exact_selected_rc9() {
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
+    [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ] &&
+    [ -f "$SMITE_STATE_FILE" ] && [ ! -L "$SMITE_STATE_FILE" ] &&
+    [ "$(grep -Fxc 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE")" = 1 ] &&
+    [ "$(grep -Fxc 'SMITE_CONNECTION_MODE=standard' "$SMITE_STATE_FILE")" = 1 ] &&
+    [ "$(grep -Fxc 'SMITE_MANAGED_VERSION=2.0.0-rc.9' "$SMITE_STATE_FILE")" = 1 ] &&
+    [ "$(grep -Fxc 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06' "$SMITE_STATE_FILE")" = 1 ]
+}
+
 smite_foreign_gateway_is_clean_rc() {
     # RC7 is a signed, paused/strict Node too. Never run legacy anonymous
     # registration, legacy Python overlays or /api/agent/status readiness.
     case "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" in
         2.0.0-rc.1|2.0.0-rc.7) return 0 ;;
+        2.0.0-rc.9) smite_foreign_gateway_exact_selected_rc9 ;;
         *) return 1 ;;
     esac
 }
 
 smite_foreign_gateway_rc7_compose() {
-    local project service files helper
-    [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] || return 2
+    local project service files helper version
+    version="$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")"
+    if [ "$version" = "2.0.0-rc.9" ]; then
+        smite_foreign_gateway_exact_selected_rc9 || return 2
+    else
+        [ "$version" = "2.0.0-rc.7" ] || return 2
+    fi
     project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' smite-node 2>/dev/null)" || return 2
     service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' smite-node 2>/dev/null)" || return 2
     files="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' smite-node 2>/dev/null)" || return 2
@@ -769,7 +789,8 @@ smite_foreign_gateway_recreate_node() {
     # An unexpected mismatch is a HOLD, never a fallback to recreation.
     if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
         [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
-        [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] &&
+        { [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] ||
+          smite_foreign_gateway_exact_selected_rc9; } &&
         smite_foreign_gateway_require_rc_paused &&
         smite_foreign_gateway_rc7_compose config --quiet || {
             echo 'HOLD: Existing selected Foreign Node is not owned/paused.' >&2
@@ -1182,8 +1203,17 @@ smite_foreign_gateway_configure() {
     # the private exact signed Panel packet before editing Nginx/Compose.
     if [ -n "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" ]; then
         [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
-        [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] || {
-            echo 'HOLD: Unified Foreign Gateway requires a fresh signed RC7 Node.' >&2
+        { [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.7" ] ||
+          smite_foreign_gateway_exact_selected_rc9; } || {
+            echo 'HOLD: Unified Foreign Gateway requires an exact signed selected Node.' >&2
+            return 2
+        }
+    fi
+    # Nonselected RC9 must not fall through to the legacy anonymous
+    # control-overlay Gateway, even when a caller skips the selected menu.
+    if [ "$(smite_foreign_gateway_state_value SMITE_MANAGED_VERSION "$SMITE_STATE_FILE")" = "2.0.0-rc.9" ]; then
+        smite_foreign_gateway_exact_selected_rc9 || {
+            echo 'HOLD: RC9 Foreign Gateway is available only inside signed option 2.' >&2
             return 2
         }
     fi
