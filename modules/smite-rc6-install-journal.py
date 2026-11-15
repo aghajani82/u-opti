@@ -185,7 +185,7 @@ class Journal:
             raise Hold('FOREIGN_PACKET_SCOPE_INVALID')
         return fields
 
-    def foreign_core_env(self, record):
+    def foreign_core_env(self, record, *, attached_sanaei=False):
         """The ORIGINAL foreign Core's saved Node configuration must be exact.
 
         A journal cannot advance to COMMITTED merely because an image tag,
@@ -217,11 +217,24 @@ class Journal:
                 + scope['control_path']),
             'SMITE_NODE_PANEL_AUTH_MODE': 'paused',
             'SMITE_AGENT_AUTH_MODE': 'strict',
-            'SMITE_SANAEI_INVENTORY_ENABLED': 'false',
+            'SMITE_SANAEI_INVENTORY_ENABLED': (
+                'true' if attached_sanaei is True else 'false'),
         }
+        if attached_sanaei is not False and attached_sanaei is not True:
+            raise Hold('INVALID_FOREIGN_SANAEI_RESUME_MODE')
         for key, value in expected.items():
             if values.get(key) != value:
                 raise Hold('FOREIGN_CORE_ENV_SCOPE_OR_AUTH_DRIFT')
+        if attached_sanaei:
+            # Only after the original Core was COMMITTED may the original
+            # Sanaei RO attachment change inventory=false to true. This is
+            # not permission to skip the separate real RO DB witness.
+            source = values.get('SMITE_SANAEI_DB_HOST_PATH', '')
+            if (values.get('SMITE_ENGINE_INVENTORY_MODE') != 'managed'
+                    or not re.fullmatch(
+                        r'/opt/3x-ui/instances/[0-9]{2}/db', source)):
+                raise Hold('FOREIGN_SANAEI_SOURCE_OR_ENGINE_DRIFT')
+            return scope, source
         return scope
 
     def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None,
@@ -674,7 +687,7 @@ class Journal:
                     or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
                 raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
-    def foreign_resume(self, packet_path=None):
+    def foreign_resume(self, packet_path=None, *, attached_sanaei=False):
         """Read-only pre-enrollment disposition of the ORIGINAL RC9 Core.
 
         Reuse the same durable owner on an interrupted selected option 2.
@@ -700,6 +713,10 @@ class Journal:
             return 'FRESH_ALLOWED', None
         if d['state'] not in ('INSTALLING', 'COMMITTED'):
             raise Hold('FOREIGN_ROLLBACK_IN_PROGRESS')
+        if attached_sanaei is not False and attached_sanaei is not True:
+            raise Hold('FOREIGN_ATTACHED_MODE_INVALID')
+        if attached_sanaei and d['state'] != 'COMMITTED':
+            raise Hold('FOREIGN_SANAEI_MUST_FOLLOW_CORE_COMMIT')
 
         expected = {'smite-node'}
         owned = self.inspect_owned(d)
@@ -714,7 +731,8 @@ class Journal:
         if present != expected:
             raise Hold('FOREIGN_CORE_NODE_OWNER_MISSING')
 
-        self.foreign_core_env(d)
+        attachment = self.foreign_core_env(
+            d, attached_sanaei=attached_sanaei)
         state = self.root / 'etc/u-opti/smite/state.env'
         state_info = trusted(state)
         if (not stat.S_ISREG(state_info.st_mode)
@@ -745,6 +763,29 @@ class Journal:
                 or (obj.get('State') or {}).get('Health', {}).get('Status', 'healthy')
                 != 'healthy'):
             raise Hold('FOREIGN_CORE_COMPOSE_OR_HEALTH_DRIFT')
+        if attached_sanaei:
+            # This is a SECOND read-only provenance check after the shell
+            # coordinator's original smite_install_sanaei_retained RO SQLite
+            # probe. Never mistake a changed env toggle for a verified DB.
+            source = attachment[1]
+            mounts = [
+                m for m in (obj.get('Mounts') or [])
+                if m.get('Destination') == '/run/smite-sanaei-ro'
+            ]
+            runtime_env = (cfg.get('Env') or [])
+            for key, value in (
+                ('SMITE_NODE_PANEL_AUTH_MODE', 'paused'),
+                ('SMITE_AGENT_AUTH_MODE', 'strict'),
+                ('SMITE_ENGINE_INVENTORY_MODE', 'managed'),
+                ('SMITE_SANAEI_INVENTORY_ENABLED', 'true'),
+            ):
+                if runtime_env.count(key + '=' + value) != 1:
+                    raise Hold('FOREIGN_SANAEI_RUNTIME_DRIFT')
+            if (len(mounts) != 1
+                    or mounts[0].get('Type') != 'bind'
+                    or mounts[0].get('Source') != source
+                    or mounts[0].get('RW') is not False):
+                raise Hold('FOREIGN_SANAEI_READ_ONLY_MOUNT_DRIFT')
         return ('CORE_READY_TO_COMMIT' if d['state'] == 'INSTALLING'
                 else 'CORE_COMMITTED'), d['id']
 
@@ -832,6 +873,7 @@ def main():
     # Path only. The original private packet owns the code and TTL; no
     # credential or token is passed as argv or copied into the Core journal.
     ap.add_argument('--foreign-packet-file')
+    ap.add_argument('--attached-sanaei', action='store_true')
     ap.add_argument('--resumable-ir', action='store_true')
     ap.add_argument('--ir-inputs', nargs=2)
     ap.add_argument('--phase', choices=IR_PHASES)
@@ -893,7 +935,8 @@ def main():
                 if project is not None:
                     print('IR_INSTALL_PROJECT=' + project)
             elif a.action == 'resume-foreign':
-                stage, project = j.foreign_resume(a.foreign_packet_file)
+                stage, project = j.foreign_resume(
+                    a.foreign_packet_file, attached_sanaei=a.attached_sanaei)
                 print('FOREIGN_CORE_STAGE=' + stage)
                 if project is not None:
                     print('FOREIGN_CORE_PROJECT=' + project)
