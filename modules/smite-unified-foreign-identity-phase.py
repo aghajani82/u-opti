@@ -432,13 +432,51 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
         deny()
 
 
+def selected_option2_transaction(installer_pid):
+    """The original transaction selected by option 2, never manual Pairing.
+
+    The CLI supplies only a process lease. All managed paths are fixed here,
+    all credentials stay in the existing private 0600 packet/staged secret,
+    and the original signed release gate independently decides admission.
+    """
+    import time
+    client = load("uopti_selected_tls_client", "smite-foreign-install-client.py")
+    return rehearse_transaction(
+        packet_path=_SELECTED_PACKET, state_path=_SELECTED_STATE,
+        gateway_path=_SELECTED_GATEWAY, node_env_path=_SELECTED_NODE_ENV,
+        directory=_SELECTED_PRIVATE, live_identity=_SELECTED_IDENTITY,
+        transport=client.post, now=int(time.time()),
+        selected_capability=True, installer_pid=installer_pid)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status", action="store_true", required=True)
-    parser.parse_args(argv)
-    print("UNIFIED_FOREIGN_IDENTITY_PHASE=REHEARSAL_ONLY")
-    print("PRODUCTION_REDEEM_AND_PROMOTION=NOT_AUTHORIZED")
-    print("NODE_RUNTIME=UNCHANGED")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--status", action="store_true")
+    mode.add_argument("--selected-foreign", action="store_true")
+    parser.add_argument("--installer-pid", type=int)
+    args = parser.parse_args(argv)
+    if args.status:
+        print("UNIFIED_FOREIGN_IDENTITY_PHASE=REHEARSAL_ONLY")
+        print("PRODUCTION_REDEEM_AND_PROMOTION=NOT_AUTHORIZED")
+        print("NODE_RUNTIME=UNCHANGED")
+        print("FOREIGN_CONNECTED=NOT_PROVEN")
+        return 0
+    try:
+        result = selected_option2_transaction(args.installer_pid)
+        if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
+                or result.get("journal") != "IDENTITY_PROMOTED_OFFLINE"
+                or result.get("signed_panel_proof") != "PASS"
+                or result.get("runtime_activation") != "NOT_PERFORMED"
+                or result.get("connected") is not False):
+            deny()
+    except (Hold, OSError, ValueError, TypeError, KeyError, AttributeError,
+            RuntimeError):
+        print("UNIFIED_FOREIGN_IDENTITY=HOLD_RELEASE_OR_ORIGINAL_JOURNAL",
+              file=sys.stderr)
+        print("FOREIGN_CONNECTED=NOT_PROVEN", file=sys.stderr)
+        return 2
+    print("UNIFIED_FOREIGN_IDENTITY=SIGNED_PROOF_RETAINED_NOT_ACTIVATED")
     print("FOREIGN_CONNECTED=NOT_PROVEN")
     return 0
 
