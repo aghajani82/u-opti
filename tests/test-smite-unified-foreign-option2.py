@@ -160,6 +160,7 @@ class UnifiedForeignOption2(unittest.TestCase):
         import subprocess
         import os
         import stat
+        from unittest.mock import patch
         core_mod = load("option2_original_rc9_core_owner",
                         ROOT / "modules" / "smite-rc6-install-journal.py")
         # The production Journal explicitly requires root-owned files.
@@ -201,8 +202,19 @@ class UnifiedForeignOption2(unittest.TestCase):
         scope = ("panel.example.com", "kh.example.com",
                  p.doc["node_name"], p.doc["node_id"],
                  "/smite-node/" + "a"*32)
-        project = owner.begin("foreign", source=source,
-                              resumable_foreign=True, foreign_inputs=scope)
+        # The original private 0600 grant is the ONLY authority for Core
+        # owner fields; no free-form foreign-inputs or second operator prompts.
+        with patch("time.time", return_value=p.doc["expires_at"]+1):
+            with self.assertRaises(core_mod.Hold):
+                owner.begin("foreign", source=source,
+                            resumable_foreign=True,
+                            foreign_packet_path=p.packet)
+        self.assertFalse(owner.path.exists())
+        with patch("time.time", return_value=p.now):
+            project = owner.begin("foreign", source=source,
+                                  resumable_foreign=True,
+                                  foreign_packet_path=p.packet)
+        self.assertEqual(owner.load()["foreign_inputs"]["node_id"],p.doc["node_id"])
         self.assertEqual(owner.load()["state"], "INSTALLING")
         # A partially installed, or an inconsistent Core cannot start the
         # Host journal or redeem a grant.
