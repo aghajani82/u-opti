@@ -615,6 +615,22 @@ def selected_option2_activate(installer_pid):
                    hashlib.sha256(raw).hexdigest()
                 or journal.get("node_id") != identity[0]):
             deny()
+        # The transaction and original promoter signed their own state,
+        # but the retained live identity must STILL be the exact bytes
+        # written by that promoter at this final activation boundary.
+        # Never activate a changed/rotated secret, a symlink, hardlink,
+        # missing identity or a receipt with a detached SHA-256.
+        with promotion.private_directory(_SELECTED_IDENTITY.parent) as folder:
+            live_raw = promotion.read_optional(
+                folder, _SELECTED_IDENTITY.name, client, limit=4096)
+        original_payload = json.dumps({
+            "version": 1, "node_id": identity[0],
+            "node_secret": identity[1],
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+        if (live_raw != original_payload
+                or expected_prepared.get("sha256") !=
+                   hashlib.sha256(original_payload).hexdigest()):
+            deny()
         pairing._require_unified_foreign_release()
         # There is NO alternative activation: original Pairing verifies
         # paused/strict RO-Sanaei and exact compose/digest, performs signed

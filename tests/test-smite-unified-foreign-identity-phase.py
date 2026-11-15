@@ -573,6 +573,95 @@ class IdentityPhase(unittest.TestCase):
         self.assertFalse((self.stage / "unified-foreign-transaction.lock").exists())
         self.assertFalse(self.live.exists())
 
+    def _isolated_selected_activation(self, *, mutate=None, release_ok=True):
+        """Rehearse the successful adapter with real client+promoter bytes.
+
+        ONLY the already signed external Pairing release/runtime is faked:
+        no host file, Docker, real Panel connection or production override.
+        """
+        from unittest import mock
+        original = self.tx()
+        calls = []
+        fixture = self
+        class PairingFixture:
+            class WizardHold(Exception):
+                pass
+
+            def _identity_record(self):
+                raw = json.loads(fixture.live.read_text())
+                calls.append("read-original-identity")
+                return raw["node_id"], raw["node_secret"]
+
+            def _require_unified_foreign_release(self):
+                calls.append("check-signed-release")
+                if not release_ok:
+                    raise self.WizardHold("isolated simulated release HOLD")
+
+            def activate_foreign_node_field_trial(self, *, reviewed_unified_trial):
+                fixture.assertIs(reviewed_unified_trial, True)
+                calls.append("existing-signed-activation")
+
+        pairing = PairingFixture()
+        original_loader = module.load
+        def load_with_isolated_pairing(name, filename):
+            if filename == "smite-node-pairing.py":
+                return pairing
+            return original_loader(name, filename)
+        if mutate is not None:
+            mutate()
+        with (
+            mock.patch.object(module, "_SELECTED_PRIVATE", self.stage),
+            mock.patch.object(module, "_SELECTED_IDENTITY", self.live),
+            mock.patch.object(module, "selected_option2_transaction",
+                              return_value=original),
+            mock.patch.object(module, "load",
+                              side_effect=load_with_isolated_pairing),
+        ):
+            if mutate is not None or not release_ok:
+                with self.assertRaises(module.Hold):
+                    module.selected_option2_activate(os.getpid())
+                self.assertNotIn("existing-signed-activation", calls)
+                return calls
+            out = module.selected_option2_activate(os.getpid())
+        self.assertEqual(out, {
+            "status": "SIGNED_BIDIRECTIONAL_CONNECTED",
+            "node_id": self.doc["node_id"],
+        })
+        self.assertEqual(calls, [
+            "read-original-identity", "check-signed-release",
+            "existing-signed-activation",
+        ])
+        return calls
+
+    def test_selected_activation_adapter_only_invokes_original_pairing_after_receipts(self):
+        self._isolated_selected_activation()
+        self.assertEqual(json.loads(self.journal().read_text())["phase"],
+                         "IDENTITY_PROMOTED_OFFLINE")
+
+    def test_selected_activation_adapter_refuses_changed_live_identity_bytes(self):
+        def modify():
+            live = json.loads(self.live.read_text())
+            live["node_secret"] = "f"*64
+            self.write(self.live, json.dumps(live, sort_keys=True,
+                                             separators=(",", ":")))
+        self._isolated_selected_activation(mutate=modify)
+
+    def test_selected_activation_adapter_refuses_detached_promotion_sha(self):
+        def modify():
+            path = self.stage/"foreign-install-promotion-prepared.json"
+            receipt = json.loads(path.read_text())
+            receipt["sha256"] = "0"*64
+            self.write(path, json.dumps(receipt, sort_keys=True))
+            # Even an equally forged completed receipt may not authorize
+            # the original Pairing/Node runtime without exact live bytes.
+            done = self.stage/"foreign-install-promotion-completed.json"
+            self.write(done, json.dumps({**receipt, "status": "completed"},
+                                        sort_keys=True))
+        self._isolated_selected_activation(mutate=modify)
+
+    def test_selected_activation_adapter_refuses_withheld_release(self):
+        self._isolated_selected_activation(release_ok=False)
+
     def test_final_selected_activation_cli_is_release_hold_no_fake_connected(self):
         # This is the SAME original pairing/identity journal, not a second
         # credential or menu path. Current signed RC9 trial denies activation

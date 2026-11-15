@@ -370,6 +370,21 @@ already exists, the original Core Journal verifies that owner instead.
 The offline tests now cover both no-write fresh-host admission and
 fail-closed rejection of prior stages/managed paths.
 
+#### Final adapter, exact live identity bytes — 2026-11-15
+
+Immediately before any original signed Foreign Pairing activation, the
+option-2 adapter now reopens the **same** private live identity via the
+existing directory-FD and 0600/no-hardlink reader. It recomputes the
+canonical original promoter payload from the identity returned by the
+original Pairing module and checks its exact bytes and the original
+`PREPARED` receipt SHA-256. Any changed secret, missing identity or
+detached receipt fails closed *before* the original runtime activation.
+Offline tests now exercise the adapter's **success** call chain with real
+client/promoter identity receipts and only a simulated release/Pairing
+side-effect, plus altered-live-secret, altered-receipt and withheld-release
+rejection. This is not a live KH/IR two-server Connected result, and does
+not change RC9's `activation_allowed=false` gate.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
