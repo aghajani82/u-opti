@@ -237,6 +237,16 @@ class UnifiedForeignOption2(unittest.TestCase):
         self.assert_no_identity()
         record["foreign_inputs"]["foreign_domain"]=scope[1]
         owner.save(record)
+        before_core = state.read_text()
+        state.write_text(before_core.replace(
+            "SMITE_UPSTREAM_REF="+source, "SMITE_UPSTREAM_REF="+("0"*40)))
+        state.chmod(0o600)
+        with self.assertRaises(host.Hold):
+            self.run_option2(core_owner=owner)
+        self.assertEqual(self.events, [])
+        self.assert_no_identity()
+        state.write_text(before_core)
+        state.chmod(0o600)
         current["smite-node"]["Config"]["Image"]=core_mod.RC7_IMAGES["smite-node"]
         with self.assertRaises(host.Hold):
             self.run_option2(core_owner=owner)
