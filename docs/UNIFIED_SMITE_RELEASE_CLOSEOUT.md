@@ -1,6 +1,6 @@
 # U-OPTI × Smite — final release and rollout acceptance
 
-**Date:** 2026-11-14  
+**Date:** 2026-11-15  
 **Source:** Smite `main` at the tagged RC9 commit and U-OPTI
 `trial/unified-smite-install`  
 **Scope:** finish the existing one-choice Iran/Foreign installer, signed
@@ -17,7 +17,7 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | RC9 manifest SHA256 | `f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60` |
 | RC9 evidence | [Publisher](https://github.com/aghajani82/Smite/actions/runs/43631138363), [independent Cosign](https://github.com/aghajani82/Smite/actions/runs/43631412672), [U-OPTI signatures](https://github.com/aghajani82/u-opti/actions/runs/43632177646), [U-OPTI rehearsal](https://github.com/aghajani82/u-opti/actions/runs/43632177665) |
 | RC9 candidate policy | `release_approved=false`, `activation_allowed=false` |
-| Iran option 1 | Existing signed RC7 install/journal; Panel + Iran Node + HTTPS/443 Pairing stages tested, with isolated real Compose upgrade and rollback |
+| Iran option 1 | **Trial branch:** fresh installs now pin exact signed RC9 Panel+Node and reuse original Journal/Gateway/Pairing/admin flow; selected/failure-injection tests run in CI. **main:** original RC7; RC7 retained journal never silently migrates to RC9. No live RC9 Connected evidence yet |
 | Iran retained Node | Private stage binds Docker container ID, image ID, project, Created and StartedAt; stage/status and rollback fail on change |
 | Iran Panel transaction | Signed sealed stage, additive schema, durable per-step cutover and owned config-only rollback; exact, restricted Docker/Compose/Nginx command driver **fixture-only** |
 | Foreign host stages | Existing core/Sanaei RO/Gateway 443 recovery journal: per-stage intent, verification and compensation; immutable Node/FRP preservation |
@@ -33,6 +33,12 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 RC9 candidate publication and independent verification passed. Deployment
 approval and the recovery boundary still require a separate decision bound
 to the exact pair and the intended host.
+
+### Gate 2A — disposable fresh Iran RC9 (trial branch, awaiting live proof)
+
+Use only after the full pinned CI run passes. On the **designated disposable Iran test host** (not Grandoptical), confirm backups/rebuild window, source pin, Docker ownership and valid DNS/TLS. Fresh option 1 must install the *same* signed RC9 Panel/Node digest pair, configure Gateway on HTTPS/443, perform the original signed local Iran Pairing and create the admin account in one journaled path. Evidence must include both healthy pinned containers, Panel API RC9 over loopback and valid HTTPS, the Iran Node showing `Connected`, signed Panel↔Node probes, stable identity, and correct retry from each completed checkpoint after an interruption. Capture a redacted report, never credentials or one-time codes.
+
+The trial branch is **not** approved for production. Do not rebuild or upgrade the live RC7 installation simply because CI passed; testing a fresh RC9 install does not prove the separately gated Panel-only RC7→RC9 cutover.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
