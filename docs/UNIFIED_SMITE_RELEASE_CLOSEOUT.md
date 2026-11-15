@@ -529,13 +529,23 @@ requires the exact nonsecret receipt
 No one-time code is included in CLI arguments, state or output. Neither
 the new read-only check nor its tests call the Panel redeem endpoint,
 create/overwrite an identity, change Node Compose, install Sanaei,
-restart Nginx or enable runtime. Incorrect source, revoked/expired
+restart Nginx or enable runtime. Incorrect source, expired or locally changed
 packet, changed Gateway path, untrusted settings, or a Node no longer
 in strict HMAC mode all HOLD *after retaining the already verified
-Core/Sanaei/Gateway stages*. Existing CI tests exercise the actual
+Core/Sanaei/Gateway stages*. This preflight is local and does **not**
+claim to prove remote Panel revocation or live connectivity. Existing CI tests exercise the actual
 original parser + original promotion verifier in isolated fixtures
 and the actual one-choice shell function with mocked host commands,
 including fail-closed order and no false Connected receipt.
+
+The shell handoff now also repeats the **original running** immutable
+Node image-ID, owned Compose, paused/strict Node and `smite_install_sanaei_retained`
+witness (effective RW=false bind plus real read-only SQLite schema)
+immediately before invoking this packet/Gateway/Node admission.
+A valid Gateway file cannot stand in for a verified Sanaei mount.
+The only successful result is still *ready for original signed
+Pairing*, not `Connected`. Three independent workflow jobs PASS:
+[43715236360](https://github.com/aghajani82/u-opti/actions/runs/43715236360).
 
 **Still unimplemented / not authorized:** a real-root, release-approved
 Identity journal and one-use Panel redeem/HMAC proof handoff inside

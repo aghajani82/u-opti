@@ -29,13 +29,19 @@ paused/strict managed Node `.env`), without implementing a
 replacement certificate, Pairing or identity system. A wrong
 Panel domain, source, control path, expired grant or non-strict Node
 returns HOLD with no redeem, identity promotion or runtime changes.
+The original **effective** Docker image/Compose, paused auth and
+Sanaei RO SQLite/schema witness must also pass in the same shell
+before that pre-pairing check; a Gateway receipt alone is not enough.
+Remote Panel revocation and end-to-end Connected remain unproven.
 
 The shell coordinator requires the explicit exact
 `FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY` receipt; it never
 claims Connected and cannot enable the still-disabled public option
 2. Python fixtures call the real existing packet/promotion modules;
 the shell fixture exercises the actual CLI arguments and failure
-ordering. The final release gate remains OFF, and no host was touched.
+ordering, including denial on the changed running Node/RO mount.
+[3/3 CI PASS](https://github.com/aghajani82/u-opti/actions/runs/43715236360).
+The final release gate remains OFF, and no host was touched.
 
 **Next:** bind the *existing* identity grant/HMAC promotion journal
 to that verified preflight with its original one-use replay guarantees
