@@ -806,12 +806,14 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
         printf 'original-identity\n' >> "$TMP/selected-identity-stage-calls"
         [ "$STAGE_FAIL" != identity ]
     }
+    smite_install_unified_foreign_activate_signed_stage() {
+        printf 'original-signed-activation\n' >> "$TMP/selected-identity-stage-calls"
+        [ "$STAGE_FAIL" != activation ]
+    }
     : > "$TMP/selected-identity-stage-calls"
     smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-identity-ok"
-    [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity')" ]
-    grep -qx 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED' "$TMP/selected-identity-ok"
-    grep -qx 'FOREIGN_NODE_ACTIVATION=NOT_PERFORMED' "$TMP/selected-identity-ok"
-    grep -qx 'FOREIGN_CONNECTED=NOT_PROVEN' "$TMP/selected-identity-ok"
+    [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity\noriginal-signed-activation')" ]
+    grep -qx 'FOREIGN_OPTION2=CONNECTED_SIGNED_BIDIRECTIONAL' "$TMP/selected-identity-ok"
     STAGE_FAIL=core
     : > "$TMP/selected-identity-stage-calls"
     if smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-identity-core-failed"; then
@@ -825,7 +827,14 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
         echo 'FAIL: unproved Identity marked ready' >&2; exit 1
     fi
     [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity')" ]
-    ! grep -q 'FOREIGN_OPTION2_IDENTITY=' "$TMP/selected-identity-denied"
+    ! grep -q 'FOREIGN_OPTION2=CONNECTED' "$TMP/selected-identity-denied"
+    STAGE_FAIL=activation
+    : > "$TMP/selected-identity-stage-calls"
+    if smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-activation-denied"; then
+        echo 'FAIL: signed activation failure reported Connected' >&2; exit 1
+    fi
+    [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity\noriginal-signed-activation')" ]
+    ! grep -q 'FOREIGN_OPTION2=CONNECTED' "$TMP/selected-activation-denied"
 )
 
 # The actual root identity stage must refuse a temporary/symlinked or
@@ -863,6 +872,41 @@ assert body.index('smite_install_unified_signed_pair_review') < body.index(
 assert "FOREIGN_CONNECTED=YES" not in body
 PY_SELECTED_HMAC_BRIDGE
 echo 'FOREIGN_OPTION2_ORIGINAL_SIGNED_IDENTITY_BRIDGE=PASS_ISOLATED'
+# Original activation bridge requires the SAME source/selected packet,
+# review + exact receipt; an unrelated temporary packet never reaches
+# Python or Node recreation, and no legacy menu action is invoked.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    smite_install_unified_signed_pair_review() {
+        echo 'UNSAFE_RELEASE_REVIEW' >&2
+        return 2
+    }
+    if smite_install_unified_foreign_activate_signed_stage "$PACKET" \
+        > "$TMP/selected-activation-root-guard" 2>&1; then
+        echo 'FAIL: unowned Foreign grant reached signed activation' >&2
+        exit 1
+    fi
+    ! grep -q 'UNSAFE_RELEASE_REVIEW' "$TMP/selected-activation-root-guard"
+)
+command python3 - "$ROOT/modules/smite-install.sh" <<'PY_SIGNED_ACTIVATION_CONTRACT'
+from pathlib import Path
+import sys
+source=Path(sys.argv[1]).read_text()
+body=source.split("smite_install_unified_foreign_activate_signed_stage() {",1)[1].split(
+    "\n# One-choice composition uses only original per-stage owners.",1)[0]
+assert "smite_install_unified_signed_pair_review" in body
+assert "--activate-selected-foreign --installer-pid" in body
+for witness in ("KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS",
+                "PANEL_TO_KH_SIGNED_HMAC=PASS",
+                "KH_LOCAL_HMAC_REPLAY=PASS"):
+    assert witness in body
+assert body.index("smite_install_unified_signed_pair_review") < body.index(
+    "--activate-selected-foreign")
+assert "rollback-node-field-trial" not in body
+PY_SIGNED_ACTIVATION_CONTRACT
+echo 'FOREIGN_OPTION2_ORIGINAL_ACTIVATION_AND_PAUSED_ROLLBACK=PASS_ISOLATED'
 
 # Original option-2 durable packet capture is INSIDE the selected flow, but
 # the signed release false gate must stop it before Journal.prepare, mkdir,
