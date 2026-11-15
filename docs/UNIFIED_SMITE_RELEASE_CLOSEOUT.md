@@ -460,6 +460,55 @@ signed host-activation approval, and Iran Panel Foreign capability
 flags be coordinated for a matched two-host test. No main merge,
 rebuild or production modification is authorized by this CI result.
 
+#### Exact Core → original Sanaei RO → original HTTPS/443 Gateway handoff, including interrupted RO resume — CI PASS
+
+The original `smite-rc6-install-journal.py` now supports an explicitly
+**read-only, post-Sanaei resume disposition** for a *previously COMMITTED*
+exact RC9 Foreign Core. The original fresh pre-Core `commit` still
+requires `SMITE_SANAEI_INVENTORY_ENABLED=false`; the later change to
+`true` cannot masquerade as Core installation progress. For the
+later, distinct `--attached-sanaei` read-only resume, both the original
+Compose/project/digest/health and current Node `.env` still have to
+match the immutable signed Panel-issued name, Panel HTTPS/443 domain and
+exact control URL, paused registration and strict auth. In addition,
+the managed Sanaei DB source must be a registered instance path and
+the *effective running Node* must have exactly one RW=false bind mount
+to `/run/smite-sanaei-ro` plus the matching paused/strict/managed
+inventory flags. Incorrect or writeable mounts, inconsistent DB paths,
+unverified inventory mode, and uncommitted Core all HOLD with no host
+write or Node restart.
+
+The **existing** `smite_install_sanaei_retained` is the precondition for
+passing this read-only option in the shell coordinator. It checks the
+original effective RO bind, healthy Node, registered source and
+read-only SQLite schema probe. If it cannot independently prove
+the attachment, the Core Journal is invoked in its original strict
+mode and still refuses the changed inventory. Tests prove the
+authorized `false → true` transition is **not a reinstall**, while
+negative cases HOLD and retain the original Core identity.
+
+The internal selected-stage coordinator now directly invokes the
+existing `smite_install_unified_foreign_core_stage` followed by
+`smite_install_unified_foreign_after_core`, which already owns the
+original Sanaei and Foreign Gateway step-level compensation and exact
+signed packet/443 checks. The helper explicitly stops at
+`FOREIGN_IDENTITY=AWAITING_ORIGINAL_SIGNED_PAIRING` and
+`FOREIGN_CONNECTED=NOT_PROVEN`. It intentionally does not invent a
+separate installer, claim completion, bypass the one-time HMAC
+enrollment, or enable public option 2. The original Core owner
+process PID now survives nested shell command substitution and is
+covered by an isolated regression. CI **3/3 PASS**:
+[43713219769](https://github.com/aghajani82/u-opti/actions/runs/43713219769).
+
+**Still HOLD, not authorized for new KH VPS install:** the public option
+2 is deliberately not wired to this internal sequence and signed RC9
+host release remains default-off. The final real-host Host/Identity
+journal bridge, per-stage restart/rollback proof, Panel Foreign-install
+and trusted-origin flags on the matched Iran RC9 release, and actual
+Iran↔KH authenticated Connected/runtime-activation receipt are not yet
+proved. The current retained Iran install was not rebuilt or changed;
+`main`, Grandoptical, FRP 20182 and Backhaul remain unchanged.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;

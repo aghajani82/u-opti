@@ -16,6 +16,36 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 interrupted post-Sanaei Core resume and direct Core-to-Gateway selection
+
+Closed the original resume conflict: the *correct* Sanaei RO attachment
+changes the Node's `SMITE_SANAEI_INVENTORY_ENABLED` value from false to
+true, but a strict Core-only recheck previously treated that as source
+drift on selecting option 2 again. The original Core Journal now
+offers an **explicit read-only post-Sanaei resume mode** only when
+the Core was previously COMMITTED and the signed Panel/Node source,
+control HTTPS/443, managed inventory, strict paused auth, immutable
+Compose owner and live RO bind mount all remain exact. The original
+`smite_install_sanaei_retained` must independently prove the
+RO SQLite schema/health before the shell passes this option.
+Writable/unmatched mounts and corrupted runtime flags remain HOLD.
+
+The same pre-pairing invocation now calls the ORIGINAL selected Core
+stage followed by the ORIGINAL Sanaei/Gateway stage without re-creating
+the Core or requesting another install-menu choice. In isolated tests,
+failed Core stops Host; a Host failure stops before any false success;
+retry uses the same Core owner. A prepared Host returns
+`FOREIGN_CONNECTED=NOT_PROVEN` until the existing one-use signed
+Pairing and final runtime stage finish. Tests on the selected branch
+3/3 PASS: https://github.com/aghajani82/u-opti/actions/runs/43713219769.
+
+**Important next boundary:** integrate the Host and Identity journals
+with this internal function for real-host source-owned staged execution
+and safe expiry/reissue. Obtain a separately authorized signed
+Foreign host release and coordinate Iran Panel's Foreign flags before
+ever enabling public option 2. No Iran test-server rebuild needed
+yet, and no change was made to production/FRP/Backhaul/`main`.
+
 ### 2026-11-15 original Foreign Core selected-stage reuse (no menu or real-root activation)
 
 The existing Foreign Node installer is now composed with original
