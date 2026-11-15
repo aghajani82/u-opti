@@ -2429,6 +2429,33 @@ smite_install_unified_foreign_core_stage() {
     echo 'FOREIGN_CORE_NEXT=EXISTING_SANAEI_GATEWAY_SIGNED_PAIRING'
 }
 
+# Last READ-ONLY boundary before the ORIGINAL one-use Signed Pairing.
+# Reuse the exact private Panel packet and pre-existing promotion's
+# verify_gateway() rather than treating "Gateway configured" as proof
+# that the current Node still has the correct signed control address.
+# This function never redeems a code, creates an identity or touches Docker.
+smite_install_unified_foreign_identity_preflight() {
+    local packet="${1:-}" module_dir domain site result
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
+    [ -n "$packet" ] && [ -f "$packet" ] && [ ! -L "$packet" ] || return 2
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-gateway-plan.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-gateway-plan.py" ] || return 2
+    domain="$(smite_foreign_gateway_domain)" || return 2
+    site="$(smite_foreign_gateway_site_path "$domain")" || return 2
+    result="$(python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+        --packet-file "$packet" --state-file "$SMITE_STATE_FILE" \
+        --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env" \
+        --site-file "$site" --node-env-file "$SMITE_NODE_DIR/.env" \
+        --prepairing-read-only)" || {
+        echo 'HOLD: Original Panel/Gateway/Node scope changed before Signed Pairing.' >&2
+        return 2
+    }
+    [ "$result" = 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY' ] || return 2
+    echo "$result"
+}
+
 # Internal one-choice hand-off: the original Core Journal chooses whether
 # to install/commit/resume, then the original Sanaei + HTTPS/443 coordinator
 # verifies and continues without returning to the menu. The identity and
@@ -2451,6 +2478,13 @@ smite_install_unified_foreign_pre_pairing_stages() {
     # only the interrupted stage and the same previously owned Core.
     smite_install_unified_foreign_after_core "$packet" || {
         echo 'HOLD: Foreign Core retained; resume original Sanaei/Gateway stage with the SAME Node.' >&2
+        return 2
+    }
+    # The separate identity journal must not consume its one-use grant
+    # unless the *current* persisted Panel scope, Gateway and paused Node
+    # match the exact original signed promotion admission.
+    smite_install_unified_foreign_identity_preflight "$packet" || {
+        echo 'HOLD: Retain verified Core/Sanaei/Gateway; Signed Pairing preflight failed.' >&2
         return 2
     }
     echo 'FOREIGN_OPTION2_PRE_PAIRING=SIGNED_CORE_SANAEI_RO_GATEWAY_443_PREPARED'
