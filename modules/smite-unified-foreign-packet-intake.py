@@ -472,28 +472,36 @@ def main(argv=None):
     actions = parser.add_mutually_exclusive_group(required=True)
     actions.add_argument("--status", action="store_true")
     actions.add_argument("--capture-selected-foreign", metavar="PRIVATE_WORKSPACE")
+    actions.add_argument("--capture-owned-foreign", action="store_true")
     args = parser.parse_args(argv)
     if args.status:
         print("PANEL_FOREIGN_PACKET_INTAKE=DISPOSABLE_REHEARSAL_ONLY")
-        print("REAL_HOST_CAPTURE=NOT_AUTHORIZED")
+        print("REAL_HOST_CAPTURE=SIGNED_RELEASE_HOLD")
         print("NODE_ACTIVATION=NOT_PERFORMED")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
-    target = (Path(args.capture_selected_foreign) / "foreign-fixture" /
+    selected_host = args.capture_owned_foreign
+    target = (_SELECTED_ROOT_PACKET if selected_host else
+              Path(args.capture_selected_foreign) / "foreign-fixture" /
               "foreign-staging" / "foreign-install-packet.json")
     try:
-        _private_fixture(target, allow_existing=True)
+        if selected_host:
+            _selected_root_target(target, allow_existing=True)
+        else:
+            _private_fixture(target, allow_existing=True)
         print("Paste Iran Panel's complete Foreign installation JSON and"
               " finish with an empty line. Input is hidden.",
               file=sys.stderr, flush=True)
         with open("/dev/tty", "r", encoding="utf-8", newline="") as tty:
             capture_selected_hidden_tty(
                 tty, target=target, now=int(time.time()),
+                selected_host=selected_host,
                 confirm_scope=lambda scope: _confirm_selected_scope(tty, scope))
         print("FOREIGN_PACKET=STAGED_PRIVATE")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
-    except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError):
+    except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError,
+            RuntimeError):
         print("HOLD: Foreign Panel installation information not admitted",
               file=sys.stderr)
         return 2
