@@ -163,6 +163,60 @@ release-HOLD before any host mutation. They are offline fixture
 tests, **not** live Iran+Foreign acceptance. The public option 7,
 Smite main, U-OPTI main, FRP, Backhaul and test hosts are unchanged.
 
+#### Panel → Foreign option 2: two-hour grant and stage-local retry — 2026-11-15
+
+The agreed operator sequence is **not** Foreign self-registration:
+1. Finish Iran option 1 and verify its Iran Node is Connected in the
+   **Iran Smite Panel**.
+2. In that same Panel, reserve/create the **Foreign Node** with its exact
+   Foreign HTTPS/443 domain; use the existing Foreign installation dialog
+   to issue/copy its `smi1` JSON (`node_id`, `node_name`, `panel_url`,
+   `origin`, `control_url`, `installation_code`, `expires_at`).
+3. Paste this exact JSON once, with terminal echo disabled, **during
+   Foreign Smite Manager option 2**; do not type credentials into
+   argv/environment, ask KH to create a competing Node or issue a code
+   outside the Iran Panel.
+4. Reuse the same saved, private, still-valid 0600 packet on retries.
+   The original IR Panel grants code validity for `7200` seconds **from
+   issuance**, not from the beginning of KH installation.
+5. If the grant expires *before redemption*, request a fresh code
+   **for exactly the same reserved Node and domain** in the Iran Panel.
+   The original Panel grant issuer retains the previously reserved
+   `control_url` for that same Node/domain. The root-owned option-2
+   intake now reuses the original 0700/0600 hidden-TTY stager and Core
+   Journal read-only `foreign_resume` witness to accept only the
+   same five immutable values, an expired prior code, a different fresh
+   code and an unpromoted Identity `INTENT`. Drift, a live identity,
+   a previously committed promotion or an unverified/partial Core
+   **HOLDS**. It never reinstalls successful Core/Sanaei/Gateway,
+   creates a new identity, consumes the old code or changes the
+   current operation owner.
+6. Use the **existing** signed Panel HMAC proof and promotion receipts.
+   A completed identity must never be rekeyed/redeemed on an expired
+   bearer code. Activation and the live Iran-Panel Connected witness
+   are separate, still-pending acceptance checks.
+
+The selected internal coordinator also shares Iran option 1's original
+`operation.lock` across hidden input, Core, Sanaei, Gateway and
+identity; concurrent installs cannot silently race ownership. Existing
+legacy recovery/menu option 7 remains unchanged.
+
+**Evidence**: source Smite tag
+`e7f76185e9a7da51d7069d5d0a829dc192cc1e06`,
+`frontend/src/components/ForeignInstallDialog.tsx` supplies
+`ttl_seconds: 7200`, and `panel/app/foreign_install_grants.py`
+enforces `DEFAULT_TTL = MAX_TTL = 7200` and reuses prior
+`control_url` for the same Node and domain. U-OPTI adds original-owner
+failure-injection coverage for unchanged scope, Node image/runtime
+drift and no renewed-token adoption after promotion.
+
+**Release truth**: the currently pinned signed RC9 trial manifest still
+denies host activation; the public option 2 remains
+`HOLD_BEFORE_HOST_CHANGES`. All evidence here is branch CI/disposable
+rehearsal until an approved signed release, the real-root Host/Identity
+admission and live two-server Connected test are complete. No new
+PR, Workflow, feature, menu or main-branch change is requested.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
