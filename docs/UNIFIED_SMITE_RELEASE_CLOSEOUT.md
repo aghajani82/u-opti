@@ -355,6 +355,51 @@ identity continuity and rollback on the two disposable servers. A
 matching fresh Iran rebuild is acceptable at that point; it is not
 needed for code-only CI work. Protect Grandoptical/FRP/Backhaul.
 
+#### Foreign RC9 Core COMMIT and read-only same-option resume — CI PASS
+
+The ORIGINAL `smite-rc6-install-journal.py` now refuses a fresh
+Foreign RC9 `COMMIT` unless the owner-private Node `.env` matches the
+**same** Panel-issued nonsecret scope: exact Node name/role, HTTPS/443
+Panel address, the immutable `/smite-node/<32 hex>` control path,
+paused outbound registration, strict HMAC Agent authentication and
+the initial unattached Sanaei inventory baseline. The checks are
+read-only; the preexisting Core rollback/quarantine still owns data.
+
+The original Journal also exposes a read-only `resume-foreign`
+disposition, specific to the same signed RC9 Foreign owner and
+**pre-enrollment Core stage**. It reports `CORE_PENDING` only when
+no Core bytes or containers have yet been installed,
+`CORE_READY_TO_COMMIT` only after a complete verified pinned Node,
+and `CORE_COMMITTED` only for the exact retained owner. Partial
+files, wrong source/Node, mismatched Compose project/config-files,
+unhealthy or restarted Node, incorrect control address, or expired/
+wrong private Panel packet HOLD **without restarting or deleting
+anything**. New secret material is never copied into the Core
+Journal or printed in a status receipt.
+
+The original Host/Identity journals **remain responsible for later
+Sanaei RO, Gateway/443, one-use HMAC enrollment, activation and
+stage-owned compensation**; these read-only Core states are not a
+replacement for those journals. No public option-2 activation has
+been authorized. Tested with the actual Core Journal and its
+pre-existing signed Host/Identity integration tests, including
+interruption, drift, rollback refusal, exact packet reissue,
+idempotence and no Node recreation. CI **3/3 PASS**:
+[43707732046](https://github.com/aghajani82/u-opti/actions/runs/43707732046).
+
+The next practical boundary is to wire the **real-root** original
+Core execution and durable Host/Identity stage operations to the
+single Foreign option-2 selection with safe interruption recovery,
+then prove original stage rollbacks and independently publish the
+host-activation approved signed pair. Current RC9 trial admission
+still returns `host_activation_allowed=False` and the menu still
+returns `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+On the disposable Iran side, the original Foreign schema is READY;
+existing Foreign enable/origin-trust flags will be coordinated only
+with that release. No test VPS rebuild is needed for the offline
+change. Production Grandoptical, FRP, Backhaul and `main` remain
+untouched.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;

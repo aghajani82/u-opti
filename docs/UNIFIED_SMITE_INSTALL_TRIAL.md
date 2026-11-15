@@ -16,6 +16,35 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 original Foreign Core exact-state COMMIT and resume
+
+The **existing** fresh Core Journal now checks its private Node
+`/opt/smite-node/.env` before `COMMIT`: one exact Panel-issued
+HTTPS/443 control address, matching Node/Panel names, disabled
+anonymous outbound registration, strict HMAC Agent auth and pending
+Sanaei inventory. A wrong address, non-strict mode or loose
+permissions HOLD without changing the persisted journal.
+
+The original Journal's `resume-foreign` path is **read-only and
+pre-enrollment only**. It identifies `CORE_PENDING`,
+`CORE_READY_TO_COMMIT` and `CORE_COMMITTED` based on immutable
+RC9 source, original Compose-owned Node, current private Core files,
+exact health/status and the same fresh private Panel packet. Partial
+or ambiguous Core installations require original recovery, not
+an automatic second `docker up` or a new identity. Later stages
+continue to use their own preexisting Sanaei/Gateway/Identity
+stage recovery; no claim of full Foreign Connected follows merely
+from `CORE_COMMITTED`.
+
+Isolated CI PASS:
+https://github.com/aghajani82/u-opti/actions/runs/43707732046
+
+Remain HOLD: actual public option-2 real-root executor, approved
+signed host-activation release, Iran Panel Foreign/origin flags and
+live Iran↔KH authenticated Connected/rollback acceptance. Do not
+rebuild Iran or purchase a KH trial server until the option-2
+release gate is genuinely prepared.
+
 ### 2026-11-15 signed Panel packet is now the sole Core owner input
 
 In the existing trial branch, Foreign Core ownership no longer needs
