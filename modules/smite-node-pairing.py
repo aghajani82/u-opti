@@ -2478,7 +2478,7 @@ def complete_local_ir_foreign_install(state: dict[str, str]) -> None:
         if (record.get("source") != journal_lib.RC9_SOURCE
                 or record.get("ir_phase") not in ("ADMIN_CREATED", "COMPLETE")):
             raise WizardHold("Fresh Iran Node/admin checkpoint not committed")
-        if journal.admin_present() != 0:
+        if not journal.ir_admin_present():
             raise WizardHold("Fresh Iran administrator not verified")
     except (OSError, ValueError, RuntimeError) as exc:
         raise WizardHold("Original fresh Iran signed install proof required") from exc

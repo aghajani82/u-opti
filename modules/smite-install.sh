@@ -3669,8 +3669,9 @@ smite_install_ir_admin_present() {
 }
 
 # The original RC9 Panel has a private, WAL-aware additive migration for the
-# Foreign-install schema. Reuse it after signed Iran Node/Admin checks; never
-# enable Foreign flags, restart services, or rewind existing identities.
+# Foreign-install schema. Reuse it after signed Iran Node/Admin checks.
+# The exact existing signed Pairing flags+Nginx renderers are attached
+# immediately afterward under a durable same-owner config-only rollback.
 # Failure retains ADMIN_CREATED for the SAME option-1 retry.
 smite_install_ir_foreign_schema_stage() {
     [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] || return 0
@@ -3722,7 +3723,24 @@ smite_install_ir_foreign_schema_stage() {
         return 2
     }
     echo 'IR_FOREIGN_SCHEMA=READY'
-    echo 'IR_FOREIGN_FLAGS=UNCHANGED'
+    # The original smite-node-pairing controller owns signed Panel config,
+    # and the original Foreign ingress renderer owns both exact POST
+    # locations. A private original-install receipt permits this same
+    # option-1 stage to resume/compensate after interruption. No Node, FRP,
+    # Backhaul or pairing identity is recreated by this step.
+    local module_dir result
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    result="$(UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B \
+        "$module_dir/smite-node-pairing.py" --complete-local-ir-foreign)" || {
+        echo 'HOLD: Foreign signed Panel flags/443 ingress incomplete; retry option 1 from ADMIN_CREATED.' >&2
+        return 2
+    }
+    grep -Fxq 'IR_FOREIGN_INSTALL=READY_SIGNED_443' <<< "$result" || {
+        echo 'HOLD: Original Foreign Panel readiness receipt not verified.' >&2
+        return 2
+    }
+    echo 'IR_FOREIGN_FLAGS=ENABLED_SIGNED_443'
+    echo 'IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION'
 }
 
 # Core is committed BEFORE any Gateway/Pairing writes. On an explicitly
