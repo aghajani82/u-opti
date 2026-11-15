@@ -687,6 +687,39 @@ class Journal:
                     or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
                 raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
+    def foreign_recover_incomplete_core(self, packet_path, installer_pid=None):
+        """Internal option-2 compensation for ONLY an uncommitted fresh Core.
+
+        Reuse the original owner's immutable packet scope, fresh-only
+        identity/grant/route guards and original quarantine rollback. This
+        does not touch the menu's separate recovery option. Already COMMITTED
+        Core/Sanaei/Gateway/Pairing must never be rewound on a retry.
+        """
+        d = self.load()
+        if (d.get('role') != 'foreign' or d.get('source') != RC9_SOURCE
+                or d.get('foreign_resumable_version') != 1
+                or d.get('state') not in ('INSTALLING', 'ROLLING_BACK')):
+            raise Hold('FOREIGN_CORE_AUTO_ROLLBACK_NOT_OWNED')
+        saved = self.foreign_inputs(d)
+        packet = self.foreign_packet_inputs(packet_path)
+        keys = ('panel_domain', 'foreign_domain', 'node_name',
+                'node_id', 'control_path')
+        if tuple(saved[k] for k in keys) != tuple(packet):
+            raise Hold('FOREIGN_CORE_AUTO_ROLLBACK_SCOPE_MISMATCH')
+        # The original operation lock is held by the selected installer.
+        # Another still-running installer must never be compensated.
+        if (d.get('installer_start')
+                and process_start(d.get('installer_pid')) == d['installer_start']
+                and d.get('installer_pid') != installer_pid):
+            raise Hold('FOREIGN_CORE_INSTALLER_STILL_RUNNING')
+        if self.root == Path('/') and (
+                not installer_pid or not process_start(installer_pid)):
+            raise Hold('FOREIGN_CORE_AUTO_ROLLBACK_INSTALLER_REQUIRED')
+        # The existing rollback checks actual Docker owner/image/paused mode,
+        # signed identity absence, grants/routes and protected database rows
+        # BEFORE any stop, rename or file quarantine. Only this Core is owned.
+        return self.rollback(installer_pid=installer_pid)
+
     def foreign_resume(self, packet_path=None, *, attached_sanaei=False):
         """Read-only pre-enrollment disposition of the ORIGINAL RC9 Core.
 
@@ -865,7 +898,7 @@ def main():
     ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback',
                                        'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir',
                                        'prepare', 'recover-ir-core', 'commit-ir-panel',
-                                       'resume-foreign'))
+                                       'resume-foreign', 'recover-foreign-core'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
     ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted signed-source owner')
     ap.add_argument('--resumable-foreign', action='store_true')
@@ -940,6 +973,11 @@ def main():
                 print('FOREIGN_CORE_STAGE=' + stage)
                 if project is not None:
                     print('FOREIGN_CORE_PROJECT=' + project)
+            elif a.action == 'recover-foreign-core':
+                if not a.foreign_packet_file:
+                    raise Hold('FOREIGN_CORE_PACKET_REQUIRED')
+                print(j.foreign_recover_incomplete_core(
+                    a.foreign_packet_file, installer_pid=a.installer_pid))
             elif a.action == 'advance-ir':
                 if a.phase is None: raise Hold('IR_STAGE_REQUIRED')
                 print('IR_INSTALL_STAGE=' + j.ir_advance(a.phase))
