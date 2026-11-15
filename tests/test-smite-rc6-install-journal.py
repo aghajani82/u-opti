@@ -122,7 +122,9 @@ class RecoveryTests(unittest.TestCase):
         packet.chmod(0o600)
         for unsafe in ('world_readable','expired','conflicting_manual_scope'):
             if unsafe=='world_readable':packet.chmod(0o644)
-            if unsafe=='expired':payload['expires_at']=now-1
+            if unsafe=='expired':
+                payload['expires_at']=now-1
+                packet.write_text(json.dumps(payload))
             with self.subTest(unsafe=unsafe),self.assertRaises(m.Hold):
                 self.j.begin('foreign',source=m.RC9_SOURCE,
                     resumable_foreign=True,foreign_packet_path=packet,
