@@ -139,7 +139,8 @@ class Journal:
                 or record.get('source') != RC9_SOURCE
                 or record.get('role') != 'foreign'
                 or not isinstance(scope, dict)
-                or tuple(scope) != required
+                or set(scope) != set(required)
+                or len(scope) != len(required)
                 or any(type(scope.get(key)) is not str for key in required)):
             raise Hold('INVALID_FOREIGN_RC9_OWNER_SCOPE')
         panel, foreign, name, node_id, control = (scope[key] for key in required)
