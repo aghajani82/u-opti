@@ -128,6 +128,71 @@ class OperatorPacketIntake(unittest.TestCase):
         # The existing recovery flow reads this packet and can adopt its
         # newer expiry after independently re-verifying host witnesses.
 
+    def original_precore_owner(self):
+        def load(name, path):
+            spec = importlib.util.spec_from_file_location(
+                name, ROOT/"modules"/path)
+            result = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = result
+            spec.loader.exec_module(result)
+            return result
+        owner = load("uopti_exact_rc9_core_owner_pre_packet_test",
+                     "smite-rc6-install-journal.py")
+        promotion = load("uopti_exact_promotion_owner_pre_packet_test",
+                         "smite-foreign-install-promotion.py")
+        return owner, promotion, owner.Journal(root=self.root)
+
+    def test_root_precore_reissue_verifier_is_read_only_and_never_creates_core(self):
+        self.operator_paste()
+        owner, promotion, journal = self.original_precore_owner()
+        core_receipt = journal.path
+        self.assertFalse(core_receipt.exists())
+        packet_before = self.file.read_bytes()
+        with promotion.private_directory(self.stage) as fd:
+            result = module._original_unstarted_core_packet_witness(
+                journal, owner, promotion, fd, module.client_module())
+        self.assertTrue(result)
+        self.assertFalse(core_receipt.exists())
+        self.assertEqual(self.file.read_bytes(), packet_before)
+        self.assertFalse((self.stage/"foreign-install-identity.json").exists())
+
+    def test_root_precore_reissue_refuses_any_previous_stage_or_core_path(self):
+        self.operator_paste()
+        owner, promotion, journal = self.original_precore_owner()
+        candidate = (
+            self.stage/"unified-foreign-transaction.json",
+            self.stage/"foreign-install-identity.json",
+            self.stage/"unified-foreign-host-journal.json",
+            self.stage/"foreign-install-promotion-prepared.json",
+        )
+        for path in candidate:
+            path.write_text("{}")
+            path.chmod(0o600)
+            try:
+                with promotion.private_directory(self.stage) as fd:
+                    with self.subTest(receipt=path.name), self.assertRaises(module.Hold):
+                        module._original_unstarted_core_packet_witness(
+                            journal, owner, promotion, fd, module.client_module())
+            finally:
+                path.unlink()
+        target = self.root/"opt/smite-node"
+        target.mkdir(parents=True, mode=0o700)
+        try:
+            with promotion.private_directory(self.stage) as fd:
+                with self.assertRaises(module.Hold):
+                    module._original_unstarted_core_packet_witness(
+                        journal, owner, promotion, fd, module.client_module())
+        finally:
+            target.rmdir()
+            target.parent.rmdir()
+        journal.folder.mkdir(parents=True, mode=0o700)
+        journal.path.write_text("{}")
+        journal.path.chmod(0o600)
+        with promotion.private_directory(self.stage) as fd:
+            self.assertFalse(module._original_unstarted_core_packet_witness(
+                journal, owner, promotion, fd, module.client_module()))
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o600)
+
     def test_no_renewal_before_expiry_or_without_owned_checkpoint(self):
         self.operator_paste()
         original = self.file.read_bytes()

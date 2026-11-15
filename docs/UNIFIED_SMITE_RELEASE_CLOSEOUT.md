@@ -354,6 +354,22 @@ identity is forbidden. The original enrolment/promoter must obtain a new
 signed Panel STATUS witness before it can finish the retained stage. The
 companion offline tests inject crashes at both boundaries.
 
+#### Two-hour expiry before Core begins — 2026-11-15
+
+If the Panel-issued `smi1` code expires while Foreign option 2 is
+paused **before the first Core Journal transaction**, the unchanged
+private 0600 packet may be replaced with a new Panel-issued code only
+for the **exact same reserved Node, domain and control URL**. The
+existing signed release admission remains mandatory. The original
+RC9 Core Journal must not exist, all its original managed installation
+targets must be absent, and none of the Host/Identity/Promotion staged
+receipts or secret files may exist. This is a packet-only atomic
+replacement; it never creates a Core owner or a new Node, and never
+touches the running Sanaei/FRP installation. If any managed owner
+already exists, the original Core Journal verifies that owner instead.
+The offline tests now cover both no-write fresh-host admission and
+fail-closed rejection of prior stages/managed paths.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair

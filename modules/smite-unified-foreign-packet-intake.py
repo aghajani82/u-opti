@@ -215,6 +215,38 @@ def _original_core_reissue_witness(journal, owner, packet, installer_pid):
     return stage
 
 
+def _original_unstarted_core_packet_witness(journal, owner, files, fd, client):
+    """Only a never-started RC9 Foreign Core may reissue its expired packet.
+
+    An exact signed Panel packet was already stored, but the operator may
+    have paused more than two hours *before* the original Core Journal
+    began. This read-only branch uses the ORIGINAL journal's own TARGETS
+    to reject any existing Smite installation and checks that not even an
+    INTENT or staged secret exists. It never creates a new Core owner.
+    Return False only when an existing Core journal must verify itself.
+    """
+    if os.path.lexists(journal.path):
+        # Present (including unsafe symlinks) is never "fresh". The
+        # original journal load/signature/runtime witness must decide.
+        return False
+    if any(os.path.lexists(journal.root / rel) for rel in owner.TARGETS):
+        deny()
+    for name in (
+        "unified-foreign-host.lock",
+        "unified-foreign-host-journal.json",
+        "unified-foreign-transaction.lock",
+        "unified-foreign-transaction.json",
+        "foreign-install-identity.json",
+        "foreign-install-promotion-prepared.json",
+        "foreign-install-promotion-completed.json",
+    ):
+        # Missing is the ONLY allowed state. Files/symlinks/hardlinks
+        # either count as committed state or are refused by read_optional.
+        if files.read_optional(fd, name, client) is not None:
+            deny()
+    return True
+
+
 def _renew_expired_owned_root(*, target, data, packet, now, client,
                              installer_pid=None):
     """Reissue a 2-hour IR Panel grant to the SAME paused Foreign owner only.
@@ -305,8 +337,14 @@ def _renew_expired_owned_root(*, target, data, packet, now, client,
                                    for x in staged["node_secret"])):
                         deny()
                 journal = owner.Journal()
-                _original_core_reissue_witness(
-                    journal, owner, packet, installer_pid)
+                # An expired code *before Core ever starts* must not strand
+                # the operator or demand a new Node. In that one narrow
+                # case no Core owner or identity is ever minted; the only
+                # write below replaces the old private bearer packet.
+                if not _original_unstarted_core_packet_witness(
+                        journal, owner, files, directory, client):
+                    _original_core_reissue_witness(
+                        journal, owner, packet, installer_pid)
                 if files.read_optional(directory, target.name, client) != previous:
                     deny()
                 # Replacing the original packet is the ONLY write to
