@@ -237,6 +237,38 @@ class Journal:
             return scope, source
         return scope
 
+    def require_foreign_selected_release(self, foreign_packet_path):
+        """Reuse ORIGINAL signed Pairing admission for an RC9 root owner.
+
+        No env flag, manually typed Node ID, raw digest or trial signature
+        grants host installation. The selected packet is the only authority
+        and has to be inside the original root-owned operation journal.
+        The currently pinned RC9 release is NOT approved, hence HOLD.
+        """
+        if self.root != Path('/'):
+            return
+        if (foreign_packet_path is None or
+                Path(foreign_packet_path) !=
+                Path('/var/lib/u-opti/rc6-install-journal/foreign-staging/'
+                     'foreign-install-packet.json')):
+            raise Hold('FOREIGN_ROOT_REQUIRES_ORIGINAL_SELECTED_PACKET')
+        pairing_path = Path(__file__).with_name("smite-node-pairing.py")
+        if pairing_path.is_symlink() or not pairing_path.is_file():
+            raise Hold('FOREIGN_SIGNED_PAIRING_RELEASE_GATE_MISSING')
+        spec = importlib.util.spec_from_file_location(
+            'uopti_foreign_core_original_signed_release', pairing_path)
+        if spec is None or spec.loader is None:
+            raise Hold('FOREIGN_SIGNED_PAIRING_RELEASE_GATE_MISSING')
+        pairing = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = pairing
+        spec.loader.exec_module(pairing)
+        try:
+            pairing._require_unified_foreign_release()
+        except Exception as exc:
+            # The signed RC9 trial manifest says activation_allowed=false.
+            # Never print the private packet/code or a raw signature error.
+            raise Hold('FOREIGN_RC9_SIGNED_HOST_RELEASE_NOT_APPROVED') from exc
+
     def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None,
               resumable_foreign=False, foreign_inputs=None,
               foreign_packet_path=None, source=None):
@@ -250,7 +282,7 @@ class Journal:
             raise Hold('INVALID_FOREIGN_CORE_INPUTS')
         if foreign_packet_path is not None:
             if (foreign_inputs is not None or not resumable_foreign
-                    or role != 'foreign' or self.root == Path('/')):
+                    or role != 'foreign'):
                 raise Hold('FOREIGN_PACKET_NOT_ADMITTED')
         if resumable_ir and resumable_foreign:
             raise Hold('CONFLICTING_INSTALL_OWNERS')
@@ -262,12 +294,13 @@ class Journal:
                 if not resumable_ir or ir_inputs is None:
                     raise Hold('RC9_IR_OWNER_REQUIRED')
             elif role == 'foreign':
-                # The signed candidate still has activation_allowed=false.
-                # Only private-root fixtures may model the future RC9 owner.
-                # The installed / journal CLI cannot create one yet.
-                if (self.root == Path('/') or not resumable_foreign
-                        or (foreign_inputs is None and foreign_packet_path is None)):
+                if (not resumable_foreign or
+                        (foreign_inputs is None and foreign_packet_path is None)):
                     raise Hold('RC9_FOREIGN_HOST_RELEASE_NOT_APPROVED')
+                # No standalone/manual root Core owner is acceptable. Only
+                # the original 0600 Panel-issued smi1 packet, together with
+                # original signed Pairing approval, can authorize a fresh KH.
+                self.require_foreign_selected_release(foreign_packet_path)
             else:
                 raise Hold('RC9_ROLE_NOT_APPROVED')
         elif resumable_foreign or foreign_inputs is not None or foreign_packet_path is not None:
