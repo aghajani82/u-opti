@@ -258,7 +258,7 @@ assert selected.index(review) < selected.index('smite-rc6-install-journal.py" be
 # The new Foreign option 2 is a separate scoped branch and must reject an
 # unapproved signed trial BEFORE staging Cosign or changing the Foreign host.
 foreign=s.split("smite_install_selected_foreign_fresh() (",1)[1].split(
-    "\\nsmite_install_selected_fresh() (",1)[0]
+    "\nsmite_install_selected_fresh() (",1)[0]
 assert foreign.index('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES') < foreign.index(
     'smite_install_rc7_verified_cosign')
 assert foreign.index('smite_install_unified_signed_pair_review') < foreign.index(
