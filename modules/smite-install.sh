@@ -2301,7 +2301,7 @@ smite_install_unified_foreign_capture_packet() {
 # branch reuses that SAME hidden TTY reader and atomic no-overwrite stager,
 # gated by the same signed Pairing release before creating anything.
 smite_install_unified_foreign_capture_owned_packet() {
-    local module_dir selected_dir
+    local module_dir selected_dir packet installer_pid="$BASHPID"
     [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
     [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
     [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" = e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] &&
@@ -2324,8 +2324,26 @@ smite_install_unified_foreign_capture_owned_packet() {
         echo 'HOLD: Foreign private grant directory ownership changed.' >&2
         return 2
     }
+    packet="$selected_dir/foreign-install-packet.json"
+    if [ -e "$packet" ] || [ -L "$packet" ]; then
+        # The SAME previously copied Panel code stays valid for up to two
+        # hours from IR issue; a retry must not ask for it a second time.
+        # Reuse the original private 0600 packet/TTL parser, never source
+        # values from an old console prompt or rebuild Core/Sanaei.
+        [ -f "$packet" ] && [ ! -L "$packet" ] || return 2
+        if python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$packet" --precore-fields >/dev/null 2>&1; then
+            echo 'FOREIGN_ONE_CHOICE_INPUT=REUSED_VALID_PANEL_PACKET'
+            return 0
+        fi
+        echo 'Foreign Panel code expired or is not independently verified.' >&2
+        echo 'Issue a fresh two-hour code for the SAME reserved Foreign Node in the Iran Panel.' >&2
+    fi
+    # Same original hidden-TTY reader accepts a new code only when its
+    # immutable Node/domain/control scope matches the original owner.
+    # This never generates a code, a Node ID or a new control URL.
     python3 -B "$module_dir/smite-unified-foreign-packet-intake.py" \
-        --capture-owned-foreign || return 2
+        --capture-owned-foreign --installer-pid "$installer_pid" || return 2
     echo 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED_RETAINED_PRIVATE_PANEL_PACKET'
 }
 
