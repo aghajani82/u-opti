@@ -107,6 +107,62 @@ proof on the two disposable hosts. Public option 2 remains
 manifest still explicitly disallows activation. No release flag was
 relaxed or production deployment authorized.
 
+#### Foreign option-2 original signed Identity + retained private packet — 2026-11-15
+
+This branch now composes the **existing** Foreign grant client,
+HMAC-signed proof and no-overwrite identity promoter as the selected
+option-2 identity stage, reusing the original locked
+`unified-foreign-transaction.json` INTENT/IDENTITY_PROMOTED_OFFLINE
+journal. Neither a second identity/key generator, another Pairing menu
+nor a duplicate Foreign installer was added.
+
+The original `smite-unified-foreign-identity-phase.py` has an internal
+`--selected-foreign --installer-pid` route. Its root boundary is
+*exactly* bound to the original installer operation journal, retained
+private packet, managed `state.env`, Gateway receipt, paused/strict
+Node environment and existing live identity destination. Before
+reaching the grant client or creating an identity journal it reuses
+`smite-node-pairing.py::_require_unified_foreign_release()`, the
+original RC9 Core owner's `foreign_resume(..., attached_sanaei=True)`,
+the existing HTTPS/443 Gateway/Compose/RO-Sanaei checks and immutable
+Panel-issued Node/control scope. The original HMAC proof, promotion
+prepared/completed receipts and identity bytes stay unchanged on
+retry, including a lost redemption response. No activation/Connected
+claim follows this **identity-only** stage.
+
+The selected one-choice coordinator also reuses the existing
+hidden-terminal packet reader and 0600, fsynced, no-overwrite stager,
+with a **durable** owner at
+`/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json`.
+This corrects the transient temporary-fixture packet lifetime: an
+interrupted selected flow must not lose its private Panel-grant source
+before the original journals can resume. The real-root intake entry is
+`--capture-owned-foreign`, guarded by the SAME immutable signed
+release admission and exact root-owned 0700 directory/no-symlink checks.
+Existing disposable rehearsal intake remains separate. No external
+code, secret or Node identity appears in argv, logs or receipts.
+
+**Important remaining gates:** the currently signed RC9 trial
+manifest explicitly says `release_approved=false` and
+`activation_allowed=false`. Therefore the public menu's option 2
+still deliberately emits
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`; the new internal
+root identity and private intake entries **refuse host execution**
+today. The original disposable Host stage journal/witness and
+post-promotion activation/rollback still need approved real-root
+admission and actual two-host signed Connected proof. In particular,
+an expired packet's renewal/replay after a process interruption must
+retain its original, provable Host+Identity owner before enabling
+live retries. Do not mark the install complete based solely on
+successful signed enrollment or release signatures.
+
+The new tests cover original-client interoperability, HMAC proof
+after lost ACK, exact source and lease admission, packet privacy,
+selected Core→Sanaei→Gateway→Identity call ordering, and fail-closed
+release-HOLD before any host mutation. They are offline fixture
+tests, **not** live Iran+Foreign acceptance. The public option 7,
+Smite main, U-OPTI main, FRP, Backhaul and test hosts are unchanged.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
