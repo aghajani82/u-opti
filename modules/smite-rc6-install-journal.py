@@ -155,8 +155,39 @@ class Journal:
             raise Hold('UNTRUSTED_FOREIGN_RC9_SCOPE')
         return scope
 
+    def foreign_packet_inputs(self, packet_path):
+        """Derive NONSECRET Core owner scope from original Panel admission.
+
+        Always use the original bounded private 0600 packet/TTL verifier,
+        never a second source of values or an argv installation code. Host
+        activation is still denied for root='/' by begin().
+        """
+        if (not isinstance(packet_path, (str, Path))
+                or not str(packet_path)):
+            raise Hold('FOREIGN_PACKET_PATH_REQUIRED')
+        module_path = Path(__file__).with_name(
+            'smite-unified-foreign-gateway-plan.py')
+        if not module_path.is_file() or module_path.is_symlink():
+            raise Hold('FOREIGN_PACKET_VERIFIER_MISSING')
+        spec = importlib.util.spec_from_file_location(
+            'uopti_existing_foreign_core_packet_admission', module_path)
+        if spec is None or spec.loader is None:
+            raise Hold('FOREIGN_PACKET_VERIFIER_MISSING')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        try:
+            fields = module.precore_fields(
+                packet_path, for_core_owner=True)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise Hold('FOREIGN_PACKET_EXPIRED_OR_UNTRUSTED') from exc
+        if not isinstance(fields, tuple) or len(fields) != 5:
+            raise Hold('FOREIGN_PACKET_SCOPE_INVALID')
+        return fields
+
     def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None,
-              resumable_foreign=False, foreign_inputs=None, source=None):
+              resumable_foreign=False, foreign_inputs=None,
+              foreign_packet_path=None, source=None):
         if type(resumable_ir) is not bool or (resumable_ir and role != 'panel-iran'):
             raise Hold('INVALID_RESUMABLE_INSTALL_ROLE')
         if type(resumable_foreign) is not bool or (resumable_foreign and role != 'foreign'):
@@ -165,6 +196,10 @@ class Journal:
             raise Hold('INVALID_IR_CORE_INPUTS')
         if foreign_inputs is not None and not resumable_foreign:
             raise Hold('INVALID_FOREIGN_CORE_INPUTS')
+        if foreign_packet_path is not None:
+            if (foreign_inputs is not None or not resumable_foreign
+                    or role != 'foreign' or self.root == Path('/')):
+                raise Hold('FOREIGN_PACKET_NOT_ADMITTED')
         if resumable_ir and resumable_foreign:
             raise Hold('CONFLICTING_INSTALL_OWNERS')
         source = SOURCE if source is None else source
@@ -179,12 +214,14 @@ class Journal:
                 # Only private-root fixtures may model the future RC9 owner.
                 # The installed / journal CLI cannot create one yet.
                 if (self.root == Path('/') or not resumable_foreign
-                        or foreign_inputs is None):
+                        or (foreign_inputs is None and foreign_packet_path is None)):
                     raise Hold('RC9_FOREIGN_HOST_RELEASE_NOT_APPROVED')
             else:
                 raise Hold('RC9_ROLE_NOT_APPROVED')
-        elif resumable_foreign or foreign_inputs is not None:
+        elif resumable_foreign or foreign_inputs is not None or foreign_packet_path is not None:
             raise Hold('FOREIGN_RC9_SCOPE_REQUIRES_SIGNED_RC9_SOURCE')
+        if foreign_packet_path is not None:
+            foreign_inputs = self.foreign_packet_inputs(foreign_packet_path)
         archive = None
         if os.path.lexists(self.path):
             old = self.load()
@@ -678,6 +715,9 @@ def main():
     ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted signed-source owner')
     ap.add_argument('--resumable-foreign', action='store_true')
     ap.add_argument('--foreign-inputs', nargs=5)
+    # Path only. The original private packet owns the code and TTL; no
+    # credential or token is passed as argv or copied into the Core journal.
+    ap.add_argument('--foreign-packet-file')
     ap.add_argument('--resumable-ir', action='store_true')
     ap.add_argument('--ir-inputs', nargs=2)
     ap.add_argument('--phase', choices=IR_PHASES)
@@ -706,7 +746,9 @@ def main():
                     raise Hold('INSTALLER_PROCESS_REQUIRED')
                 print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir,
                               ir_inputs=a.ir_inputs, resumable_foreign=a.resumable_foreign,
-                              foreign_inputs=a.foreign_inputs, source=a.source))
+                              foreign_inputs=a.foreign_inputs,
+                              foreign_packet_path=a.foreign_packet_file,
+                              source=a.source))
             elif a.action == 'prepare':
                 fd = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
                 os.close(fd)
