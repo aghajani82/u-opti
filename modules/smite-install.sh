@@ -3085,6 +3085,63 @@ smite_install_ir_admin_present() {
     python3 -B "$module_dir/smite-rc6-install-journal.py" admin-present >/dev/null 2>&1
 }
 
+# The original RC9 Panel has a private, WAL-aware additive migration for the
+# Foreign-install schema. Reuse it after signed Iran Node/Admin checks; never
+# enable Foreign flags, restart services, or rewind existing identities.
+# Failure retains ADMIN_CREATED for the SAME option-1 retry.
+smite_install_ir_foreign_schema_stage() {
+    [ "${SMITE_IR_RESUMABLE:-0}" = 1 ] || return 0
+    local state="${SMITE_STATE_FILE:-}" before migrated after expected
+    local ready=$'FOREIGN_INSTALL_SCHEMA=READY\nFOREIGN_INSTALL_FLAGS=UNCHANGED\nRUNTIME_AND_GATEWAY=UNCHANGED'
+    local missing=$'FOREIGN_INSTALL_SCHEMA=MISSING\nFOREIGN_INSTALL_FLAGS=UNCHANGED\nRUNTIME_AND_GATEWAY=UNCHANGED'
+    local already=$'FOREIGN_INSTALL_SCHEMA=ALREADY_READY\nFOREIGN_INSTALL_FLAGS=UNCHANGED\nRUNTIME_AND_GATEWAY=UNCHANGED'
+    if [ -z "$state" ] || [ -L "$state" ] || [ ! -f "$state" ]; then
+        echo 'HOLD: Iran Foreign schema stage requires a regular state file.' >&2
+        return 2
+    fi
+    for expected in 'SMITE_ROLE=panel-iran' \
+                    'SMITE_CONNECTION_MODE=standard' \
+                    'SMITE_MANAGED_VERSION=2.0.0-rc.9' \
+                    'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06'; do
+        if [ "$(grep -Fxc "$expected" "$state")" != 1 ]; then
+            echo 'HOLD: Iran Foreign schema source/role mismatch.' >&2
+            return 2
+        fi
+    done
+    before="$(docker exec smite-panel python3 -B -m app.foreign_install_migration --review 2>/dev/null)" || {
+        echo 'HOLD: Original Smite Foreign schema review failed.' >&2
+        return 2
+    }
+    case "$before" in
+        "$ready") echo 'IR_FOREIGN_SCHEMA=VERIFIED_RETAINED' ;;
+        "$missing")
+            migrated="$(docker exec smite-panel python3 -B -m app.foreign_install_migration \
+                --migrate --confirm PREPARE-FOREIGN-INSTALL-TRIAL-SCHEMA 2>/dev/null)" || {
+                echo 'HOLD: Existing Smite Foreign migration failed; keep its SQLite backup.' >&2
+                return 2
+            }
+            if [ "$migrated" != "$ready" ] && [ "$migrated" != "$already" ]; then
+                echo 'HOLD: Foreign migration returned an untrusted receipt.' >&2
+                return 2
+            fi
+            echo 'IR_FOREIGN_SCHEMA=PREPARED_USING_EXISTING_SQLITE_BACKUP'
+            ;;
+        *)
+            echo 'HOLD: Foreign schema is neither MISSING nor READY.' >&2
+            return 2 ;;
+    esac
+    after="$(docker exec smite-panel python3 -B -m app.foreign_install_migration --review 2>/dev/null)" || {
+        echo 'HOLD: Foreign schema post-migration review failed.' >&2
+        return 2
+    }
+    [ "$after" = "$ready" ] || {
+        echo 'HOLD: Foreign schema post-migration state differs from READY.' >&2
+        return 2
+    }
+    echo 'IR_FOREIGN_SCHEMA=READY'
+    echo 'IR_FOREIGN_FLAGS=UNCHANGED'
+}
+
 # Core is committed BEFORE any Gateway/Pairing writes. On an explicitly
 # resumable Iran install the first incomplete stage is retried in place;
 # completed stages are RE-VERIFIED before being skipped.
@@ -3170,6 +3227,14 @@ smite_install_finish_local_ir() {
     else
         echo 'Iran Node verified active. Create the Panel administrator account:'
         smite_install_create_admin || return 2
+    fi
+    # The signed Node and admin row are already verified. Schema migration
+    # is additive and separately backed up by the original Smite module.
+    if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
+        smite_install_ir_foreign_schema_stage || {
+            echo 'HOLD: Foreign schema prerequisite incomplete; retry option 1 without rekeying Iran Node.' >&2
+            return 2
+        }
     fi
     if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
