@@ -94,6 +94,15 @@ jobs:
           PY_CHECK_COMPANION
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -m pip install -r companion-smite/panel/requirements.txt
+      # Reuse sealed RC9 Smite's ORIGINAL SQLite migration, HTTP gate and
+      # credential/replay recovery tests. These run on disposable CI databases,
+      # never on a live Panel, and do not approve foreign host activation.
+      - name: RC9 Foreign schema MISSING to READY with sealed backup and no startup writes
+        run: python -B companion-smite/tests/test_foreign_install_migration.py -v
+      - name: RC9 Foreign API default-off JWT/MFA and trusted-ingress contract
+        run: python -B companion-smite/tests/test_foreign_install_http.py -v
+      - name: RC9 signed Foreign enrollment HMAC/replay recovery
+        run: python -B companion-smite/tests/test_foreign_install_recovery.py -v
       - run: python -B tests/test-smite-foreign-install-client.py -v
       - run: python -B tests/test-smite-unified-foreign-packet-intake.py -v
       - run: python -B tests/test-smite-unified-foreign-identity-phase.py -v
