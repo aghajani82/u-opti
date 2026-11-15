@@ -231,6 +231,88 @@ _SELECTED_NODE_ENV = Path("/opt/smite-node/.env")
 _SELECTED_IDENTITY = Path("/etc/u-opti/smite/identities/node-identity.json")
 
 
+def _selected_expired_packet_resume(packet, raw, *, client, promotion,
+                                    directory, live_identity):
+    """Read-only proof that the expired smi1 bearer already has an owner.
+
+    An expired NEW code can never start Core/enrollment. An interrupted
+    identity whose exact old private packet, stage secret and original
+    INTENT/promotion receipts survive may continue using fresh signed
+    Panel STATUS; the original client does not redeem an expired code.
+    This neither renews a code nor creates a new Node/secret.
+    """
+    try:
+        with promotion.private_directory(directory) as fd:
+            tx_raw = promotion.read_optional(fd, _TX_JOURNAL, client)
+            staged_raw = promotion.read_optional(
+                fd, "foreign-install-identity.json", client)
+            prepared_raw = promotion.read_optional(
+                fd, "foreign-install-promotion-prepared.json", client)
+            completed_raw = promotion.read_optional(
+                fd, "foreign-install-promotion-completed.json", client)
+        if tx_raw is None or staged_raw is None:
+            deny()
+        tx = client.decode(tx_raw)
+        expected = {
+            "schema": 2,
+            "packet_sha256": hashlib.sha256(raw).hexdigest(),
+            "expires_at": packet.expires_at,
+            "node_id": packet.scope["node_id"],
+            "scope": packet.scope,
+        }
+        if (not isinstance(tx, dict)
+                or tx not in (
+                    {**expected, "phase": "INTENT"},
+                    {**expected, "phase": "IDENTITY_PROMOTED_OFFLINE"})):
+            deny()
+        staged = client.decode(staged_raw)
+        if (not isinstance(staged, dict)
+                or set(staged) != {"schema", "scope", "node_secret"}
+                or staged["schema"] != 1
+                or staged["scope"] != packet.scope
+                or not isinstance(staged["node_secret"], str)
+                or len(staged["node_secret"]) != 64
+                or any(c not in "0123456789abcdef"
+                       for c in staged["node_secret"])):
+            deny()
+        with promotion.private_directory(live_identity.parent) as fd:
+            identity_raw = promotion.read_optional(
+                fd, live_identity.name, client, limit=4096)
+        receipt = None
+        if identity_raw is not None:
+            identity_doc = client.decode(identity_raw)
+            if (identity_doc != {
+                    "version": 1,
+                    "node_id": packet.scope["node_id"],
+                    "node_secret": staged["node_secret"]}):
+                deny()
+            receipt = {
+                "schema": 1, "scope": packet.scope,
+                "destination": str(live_identity),
+                "sha256": hashlib.sha256(identity_raw).hexdigest(),
+            }
+        if prepared_raw is not None:
+            if receipt is None or client.decode(prepared_raw) != receipt:
+                deny()
+        elif identity_raw is not None:
+            # Original promotion writes PREPARED before any live identity.
+            deny()
+        if completed_raw is not None:
+            if (receipt is None or prepared_raw is None
+                    or client.decode(completed_raw) !=
+                    {**receipt, "status": "completed"}):
+                deny()
+        if tx["phase"] == "IDENTITY_PROMOTED_OFFLINE":
+            if completed_raw is None or identity_raw is None:
+                deny()
+        elif completed_raw is not None:
+            # Original transaction must have recorded promotion commit.
+            deny()
+        return True
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+
 def _selected_option2_boundary(*, packet_path, state_path, gateway_path,
                                node_env_path, directory, live_identity,
                                installer_pid):
@@ -261,13 +343,6 @@ def _selected_option2_boundary(*, packet_path, state_path, gateway_path,
     try:
         # Same signed two-image release policy as original Pairing activation.
         pairing._require_unified_foreign_release()
-        # Source-owning selected Core Journal must be COMMITTED and must
-        # independently verify paused+strict runtime and Sanaei RO mount.
-        stage, _project = core.Journal().foreign_resume(
-            str(_SELECTED_PACKET), attached_sanaei=True,
-            installer_pid=installer_pid)
-        if stage != "CORE_COMMITTED":
-            deny()
         with promotion.private_directory(_SELECTED_PRIVATE) as fd:
             raw = promotion.read_optional(
                 fd, "foreign-install-packet.json", client)
@@ -275,6 +350,37 @@ def _selected_option2_boundary(*, packet_path, state_path, gateway_path,
             deny()
         packet = client.parse_packet(raw)
         scope = packet.scope
+        # The Panel grant's two-hour TTL applies to REDEMPTION, not to
+        # continued use of an already staged, scope-bound identity.
+        # An expired grant without an original INTENT+staged secret is HOLD.
+        import time
+        expired = int(time.time()) >= packet.expires_at
+        if expired:
+            _selected_expired_packet_resume(
+                packet, raw, client=client, promotion=promotion,
+                directory=_SELECTED_PRIVATE,
+                live_identity=_SELECTED_IDENTITY)
+        owner = core.Journal()
+        if expired:
+            # Original foreign_resume(None) still proves current immutable
+            # Docker/Compose/paused+strict/Sanaei RO runtime. Scope MUST be
+            # matched separately against the original Core's saved 5-tuple.
+            record = owner.load()
+            exact = owner.foreign_inputs(record)
+            expected = (
+                urlsplit(scope["panel_url"]).hostname,
+                urlsplit(scope["origin"]).hostname,
+                scope["node_name"], scope["node_id"],
+                urlsplit(scope["control_url"]).path)
+            if tuple(exact[key] for key in (
+                    "panel_domain", "foreign_domain", "node_name",
+                    "node_id", "control_path")) != expected:
+                deny()
+        stage, _project = owner.foreign_resume(
+            None if expired else str(_SELECTED_PACKET),
+            attached_sanaei=True, installer_pid=installer_pid)
+        if stage != "CORE_COMMITTED":
+            deny()
         control = plan.admit(packet_path=_SELECTED_PACKET,
                              state_path=_SELECTED_STATE,
                              gateway_state_path=_SELECTED_GATEWAY)
@@ -524,6 +630,7 @@ def main(argv=None):
     mode.add_argument("--status", action="store_true")
     mode.add_argument("--selected-foreign", action="store_true")
     mode.add_argument("--activate-selected-foreign", action="store_true")
+    mode.add_argument("--verify-owned-expired-resume", action="store_true")
     parser.add_argument("--installer-pid", type=int)
     args = parser.parse_args(argv)
     if args.status:
@@ -533,6 +640,32 @@ def main(argv=None):
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
     try:
+        if args.verify_owned_expired_resume:
+            # NO host operation, redeem or Docker. Only the signed release
+            # and exact prior staged INTENT allow reuse of an expired code.
+            pairing = load("uopti_expired_existing_release",
+                           "smite-node-pairing.py")
+            pairing._require_unified_foreign_release()
+            client = load("uopti_expired_existing_client",
+                          "smite-foreign-install-client.py")
+            promotion = load("uopti_expired_existing_promotion",
+                             "smite-foreign-install-promotion.py")
+            if os.geteuid() != 0:
+                deny()
+            with promotion.private_directory(_SELECTED_PRIVATE) as folder:
+                raw = promotion.read_optional(
+                    folder, "foreign-install-packet.json", client)
+            if raw is None:
+                deny()
+            packet = client.parse_packet(raw)
+            import time
+            if int(time.time()) < packet.expires_at:
+                deny()
+            _selected_expired_packet_resume(
+                packet, raw, client=client, promotion=promotion,
+                directory=_SELECTED_PRIVATE, live_identity=_SELECTED_IDENTITY)
+            print("FOREIGN_PACKET=REUSED_EXPIRED_OWNED_IDENTITY")
+            return 0
         if args.activate_selected_foreign:
             activation = selected_option2_activate(args.installer_pid)
             if activation.get("status") != "SIGNED_BIDIRECTIONAL_CONNECTED":
