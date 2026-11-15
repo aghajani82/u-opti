@@ -335,21 +335,21 @@ class GatewayScope(unittest.TestCase):
         self.write(node, node.read_bytes().replace(
             b'SMITE_AGENT_AUTH_MODE=strict',
             b'SMITE_AGENT_AUTH_MODE=legacy'))
-        with self.assertRaises(gateway.Hold):
+        with self.assertRaises(ValueError):
             invoke()
         self.write(node, node.read_bytes().replace(
             b'SMITE_AGENT_AUTH_MODE=legacy',
             b'SMITE_AGENT_AUTH_MODE=strict'))
         self.write(self.status, self.status.read_bytes().replace(
             PATH.encode(), b'/smite-node/'+b'd'*32))
-        with self.assertRaises(gateway.Hold):
+        with self.assertRaises(ValueError):
             invoke()
         self.write(self.status, self.status.read_bytes().replace(
             b'/smite-node/'+b'd'*32, PATH.encode()))
         staged = stage/"foreign-install-identity.json"
         before=staged.read_bytes()
         self.write(staged, b'{}')
-        with self.assertRaises(gateway.Hold):
+        with self.assertRaises(ValueError):
             invoke()
         self.write(staged, before)
         self.assertEqual(
