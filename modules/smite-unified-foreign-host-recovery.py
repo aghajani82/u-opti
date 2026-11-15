@@ -330,6 +330,69 @@ def rehearse(*, directory, packet_path, now, expected_panel, expected_foreign,
         deny()
 
 
+def _retained_expired_identity_proof(*, directory, packet_path, now,
+                                     expected_panel, expected_foreign,
+                                     expected_node, live_identity,
+                                     verify_core, verify_sanaei, verify_gateway):
+    """Require original COMPLETED Host+Identity receipts for expired-code retry.
+
+    With a promoted, sealed identity the bearer code is not used again.
+    The original HMAC signed Panel proof is still mandatory later.
+    An incomplete INTENT or unpromoted key cannot bypass the grant TTL.
+    This accepts no new Node, host stage, credential or runtime write.
+    """
+    client = load("uopti_expired_receipt_client",
+                  "smite-foreign-install-client.py")
+    promotion = load("uopti_expired_receipt_promotion",
+                     "smite-foreign-install-promotion.py")
+    try:
+        with promotion.private_directory(directory) as fd:
+            raw = promotion.read_optional(
+                fd, "foreign-install-packet.json", client)
+            saved_host = promotion.read_optional(fd, JOURNAL, client)
+            saved_identity = promotion.read_optional(
+                fd, "unified-foreign-transaction.json", client)
+        if (raw is None or saved_host is None or saved_identity is None
+                or not os.path.lexists(live_identity)):
+            deny()
+        packet = client.parse_packet(raw)
+        scope = packet.scope
+        if (type(now) is not int or now < packet.expires_at
+                or client.origin(expected_panel) != scope["panel_url"]
+                or client.origin(expected_foreign) != scope["origin"]
+                or expected_node != scope["node_name"]):
+            deny()
+        digest = hashlib.sha256(raw).hexdigest()
+        if client.decode(saved_host) != {
+            "schema": 2, "packet_sha256": digest,
+            "expires_at": packet.expires_at, "scope": scope,
+            "phase": "GATEWAY_443_VERIFIED",
+        } or client.decode(saved_identity) != {
+            "schema": 2, "packet_sha256": digest,
+            "expires_at": packet.expires_at, "scope": scope,
+            "node_id": scope["node_id"],
+            "phase": "IDENTITY_PROMOTED_OFFLINE",
+        }:
+            deny()
+        # Exactly the same original read-only witnesses used by the Host
+        # journal. A forged old completed receipt is not enough to skip them.
+        if (verify_core(scope) is not True
+                or verify_sanaei(scope) != "READY"
+                or verify_gateway(scope) != "READY"):
+            deny()
+        return {
+            "phase": "GATEWAY_443_VERIFIED",
+            "node_id": scope["node_id"],
+            "sanaei": "READ_ONLY_VERIFIED",
+            "gateway": "EXACT_HTTPS_443_VERIFIED",
+            "identity_promoted": False,
+            "runtime_activation": "NOT_PERFORMED",
+            "connected": False,
+        }
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+
 def rehearse_option2(*, directory, packet_path, state_path,
                      gateway_path, node_env_path, live_identity,
                      now, expected_panel, expected_foreign, expected_node,
@@ -436,14 +499,36 @@ def rehearse_option2(*, directory, packet_path, state_path,
     # or interrupted Sanaei/Gateway stage is compensated only under its
     # durable HOST_INTENT checkpoint. The identity code is not consumed
     # until both host stages have been independently verified.
-    host = rehearse(
-        directory=directory, packet_path=packet_path, now=now,
-        expected_panel=expected_panel, expected_foreign=expected_foreign,
-        expected_node=expected_node, verify_core=verify_core,
-        verify_sanaei=verify_sanaei, verify_gateway=verify_gateway,
-        install_sanaei=install_sanaei, install_gateway=install_gateway,
-        rollback_sanaei=rollback_sanaei, rollback_gateway=rollback_gateway,
-        disposable_capability=True)
+    # An expired code must NEVER start or resume a host installation.
+    # The one exception is an ALREADY PROMOTED original identity with
+    # byte-for-byte matching completed Host+Identity journals. Then only
+    # fresh read-only witnesses and the original signed Panel HMAC proof
+    # can confirm continuity; no bearer-code redemption or host callbacks.
+    client_for_expiry = load(
+        "uopti_option2_expiry_packet", "smite-foreign-install-client.py")
+    promotion_for_expiry = load(
+        "uopti_option2_expiry_promotion", "smite-foreign-install-promotion.py")
+    try:
+        packet_for_expiry = gateway_plan.private_packet(
+            packet_path, client_for_expiry, promotion_for_expiry)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+    if now >= packet_for_expiry.expires_at:
+        host = _retained_expired_identity_proof(
+            directory=directory, packet_path=packet_path, now=now,
+            expected_panel=expected_panel, expected_foreign=expected_foreign,
+            expected_node=expected_node, live_identity=live_identity,
+            verify_core=verify_core, verify_sanaei=verify_sanaei,
+            verify_gateway=verify_gateway)
+    else:
+        host = rehearse(
+            directory=directory, packet_path=packet_path, now=now,
+            expected_panel=expected_panel, expected_foreign=expected_foreign,
+            expected_node=expected_node, verify_core=verify_core,
+            verify_sanaei=verify_sanaei, verify_gateway=verify_gateway,
+            install_sanaei=install_sanaei, install_gateway=install_gateway,
+            rollback_sanaei=rollback_sanaei, rollback_gateway=rollback_gateway,
+            disposable_capability=True)
     if (host.get("phase") != "GATEWAY_443_VERIFIED"
             or host.get("identity_promoted") is not False
             or host.get("runtime_activation") != "NOT_PERFORMED"
