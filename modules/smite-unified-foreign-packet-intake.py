@@ -150,6 +150,172 @@ def _selected_root_target(path, *, allow_existing=False):
     return target
 
 
+# The existing disposable reissue journal lives beside its fixture.
+# The real option-2 stages instead belong to the ORIGINAL RC9 Core Journal.
+# Never mistake one receipt for the other or silently reset a Node.
+_SELECTED_ROOT_IDENTITY = Path(
+    "/etc/u-opti/smite/identities/node-identity.json")
+
+
+def _replace_private_packet(fd, name, data):
+    """Original fsynced 0600 replacement under an already held private lock."""
+    temporary = ".packet-renew-" + secrets.token_hex(16)
+    output = os.open(temporary, os.O_WRONLY | os.O_CREAT |
+                     os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+    try:
+        with os.fdopen(output, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+        os.fsync(fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=fd)
+        except FileNotFoundError:
+            pass
+
+
+def _renew_expired_owned_root(*, target, data, packet, now, client,
+                             installer_pid=None):
+    """Reissue a 2-hour IR Panel grant to the SAME paused Foreign owner only.
+
+    The original RC9 Core Journal, its image/Compose/runtime witness and the
+    original Identity INTENT receipt are the authorities here. This function
+    never creates a new installation owner, key, promotion or Host journal.
+    The selected intake already required the original signed Pairing release.
+    """
+    if target != _SELECTED_ROOT_PACKET:
+        deny()
+    core_path = Path(__file__).with_name("smite-rc6-install-journal.py")
+    promotion_path = Path(__file__).with_name(
+        "smite-foreign-install-promotion.py")
+    if any(p.is_symlink() or not p.is_file() for p in
+           (core_path, promotion_path)):
+        deny()
+
+    def existing(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            deny()
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    owner = existing("uopti_selected_original_core_renewal", core_path)
+    files = existing("uopti_selected_original_promotion_renewal", promotion_path)
+    try:
+        with files.private_directory(target.parent) as directory:
+            # Same existing enrollment.lock as the original client: a
+            # competing redeem/proof cannot rotate the bearer code halfway.
+            lock = os.open("enrollment.lock", os.O_RDWR | os.O_CREAT |
+                           os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+            try:
+                client.private_file(lock)
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                previous = files.read_optional(directory, target.name, client)
+                if previous is None:
+                    deny()
+                old = client.parse_packet(previous)
+                if data == previous and now < old.expires_at:
+                    return {"status": "ALREADY_STAGED_PRIVATE",
+                            "node_name": packet.scope["node_name"],
+                            "expires_at": packet.expires_at,
+                            "connected": False}
+                if (now < old.expires_at or old.scope != packet.scope
+                        or old.code == packet.code
+                        or not now < packet.expires_at <= now + 7200):
+                    deny()
+                # Once promoted or an independently signed Node identity
+                # exists, the old code is irrelevant. Never reissue/rekey.
+                if (os.path.lexists(_SELECTED_ROOT_IDENTITY)
+                        or os.path.lexists(_SELECTED_ROOT_IDENTITY.parent /
+                                           "replay-enrollment.json")
+                        or files.read_optional(directory,
+                            "foreign-install-promotion-prepared.json",
+                            client) is not None
+                        or files.read_optional(directory,
+                            "foreign-install-promotion-completed.json",
+                            client) is not None):
+                    deny()
+                intent_raw = files.read_optional(
+                    directory, "unified-foreign-transaction.json", client)
+                if intent_raw is not None:
+                    intent = client.decode(intent_raw)
+                    if intent != {
+                        "schema": 2,
+                        "packet_sha256": hashlib.sha256(previous).hexdigest(),
+                        "expires_at": old.expires_at,
+                        "scope": old.scope,
+                        "node_id": old.scope["node_id"],
+                        "phase": "INTENT",
+                    }:
+                        deny()
+                staged_raw = files.read_optional(
+                    directory, "foreign-install-identity.json", client)
+                if staged_raw is not None:
+                    staged = client.decode(staged_raw)
+                    if (not isinstance(staged, dict)
+                            or set(staged) != {"schema", "scope", "node_secret"}
+                            or staged["schema"] != 1
+                            or staged["scope"] != old.scope
+                            or not isinstance(staged["node_secret"], str)
+                            or len(staged["node_secret"]) != 64
+                            or any(x not in "0123456789abcdef"
+                                   for x in staged["node_secret"])):
+                        deny()
+                journal = owner.Journal()
+                record = journal.load()
+                if (record.get("source") != owner.RC9_SOURCE
+                        or record.get("role") != "foreign"
+                        or record.get("foreign_resumable_version") != 1
+                        or record.get("state") not in ("INSTALLING", "COMMITTED")):
+                    deny()
+                exact = journal.foreign_inputs(record)
+                expected = (
+                    urlsplit(packet.scope["panel_url"]).hostname,
+                    urlsplit(packet.scope["origin"]).hostname,
+                    packet.scope["node_name"], packet.scope["node_id"],
+                    urlsplit(packet.scope["control_url"]).path,
+                )
+                if tuple(exact[key] for key in (
+                        "panel_domain", "foreign_domain", "node_name",
+                        "node_id", "control_path")) != expected:
+                    deny()
+                # No bearer-TTL bypass: the expired code cannot redeem.
+                # For the renewal ADMISSION alone, reuse the original
+                # source-bound Core Journal's read-only verification without
+                # asking it to parse the already expired packet.
+                stage = None
+                for attached in (False, True):
+                    try:
+                        stage, project = journal.foreign_resume(
+                            attached_sanaei=attached,
+                            installer_pid=installer_pid)
+                        break
+                    except owner.Hold:
+                        continue
+                if (stage not in (
+                        "CORE_PENDING", "CORE_READY_TO_COMMIT",
+                        "CORE_COMMITTED")
+                        or project != record.get("id")):
+                    deny()
+                if files.read_optional(directory, target.name, client) != previous:
+                    deny()
+                # Replacing the original packet is the ONLY write to
+                # installation state. Core/Host/Identity remain unchanged.
+                _replace_private_packet(directory, target.name, data)
+                return {"status": "RENEWED_PRIVATE",
+                        "node_name": packet.scope["node_name"],
+                        "expires_at": packet.expires_at,
+                        "connected": False}
+            finally:
+                os.close(lock)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+
 def _renew_expired_disposable(*, target, data, packet, now, client):
     """Repair the existing Foreign resume path for one expired Panel grant.
 
@@ -270,23 +436,7 @@ def _renew_expired_disposable(*, target, data, packet, now, client):
                                 directory, "foreign-install-promotion-completed.json",
                                 client) is not None):
                         deny()
-                    temporary = ".packet-renew-" + secrets.token_hex(16)
-                    output = os.open(temporary, os.O_WRONLY | os.O_CREAT |
-                                     os.O_EXCL | os.O_NOFOLLOW, 0o600,
-                                     dir_fd=directory)
-                    try:
-                        with os.fdopen(output, "wb") as stream:
-                            stream.write(data)
-                            stream.flush()
-                            os.fsync(stream.fileno())
-                        os.replace(temporary, target.name, src_dir_fd=directory,
-                                   dst_dir_fd=directory)
-                        os.fsync(directory)
-                    finally:
-                        try:
-                            os.unlink(temporary, dir_fd=directory)
-                        except FileNotFoundError:
-                            pass
+                    _replace_private_packet(directory, target.name, data)
                 finally:
                     os.close(enroll_lock)
                 return {"status": "RENEWED_PRIVATE",
@@ -300,7 +450,8 @@ def _renew_expired_disposable(*, target, data, packet, now, client):
 
 def capture_disposable(reader, *, target, expected_panel, expected_domain,
                        expected_node, now, disposable_capability=False,
-                       allow_expired_renewal=False, selected_capability=False):
+                       allow_expired_renewal=False, selected_capability=False,
+                       installer_pid=None):
     """Write the exact validated packet once in a PRIVATE disposable fixture.
 
     No host path, overwrite, reuse of a consumed code, secret output, child
@@ -332,6 +483,10 @@ def capture_disposable(reader, *, target, expected_panel, expected_domain,
         if len(data) > 8192:
             deny()
         if allow_expired_renewal and os.path.lexists(target):
+            if selected_capability is True:
+                return _renew_expired_owned_root(
+                    target=target, data=data, packet=packet, now=now,
+                    client=c, installer_pid=installer_pid)
             return _renew_expired_disposable(
                 target=target, data=data, packet=packet, now=now, client=c)
         directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -394,7 +549,7 @@ def read_hidden_tty(stream, *, ready=None):
 def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
                          expected_panel=None, expected_domain=None,
                          expected_node=None, allow_expired_renewal=False,
-                         selected_host=False):
+                         selected_host=False, installer_pid=None):
     """One verified hidden paste for BOTH existing intake callers.
 
     Always validate the private destination and grant expiry BEFORE showing
@@ -431,7 +586,7 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
         expected_domain=scope["origin"],
         expected_node=scope["node_name"],
         now=now, disposable_capability=not selected_host,
-        selected_capability=selected_host,
+        selected_capability=selected_host, installer_pid=installer_pid,
         allow_expired_renewal=allow_expired_renewal)
 
 
@@ -448,12 +603,13 @@ def capture_disposable_hidden_tty(tty, *, confirm_scope, ready=None, **kwargs):
 
 
 def capture_selected_hidden_tty(tty, *, target, now, confirm_scope,
-                                ready=None, selected_host=False):
+                                ready=None, selected_host=False,
+                                installer_pid=None):
     """Existing selected intake; root only after original signed release."""
     return _capture_hidden_once(
         tty, target=target, now=now, confirm_scope=confirm_scope,
         ready=ready, allow_expired_renewal=True,
-        selected_host=selected_host)
+        selected_host=selected_host, installer_pid=installer_pid)
 
 
 def _confirm_selected_scope(tty, scope):
@@ -473,6 +629,7 @@ def main(argv=None):
     actions.add_argument("--status", action="store_true")
     actions.add_argument("--capture-selected-foreign", metavar="PRIVATE_WORKSPACE")
     actions.add_argument("--capture-owned-foreign", action="store_true")
+    parser.add_argument("--installer-pid", type=int)
     args = parser.parse_args(argv)
     if args.status:
         print("PANEL_FOREIGN_PACKET_INTAKE=DISPOSABLE_REHEARSAL_ONLY")
@@ -496,6 +653,7 @@ def main(argv=None):
             capture_selected_hidden_tty(
                 tty, target=target, now=int(time.time()),
                 selected_host=selected_host,
+                installer_pid=args.installer_pid if selected_host else None,
                 confirm_scope=lambda scope: _confirm_selected_scope(tty, scope))
         print("FOREIGN_PACKET=STAGED_PRIVATE")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
