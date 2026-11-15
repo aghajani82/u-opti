@@ -258,26 +258,26 @@ class GatewayScope(unittest.TestCase):
         scope = self.scope
         self.write(self.state, self.state.read_bytes().replace(
             b'SMITE_MANAGED_VERSION=2.0.0-rc.7',
-            b'SMITE_MANAGED_VERSION=2.0.0-rc.9\\n'
+            b'SMITE_MANAGED_VERSION=2.0.0-rc.9\n'
             b'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06'))
         node = self.root/'node.env'
         self.write(node, (
-            'PANEL_ADDRESS='+PANEL+':443\\n'
-            'SMITE_CONTROL_ADDRESS=https://'+FOREIGN+':443'+PATH+'\\n'
-            'SMITE_NODE_PANEL_AUTH_MODE=paused\\n'
-            'SMITE_AGENT_AUTH_MODE=strict\\n'
-            'SMITE_ENGINE_INVENTORY_MODE=managed\\n').encode())
+            'PANEL_ADDRESS='+PANEL+':443\n'
+            'SMITE_CONTROL_ADDRESS=https://'+FOREIGN+':443'+PATH+'\n'
+            'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
+            'SMITE_AGENT_AUTH_MODE=strict\n'
+            'SMITE_ENGINE_INVENTORY_MODE=managed\n').encode())
         self.write(self.status, (
-            'SMITE_FOREIGN_GATEWAY_DOMAIN='+FOREIGN+'\\n'
-            'SMITE_FOREIGN_PANEL_DOMAIN='+PANEL+'\\n'
-            'SMITE_FOREIGN_CONTROL_PATH='+PATH+'\\n'
-            'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\\n'
-            'SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\\n').encode())
+            'SMITE_FOREIGN_GATEWAY_DOMAIN='+FOREIGN+'\n'
+            'SMITE_FOREIGN_PANEL_DOMAIN='+PANEL+'\n'
+            'SMITE_FOREIGN_CONTROL_PATH='+PATH+'\n'
+            'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\n'
+            'SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\n').encode())
         self.write(self.site, (
-            'server {\\n listen 443 ssl;\\n server_name '+FOREIGN+';\\n'
-            ' location ^~ '+PATH+'/ { proxy_pass http://127.0.0.1:8888/; }\\n'
-            '# BEGIN U-OPTI SMITE FOREIGN CONTROL\\n'
-            '# END U-OPTI SMITE FOREIGN CONTROL\\n}\\n'
+            'server {\n listen 443 ssl;\n server_name '+FOREIGN+';\n'
+            ' location ^~ '+PATH+'/ { proxy_pass http://127.0.0.1:8888/; }\n'
+            '# BEGIN U-OPTI SMITE FOREIGN CONTROL\n'
+            '# END U-OPTI SMITE FOREIGN CONTROL\n}\n'
         ).encode(), mode=0o644)
         client = gateway.load_module("test_expired_exact_client",
                                      "smite-foreign-install-client.py")
