@@ -2257,7 +2257,8 @@ def rollback_node_to_paused_field_trial(
 
 
 def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
-                                   domain: str, compose: list[str]) -> None:
+                                   domain: str, compose: list[str],
+                                   fixture_capability: bool = False) -> None:
     """Original RC9 fresh-Iran install: reuse signed env and ingress renderers.
 
     Keep the two-file step in the EXISTING RC6/RC9 owner directory. All
@@ -2267,13 +2268,24 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
     """
     import importlib.util
 
+    original_parent = Path("/var/lib/u-opti/rc6-install-journal")
     if (not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", project)
             or not _DOMAIN.fullmatch(domain)
-            or stage_dir.name != "iran-foreign-ready"
-            or stage_dir.parent != Path("/var/lib/u-opti/rc6-install-journal")):
+            or stage_dir.name != "iran-foreign-ready"):
         raise WizardHold("Fresh Iran Foreign stage requires original install owner")
+    # Only isolated in-memory test runners may choose a disposable path.
+    # No CLI accepts a fixture capability or an alternate host destination.
+    if fixture_capability is True:
+        if (stage_dir.parent == original_parent
+                or stage_dir.parent.parent.parent != Path(tempfile.gettempdir()).resolve()
+                or not stage_dir.parent.parent.name.startswith("smite-ir-fixture-")):
+            raise WizardHold("Unsafe disposable Foreign Iran fixture")
+    elif (fixture_capability is not False or os.geteuid() != 0
+          or stage_dir.parent != original_parent):
+        raise WizardHold("Foreign Iran live stage must use original root journal")
     parent = stage_dir.parent
-    if (parent.is_symlink() or parent.lstat().st_uid != 0
+    expected_owner = os.geteuid() if fixture_capability else 0
+    if (parent.is_symlink() or parent.lstat().st_uid != expected_owner
             or stat.S_IMODE(parent.stat().st_mode) != 0o700):
         raise WizardHold("Fresh Iran installation journal is not private")
     module_dir = Path(__file__).parent
@@ -2300,7 +2312,7 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
 
     def sealed(file: Path) -> bytes:
         st = file.lstat()
-        if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != expected_owner
                 or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
                 or st.st_size > 262144):
             raise WizardHold("Fresh Iran foreign receipt is unsafe")
@@ -2353,7 +2365,7 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
                     file.unlink()
                 temp.rmdir()
     if (stage_dir.is_symlink() or not stage_dir.is_dir()
-            or stage_dir.lstat().st_uid != 0
+            or stage_dir.lstat().st_uid != expected_owner
             or stat.S_IMODE(stage_dir.lstat().st_mode) != 0o700
             or {p.name for p in stage_dir.iterdir()}
                not in ({"before-env", "before-nginx", "after-env", "after-nginx", "receipt.json"},
@@ -2396,8 +2408,13 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
         except (WizardHold, OSError):
             return False
 
+    if (stage_dir / "complete").exists():
+        if (sealed(stage_dir / "complete") != b"FOREIGN_IR_READY\n"
+                or live() != after):
+            raise WizardHold("Completed Foreign Iran stage drift; do not auto-enable")
     if (live() == after and effective_ready()):
         _run(["nginx", "-t"], timeout=20)
+        _run(["systemctl", "reload", "nginx"], timeout=30)
         if (stage_dir / "complete").exists():
             if sealed(stage_dir / "complete") != b"FOREIGN_IR_READY\n":
                 raise WizardHold("Foreign Iran completion checkpoint drift")
@@ -2486,10 +2503,13 @@ def complete_local_ir_foreign_install(state: dict[str, str]) -> None:
     if not _replay_artifacts_valid():
         raise WizardHold("Iran identity/replay continuity not verified")
     project = _panel_compose_command()
-    _fresh_ir_foreign_ready_config(
-        stage_dir=journal.folder / "iran-foreign-ready",
-        project=record["id"], domain=state["SMITE_PANEL_DOMAIN"],
-        compose=project)
+    try:
+        _fresh_ir_foreign_ready_config(
+            stage_dir=journal.folder / "iran-foreign-ready",
+            project=record["id"], domain=state["SMITE_PANEL_DOMAIN"],
+            compose=project)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WizardHold("Fresh Iran Foreign stage HOLD; original snapshot retained") from exc
     journal._ir_witness(journal.load())
     if _identity_record() != before_identity or not _replay_artifacts_valid():
         raise WizardHold("Fresh Iran foreign stage changed signed identity/replay")
