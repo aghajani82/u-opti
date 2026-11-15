@@ -26,3 +26,52 @@ Owner request: enable Foreign option 2, merge to main, and test two fresh server
 5. Full PR CI and final merged-source checks must be inspected. Two real fresh-server Connected and interruption/resume results remain pending; CI is not that evidence.
 
 No server was changed by this audit. Main was not moved and option 2 was not activated. Existing signed image digests remain unchanged. Do not describe this branch as ready for two-server installation from main until the missing Iran integration and coherent release admission are complete.
+
+## Post-audit integration update — 2026-11-15
+
+This section supersedes the *implementation status* of blocker 1 above; the
+original audit remains as a record of what was missing at the time.
+
+- **Blocker 1 — code integrated on trial (host acceptance pending).**
+  `smite_install_ir_foreign_schema_stage` still uses the original, backup-aware
+  Smite SQLite migration. Only after signed Iran Node and administrator have
+  passed, it now calls the existing
+  `smite-node-pairing.py --complete-local-ir-foreign` controller. The controller
+  reuses the exact `smite-unified-panel-stage._candidate_env` security flags
+  and `smite-foreign-install-panel-ingress.render` TLS/443 Nginx
+  redeem/status locations. No extra menu, credential issuer, Compose project,
+  identity or FRP/Backhaul code was introduced. The same root-owned install
+  Journal holds a private preimage+candidate receipt before two config writes.
+  The staged step requires effective signed Panel flags, Nginx syntax and
+  reload; on error only its original Panel env/Nginx files are compensated.
+  A fully committed repeat checks current state without recurring Nginx
+  reload/Panel recreation. Failed review leaves `ADMIN_CREATED` for option-1
+  retry without regenerating Iran Node identity.
+- **Isolated evidence:** the existing `test-smite-local-ir-install.py` now
+  checks real original renderer output, exact two HTTP locations, idempotence,
+  interrupted-step recovery, failed Nginx compensation and tampered-receipt
+  HOLD. `test-smite-ir-foreign-schema-stage.sh` verifies that schema migration
+  precedes the existing Foreign runtime/ingress step, with a HOLD on missing
+  post-migration readiness. The Foreign client integration run
+  [43755920318](https://github.com/aghajani82/u-opti/actions/runs/43755920318)
+  reports successful direct tests. These are isolated tests, **not** live IR/KH
+  Connected proof.
+- **Byte-level wizard safety:** only the intentionally edited
+  `modules/smite-install.sh` hash was reviewed and re-pinned in
+  `tests/test-smite-wizard-preservation.sh`. The separate Docker, Private
+  Network, EasyTier and legacy wizard pins remain unchanged.
+- **Blockers 2/4 remain genuinely closed:** candidate flags stay
+  `release_approved=false`, `activation_allowed=false`, and the independent
+  admission still says `host_activation_allowed=false`. A signature check
+  over two candidate images is not an authorization to enable production or
+  assert Foreign `Connected`.
+- **Blocker 3:** retained Panel *upgrade* executor remains disposable-only;
+  it is not part of the newly integrated **fresh-install** lane.
+- **Blocker 5:** complete PR #202 19-job workflow and two independently
+  witnessed real-host signed/restart/rollback results are separate gates.
+  The prior complete-suite Backhaul two-host runner exposed a manual-review
+  HOLD; never weaken FRP or recovery rules merely to turn this green.
+
+**Do not rebuild live hosts or merge trial into main based on these offline
+results.** The code closure is not the signed release or real two-host
+acceptance.
