@@ -336,9 +336,18 @@ assert core.index('FOREIGN_CORE=READY_PAUSED_FOR_UNIFIED_CONTINUATION') < core.i
 assert 'FOREIGN_CONNECTED=NOT_PROVEN' in core
 selected=src.split('smite_install_selected_fresh() (',1)[1].split(
     '\nsmite_install_finish_local_ir() {',1)[0]
-assert "echo 'FOREIGN_CONNECTED=NOT_PROVEN'" in selected
-assert 'return 2' in selected.split('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES',1)[1].split('    fi', 1)[0]
+# Public choice 2 now delegates to the existing staged Core→Sanaei→
+# Gateway→Identity→Pairing coordinator, but only after a release gate.
+assert 'smite_install_selected_foreign_fresh' in selected
 assert 'smite_install_finish_local_ir || return 2' in selected
+foreign=src.split('smite_install_selected_foreign_fresh() (',1)[1].split(
+    '\\nsmite_install_selected_fresh() (',1)[0]
+assert 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES' in foreign
+assert 'FOREIGN_CONNECTED=NOT_PROVEN' in foreign
+assert foreign.index('release_approved') < foreign.index(
+    'smite_install_rc7_verified_cosign') < foreign.index(
+    'smite_install_unified_signed_pair_review')
+assert 'smite_install_unified_foreign_selected_stages' in foreign
 PY
 
 # The previous Gateway rehearsal permits a far-future expiry because
@@ -447,8 +456,8 @@ smite_install_foreign_node > "$TMP/core-prebound" 2>&1 || status=$?
 ! grep -q 'smi1_B' "$TMP/core-prebound"
 unset -f smite_install_node_files
 
-# No publicly-selected fresh Option-2 entry may use this incomplete phase
-# sequence until the signed trial runtime activation has been reviewed.
+# The publicly-selected option-2 now reuses only the original complete
+# signed stages; the current unapproved manifest HOLDS before any host write.
 python3 - "$ROOT/modules/smite-install.sh" <<'PY'
 from pathlib import Path
 import sys
@@ -457,7 +466,14 @@ start=src.index('smite_install_selected_fresh() (')
 end=src.index('\nsmite_install_finish_local_ir() {',start)
 assert 'smite_install_unified_foreign_after_core' not in src[start:end]
 assert 'smite_install_foreign_node; fi' in src[start:end]
+assert 'smite_install_selected_foreign_fresh' in src[start:end]
 assert 'smite_install_finish_local_ir || return 2' in src[start:end]
+foreign=src.split('smite_install_selected_foreign_fresh() (',1)[1].split(
+    '\\nsmite_install_selected_fresh() (',1)[0]
+assert foreign.index('release_approved') < foreign.index(
+    'smite_install_rc7_verified_cosign') < foreign.index(
+    'smite_install_unified_signed_pair_review')
+assert 'smite_install_unified_foreign_selected_stages' in foreign
 PY
 
 # The REAL signed-pair gate refuses the current unapproved trial
