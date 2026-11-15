@@ -2303,7 +2303,10 @@ smite_install_unified_foreign_capture_packet() {
 # is still HOLD, and the original Journal refuses root='/' RC9 Foreign
 # begin until the approved signed host executor/rollback exists.
 smite_install_unified_foreign_begin_core_from_panel() {
-    local packet="${1:-}" module_dir project source
+    # BASHPID inside $(python ...) is the transient command-substitution
+    # child, not the installer process that holds the stage operation lock.
+    # Capture it in the caller before launching the original Journal CLI.
+    local packet="${1:-}" module_dir project source installer_pid="$BASHPID"
     source='e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
@@ -2333,7 +2336,7 @@ smite_install_unified_foreign_begin_core_from_panel() {
     # time before committing its durable owner. Neither the code nor any
     # identity secret is passed as argv or written to the Core receipt.
     project="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin \
-        --role foreign --installer-pid "$BASHPID" --resumable-foreign \
+        --role foreign --installer-pid "$installer_pid" --resumable-foreign \
         --foreign-packet-file "$packet" --source "$source")" || return 2
     [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
     echo "FOREIGN_CORE_OWNER=$project"
