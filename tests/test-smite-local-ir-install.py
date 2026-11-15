@@ -51,6 +51,10 @@ class BootstrapTests(unittest.TestCase):
 
     def run_host(self, args, **kwargs):
         if '{{.Config.Image}}' in args:
+            if self.state['SMITE_MANAGED_VERSION'] == '2.0.0-rc.9':
+                return (p._FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL
+                        if args[-1] == 'smite-panel' else
+                        p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
             return p._FOREIGN_PANEL_IMAGE_RC7 if args[-1] == 'smite-panel' else p._FOREIGN_NODE_IMAGE_RC7
         if p._LOCAL_IR_RESERVE in args:
             self.events.append('reserve')
@@ -66,6 +70,26 @@ class BootstrapTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             p.complete_local_ir_install(self.state)
         return output.getvalue()
+
+    def test_rc9_bootstrap_and_resumed_signed_probe_preserve_identity(self):
+        self.state['SMITE_MANAGED_VERSION'] = '2.0.0-rc.9'
+        self.assertIn('VERIFIED_ACTIVE', self.complete())
+        original = self.identity.read_bytes()
+        self.assertEqual(self.events, ['enable', 'reserve', 'redeem', 'activate'])
+        self.signed = True
+        self.events.clear()
+        self.assertIn('VERIFIED_ACTIVE', self.complete())
+        self.assertEqual(self.identity.read_bytes(), original)
+        self.assertEqual(self.events, ['_local_signed_replay_probe',
+                                      '_wait_panel_signed_checkin', '_panel_to_ir_signed_probe'])
+
+    def test_rc9_mixed_rc7_image_holds_before_reservation(self):
+        self.state['SMITE_MANAGED_VERSION'] = '2.0.0-rc.9'
+        with patch.object(p, '_run', return_value=p._FOREIGN_NODE_IMAGE_RC7):
+            with self.assertRaisesRegex(p.WizardHold, 'pinned version pair'):
+                self.complete()
+        self.assertEqual(self.events, [])
+        self.assertFalse(self.identity.exists())
 
     def test_full_order_and_private_output(self):
         output = self.complete()

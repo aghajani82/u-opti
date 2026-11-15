@@ -20,6 +20,8 @@ on:
       - tests/test-smite-unified-foreign-activation-review.py
       - modules/smite-node-pairing.py
       - tests/test-smite-rc7-foreign-pairing.py
+      - tests/test-smite-local-ir-install.py
+      - tests/test-smite-local-ir-app.py
       - tests/test-smite-unified-foreign-identity-phase.py
       - tests/test-smite-foreign-install-client.py
       - modules/smite-unified-trial-pair-admission.py
@@ -100,6 +102,12 @@ jobs:
       - run: python -B tests/test-smite-unified-foreign-existing-witnesses.py -v
       - run: python -B tests/test-smite-unified-foreign-activation-review.py -v
       - run: python -B tests/test-smite-rc7-foreign-pairing.py -v
+      # Exercise the existing Iran pairing/identity code twice (RC7 + exact RC9),
+      # then execute the same one-time code reservation against the sealed RC9 ORM.
+      - run: python -B tests/test-smite-local-ir-install.py -v
+      - run: python -B tests/test-smite-local-ir-app.py
+        env:
+          UOPTI_TEST_SMITE_SOURCE: companion-smite
       - run: python -B tests/test-smite-unified-trial-pair-admission.py -v
       - run: python -B tests/test-smite-unified-panel-stage.py -v
       - run: bash tests/test-smite-unified-sanaei-continuation.sh
