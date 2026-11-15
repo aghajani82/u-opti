@@ -2533,6 +2533,52 @@ smite_install_unified_foreign_pre_pairing_stages() {
     echo 'FOREIGN_CONNECTED=NOT_PROVEN'
 }
 
+# SAME selected option-2 handoff, not a new Pairing implementation.
+# Consume/reprove the Panel-issued one-time grant only after Core, Sanaei RO,
+# Gateway TLS/443 and exact signed promotion preflights. The original
+# identity-phase CLI owns the INTENT/completed receipts and original HMAC
+# client/promoter; its independently signed release gate is currently HOLD.
+smite_install_unified_foreign_identity_stage() {
+    local packet="${1:-}" module_dir installer_pid="$BASHPID" output
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
+    [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" = e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] || return 2
+    [ "$packet" = '/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json' ] &&
+    [ -f "$packet" ] && [ ! -L "$packet" ] || {
+        echo 'HOLD: Identity stage requires the retained original private Panel packet.' >&2
+        return 2
+    }
+    smite_install_unified_signed_pair_review >/dev/null || return 2
+    smite_install_unified_foreign_identity_preflight "$packet" >/dev/null || return 2
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-identity-phase.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-identity-phase.py" ] || return 2
+    output="$(python3 -B "$module_dir/smite-unified-foreign-identity-phase.py" \
+        --selected-foreign --installer-pid "$installer_pid")" || {
+        echo 'HOLD: Signed Pairing identity not committed; retain verified Core/Sanaei/Gateway and original staged identity.' >&2
+        return 2
+    }
+    [ "$output" = "$(printf '%s\\n' \
+        'UNIFIED_FOREIGN_IDENTITY=SIGNED_PROOF_RETAINED_NOT_ACTIVATED' \
+        'FOREIGN_CONNECTED=NOT_PROVEN')" ] || {
+        echo 'HOLD: Original signed identity journal receipt not verified.' >&2
+        return 2
+    }
+    printf '%s\\n' "$output"
+}
+
+# One-choice composition uses only original per-stage owners. Deliberately
+# NOT an alternate menu action: this becomes the selected option-2 body
+# after the already published false release gate is reviewed and approved.
+smite_install_unified_foreign_selected_stages() {
+    local packet="${1:-}"
+    smite_install_unified_foreign_pre_pairing_stages "$packet" || return 2
+    smite_install_unified_foreign_identity_stage "$packet" || return 2
+    echo 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED'
+    echo 'FOREIGN_NODE_ACTIVATION=NOT_PERFORMED'
+    echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+}
+
 # Unified option-2 building block: reuse the existing Sanaei installer and
 # exact read-only DB attachment, without sending the caller back to the menu.
 # The complete Foreign enrollment/Gateway orchestration must explicitly call
