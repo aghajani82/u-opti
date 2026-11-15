@@ -131,6 +131,20 @@ run() {
 }
 
 run 0 signed,paused,compose,sanaei,gateway,paused,compose
+
+# The SAME original Sanaei/Gateway choreography admits signed RC9 only with
+# the exact sealed source. This still uses a stubbed release verifier and
+# cannot be invoked on a real host while activation remains default-off.
+printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=iran.example.org\nSMITE_FOREIGN_DOMAIN=kh.example.org\nSMITE_NODE_NAME=node-kh\n' > "$SMITE_STATE_FILE"
+chmod 0600 "$SMITE_STATE_FILE"
+MODE=ok; run 0 signed,paused,compose,sanaei,gateway,paused,compose
+sed -i 's/^SMITE_UPSTREAM_REF=.*/SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000/' "$SMITE_STATE_FILE"
+run 2 ""
+sed -i '/^SMITE_UPSTREAM_REF=/d' "$SMITE_STATE_FILE"
+run 2 ""
+printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.7\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=iran.example.org\nSMITE_FOREIGN_DOMAIN=kh.example.org\nSMITE_NODE_NAME=node-kh\n' > "$SMITE_STATE_FILE"
+chmod 0600 "$SMITE_STATE_FILE"
+MODE=ok
 # The original after-core scope check did not recheck expiry. The
 # selected one-choice path must now HOLD before Sanaei/Gateway for an
 # expired OR implausibly far-future code, even with a valid signed pair.
