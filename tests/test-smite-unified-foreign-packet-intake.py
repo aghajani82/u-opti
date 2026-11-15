@@ -558,7 +558,7 @@ class OperatorPacketIntake(unittest.TestCase):
         # The exact durable owner is not interchangeable with the
         # disposable fixture. No credential, enrollment or host write is
         # permitted under the signed RC9 trial release (approval=false).
-        payload = json.dumps(self.grant) + "\\n\\n"
+        payload = json.dumps(self.grant) + "\n\n"
         with self.assertRaises(module.Hold):
             module.capture_disposable(
                 io.StringIO(payload),
@@ -586,7 +586,7 @@ class OperatorPacketIntake(unittest.TestCase):
         code = ROOT / "modules/smite-unified-foreign-packet-intake.py"
         result = subprocess.run(
             [sys.executable, "-B", str(code), "--capture-owned-foreign"],
-            input=json.dumps(self.grant) + "\\n\\n",
+            input=json.dumps(self.grant) + "\n\n",
             capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("FOREIGN_PACKET=STAGED_PRIVATE", result.stdout)
