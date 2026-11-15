@@ -22,6 +22,7 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Iran Panel transaction | Signed sealed stage, additive schema, durable per-step cutover and owned config-only rollback; exact, restricted Docker/Compose/Nginx command driver **fixture-only** |
 | Foreign host stages | Existing core/Sanaei RO/Gateway 443 recovery journal: per-stage intent, verification and compensation; immutable Node/FRP preservation |
 | Foreign Pairing | Existing one-time grant, signed HMAC proof and no-overwrite identity promotion with its separate private recovery journal |
+| Iran Panel Foreign schema | **READY on live disposable Iran RC9**: operator executed original `app.foreign_install_migration --migrate --confirm PREPARE-FOREIGN-INSTALL-TRIAL-SCHEMA` then `--review`, both returned `FOREIGN_INSTALL_SCHEMA=READY`; flags and runtime/gateway unchanged. Original migration performs a private SQLite snapshot, not an automatic startup migration |
 | Foreign consolidated option 2 | `smite-unified-foreign-host-recovery.py::rehearse_option2` composes the existing two journals, with 15 integration tests; **disposable-only** |
 | Public Foreign menu option 2 | Explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, unchanged |
 | Production hosts and U-OPTI main | Awaiting live authorization and evidence. Smite source was merged in [PR #58](https://github.com/aghajani82/Smite/pull/58). |
@@ -65,6 +66,44 @@ independently exported two-way HMAC/replay receipt. Crash/power-loss
 resume, identity continuity across restart, and a real two-server Foreign
 connection remain unproven. Do not rebuild this verified Iran host while
 preparing the Foreign path.
+
+#### Iran Foreign-install schema milestone — 2026-11-15
+
+On the already-verified `03.grandoptical.ir` RC9 Panel, the operator
+first confirmed `FOREIGN_INSTALL_SCHEMA=MISSING` using the **existing**
+`app.foreign_install_migration --review` command. They then explicitly
+ran `--migrate --confirm PREPARE-FOREIGN-INSTALL-TRIAL-SCHEMA`, which
+reported `FOREIGN_INSTALL_SCHEMA=READY`. An independent immediate
+`--review` also returned `READY`. Both invocations reported
+`FOREIGN_INSTALL_FLAGS=UNCHANGED` and
+`RUNTIME_AND_GATEWAY=UNCHANGED`. The original Smite migration makes
+a SQLite online snapshot with a private, no-overwrite backup name and
+only adds the reviewed Foreign tables.
+
+Before migration, the Panel reported `SIGNED_REGISTRATION=signed`,
+`SIGNED_AGENT_AUTH=signed`, but `FOREIGN_INSTALL_ENABLED=NO`,
+`FOREIGN_ORIGIN_TRUST=NO` and `FOREIGN_DATABASE_SCHEMA=HOLD`.
+**The schema prerequisite is now satisfied; the two runtime enable
+flags remain OFF intentionally**. Do not toggle them or issue a
+time-limited, one-use Foreign installation grant until the entire
+approved option-2 host transaction, origin trust, durable rollback and
+actual two-host Connected gates are ready.
+
+The existing **unmodified** Smite RC9 migration, HTTP/JWT/MFA default-off
+API contract, and signed grant/HMAC/replay recovery tests are now included
+directly in the unified U-OPTI CI via the exact pinned
+`companion-smite` checkout. This adds test coverage without a new
+migration tool or changed production Panel code.
+
+**Remaining engineering boundaries before building/using a fresh KH
+host for live install:** reconcile RC9 Foreign source/journal ownership
+against RC7-specific read-only adapters; connect public option 2 to
+the existing, stage-owned Sanaei RO, HTTPS/443 Gateway, signed packet
+and identity recovery in the correct once-only order; confirm an
+independently approved signed release and rollback; then demonstrate
+actual Iran↔Foreign `Connected` with stable identities and retained
+FRP/Backhaul/Sanaei. Host activation remains HOLD. No changes were made
+to the operational Iran Node or the foreign server by the above CI.
 
 #### Foreign choice 2 release gap exposed by comparing the current modules
 

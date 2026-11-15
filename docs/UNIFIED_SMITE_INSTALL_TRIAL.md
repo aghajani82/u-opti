@@ -16,6 +16,26 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separate release acceptance of the already signed RC9 pair; a live fresh-host Iran option-1 validation, including retained stage recovery and bidirectional authenticated `Connected`; a safely reviewed production Panel upgrade/rollback path if retained RC7 is to be upgraded; public option-2 wiring and interrupted-install recovery; real two-server proof preserving FRP/Sanaei/Backhaul; final operator acceptance. Do not merge to `main` or use trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 Iran Foreign schema migration — READY, activation still HOLD
+
+Operator `--review` returned `FOREIGN_INSTALL_SCHEMA=MISSING` on
+`03.grandoptical.ir`. They invoked the **existing exact RC9 Smite**
+`foreign_install_migration --migrate --confirm
+PREPARE-FOREIGN-INSTALL-TRIAL-SCHEMA`, which returned `READY`, then
+`--review` returned `READY` again. Original migration creates an
+online SQLite backup and only adds Foreign tables; reported flags and
+runtime/gateway stayed unchanged. Both Foreign install and Foreign origin
+trust flags were explicitly OFF in the preceding runtime check.
+
+The unified U-OPTI trial CI now reruns the original RC9 companion
+Smite migration tests, default-off Foreign HTTP/authorization tests and
+signed one-time enrollment HMAC/replay recovery tests. This is **not**
+live Foreign option-2 authorization: published candidate flags still
+`activation_allowed=false` and `release_approved=false`,
+the menu remains `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`,
+and Foreign RC9 owner/journal plus per-stage rollback still need a
+full host-executor review.
+
 ### 2026-11-15 live Iran validation — operator-confirmed RC9 option 1
 
 The disposable Iran server was rebuilt, installed from U-OPTI
