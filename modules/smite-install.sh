@@ -2734,6 +2734,32 @@ smite_install_unified_foreign_after_core() {
         echo 'HOLD: Sanaei and Node inventory were not both verified.' >&2
         return 2
     }
+    # SAME selected option-2 installer, SAME original Core owner. Do not
+    # advance to SSL/443 based solely on Sanaei returning success: the
+    # original source-pinned Journal independently verifies the CURRENT
+    # Compose image, paused/strict runtime, Node identity scope and exact
+    # read-only database bind after attachment. This is read-only and uses
+    # the existing operation lock, not the legacy menu recovery action.
+    if grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.9' "$SMITE_STATE_FILE"; then
+        local core_witness="" owner_stage="" owner_project=""
+        local -a core_lines=()
+        core_witness="$(python3 -B "$helper_dir/smite-rc6-install-journal.py" \
+            resume-foreign --foreign-packet-file "$packet" --attached-sanaei \
+            --installer-pid "$BASHPID")" || {
+            echo 'HOLD: Original Foreign Core/Sanaei ownership verification failed; keep completed stages.' >&2
+            return 2
+        }
+        mapfile -t core_lines <<< "$core_witness"
+        [ "${#core_lines[@]}" -eq 2 ] || return 2
+        owner_stage="${core_lines[0]}"
+        owner_project="${core_lines[1]}"
+        [ "$owner_stage" = FOREIGN_CORE_STAGE=CORE_COMMITTED ] &&
+        [[ "$owner_project" =~ ^FOREIGN_CORE_PROJECT=uopti_rc6_[a-f0-9]{32}$ ]] || {
+            echo 'HOLD: Original Foreign Core receipt is not committed and source-bound.' >&2
+            return 2
+        }
+        echo 'UNIFIED_FOREIGN_CORE_SANAEI=VERIFIED_RETAINED_ORIGINAL_OWNER'
+    fi
     # Select the shared Sanaei vhost after attaching inventory. An already
     # committed Gateway is verified in place on retry.
     domain="$(smite_foreign_gateway_domain)" || return 2
