@@ -2670,6 +2670,7 @@ smite_install_unified_foreign_node_image_review() {
 smite_install_unified_foreign_after_core() {
     local packet="$1" helper_dir admitted="" recorded="" domain site
     local gateway_state="$SMITE_STATE_DIR/foreign-gateway.env"
+    local gateway_tls_verified=0
     # Propagate the already validated, private Panel-issued packet to the
     # existing Gateway functions for the SAME option-2 invocation.
     local UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet"
@@ -2774,6 +2775,7 @@ smite_install_unified_foreign_after_core() {
             echo 'HOLD: Retained Foreign Gateway failed verification.' >&2
             return 2
         }
+        gateway_tls_verified=1
         echo 'UNIFIED_FOREIGN_GATEWAY=VERIFIED_RETAINED'
     else
         # Sanaei may have taken most of the grant lifetime. Check it
@@ -2811,6 +2813,20 @@ smite_install_unified_foreign_after_core() {
         echo 'HOLD: Foreign Node Compose ownership changed during Gateway setup.' >&2
         return 2
     }
+    # The original Sanaei attachment and Gateway must still be genuinely
+    # readable/online AFTER the selected Gateway stage. Do not advance based
+    # on a saved state.env or a successful Nginx reload alone. These original
+    # witnesses are read-only; they do not reinstall or recreate the Node.
+    smite_install_sanaei_retained >/dev/null || {
+        echo 'HOLD: Foreign Sanaei read-only database mount changed after Gateway.' >&2
+        return 2
+    }
+    if [ "$gateway_tls_verified" != 1 ]; then
+        smite_foreign_gateway_verify_local "$domain" "$admitted" || {
+            echo 'HOLD: Foreign HTTPS/443 Gateway no longer verifies after stage commit.' >&2
+            return 2
+        }
+    fi
     python3 -B "$helper_dir/smite-unified-foreign-gateway-plan.py" \
         --packet-file "$packet" --precore-fields >/dev/null || {
         echo 'HOLD: Foreign installation code expired; issue a new code for the same Node.' >&2
