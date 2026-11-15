@@ -138,23 +138,31 @@ real source-pinned issuance and signed two-way Connected, independent
 release approval and actual rollback proofs remain open. The working
 Iran host is not updated automatically from the trial branch.
 
-#### Foreign choice 2 release gap exposed by comparing the current modules
+#### Foreign choice 2 release gap after RC9 read-only alignment
 
-The already existing trial adapters `smite-unified-foreign-existing-witnesses.py`,
-`smite-unified-foreign-activation-review.py`, and
-`smite-unified-foreign-gateway-plan.py` still require
-`SMITE_MANAGED_VERSION=2.0.0-rc.7` on the Foreign host even though the
-signed unified trial Node image is RC9. Their successful disposable test
-runs **do not** admit a brand-new RC9 Foreign source/journal or a live
-unified install. The public Foreign menu option 2 remains explicitly
-`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+The existing `smite-unified-foreign-existing-witnesses.py`,
+`smite-unified-foreign-activation-review.py` and
+`smite-unified-foreign-gateway-plan.py` now permit exact
+`SMITE_MANAGED_VERSION=2.0.0-rc.9` with the matching signed
+`SMITE_UPSTREAM_REF` **for read-only reviews**; the legacy RC7
+read-only fixture remains intact. This removes an impossible version
+comparison but does **not** admit a new Foreign RC9 source into the
+original fresh-install Journal or authorize runtime activation. The
+actual selected Foreign install/Gateway/Sanaei functions still contain
+RC7-specific source/Compose-stage assumptions and require a reviewed
+RC9 ownership and rollback conversion, not merely a digest swap.
 
-Next safe boundary: read-only review of **existing IR Panel Foreign-install
-capability flags and database schema**, and fresh Foreign host Docker,
-Nginx, Sanaei RO DB and current U-OPTI state, without exposing passwords,
-one-time grant codes or identity files. Only then reconcile Foreign
-source/journal ownership and existing stage-by-stage rollback/activation
-before any live test. Preserve FRP/Backhaul and Grandoptical.
+The public Foreign option 2 still returns
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` before host writes.
+The live Iran Panel Foreign schema is already READY, but both Foreign
+enable flags were OFF in the operator's last runtime check. Do not
+enable them until the complete released host transaction is ready.
+Next safe boundary: match exact RC9 Foreign owner/source, Compose and
+Sanaei RO evidence with the existing per-stage recovery and signed
+grant/identity journals; then test rollback and *actual*
+Panel↔Foreign signed Connected on a disposable Foreign host.
+Never leak time-limited installation codes or mutate Grandoptical,
+the FRP 20182 tunnel or retained Backhaul.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
