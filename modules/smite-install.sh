@@ -2618,6 +2618,46 @@ smite_install_unified_foreign_identity_stage() {
     printf '%s\n' "$output"
 }
 
+# Final original signed activation stage: no second runtime controller.
+# The identity phase invokes the ALREADY EXISTING Pairing activation,
+# which recreates only the owned Foreign Node and verifies both directions;
+# on failure it performs the original verified paused-only rollback.
+smite_install_unified_foreign_activate_signed_stage() {
+    local packet="${1:-}" module_dir output installer_pid="$BASHPID"
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
+    [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" = e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] &&
+    [ "$packet" = /var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json ] &&
+    [ -f "$packet" ] && [ ! -L "$packet" ] || return 2
+    smite_install_unified_signed_pair_review >/dev/null || return 2
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-identity-phase.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-identity-phase.py" ] || return 2
+    # Do NOT call legacy menu 7 or activate a separate/legacy Pairing lane.
+    # The original field-trial gate is scoped to this approved child action.
+    output="$(UOPTI_SMITE_PAIRING_FIELD_TRIAL=YES python3 -B \
+        "$module_dir/smite-unified-foreign-identity-phase.py" \
+        --activate-selected-foreign --installer-pid "$installer_pid")" || {
+        echo 'HOLD: Foreign signed two-way activation incomplete; retain installed Core/Sanaei/Gateway and identity receipts.' >&2
+        return 2
+    }
+    # The original signed check-in and authenticated Panel->KH status are
+    # BOTH required; a successful Docker restart is never a Connected proof.
+    for witness in \
+        'KH_SIGNED_NODE_RUNTIME=ACTIVE_FIELD_TRIAL' \
+        'KH_LOCAL_HMAC_REPLAY=PASS' \
+        'KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS' \
+        'PANEL_TO_KH_SIGNED_HMAC=PASS' \
+        'LEGACY_AUTH_FALLBACK=NO' \
+        'FOREIGN_CONNECTED=SIGNED_BIDIRECTIONAL_VERIFIED'; do
+        grep -Fxq -- "$witness" <<< "$output" || {
+            echo 'HOLD: Foreign runtime returned incomplete signed connection evidence.' >&2
+            return 2
+        }
+    done
+    echo 'FOREIGN_OPTION2_CONNECTED=SIGNED_IR_PANEL_FOREIGN_NODE'
+}
+
 # One-choice composition uses only original per-stage owners. Deliberately
 # NOT an alternate menu action: this becomes the selected option-2 body
 # after the already published false release gate is reviewed and approved.
@@ -2642,9 +2682,8 @@ smite_install_unified_foreign_selected_stages() {
     fi
     smite_install_unified_foreign_pre_pairing_stages "$packet" || return 2
     smite_install_unified_foreign_identity_stage "$packet" || return 2
-    echo 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED'
-    echo 'FOREIGN_NODE_ACTIVATION=NOT_PERFORMED'
-    echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+    smite_install_unified_foreign_activate_signed_stage "$packet" || return 2
+    echo 'FOREIGN_OPTION2=CONNECTED_SIGNED_BIDIRECTIONAL'
 }
 
 # Unified option-2 building block: reuse the existing Sanaei installer and
