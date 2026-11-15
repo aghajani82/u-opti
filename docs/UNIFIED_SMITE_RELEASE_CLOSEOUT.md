@@ -560,6 +560,53 @@ only with that gate and tested from a matching fresh Iran+KH install.
 Do not rebuild Iran yet, modify Grandoptical/FRP/Backhaul, or merge
 to `main` on these offline results alone.
 
+#### One-use Panel grant renewal and post-expiry original HMAC continuity — 2026-11-15
+
+The **same original** selected Foreign option-2, Host stage journal,
+private packet-intake utility, and Identity `rehearse_transaction`
+have been exercised **end to end**, not just as separate unit tests.
+After Sanaei RO and HTTPS/443 Host stage commit, an intentionally
+failed signed Panel proof leaves `IDENTITY_INTENT` with exactly one
+staged HMAC key; no live identity is written and Host/Gateway must not
+be installed again. A different grant before expiry is rejected. At
+expiry, the original private `smite-unified-foreign-packet-intake.py`
+accepts **only a new one-use code for the exact same reserved Node,
+Panel, Foreign origin and control path** with an existing unmodified
+Host owner checkpoint. The next original Host and Identity journal
+runs adopt the new packet, prove enrollment via the existing Panel
+HMAC status endpoint, and promote the **same** key. The subsequent
+retry calls *only* authenticated Panel status, never another redeem or
+Sanaei/Gateway install. All receipts remain private and code/secret
+free. Full CI PASS:
+[43716754099](https://github.com/aghajani82/u-opti/actions/runs/43716754099).
+
+The existing offline Host `rehearse_option2` also had a separate
+continuity gap: after an original **COMPLETED** Host and promoted
+Identity, expiration of the old bearer packet prevented the same
+option from re-verifying its identity. Its **disposable-only** path
+now permits an expired packet *solely* when BOTH original schema-2
+Host and Identity journals are complete, match the exact unchanged
+private packet hash/scope/expiry, and the live identity exists.
+Current original Core, RO Sanaei and HTTPS/443 witnesses must all
+still pass, followed by a **fresh signed HMAC Panel proof** from
+the original identity module. The old bearer code is not redeemed,
+no host stages rerun, a revoked signed proof still HOLDS, and an
+incomplete INTENT or corrupted receipt can never bypass expiry.
+Original Node secret and all Host services are unchanged. Full
+CI 3/3 PASS:
+[43717050291](https://github.com/aghajani82/u-opti/actions/runs/43717050291).
+
+These are **offline/disposable acceptance tests**, not a live
+activation or restored Connected claim. On a real KH server the
+public option 2 and the original signed release/real-root Journal
+are still HOLD. The next actual gate is a root-owned,
+release-approved deployment of the ORIGINAL Identity journal and
+the already integrated Host stages, followed by activation/replay
+rollback proof and matched fresh Iran+KH `Connected`. The Iran Panel
+Foreign enable/trust flags remain unapproved until that release.
+No new features, changes to `main`, production Grandoptical,
+FRP/Backhaul or existing servers.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;

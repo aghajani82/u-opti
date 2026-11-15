@@ -16,6 +16,40 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 signed Foreign original Identity retry after lost proof and bearer expiry
+
+Two original one-choice recovery cases were closed in the **same
+disposable** Core/Host/Identity integration fixture.
+
+First: Host Sanaei RO and Gateway 443 were COMMITTED, but the
+Panel's HMAC enrollment proof failed, leaving original
+`unified-foreign-transaction.json` in `INTENT` and one
+`foreign-install-identity.json` staged secret. The original
+packet intake refuses replacing the code early; after expiry it
+accepts only a same-Node/same-control reissued Panel packet under
+the Host journal lock. Resume re-verifies original Host witnesses,
+uses the existing one-use redemption and fresh signed HMAC proof,
+then promotes that **same** retained secret. A subsequent repeat
+calls only the signed status API; no Node/Host reinstall.
+[CI PASS](https://github.com/aghajani82/u-opti/actions/runs/43716754099).
+
+Second: if the original Host **and** Identity journals already
+completed, the old packet may later expire. The existing offline
+`rehearse_option2` now treats this as a **signed-status-only**
+continuity verification, never a code redemption, but only after
+independent exact schema-2 completed journals, immutable packet
+hash/scope, existing live identity and fresh Core/Sanaei/Gateway
+witnesses. Corrupted receipts, incomplete INTENT, Gateway drift
+or rejected signed Panel proof HOLD; none changes the identity.
+[Full 3/3 CI PASS](https://github.com/aghajani82/u-opti/actions/runs/43717050291).
+
+Both cases remain **disposable only**, with
+`activation_allowed=false`, `connected=false` and public
+option 2 `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+Next work: reviewed real-root Original Identity journal execution
+plus approved signed Host release, stage-owned rollback and two-host
+Iran↔KH authenticated Connected acceptance. No Iran rebuild yet.
+
 ### 2026-11-15 original signed identity preflight after Core/Sanaei/443
 
 The **same existing** one-choice internal Foreign
