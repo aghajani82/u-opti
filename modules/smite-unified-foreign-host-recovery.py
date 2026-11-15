@@ -24,6 +24,7 @@ import secrets
 import stat
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 
 LOCK = "unified-foreign-host.lock"
@@ -335,8 +336,8 @@ def rehearse_option2(*, directory, packet_path, state_path,
                      verify_core, verify_sanaei, verify_gateway,
                      install_sanaei, install_gateway, transport,
                      rollback_sanaei=None, rollback_gateway=None,
-                     disposable_capability=False):
-    """Compose the TWO EXISTING Foreign per-stage journals in option-2 order.
+                     disposable_capability=False, core_owner=None):
+    """Compose the EXISTING Core, Host and Identity owners in option-2 order.
 
     Disposable-only continuation. Never introduces a second pairing
     identity or a second Sanaei/Gateway installer. The Host journal owns
@@ -378,6 +379,47 @@ def rehearse_option2(*, directory, packet_path, state_path,
             gateway_state_path=gateway_path)
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()
+
+    # Once the original fresh RC9 Core owner exists, bind its durable
+    # nonsecret scope to the SAME Panel packet before any Sanaei/Gateway
+    # callback or one-use redemption. This is a fixture-only cross-Journal
+    # hand-off: the original Core Journal performs source/Compose/image
+    # checks, and the existing Host/Identity journals retain later stages.
+    # On a real host the public Foreign option 2 remains release-HOLD.
+    if core_owner is not None:
+        client = load("uopti_option2_core_owner_client",
+                      "smite-foreign-install-client.py")
+        promotion = load("uopti_option2_core_owner_promotion",
+                         "smite-foreign-install-promotion.py")
+        try:
+            core_root = Path(core_owner.root)
+            if (not core_root.is_absolute() or core_root == Path("/")
+                    or not core_root.resolve().is_relative_to(
+                        Path(tempfile.gettempdir()).resolve())):
+                deny()
+            with promotion.private_directory(directory) as fd:
+                raw = promotion.read_optional(
+                    fd, "foreign-install-packet.json", client)
+            if raw is None:
+                deny()
+            packet = client.parse_packet(raw)
+            saved = core_owner.load()
+            owned_scope = core_owner.foreign_inputs(saved)
+            expected_scope = {
+                "panel_domain": urlsplit(packet.scope["panel_url"]).hostname,
+                "foreign_domain": urlsplit(packet.scope["origin"]).hostname,
+                "node_name": packet.scope["node_name"],
+                "node_id": packet.scope["node_id"],
+                "control_path": urlsplit(packet.scope["control_url"]).path,
+            }
+            if (saved.get("state") != "COMMITTED"
+                    or owned_scope != expected_scope
+                    or {obj["name"] for obj in core_owner.inspect_owned(saved)}
+                    != {"smite-node"}):
+                deny()
+        except (OSError, ValueError, TypeError, KeyError,
+                AttributeError, Hold):
+            deny()
 
     # All predicates are the EXISTING signed/owned Foreign adapters. A failed
     # or interrupted Sanaei/Gateway stage is compensated only under its
