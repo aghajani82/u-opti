@@ -863,3 +863,33 @@ assert body.index('smite_install_unified_signed_pair_review') < body.index(
 assert "FOREIGN_CONNECTED=YES" not in body
 PY_SELECTED_HMAC_BRIDGE
 echo 'FOREIGN_OPTION2_ORIGINAL_SIGNED_IDENTITY_BRIDGE=PASS_ISOLATED'
+
+# Original option-2 durable packet capture is INSIDE the selected flow, but
+# the signed release false gate must stop it before Journal.prepare, mkdir,
+# hidden TTY input, Docker or any host side effects.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    : > "$TMP/owned-packet-prehost-calls"
+    smite_install_unified_signed_pair_review() {
+        printf 'signed-release-review\n' >> "$TMP/owned-packet-prehost-calls"
+        return 2
+    }
+    python3() {
+        printf 'UNSAFE_PYTHON_EXECUTED\n' >> "$TMP/owned-packet-prehost-calls"
+        return 77
+    }
+    smite_install_unified_foreign_pre_pairing_stages() {
+        printf 'UNSAFE_CORE_HOST_EXECUTED\n' >> "$TMP/owned-packet-prehost-calls"
+        return 77
+    }
+    if smite_install_unified_foreign_selected_stages         > "$TMP/owned-packet-release-hold" 2>&1; then
+        echo 'FAIL: release-hold option 2 admitted real owned packet' >&2
+        exit 1
+    fi
+    [ "$(cat "$TMP/owned-packet-prehost-calls")" = signed-release-review ]
+    grep -q 'Foreign private grant cannot be captured before signed release'         "$TMP/owned-packet-release-hold"
+    ! grep -q 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED'         "$TMP/owned-packet-release-hold"
+)
+echo 'FOREIGN_OPTION2_DURABLE_PACKET_RELEASE_HOLD=PASS_ISOLATED_NO_HOST_WRITES'
