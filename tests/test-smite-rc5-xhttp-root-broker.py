@@ -137,7 +137,7 @@ class BrokerRegressionTests(unittest.TestCase):
         pid = os.getpid()
         start = Path("/proc", str(pid), "stat").read_text().rsplit(")", 1)[1].split()[19]
         record = {
-            "schema": 1, "source": admission.IR_INSTALL_SOURCE,
+            "schema": 1, "source": "9a1270b31e8d44f13d09b71ab6b9798410b09c12",
             "id": "uopti_rc6_" + "a" * 32, "role": "panel-iran",
             "state": "INSTALLING", "installer_pid": pid,
             "installer_start": start,
@@ -173,7 +173,7 @@ class BrokerRegressionTests(unittest.TestCase):
             save()
             with self.assertRaises(admission.ProvisionHold):
                 admission._require_ir_root_role()
-            record["source"] = admission.IR_INSTALL_SOURCE
+            record["source"] = "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
 
             record["state"] = "ROLLED_BACK"
             save()
@@ -206,6 +206,20 @@ class BrokerRegressionTests(unittest.TestCase):
             state.chmod(0o600)
             self.assertIsNone(admission._require_ir_root_role())
             self.assertIsNone(broker._require_ir_root_role())
+
+            # Each admitted source must match its own retained version.
+            for source, version in admission.IR_INSTALL_SOURCE_VERSIONS.items():
+                record["source"] = source
+                save()
+                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + version + "\n")
+                self.assertIsNone(admission._require_ir_root_role())
+                self.assertIsNone(broker._require_ir_root_role())
+                other = "2.0.0-rc.9" if version == "2.0.0-rc.7" else "2.0.0-rc.7"
+                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + other + "\n")
+                with self.assertRaises(admission.ProvisionHold):
+                    admission._require_ir_root_role()
+            record["source"] = "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+            save()
 
             state.write_text("SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
             state.chmod(0o600)

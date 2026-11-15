@@ -170,21 +170,24 @@ docker_3xui_install() { echo UNEXPECTED_INSTALL; }
 smite_install_sanaei_foreign
 '''.replace('"$3"', '"' + runtime + '"')
             return subprocess.run(['bash', '-c', script, '_', str(ROOT), str(root)],
-                                  capture_output=True, text=True, check=True)
+                                  capture_output=True, text=True, check=False)
 
     def test_sanaei_rejects_signed_runtime_even_if_env_is_paused(self):
         result = self.invoke(runtime='signed')
+        self.assertEqual(result.returncode, 2)
         self.assertIn('HOLD: KH runtime is not confirmed paused', result.stderr)
         self.assertNotIn('UNEXPECTED_INSTALL', result.stdout)
 
     def test_sanaei_rejects_signed_env_or_staged_identity(self):
         for args in (dict(disk='signed'), dict(identity=True)):
             result = self.invoke(**args)
+            self.assertEqual(result.returncode, 2)
             self.assertIn('HOLD: Install/attach Sanaei before pairing', result.stderr)
             self.assertNotIn('UNEXPECTED_INSTALL', result.stdout)
 
     def test_paused_runtime_passes_guard_but_missing_compose_still_holds(self):
         result = self.invoke()
+        self.assertEqual(result.returncode, 2)
         self.assertIn('HOLD: Clean-RC Foreign Node Compose and environment', result.stderr)
         self.assertNotIn('runtime is not confirmed', result.stderr)
 
