@@ -202,7 +202,7 @@ class BrokerRegressionTests(unittest.TestCase):
             save()
             with self.assertRaises(admission.ProvisionHold):
                 admission._require_ir_root_role()
-            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
+            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\nSMITE_UPSTREAM_REF=" + record["source"] + "\n")
             state.chmod(0o600)
             self.assertIsNone(admission._require_ir_root_role())
             self.assertIsNone(broker._require_ir_root_role())
@@ -211,11 +211,11 @@ class BrokerRegressionTests(unittest.TestCase):
             for source, version in admission.IR_INSTALL_SOURCE_VERSIONS.items():
                 record["source"] = source
                 save()
-                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + version + "\n")
+                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + version + "\nSMITE_UPSTREAM_REF=" + source + "\n")
                 self.assertIsNone(admission._require_ir_root_role())
                 self.assertIsNone(broker._require_ir_root_role())
                 other = "2.0.0-rc.9" if version == "2.0.0-rc.7" else "2.0.0-rc.7"
-                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + other + "\n")
+                state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=" + other + "\nSMITE_UPSTREAM_REF=" + source + "\n")
                 with self.assertRaises(admission.ProvisionHold):
                     admission._require_ir_root_role()
             record["source"] = "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
@@ -225,7 +225,7 @@ class BrokerRegressionTests(unittest.TestCase):
             state.chmod(0o600)
             with self.assertRaises(admission.ProvisionHold):
                 admission._require_ir_root_role()
-            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\n")
+            state.write_text("SMITE_ROLE=panel-iran\nSMITE_MANAGED_VERSION=2.0.0-rc.7\nSMITE_UPSTREAM_REF=" + record["source"] + "\n")
             state.chmod(0o600)
 
             journal.chmod(0o644)
