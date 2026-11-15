@@ -2414,11 +2414,14 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
             raise WizardHold("Completed Foreign Iran stage drift; do not auto-enable")
     if (live() == after and effective_ready()):
         _run(["nginx", "-t"], timeout=20)
-        _run(["systemctl", "reload", "nginx"], timeout=30)
         if (stage_dir / "complete").exists():
             if sealed(stage_dir / "complete") != b"FOREIGN_IR_READY\n":
                 raise WizardHold("Foreign Iran completion checkpoint drift")
         else:
+            # Only interrupted runs require reloading an already-rendered
+            # 443 route. A fully committed option-1 retry is strictly
+            # read-only; do not repeatedly reload shared FRP Nginx workers.
+            _run(["systemctl", "reload", "nginx"], timeout=30)
             fd = os.open(stage_dir / "complete", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
                 stream.write(b"FOREIGN_IR_READY\n")

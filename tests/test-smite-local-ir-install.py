@@ -273,7 +273,7 @@ class SelectedFreshIranForeignReadyTests(unittest.TestCase):
         self.events.clear()
         self.apply()
         self.assertNotIn("panel-recreated", self.events)
-        self.assertIn("nginx-reloaded", self.events)
+        self.assertNotIn("nginx-reloaded", self.events)
 
     def test_original_step_snapshot_compensates_nginx_failure_only(self):
         self.fail_next_nginx = True
