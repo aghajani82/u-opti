@@ -101,6 +101,45 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('smi1_',self.j.path.read_text())
         self.assertFalse(any('stop' in call for call in self.calls))
 
+    def test_rc9_core_packet_admission_uses_original_grant_ttl_and_excludes_code(self):
+        # The existing Panel-issued 0600 packet, not caller-supplied values,
+        # owns the Core journal scope in the future single-choice installer.
+        import time
+        from unittest.mock import patch
+        scope=('panel.example.com','kh.example.com','node-kh',
+               'foreign-node-1234','/smite-node/'+'a'*32)
+        self.assertIn('PASS',self.j.rollback())
+        private=self.root/'private-foreign-grant'
+        private.mkdir(mode=0o700)
+        packet=private/'foreign-install-packet.json'
+        now=int(time.time())
+        payload=dict(protocol='smi1',panel_url='https://'+scope[0]+':443',
+                     node_id=scope[3],node_name=scope[2],
+                     origin='https://'+scope[1]+':443',
+                     control_url='https://'+scope[1]+':443'+scope[4],
+                     installation_code='smi1_'+'b'*43,expires_at=now+3600)
+        packet.write_text(json.dumps(payload))
+        packet.chmod(0o600)
+        for unsafe in ('world_readable','expired','conflicting_manual_scope'):
+            if unsafe=='world_readable':packet.chmod(0o644)
+            if unsafe=='expired':payload['expires_at']=now-1
+            with self.subTest(unsafe=unsafe),self.assertRaises(m.Hold):
+                self.j.begin('foreign',source=m.RC9_SOURCE,
+                    resumable_foreign=True,foreign_packet_path=packet,
+                    foreign_inputs=scope if unsafe=='conflicting_manual_scope' else None)
+            self.assertEqual(self.j.load()['state'],'ROLLED_BACK')
+            packet.chmod(0o600)
+            payload['expires_at']=now+3600
+            packet.write_text(json.dumps(payload))
+        with patch('time.time',return_value=now):
+            owner=self.j.begin('foreign',source=m.RC9_SOURCE,
+                               resumable_foreign=True,foreign_packet_path=packet)
+        self.assertTrue(owner.startswith('uopti_rc6_'))
+        self.assertEqual(self.j.load()['foreign_inputs']['node_id'],scope[3])
+        self.assertEqual(self.j.load()['foreign_inputs']['control_path'],scope[4])
+        self.assertNotIn(payload['installation_code'],self.j.path.read_text())
+        self.assertNotIn('node_secret',self.j.path.read_text())
+        self.assertFalse(any('stop' in call for call in self.calls))
     def test_rc9_foreign_core_commit_refuses_drifted_panel_scope(self):
         scope=('panel.example.com','kh.example.com','node-kh',
                'foreign-node-1234','/smite-node/'+'a'*32)
