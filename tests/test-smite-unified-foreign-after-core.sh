@@ -341,7 +341,7 @@ selected=src.split('smite_install_selected_fresh() (',1)[1].split(
 assert 'smite_install_selected_foreign_fresh' in selected
 assert 'smite_install_finish_local_ir || return 2' in selected
 foreign=src.split('smite_install_selected_foreign_fresh() (',1)[1].split(
-    '\\nsmite_install_selected_fresh() (',1)[0]
+    '\nsmite_install_selected_fresh() (',1)[0]
 assert 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES' in foreign
 assert 'FOREIGN_CONNECTED=NOT_PROVEN' in foreign
 assert foreign.index('release_approved') < foreign.index(
@@ -469,7 +469,7 @@ assert 'smite_install_foreign_node; fi' in src[start:end]
 assert 'smite_install_selected_foreign_fresh' in src[start:end]
 assert 'smite_install_finish_local_ir || return 2' in src[start:end]
 foreign=src.split('smite_install_selected_foreign_fresh() (',1)[1].split(
-    '\\nsmite_install_selected_fresh() (',1)[0]
+    '\nsmite_install_selected_fresh() (',1)[0]
 assert foreign.index('release_approved') < foreign.index(
     'smite_install_rc7_verified_cosign') < foreign.index(
     'smite_install_unified_signed_pair_review')
