@@ -293,6 +293,81 @@ class IdentityPhase(unittest.TestCase):
         self.assertTrue((self.stage/"unified-foreign-transaction.lock").exists())
         self.assertEqual((self.stage/"unified-foreign-transaction.lock").stat().st_mode & 0o777,0o600)
 
+    def expired_owned_receipt(self):
+        client = module.load(
+            "test_original_client_for_expired_owner",
+            "smite-foreign-install-client.py")
+        promotion = module.load(
+            "test_original_promoter_for_expired_owner",
+            "smite-foreign-install-promotion.py")
+        packet = client.parse_packet(self.packet.read_bytes())
+        return module._selected_expired_packet_resume(
+            packet, self.packet.read_bytes(), client=client,
+            promotion=promotion, directory=self.stage,
+            live_identity=self.live)
+
+    def test_expired_completed_packet_uses_original_receipts_not_new_grant(self):
+        self.tx()
+        raw_before = self.packet.read_bytes()
+        live_before = self.live.read_bytes()
+        calls_before = list(self.calls)
+        self.assertTrue(self.expired_owned_receipt())
+        self.assertEqual(self.packet.read_bytes(), raw_before)
+        self.assertEqual(self.live.read_bytes(), live_before)
+        self.assertEqual(self.calls, calls_before)
+        # A consumed code is never renewed; the existing original
+        # transaction can resume with a NEW signed status proof after TTL.
+        self.calls.clear()
+        self.assertEqual(self.tx(now=self.doc["expires_at"]+180)["phase"],
+                         "IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.calls, ["/api/node-control/installation-status"])
+
+    def test_expired_packet_without_owned_staged_identity_never_resumes(self):
+        # An expired code without a previously written INTENT and staged
+        # secret may not skip two-hour Panel redemption or mint a new key.
+        with self.assertRaises(module.Hold):
+            self.expired_owned_receipt()
+        self.assertFalse(self.live.exists())
+        self.assertFalse(self.calls)
+
+    def test_expired_intent_uses_same_persisted_secret_after_lost_ack(self):
+        def interrupted(panel, endpoint, body, headers):
+            result = self.mock_panel(panel, endpoint, body, headers)
+            if endpoint == "/api/foreign-install/redeem":
+                raise KeyboardInterrupt("simulated crash after Panel committed")
+            return result
+        with self.assertRaises(KeyboardInterrupt):
+            self.tx(transport=interrupted)
+        self.assertEqual(json.loads(self.journal().read_text())["phase"], "INTENT")
+        staged = (self.stage/"foreign-install-identity.json").read_bytes()
+        self.assertTrue(self.expired_owned_receipt())
+        self.calls.clear()
+        result = self.tx(now=self.doc["expires_at"]+1)
+        self.assertEqual(result["phase"], "IDENTITY_PROMOTED_OFFLINE")
+        self.assertEqual(self.calls, [
+            "/api/node-control/installation-status",
+            "/api/node-control/installation-status"])
+        self.assertEqual(staged,
+                         (self.stage/"foreign-install-identity.json").read_bytes())
+
+    def test_expired_owner_refuses_corrupt_stage_receipts_and_identity(self):
+        self.tx()
+        for target, modified in (
+            (self.journal(), '{"schema":2}'),
+            (self.stage/"foreign-install-promotion-completed.json", "{}"),
+            (self.stage/"foreign-install-promotion-prepared.json", "{}"),
+            (self.live, '{"version":1,"node_id":"unowned","node_secret":"x"}'),
+            (self.stage/"foreign-install-identity.json", "{}"),
+        ):
+            original = target.read_bytes()
+            try:
+                self.write(target, modified)
+                with self.subTest(path=target.name), self.assertRaises(module.Hold):
+                    self.expired_owned_receipt()
+            finally:
+                target.write_bytes(original)
+                target.chmod(0o600)
+
     def test_completed_transaction_recheck_uses_signed_proof_only(self):
         self.tx()
         original=self.live.read_bytes()
