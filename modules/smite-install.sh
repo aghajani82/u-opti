@@ -2357,7 +2357,7 @@ smite_install_unified_foreign_begin_core_from_panel() {
 smite_install_unified_foreign_core_stage() {
     local packet="${1:-}" module_dir journal_file output stage project commit_result
     local installer_pid="$BASHPID"
-    local -a lines=()
+    local -a lines=() attached_sanaei_flag=()
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
        [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" != e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] ||
@@ -2380,8 +2380,17 @@ smite_install_unified_foreign_core_stage() {
         # The original Journal independently checks the packet TTL, exact
         # node/domain/control scope, running image and Compose ownership.
         # It refuses another active installer and partially written Core.
+        # The ORIGINAL Sanaei attachment step may already have completed
+        # before this same option was interrupted. Only its existing
+        # independent RO database + mount + runtime witness may authorize
+        # the Core Journal to accept the intentionally changed inventory.
+        # An uncertain/partial attachment must not be adopted or rewritten.
+        if smite_install_sanaei_retained >/dev/null 2>&1; then
+            attached_sanaei_flag=(--attached-sanaei)
+        fi
         output="$(python3 -B "$module_dir/smite-rc6-install-journal.py" \
-            resume-foreign --foreign-packet-file "$packet")" || return 2
+            resume-foreign --foreign-packet-file "$packet" \
+            "${attached_sanaei_flag[@]}")" || return 2
         mapfile -t lines <<< "$output"
         [ "${#lines[@]}" -eq 2 ] || return 2
         stage="${lines[0]#FOREIGN_CORE_STAGE=}"
