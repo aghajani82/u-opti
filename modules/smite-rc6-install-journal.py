@@ -674,6 +674,74 @@ class Journal:
                     or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
                 raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
+    def foreign_resume(self):
+        """Read-only pre-enrollment disposition of the ORIGINAL RC9 Core.
+
+        Reuse the same durable owner on an interrupted selected option 2.
+        Do not recreate a Node, reset its identity, repair Compose, consume
+        a grant, or treat Core COMMITTED as full Foreign Connected.
+        Later Sanaei/Gateway/identity phases retain their own journals.
+        """
+        d = self.load()
+        if (d.get('role') != 'foreign' or d.get('source') != RC9_SOURCE
+                or d.get('foreign_resumable_version') != 1):
+            raise Hold('FOREIGN_RESUME_NOT_THIS_OWNER')
+        self.foreign_inputs(d)
+        if (d.get('installer_start')
+                and process_start(d.get('installer_pid')) == d['installer_start']):
+            raise Hold('FOREIGN_INSTALLER_STILL_RUNNING')
+        if d['state'] == 'ROLLED_BACK':
+            return 'FRESH_ALLOWED', None
+        if d['state'] not in ('INSTALLING', 'COMMITTED'):
+            raise Hold('FOREIGN_ROLLBACK_IN_PROGRESS')
+
+        expected = {'smite-node'}
+        owned = self.inspect_owned(d)
+        present = {x['name'] for x in owned}
+        if d['state'] == 'INSTALLING' and not present:
+            # If interrupted before ANY Core bytes were written, the same
+            # journal/project may be retried. Otherwise a partial Core must
+            # be reviewed/rolled back by its ORIGINAL owner, not adopted.
+            if any(os.path.lexists(self.root / p) for p in TARGETS):
+                raise Hold('FOREIGN_PARTIAL_CORE_REQUIRES_ORIGINAL_RECOVERY')
+            return 'CORE_PENDING', d['id']
+        if present != expected:
+            raise Hold('FOREIGN_CORE_NODE_OWNER_MISSING')
+
+        self.foreign_core_env(d)
+        state = self.root / 'etc/u-opti/smite/state.env'
+        state_info = trusted(state)
+        if (not stat.S_ISREG(state_info.st_mode)
+                or state_info.st_nlink != 1
+                or stat.S_IMODE(state_info.st_mode) != 0o600):
+            raise Hold('FOREIGN_CORE_STATE_NOT_PRIVATE')
+        lines = state.read_text().splitlines()
+        scope = self.foreign_inputs(d)
+        for key, value in (
+            ('SMITE_ROLE', 'foreign'),
+            ('SMITE_MANAGED_VERSION', CANDIDATES[d['source']][0]),
+            ('SMITE_UPSTREAM_REF', d['source']),
+            ('SMITE_CONNECTION_MODE', 'standard'),
+            ('SMITE_PANEL_DOMAIN', scope['panel_domain']),
+            ('SMITE_FOREIGN_DOMAIN', scope['foreign_domain']),
+            ('SMITE_NODE_NAME', scope['node_name']),
+        ):
+            if lines.count(key + '=' + value) != 1:
+                raise Hold('FOREIGN_CORE_STATE_DRIFT')
+        obj = json.loads(self.docker('inspect', 'smite-node'))[0]
+        cfg = obj.get('Config', {})
+        labels = cfg.get('Labels') or {}
+        if (labels.get('com.docker.compose.project') != d['id']
+                or labels.get('com.docker.compose.service') != 'smite-node'
+                or labels.get('com.docker.compose.project.config_files')
+                != '/opt/smite-node/docker-compose.yml'
+                or not (obj.get('State') or {}).get('Running')
+                or (obj.get('State') or {}).get('Health', {}).get('Status', 'healthy')
+                != 'healthy'):
+            raise Hold('FOREIGN_CORE_COMPOSE_OR_HEALTH_DRIFT')
+        return ('CORE_READY_TO_COMMIT' if d['state'] == 'INSTALLING'
+                else 'CORE_COMMITTED'), d['id']
+
     def ir_gateway_recovery_plan(self):
         """Authorize pending Gateway snapshot recovery before Docker health.
 
@@ -749,7 +817,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action', choices=('begin', 'status', 'commit', 'rollback',
                                        'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir',
-                                       'prepare', 'recover-ir-core', 'commit-ir-panel'))
+                                       'prepare', 'recover-ir-core', 'commit-ir-panel',
+                                       'resume-foreign'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
     ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted signed-source owner')
     ap.add_argument('--resumable-foreign', action='store_true')
@@ -817,6 +886,11 @@ def main():
                 print('IR_INSTALL_STAGE=' + stage)
                 if project is not None:
                     print('IR_INSTALL_PROJECT=' + project)
+            elif a.action == 'resume-foreign':
+                stage, project = j.foreign_resume()
+                print('FOREIGN_CORE_STAGE=' + stage)
+                if project is not None:
+                    print('FOREIGN_CORE_PROJECT=' + project)
             elif a.action == 'advance-ir':
                 if a.phase is None: raise Hold('IR_STAGE_REQUIRED')
                 print('IR_INSTALL_STAGE=' + j.ir_advance(a.phase))
