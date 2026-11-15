@@ -16,6 +16,38 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 exact RC9 original Core→Host→Identity Journal handoff
+
+The original RC9 Foreign Core Journal and the existing separate
+Sanaei/443 Host and signed Pairing Identity journals were joined in
+the **same disposable option-2 integration test**. Before a Sanaei
+mount or Gateway operation, the handoff verifies the durable
+COMMITTED Core owner, immutable RC9 Node image and Compose project,
+source-pinned on-disk Core state and exact nonsecret Panel packet
+scope (domain, reserved Node name/ID and control URL). Wrong
+post-commit source, tampered owner scope, swapped RC7 image and
+uncommitted Core all fail before any host callback or code redemption.
+
+The positive scenario uses existing stage callbacks and original
+signed Panel HMAC one-time enrollment and identity promotion, proves
+idempotent same-option retry, and explicitly returns
+`FOREIGN_OPTION2_OFFLINE_READY` with `connected=false` and
+`activation_allowed=false`. Test runner's root-UID fixture adaptation
+does not alter the production Journal. CI PASS:
+https://github.com/aghajani82/u-opti/actions/runs/43703802341
+
+The user authorizes rebuilding the disposable Iran trial host as
+needed to validate final cross-server integration, so target
+**one shared immutable U-OPTI revision** on fresh Iran option 1
+and fresh Foreign option 2 once all signed release/rollback gates
+are independently approved. The current Iran live receipt comes
+from an earlier SHA and must not be treated as the final matched
+pair. Foreign schema auto-prepare is integrated into new Iran
+option 1; the real Iran Foreign enable/origin flags were still
+OFF, and the final reviewed workflow must enable them only with
+release approval. Do not use server rebuild as a substitute for
+completing the public option 2 host executor and signed pairing.
+
 ### 2026-11-15 RC9 option-2 existing Sanaei/Gateway and fresh owner rehearsal
 
 Closed two specific RC7 assumptions in the **existing Foreign

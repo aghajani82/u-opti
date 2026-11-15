@@ -262,6 +262,54 @@ and an actual two-host Iran↔Foreign authenticated Connected/rollback test
 on a disposable KH server. No change to `main`, existing Iran RC9,
 Grandoptical, FRP 20182, Backhaul or active Sanaei.
 
+#### RC9 Core→Host→Identity unified handoff — disposable CI PASS
+
+The **original** `smite-rc6-install-journal.py` fresh Foreign
+Core owner is now cross-checked by the **existing**
+`smite-unified-foreign-host-recovery.py::rehearse_option2`
+before *any* Sanaei RO mount, Gateway HTTPS/443 or signed one-use
+Panel redemption. The offline handoff compares the original durable
+Core journal (COMMITTED, exact RC9 source, private nonsecret domain/name/
+Node ID/control-path scope), its current on-disk Smite state using
+the **same existing** packet↔state admission, and its Compose-owned
+exact pinned Docker Node image. A partially installed Core, tampered
+journal, stale/mismatched source, swapped RC7 Node image or unexpected
+Docker owner fails before even an injected host stage callback.
+
+CI uses the actual Core Journal with a fake Docker runner, the existing
+Host-stage Sanaei/Gateway journal and real signed HMAC identity promotion
+against a simulated Panel, not a second installer or replacement
+credential system. A valid exact RC9 owner advances to
+`FOREIGN_OPTION2_OFFLINE_READY` and retry preserves the one identity,
+the original Sanaei/Gateway stages and the same signed Panel receipts.
+It **never** claims live Connected or activation. The original Core
+Journal's `root` ownership requirements are **unchanged** on
+deployed hosts; CI adapts UID checks only inside an unprivileged
+private test fixture. Full 3/3 CI PASS:
+[43703802341](https://github.com/aghajani82/u-opti/actions/runs/43703802341).
+
+This is **not yet** a real-host option-2 executor. The public option-2
+branch still HOLDs before host writes, and the source's signed release
+policy still has `release_approved=false` and
+`activation_allowed=false`. Next: connect the existing fresh
+Core→Host→Identity operations to the public menu under an independently
+approved signed release and verified per-stage compensation. Then
+qualify **both** roles from the same immutable U-OPTI head.
+The user has expressly authorized rebuilding the **disposable Iran
+test host** for this final coordinated fresh-install trial; do not
+touch production Grandoptical or assume the earlier Iran RC9 receipt
+already exercises the latest trial code.
+
+**Iran/Foreign compatibility requirement at final trial:** after
+option 1, signed registration/agent auth must remain signed, Foreign
+schema must be READY without manual migration, and the **existing**
+Foreign-install and trusted-origin Panel capabilities must be enabled
+only once the exact signed Foreign release and host-runner rollback
+gate are approved. The prior real Iran outputs showed both flags OFF,
+and we do **not** prematurely toggle them. The operator must then be
+able to reserve the KH Node, issue the private one-use packet and
+complete option 2 without returning to separate menu tools.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;
