@@ -21,8 +21,40 @@ class ForeignRC7Tests(unittest.TestCase):
             "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8")
         self.assertEqual(p._FOREIGN_NODE_IMAGE_RC7,
             "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263")
+        self.assertEqual(p._FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL,
+            "ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e")
         self.assertEqual(p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL,
             "ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2")
+
+    def test_rc9_local_bootstrap_rejects_mixed_images_before_mutation(self):
+        state = {"SMITE_ROLE":"panel-iran", "SMITE_CONNECTION_MODE":"standard",
+                 "SMITE_MANAGED_VERSION":"2.0.0-rc.9",
+                 "SMITE_NODE_NAME":"node-ir", "SMITE_PANEL_DOMAIN":"iran.example.org"}
+        calls = []
+        def run(args, **kw):
+            if args[:3] != ["docker", "inspect", "-f"]:
+                raise AssertionError(args)
+            return (p._FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL if args[-1] == "smite-panel"
+                    else p._FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
+        with patch.object(p, "_field_trial_gate"), \
+             patch.object(p, "secure_endpoint"), \
+             patch.object(p, "_require_no_active_engine_overlays"), \
+             patch.object(p, "_run", side_effect=run), \
+             patch.object(p, "_panel_compose_command"), \
+             patch.object(p, "_ir_node_compose_command"), \
+             patch.object(p, "_private_dir"), \
+             patch.object(p, "_complete_local_ir_locked", side_effect=lambda *a: calls.append(a)), \
+             patch.object(p.os, "open", return_value=3), \
+             patch.object(p.os, "fdopen") as fdopen, \
+             patch.object(p.fcntl, "flock"):
+            fdopen.return_value.__enter__.return_value = fdopen.return_value
+            p.complete_local_ir_install(state)
+            self.assertEqual(len(calls), 1)
+            with patch.object(p, "_run", return_value=p._FOREIGN_NODE_IMAGE_RC7):
+                with self.assertRaises(p.WizardHold):
+                    p.complete_local_ir_install(state)
+            with self.assertRaises(p.WizardHold):
+                p.complete_local_ir_install({**state, "SMITE_MANAGED_VERSION":"2.0.0-rc.8"})
 
     def test_rc7_compose_preserves_owner_before_recreate_and_rollback(self):
         with tempfile.TemporaryDirectory() as tmp:

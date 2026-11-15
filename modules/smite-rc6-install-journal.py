@@ -18,18 +18,25 @@ import subprocess
 import sys
 import uuid
 
-SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
+SOURCE = 'e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
 IMAGES = {
+    'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e',
+    'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2',
+}
+VERSION = '2.0.0-rc.9'
+# Preserve original RC7 journal/image ownership for safe read and rollback.
+RC7_SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
+RC7_IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8',
     'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263',
 }
-VERSION = '2.0.0-rc.7'
 LEGACY_SOURCE = '25ff25585be3f7ff1c8b73b39a23d0509f9a2312'
 LEGACY_IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:1e5b34652abe24c5c1971dbbdb579bb270c6c571d289198ed15cd0373da1a0f4',
     'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:60a7027b56b17ceb46348f7e107a3361723a95a9b1712634dc8d90b31f928388',
 }
-CANDIDATES = {SOURCE: (VERSION, IMAGES), LEGACY_SOURCE: ('2.0.0-rc.6', LEGACY_IMAGES)}
+CANDIDATES = {SOURCE: (VERSION, IMAGES), RC7_SOURCE: ('2.0.0-rc.7', RC7_IMAGES),
+              LEGACY_SOURCE: ('2.0.0-rc.6', LEGACY_IMAGES)}
 TARGETS = (
     'opt/smite', 'opt/smite-node', 'opt/u-opti-smite', 'etc/u-opti/smite',
     'var/lib/u-opti/smite-xhttp-broker', 'etc/nginx/smite-xhttp-routes',
@@ -242,7 +249,7 @@ class Journal:
         return unit.exists()
 
     def ir_inputs(self, d):
-        if (d.get('role') != 'panel-iran' or d.get('source') != SOURCE
+        if (d.get('role') != 'panel-iran' or d.get('source') not in (SOURCE, RC7_SOURCE)
                 or d.get('ir_resumable_version') != 1):
             raise Hold('INVALID_IR_CORE_OWNER')
         values = d.get('ir_inputs') or {}
@@ -254,7 +261,7 @@ class Journal:
 
     def panel_witness(self, d):
         domain, _ = self.ir_inputs(d)
-        self._ir_container_witness(d, 'smite-panel', IMAGES['smite-panel'])
+        self._ir_container_witness(d, 'smite-panel', CANDIDATES[d['source']][1]['smite-panel'])
         directory = self.root / 'opt/smite'
         trusted(directory, True)
         env = directory / '.env'
@@ -438,7 +445,7 @@ class Journal:
             if d.get('ir_phase') != 'PANEL_COMMITTED' or 'ir_node_rollback' in d:
                 raise Hold('IR_PANEL_CHECKPOINT_REQUIRED')
             self.panel_witness(d)
-            self._ir_container_witness(d, 'smite-node', IMAGES['smite-node'])
+            self._ir_container_witness(d, 'smite-node', CANDIDATES[d['source']][1]['smite-node'])
         expected = set(IMAGES) if d['role'] == 'panel-iran' else {'smite-node'}
         if {x['name'] for x in self.inspect_owned(d)} != expected:
             raise Hold('INCOMPLETE_CONTAINER_SET')
@@ -464,7 +471,7 @@ class Journal:
         """Read-only retained-install proof; never start/recreate containers."""
         if (d.get('state') != 'COMMITTED'
                 or d.get('role') != 'panel-iran'
-                or d.get('source') != SOURCE
+                or d.get('source') not in (SOURCE, RC7_SOURCE)
                 or d.get('ir_resumable_version') != 1
                 or d.get('ir_phase') not in IR_PHASES):
             raise Hold('IR_RESUME_NOT_OWNED_BY_THIS_INSTALL')
@@ -480,13 +487,13 @@ class Journal:
             values[key] = value
         if (values.get('SMITE_ROLE') != 'panel-iran'
                 or values.get('SMITE_CONNECTION_MODE') != 'standard'
-                or values.get('SMITE_MANAGED_VERSION') != VERSION
-                or values.get('SMITE_UPSTREAM_REF') != SOURCE):
+                or values.get('SMITE_MANAGED_VERSION') != CANDIDATES[d['source']][0]
+                or values.get('SMITE_UPSTREAM_REF') != d['source']):
             raise Hold('IR_RESUME_STATE_DRIFT')
         names = set(self.docker('ps', '-a', '--format', '{{.Names}}').splitlines())
         if not {'smite-panel', 'smite-node'} <= names:
             raise Hold('IR_RESUME_CONTAINERS_MISSING')
-        for name, ref in IMAGES.items():
+        for name, ref in CANDIDATES[d['source']][1].items():
             self._ir_container_witness(d, name, ref)
 
     def _ir_container_witness(self, d, name, ref):
@@ -525,7 +532,7 @@ class Journal:
         if d['state'] == 'ROLLED_BACK':
             return 'FRESH_ALLOWED', None
         if (d.get('state') != 'COMMITTED' or d.get('role') != 'panel-iran'
-                or d.get('source') != SOURCE
+                or d.get('source') not in (SOURCE, RC7_SOURCE)
                 or d.get('ir_resumable_version') != 1
                 or d.get('ir_phase') not in IR_PHASES):
             raise Hold('IR_GATEWAY_RECOVERY_NOT_ADMITTED')
@@ -632,6 +639,7 @@ def main():
             elif a.action == 'status':
                 d=j.load()
                 print('RC6_INSTALL_TRANSACTION=' + d['state'])
+                print('RC6_INSTALL_SOURCE=' + d['source'])
                 if d.get('ir_resumable_version') == 1:
                     print('IR_OPTION_1_STAGE=' + d.get('ir_phase','CORE_NOT_VERIFIED'))
             elif a.action == 'commit':

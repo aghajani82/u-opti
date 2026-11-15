@@ -189,6 +189,7 @@ class SealedRepositoryPinContract(unittest.TestCase):
                 "TRIAL_PANEL": panel, "TRIAL_NODE": node,
             },
             "modules/smite-node-pairing.py": {
+                "_FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL": panel,
                 "_FOREIGN_NODE_IMAGE_UNIFIED_TRIAL": node,
             },
         }

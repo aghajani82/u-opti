@@ -52,7 +52,7 @@ smite_install_field_trial_verify_candidate() {
     verifier="$helper_dir/smite-registry-pair-admission.py"
     manifest="$helper_dir/smite-field-trial-candidate.json"
     if [ "${SMITE_SELECTED_FRESH:-0}" = 1 ]; then
-        manifest="$helper_dir/smite-rc7-registry-pair.json"
+        manifest="$helper_dir/smite-unified-trial-registry-pair.json"
     fi
 
     [ -f "$verifier" ] && [ ! -L "$verifier" ] &&
@@ -2669,6 +2669,8 @@ smite_install_selected_paths() {
 # Check that the chosen signed RC7 Panel/Node source matches the ORIGINAL
 # fresh-install rollback journal before Docker or any install transaction.
 # The separately signed unified trial is NOT an admitted release.
+# A single exact selected RC9 pair for a NEW disposable Iran install.
+# RC7 stays an independently pinned journal candidate; production stays HOLD.
 smite_install_selected_pair_journal_review() {
     local module_dir="$1"
     python3 -B - "$module_dir/smite-rc6-install-journal.py" \
@@ -2677,70 +2679,64 @@ smite_install_selected_pair_journal_review() {
         "$SMITE_FIELD_TRIAL_SOURCE_SHA" "$SMITE_FIELD_TRIAL_VERSION" \
         "$SMITE_FIELD_TRIAL_PUBLISH_REF" "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" <<'PY_SOURCE_JOURNAL'
 import hashlib, importlib.util, json, pathlib, re, sys
-
 def hold():
     raise ValueError("signed selected source/rollback journal mismatch")
-
 def unique(items):
     result={}
     for key,value in items:
         if key in result: hold()
         result[key]=value
     return result
-
 try:
-    journal, official, trial = map(pathlib.Path,sys.argv[1:4])
+    journal, old_rc7, selected = map(pathlib.Path,sys.argv[1:4])
     source, version, ref, pin = sys.argv[4:8]
-    for path in (journal,official,trial):
+    for path in (journal,old_rc7,selected):
         if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 150000:
             hold()
-    raw_official=official.read_bytes()
-    raw_trial=trial.read_bytes()
+    old_raw, selected_raw = old_rc7.read_bytes(), selected.read_bytes()
     if (not re.fullmatch("[a-f0-9]{40}",source)
             or not re.fullmatch("[a-f0-9]{64}",pin)
-            or hashlib.sha256(raw_official).hexdigest()!=pin
-            or hashlib.sha256(raw_trial).hexdigest()!=
-                "f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60"):
+            or hashlib.sha256(old_raw).hexdigest()!="58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e"
+            or hashlib.sha256(selected_raw).hexdigest()!=pin
+            or pin!="f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60"):
         hold()
-    expected=json.loads(raw_official,object_pairs_hook=unique)
-    separate=json.loads(raw_trial,object_pairs_hook=unique)
-    spec=importlib.util.spec_from_file_location(
-        "uopti_rc7_existing_install_journal_review",journal)
+    old=json.loads(old_raw,object_pairs_hook=unique)
+    expected=json.loads(selected_raw,object_pairs_hook=unique)
+    spec=importlib.util.spec_from_file_location("uopti_rc9_existing_install_journal_review",journal)
     if spec is None or spec.loader is None: hold()
     mod=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    if (source!="9a1270b31e8d44f13d09b71ab6b9798410b09c12"
-            or version!="2.0.0-rc.7" or ref!="refs/tags/v2.0.0-rc.7"
+    if (source!="e7f76185e9a7da51d7069d5d0a829dc192cc1e06" or version!="2.0.0-rc.9"
+            or ref!="refs/tags/v2.0.0-rc.9"
             or expected.get("source_repo")!="aghajani82/Smite"
             or expected.get("kind")!="smite_signed_registry_pair_candidate"
             or expected.get("source_commit")!=source
             or expected.get("version")!=version or expected.get("publish_ref")!=ref
             or expected.get("activation_allowed") is not False
             or expected.get("release_approved") is not False
-            or not isinstance(expected.get("images"),dict)
-            or set(expected["images"])!={"panel","node"}
+            or expected.get("images")!={"panel":"ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e","node":"ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"}
             or mod.SOURCE!=source or mod.VERSION!=version
             or mod.IMAGES!={"smite-panel":expected["images"]["panel"],
                             "smite-node":expected["images"]["node"]}
             or mod.CANDIDATES.get(source)!=(version,mod.IMAGES)):
         hold()
-    if (separate.get("source_commit")!="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
-            or separate.get("kind")!="smite_signed_registry_pair_candidate"
-            or separate.get("publish_ref")!="refs/tags/v2.0.0-rc.9"
-            or separate.get("version")!="2.0.0-rc.9"
-            or separate.get("release_approved") is not False
-            or separate.get("activation_allowed") is not False
-            or not isinstance(separate.get("images"),dict)
-            or set(separate["images"])!={"panel","node"}
-            or separate["images"]==expected["images"]
-            or separate["source_commit"] in mod.CANDIDATES):
+    if (old.get("source_commit")!="9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+            or old.get("publish_ref")!="refs/tags/v2.0.0-rc.7"
+            or old.get("version")!="2.0.0-rc.7"
+            or old.get("release_approved") is not False
+            or old.get("activation_allowed") is not False
+            or old.get("images")!={"panel":"ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8","node":"ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"}
+            or mod.RC7_SOURCE!=old["source_commit"]
+            or mod.RC7_IMAGES!={"smite-panel":old["images"]["panel"],
+                                "smite-node":old["images"]["node"]}
+            or mod.CANDIDATES.get(mod.RC7_SOURCE)!=("2.0.0-rc.7",mod.RC7_IMAGES)):
         hold()
 except (OSError,ValueError,TypeError,AttributeError,KeyError,ImportError):
-    print("HOLD: Signed Smite source and existing rollback journal disagree",
-          file=sys.stderr)
+    print("HOLD: Signed RC9 source and existing rollback journal disagree",file=sys.stderr)
     sys.exit(2)
-print("SELECTED_RC7_PAIR_JOURNAL=EXACT_MATCH")
-print("UNIFIED_TRIAL_JOURNAL=SEPARATE_NOT_ADMITTED")
+print("SELECTED_RC9_PAIR_JOURNAL=EXACT_MATCH")
+print("RC7_JOURNAL=RETAINED_SEPARATE_SOURCE")
+print("HOST_PRODUCTION_RELEASE=NOT_APPROVED")
 PY_SOURCE_JOURNAL
 }
 
@@ -2809,7 +2805,7 @@ smite_install_selected_fresh() (
     fi
     smite_install_selected_paths || { echo 'HOLD: Selected recovery requires standard managed paths'; return 2; }
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
-    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC7 images qualify amd64 only'; return 2; }
+    [ "$(uname -m)" = x86_64 ] || { echo 'HOLD: selected RC9 images qualify amd64 only'; return 2; }
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
     # Only an explicitly resumable, signed Iran journal may resume here.
     local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
@@ -2818,14 +2814,14 @@ smite_install_selected_fresh() (
     local SMITE_GATEWAY_ACME_CONF_DIR=/etc/nginx/conf.d
     local SMITE_INSTALL_FAILURE_CODE=2
     local SMITE_RC_SIGNED_REGISTRY=1 SMITE_FIELD_TRIAL_APPROVED=YES
-    local SMITE_FIELD_TRIAL_SOURCE_SHA=9a1270b31e8d44f13d09b71ab6b9798410b09c12
-    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.7
-    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.7
-    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
+    local SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.9
+    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.9
+    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60
     local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
     local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
     local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
-    local SMITE_UPSTREAM_VERSION=2.0.0-rc.7
+    local SMITE_UPSTREAM_VERSION=2.0.0-rc.9
     local SMITE_PANEL_IMAGE SMITE_NODE_IMAGE
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     smite_install_selected_pair_journal_review "$module_dir" || return 2
@@ -2842,6 +2838,13 @@ smite_install_selected_fresh() (
     }
 
     if [ -e "$journal_file" ] || [ -L "$journal_file" ]; then
+        # No silent RC7 -> RC9 migration, including after an interrupted install.
+        local selected_status
+        selected_status="$(python3 -B "$module_dir/smite-rc6-install-journal.py" status)" || return 2
+        if ! grep -Fxq "RC6_INSTALL_SOURCE=$SMITE_FIELD_TRIAL_SOURCE_SHA" <<< "$selected_status"; then
+            echo 'HOLD: retained RC6/RC7 journal is not an RC9 fresh transaction.' >&2
+            return 2
+        fi
         core_recovery="$(python3 -B "$module_dir/smite-rc6-install-journal.py" recover-ir-core \
             --installer-pid "$installer_pid")" || return 2
         if [ -n "$core_recovery" ]; then
@@ -2925,7 +2928,7 @@ smite_install_selected_fresh() (
                 return 2
             fi
         done
-        echo 'Selected Smite 2.0.0-rc.7: fresh-host qualification candidate, not yet stable.'
+        echo 'Selected Smite 2.0.0-rc.9: disposable Iran qualification candidate, not production.'
         if [ -z "$panel_domain" ]; then
             read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
             case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac

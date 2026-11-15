@@ -115,26 +115,30 @@ print(code.code)
 
 
 def complete_local_ir_install(state: dict[str, str]) -> None:
-    """Fresh RC7 only; retain one identity across retries, never rekey it."""
+    """Fresh RC7/RC9 only; retain one identity across retries, never rekey it."""
     _field_trial_gate()
     if (state.get('SMITE_ROLE') != 'panel-iran'
-            or state.get('SMITE_CONNECTION_MODE') != 'standard'
-            or state.get('SMITE_MANAGED_VERSION') != '2.0.0-rc.7'):
-        raise WizardHold('Local bootstrap requires the selected RC7 IR install')
+            or state.get('SMITE_CONNECTION_MODE') != 'standard'):
+        raise WizardHold('Local bootstrap requires a signed Iran install')
+    # Preserve RC7 but never accept a mixed RC7/RC9 pair.
+    exact_pairs = {
+        '2.0.0-rc.7': (_FOREIGN_PANEL_IMAGE_RC7, _FOREIGN_NODE_IMAGE_RC7),
+        '2.0.0-rc.9': (_FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL, _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL),
+    }
+    expected_pair = exact_pairs.get(state.get('SMITE_MANAGED_VERSION'))
+    if expected_pair is None:
+        raise WizardHold('Local bootstrap version is not signed and pinned')
     name = state.get('SMITE_NODE_NAME', '')
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,62}', name):
         raise WizardHold('Invalid local IR name')
     domain = state.get('SMITE_PANEL_DOMAIN', '')
     secure_endpoint('https://' + domain)
     _require_no_active_engine_overlays()
-    for container, expected in (
-        ('smite-panel', _FOREIGN_PANEL_IMAGE_RC7),
-        ('smite-node', _FOREIGN_NODE_IMAGE_RC7),
-    ):
+    for container, expected in zip(('smite-panel', 'smite-node'), expected_pair):
         actual = _run(['docker', 'inspect', '-f', '{{.Config.Image}}', container],
                       capture=True, timeout=15)
         if actual != expected:
-            raise WizardHold('Local bootstrap image differs from selected RC7')
+            raise WizardHold('Local bootstrap image differs from pinned version pair')
     _panel_compose_command()
     # Validate ownership/file set without executing the returned command. The
     # inspection must also admit the already-active candidate on a safe retry.
@@ -1347,6 +1351,7 @@ _FOREIGN_PANEL_IMAGE_RC2 = (
     "9101898e19631d334b754ba8e956b63ab7dfaee304a8f9b954cf30a185125e8e"
 )
 _FOREIGN_PANEL_IMAGE_RC7 = "ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8"
+_FOREIGN_PANEL_IMAGE_UNIFIED_TRIAL = "ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"
 _FOREIGN_NODE_IMAGE_RC7 = "ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"
 # Branch-signed candidate for explicit *read-only* admission only. This image
 # is not accepted by the existing foreign runtime activation or rollback path.

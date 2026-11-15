@@ -80,14 +80,14 @@ sha256sum() {
     else command sha256sum "$@"; fi
 }
 smite_install_clean_rc_preflight() {
-    [ "$SMITE_FIELD_TRIAL_SOURCE_SHA" = 9a1270b31e8d44f13d09b71ab6b9798410b09c12 ]
-    [ "$SMITE_FIELD_TRIAL_PUBLISH_REF" = refs/tags/v2.0.0-rc.7 ]
-    [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.7 ]
+    [ "$SMITE_FIELD_TRIAL_SOURCE_SHA" = e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ]
+    [ "$SMITE_FIELD_TRIAL_PUBLISH_REF" = refs/tags/v2.0.0-rc.9 ]
+    [ "$SMITE_FIELD_TRIAL_VERSION" = 2.0.0-rc.9 ]
     [ "$SMITE_UPSTREAM_REF" = "$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_UPSTREAM_RAW" = "https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA" ]
     [ "$SMITE_SELECTED_FRESH:$SMITE_INSTALL_PROFILE:$SMITE_RC_SIGNED_REGISTRY" = 1:clean-rc:1 ]
     [ -f "$SMITE_SELECTED_TRUSTED_ROOT" ]
-    [ "$(command sha256sum "$ROOT/modules/smite-rc7-registry-pair.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
+    [ "$(command sha256sum "$ROOT/modules/smite-unified-trial-registry-pair.json" | cut -d' ' -f1)" = "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" ]
     [ -z "${DOCKER_HOST:-}" ]
     [ -z "${DOCKER_CONTEXT:-}" ]
     [ "${FAIL_SIGNATURE:-0}" = 0 ] || return 2
@@ -96,6 +96,7 @@ python3() {
     if [[ "${2:-}" == */smite-rc6-install-journal.py ]]; then
         case "$*" in
             *' prepare') touch "$TMP/operation.lock" ;;
+            *' status') echo "RC6_INSTALL_SOURCE=$SMITE_FIELD_TRIAL_SOURCE_SHA" ;;
             *' begin '*) echo "$PROJECT" ;;
             *' commit-ir-panel '*) : ;;
             *' recover-ir-core '*)
@@ -198,7 +199,7 @@ rm "$TMP/dispatch"
 SMITE_INSTALL_PROFILE=stable
 printf '1\n%s\n0\n' "$IR_INPUT" | show_smite_install_menu > "$TMP/menu.log"
 [ "$(cat "$TMP/dispatch")" = $'panel\nnode' ]
-grep -q 'Selected Smite 2.0.0-rc.7' "$TMP/menu.log"
+grep -q 'Selected Smite 2.0.0-rc.9' "$TMP/menu.log"
 export FAIL_SIGNATURE=1
 printf '1\n%s\n0\n' "$IR_INPUT" | show_smite_install_menu > "$TMP/failed-menu.log"
 unset FAIL_SIGNATURE

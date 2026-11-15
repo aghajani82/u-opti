@@ -202,13 +202,13 @@ for file in smite-rc6-install-journal.py smite-rc7-registry-pair.json \
             smite-unified-trial-registry-pair.json; do
     cp "$ROOT/modules/$file" "$PAIR_ROOT/$file"
 done
-SMITE_FIELD_TRIAL_SOURCE_SHA=9a1270b31e8d44f13d09b71ab6b9798410b09c12
-SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.7
-SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.7
-SMITE_FIELD_TRIAL_MANIFEST_SHA256=58bebfc605a5c1a64cf02ce38e6397dbcdae5f1c3289a01952f361b6a8aa660e
+SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.9
+SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.9
+SMITE_FIELD_TRIAL_MANIFEST_SHA256=f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60
 smite_install_selected_pair_journal_review "$PAIR_ROOT" > "$TMP/pair-review"
-grep -qx 'SELECTED_RC7_PAIR_JOURNAL=EXACT_MATCH' "$TMP/pair-review"
-grep -qx 'UNIFIED_TRIAL_JOURNAL=SEPARATE_NOT_ADMITTED' "$TMP/pair-review"
+grep -qx 'SELECTED_RC9_PAIR_JOURNAL=EXACT_MATCH' "$TMP/pair-review"
+grep -qx 'RC7_JOURNAL=RETAINED_SEPARATE_SOURCE' "$TMP/pair-review"
 sed -i 's/^SOURCE = .*/SOURCE = "0000000000000000000000000000000000000000"/' \
     "$PAIR_ROOT/smite-rc6-install-journal.py"
 status=0
@@ -236,4 +236,4 @@ assert selected.index(review) < selected.index('smite_install_ensure_docker || r
 assert selected.index(review) < selected.index('smite-rc6-install-journal.py" begin')
 assert selected.index('FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES') < selected.index(review)
 PY_REVIEW_ORDER
-echo 'SELECTED_SIGNED_RC7_JOURNAL_COHERENCE=PASS'
+echo 'SELECTED_SIGNED_RC9_JOURNAL_COHERENCE=PASS'
