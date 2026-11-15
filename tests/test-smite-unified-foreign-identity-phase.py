@@ -442,6 +442,24 @@ class IdentityPhase(unittest.TestCase):
         self.assertFalse((self.stage / "unified-foreign-transaction.lock").exists())
         self.assertFalse(self.live.exists())
 
+    def test_final_selected_activation_cli_is_release_hold_no_fake_connected(self):
+        # This is the SAME original pairing/identity journal, not a second
+        # credential or menu path. Current signed RC9 trial denies activation
+        # BEFORE a Node can be started, rekeyed or reported Connected.
+        executable = ROOT / "modules" / "smite-unified-foreign-identity-phase.py"
+        result = subprocess.run(
+            [sys.executable, "-B", str(executable),
+             "--activate-selected-foreign", "--installer-pid", str(os.getpid())],
+            capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("FOREIGN_CONNECTED=SIGNED_BIDIRECTIONAL_VERIFIED",
+                         result.stdout + result.stderr)
+        self.assertIn("FOREIGN_CONNECTED=NOT_PROVEN", result.stderr)
+        self.assertNotIn(self.doc["installation_code"],
+                         result.stdout + result.stderr)
+        self.assertFalse(self.live.exists())
+        self.assertFalse(self.calls)
+
     def test_selected_cli_does_not_expose_identity_without_signed_release(self):
         executable = ROOT / "modules" / "smite-unified-foreign-identity-phase.py"
         p = subprocess.run(
