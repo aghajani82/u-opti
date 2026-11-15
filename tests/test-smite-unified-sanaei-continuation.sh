@@ -125,9 +125,9 @@ DOCKER_BAD_OWNER=0
 docker() {
     DOCKER_CALLS=$((DOCKER_CALLS + 1))
     case "$*" in
+        *com.docker.compose.project.config_files*) printf '%s\n' "$SMITE_NODE_COMPOSE" ;;
         *com.docker.compose.project*) [ "$DOCKER_BAD_OWNER" != 1 ] && echo "$OWNED_PROJECT" || echo other ;;
         *com.docker.compose.service*) echo smite-node ;;
-        *com.docker.compose.project.config_files*) printf '%s\n' "$SMITE_NODE_COMPOSE" ;;
         *'range .Config.Env'*) printf '%s\n' SMITE_NODE_PANEL_AUTH_MODE=paused SMITE_AGENT_AUTH_MODE=strict ;;
         *) echo "Unexpected Docker command" >&2; return 89 ;;
     esac
