@@ -2306,7 +2306,11 @@ smite_install_unified_foreign_begin_core_from_panel() {
     # BASHPID inside $(python ...) is the transient command-substitution
     # child, not the installer process that holds the stage operation lock.
     # Capture it in the caller before launching the original Journal CLI.
-    local packet="${1:-}" module_dir project source installer_pid="$BASHPID"
+    # The selected option-2 coordinator may call this inside $(). Its
+    # process owner must be captured by the OUTER installer before that
+    # substitution, never inferred from the short-lived helper child.
+    local packet="${1:-}" module_dir project source installer_pid="${2:-$BASHPID}"
+    [[ "$installer_pid" =~ ^[1-9][0-9]*$ ]] || return 2
     source='e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
@@ -2352,6 +2356,7 @@ smite_install_unified_foreign_begin_core_from_panel() {
 # any new real-root RC9 Foreign owner until separately approved.
 smite_install_unified_foreign_core_stage() {
     local packet="${1:-}" module_dir journal_file output stage project commit_result
+    local installer_pid="$BASHPID"
     local -a lines=()
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
@@ -2384,7 +2389,7 @@ smite_install_unified_foreign_core_stage() {
         [ "${lines[0]}" = "FOREIGN_CORE_STAGE=$stage" ] &&
         [ "${lines[1]}" = "FOREIGN_CORE_PROJECT=$project" ] || return 2
     else
-        output="$(smite_install_unified_foreign_begin_core_from_panel "$packet")" || return 2
+        output="$(smite_install_unified_foreign_begin_core_from_panel "$packet" "$installer_pid")" || return 2
         [[ "$output" =~ ^FOREIGN_CORE_OWNER=uopti_rc6_[a-f0-9]{32}$ ]] || return 2
         project="${output#FOREIGN_CORE_OWNER=}"
         stage=CORE_PENDING
