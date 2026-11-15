@@ -789,3 +789,77 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
 )
 
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'
+
+# Selected option-2 identity bridge: original stage order, no duplicate
+# Pairing menu, no claim of activation or Connected until live proof.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    STAGE_FAIL=
+    : > "$TMP/selected-identity-stage-calls"
+    smite_install_unified_foreign_pre_pairing_stages() {
+        printf 'core-sanaei-443\n' >> "$TMP/selected-identity-stage-calls"
+        [ "$STAGE_FAIL" != core ]
+    }
+    smite_install_unified_foreign_identity_stage() {
+        printf 'original-identity\n' >> "$TMP/selected-identity-stage-calls"
+        [ "$STAGE_FAIL" != identity ]
+    }
+    : > "$TMP/selected-identity-stage-calls"
+    smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-identity-ok"
+    [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity')" ]
+    grep -qx 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED' "$TMP/selected-identity-ok"
+    grep -qx 'FOREIGN_NODE_ACTIVATION=NOT_PERFORMED' "$TMP/selected-identity-ok"
+    grep -qx 'FOREIGN_CONNECTED=NOT_PROVEN' "$TMP/selected-identity-ok"
+    STAGE_FAIL=core
+    : > "$TMP/selected-identity-stage-calls"
+    if smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-identity-core-failed"; then
+        echo 'FAIL: failed Core advanced to Identity' >&2; exit 1
+    fi
+    [ "$(cat "$TMP/selected-identity-stage-calls")" = core-sanaei-443 ]
+    ! grep -q 'FOREIGN_OPTION2_IDENTITY=' "$TMP/selected-identity-core-failed"
+    STAGE_FAIL=identity
+    : > "$TMP/selected-identity-stage-calls"
+    if smite_install_unified_foreign_selected_stages "$PACKET" > "$TMP/selected-identity-denied"; then
+        echo 'FAIL: unproved Identity marked ready' >&2; exit 1
+    fi
+    [ "$(cat "$TMP/selected-identity-stage-calls")" = "$(printf 'core-sanaei-443\noriginal-identity')" ]
+    ! grep -q 'FOREIGN_OPTION2_IDENTITY=' "$TMP/selected-identity-denied"
+)
+
+# The actual root identity stage must refuse a temporary/symlinked or
+# otherwise non-owned packet BEFORE release review, Python, or redemption.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    smite_install_unified_signed_pair_review() {
+        echo NOT_CALLED >&2
+        return 2
+    }
+    if smite_install_unified_foreign_identity_stage "$PACKET" > "$TMP/identity-root-guard" 2>&1; then
+        echo 'FAIL: temporary packet admitted by original root identity path' >&2; exit 1
+    fi
+    grep -q 'requires the retained original private Panel packet' "$TMP/identity-root-guard"
+    ! grep -q 'NOT_CALLED' "$TMP/identity-root-guard"
+)
+python3 - "$ROOT/modules/smite-install.sh" <<'PY_SELECTED_HMAC_BRIDGE'
+from pathlib import Path
+import sys
+s=Path(sys.argv[1]).read_text()
+body=s.split('smite_install_unified_foreign_identity_stage() {',1)[1].split(
+    '\nsmite_install_unified_foreign_selected_stages() {',1)[0]
+for marker in (
+    "smite_install_unified_signed_pair_review",
+    "smite_install_unified_foreign_identity_preflight",
+    "smite-unified-foreign-identity-phase.py",
+    "--selected-foreign --installer-pid",
+):
+    assert marker in body, marker
+assert body.index('smite_install_unified_signed_pair_review') < body.index(
+    'smite_install_unified_foreign_identity_preflight') < body.index(
+    '--selected-foreign --installer-pid')
+assert "FOREIGN_CONNECTED=YES" not in body
+PY_SELECTED_HMAC_BRIDGE
+echo 'FOREIGN_OPTION2_ORIGINAL_SIGNED_IDENTITY_BRIDGE=PASS_ISOLATED'
