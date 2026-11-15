@@ -159,6 +159,22 @@ class ForeignActivationReview(unittest.TestCase):
                           "inspect","inspect","inspect","inspect",
                           "identity","replay"])
 
+    def test_rc9_readonly_signed_scope_never_authorizes_foreign_activation(self):
+        self.state["SMITE_MANAGED_VERSION"]="2.0.0-rc.9"
+        self.state["SMITE_UPSTREAM_REF"]=reviewer.SOURCE
+        result=self.review()
+        self.assertEqual(result["admission"],"READY_READ_ONLY")
+        self.assertFalse(result["activation_allowed"])
+        self.assertFalse(result["bidirectional_connected"])
+        self.state["SMITE_UPSTREAM_REF"]="0"*40
+        self.pairing_calls.clear()
+        with self.assertRaises(reviewer.Hold):
+            self.review()
+        self.assertEqual(self.pairing_calls,["state"])
+        self.state.pop("SMITE_UPSTREAM_REF")
+        with self.assertRaises(reviewer.Hold):
+            self.review()
+
     def test_invalid_signature_never_reaches_host_runtime(self):
         for reason in ("exit","digest","claim"):
             self.signature_failure=reason

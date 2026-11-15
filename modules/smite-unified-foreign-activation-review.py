@@ -69,7 +69,9 @@ def review(*, signature_runner=subprocess.run, pairing=None):
 
         current = pairing.state_values()
         if (current.get("SMITE_ROLE") != "foreign"
-                or current.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.7"
+                or current.get("SMITE_MANAGED_VERSION") not in ("2.0.0-rc.7", "2.0.0-rc.9")
+                or (current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.9"
+                    and current.get("SMITE_UPSTREAM_REF") != SOURCE)
                 or current.get("SMITE_CONNECTION_MODE") != "standard"):
             deny()
         # Existing read-only RC7 security contract checks the exact reviewed

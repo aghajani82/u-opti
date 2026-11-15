@@ -226,6 +226,21 @@ class ForeignReadOnlyWitnesses(unittest.TestCase):
         self.assertTrue(any(c=="cosign" for c in self.calls))
         self.assertNotIn("full_gateway",self.calls)
 
+    def test_rc9_readonly_witness_requires_exact_source_and_preserves_absence(self):
+        self.current["SMITE_MANAGED_VERSION"]="2.0.0-rc.9"
+        self.current["SMITE_UPSTREAM_REF"]=w.SOURCE
+        self.assertIs(self.observer.core(self.scope), True)
+        self.assertEqual(self.observer.sanaei(self.scope),"ABSENT")
+        self.assertEqual(self.observer.gateway(self.scope),"ABSENT")
+        self.assertNotIn("full_gateway",self.calls)
+        for wrong in ("0"*40,"9a1270b31e8d44f13d09b71ab6b9798410b09c12"):
+            self.current["SMITE_UPSTREAM_REF"]=wrong
+            self.assertFalse(self.observer.core(self.scope))
+            self.assertEqual(self.observer.gateway(self.scope),"DRIFT")
+        self.current.pop("SMITE_UPSTREAM_REF")
+        self.assertFalse(self.observer.core(self.scope))
+        self.assertFalse((self.state_root/"foreign-gateway.env").exists())
+
     def test_core_refuses_mutated_roles_digest_health_and_compose(self):
         self.assertIs(self.observer.core(self.scope),True)
         self.overlays=True

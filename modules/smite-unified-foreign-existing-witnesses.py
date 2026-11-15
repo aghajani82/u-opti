@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Existing RC7 foreign runtime read-only witness adapter (trial, NOT activated).
+"""Existing RC7/RC9 foreign runtime read-only witness adapter (trial, NOT activated).
 
 Feeds independently observed CORE/SANAEI/GATEWAY truth to the disposable
 host recovery rehearsal. No installer, mutation, downgrade, or real-host CLI.
@@ -118,7 +118,9 @@ class ExistingWitnesses:
         state = p.state_values()
         if (not isinstance(scope, dict)
                 or state.get("SMITE_ROLE") != "foreign"
-                or state.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.7"
+                or state.get("SMITE_MANAGED_VERSION") not in ("2.0.0-rc.7", "2.0.0-rc.9")
+                or (state.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.9"
+                    and state.get("SMITE_UPSTREAM_REF") != SOURCE)
                 or state.get("SMITE_CONNECTION_MODE") != "standard"
                 or state.get("SMITE_NODE_NAME") != scope.get("node_name")
                 or state.get("SMITE_PANEL_DOMAIN") != urlsplit(scope["panel_url"]).hostname
@@ -164,7 +166,7 @@ class ExistingWitnesses:
             deny()
 
     def core(self, scope):
-        """The NEW, *unpaired* RC7 trial Node is running paused and strict."""
+        """The NEW, *unpaired* signed trial Node is running paused and strict."""
         try:
             self._signed()
             state = self._state(scope)

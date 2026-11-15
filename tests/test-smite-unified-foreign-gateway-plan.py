@@ -108,6 +108,24 @@ class GatewayScope(unittest.TestCase):
         self.assertFalse(self.status.exists())
         self.assertFalse(self.site.exists())
 
+    def test_rc9_source_pinned_packet_admission_is_read_only(self):
+        baseline=self.state.read_bytes()
+        exact=baseline.replace(b"SMITE_MANAGED_VERSION=2.0.0-rc.7",
+            b"SMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06")
+        self.write(self.state,exact)
+        self.assertEqual(self.admit(),PATH)
+        self.assertFalse(self.site.exists())
+        self.assertFalse(self.status.exists())
+        for changed in (
+            exact.replace(b"SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
+                          b"SMITE_UPSTREAM_REF=" + b"0"*40),
+            exact.replace(b"SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\n",b""),
+        ):
+            self.write(self.state,changed)
+            with self.assertRaises(gateway.Hold):self.admit()
+        self.write(self.state,baseline)
+        self.assertEqual(self.admit(),PATH)
+
     def test_valid_shared_sanaei_site_existing_managed_location(self):
         self.write(self.site,(
             "# U-OPTI-MANAGED-3XUI-NGINX\n"

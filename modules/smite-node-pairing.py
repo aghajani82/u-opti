@@ -1670,15 +1670,20 @@ def _foreign_gateway_preflight(
 ) -> tuple[str, str, str]:
     """Read-only managed Gateway metadata; unified trial never activates."""
     version = current.get("SMITE_MANAGED_VERSION")
-    if current.get("SMITE_ROLE") != "foreign" or version not in ("2.0.0-rc.1", "2.0.0-rc.7"):
+    if current.get("SMITE_ROLE") != "foreign" or version not in ("2.0.0-rc.1", "2.0.0-rc.7", "2.0.0-rc.9"):
         raise WizardHold("Foreign activation requires an exact reviewed signed Node")
     if review_unified_trial:
         if (type(review_unified_trial) is not bool
-                or version != "2.0.0-rc.7"
+                or version not in ("2.0.0-rc.7", "2.0.0-rc.9")
+                or (version == "2.0.0-rc.9" and
+                    current.get("SMITE_UPSTREAM_REF") != "e7f76185e9a7da51d7069d5d0a829dc192cc1e06")
                 or expected_image not in (None, _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL)
                 or allow_unattached_sanaei):
-            raise WizardHold("Unified Foreign image review is exact RC7 read-only only")
+            raise WizardHold("Unified Foreign review requires an exact RC9 source when installed as RC9")
         expected_image = _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
+    elif version == "2.0.0-rc.9":
+        # No mutation/activation/rollback from the public or legacy path.
+        raise WizardHold("RC9 Foreign requires separate signed release approval")
     elif version == "2.0.0-rc.7":
         if expected_image not in (None, _FOREIGN_NODE_IMAGE_RC7):
             raise WizardHold("RC7 cannot activate using an earlier Foreign image")

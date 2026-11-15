@@ -109,7 +109,9 @@ def admit(*, packet_path, state_path, gateway_state_path=None, site_path=None):
     foreign = urlsplit(scope['origin']).hostname
     path = urlsplit(scope['control_url']).path
     if (state.get('SMITE_ROLE') != 'foreign'
-            or state.get('SMITE_MANAGED_VERSION') != '2.0.0-rc.7'
+            or state.get('SMITE_MANAGED_VERSION') not in ('2.0.0-rc.7', '2.0.0-rc.9')
+            or (state.get('SMITE_MANAGED_VERSION') == '2.0.0-rc.9'
+                and state.get('SMITE_UPSTREAM_REF') != 'e7f76185e9a7da51d7069d5d0a829dc192cc1e06')
             or state.get('SMITE_CONNECTION_MODE') != 'standard'
             or state.get('SMITE_PANEL_DOMAIN') != panel
             or state.get('SMITE_FOREIGN_DOMAIN') != foreign
