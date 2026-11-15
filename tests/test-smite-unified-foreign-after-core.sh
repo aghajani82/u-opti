@@ -478,4 +478,105 @@ smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-co
 [ "$status" = 2 ] && [ ! -s "$TMP/foreign-core-cli-calls" ]
 echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_HOST_WRITES'
 
+# Test the REAL new Core-stage decision function, confined to the disposable
+# TMP journal locator. All Python/Docker/Node actions are mocked: never write
+# /var/lib/u-opti or touch real services. The signed release still HOLDs.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    SMITE_NODE_IMAGE=ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2
+    local_definition="$(declare -f smite_install_unified_foreign_core_stage)"
+    original_locator="journal_file=/var/lib/u-opti/rc6-install-journal/current.json"
+    [[ "$local_definition" == *"$original_locator"* ]] || {
+        echo "FAIL: original root owner locator changed"; exit 1;
+    }
+    local_definition="${local_definition/$original_locator/journal_file=$TMP\/core-current.json}"
+    eval "$local_definition"
+    PROJECT="uopti_rc6_$(printf 'a%.0s' {1..32})"
+    : > "$TMP/core-stage-calls"
+    RELEASE_FIXTURE=HOLD
+    FIX_STAGE=CORE_PENDING
+    MOCK_NODE_FAIL=0
+    smite_install_unified_signed_pair_review() {
+        printf 'release\n' >> "$TMP/core-stage-calls"
+        [ "$RELEASE_FIXTURE" = pass ]
+    }
+    smite_install_unified_foreign_begin_core_from_panel() {
+        printf 'begin\n' >> "$TMP/core-stage-calls"
+        printf 'FOREIGN_CORE_OWNER=%s\n' "$PROJECT"
+    }
+    smite_install_foreign_node() {
+        printf 'install\n' >> "$TMP/core-stage-calls"
+        [ "$COMPOSE_PROJECT_NAME" = "$PROJECT" ] &&
+        [ "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" = "$PACKET" ] &&
+        [ "$MOCK_NODE_FAIL" = 0 ]
+    }
+    python3() {
+        case "$*" in
+            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET")
+                printf 'resume\n' >> "$TMP/core-stage-calls"
+                printf 'FOREIGN_CORE_STAGE=%s\nFOREIGN_CORE_PROJECT=%s\n' "$FIX_STAGE" "$PROJECT" ;;
+            *"smite-rc6-install-journal.py commit")
+                printf 'commit\n' >> "$TMP/core-stage-calls"
+                printf 'RC6_INSTALL_TRANSACTION=COMMITTED\n' ;;
+            *) printf 'FAIL: unexpected Core command\n' >&2; return 77 ;;
+        esac
+    }
+    case_core() {
+        local expected_rc="$1" expected_calls="$2" result=0
+        : > "$TMP/core-stage-calls"
+        smite_install_unified_foreign_core_stage "$PACKET" \
+            > "$TMP/core-stage-report" 2>&1 || result=$?
+        [ "$result" -eq "$expected_rc" ] || {
+            echo "FAIL: Core stage return $result expected $expected_rc"; cat "$TMP/core-stage-report"; exit 1;
+        }
+        [ "$(cat "$TMP/core-stage-calls")" = "$expected_calls" ] || {
+            echo 'FAIL: wrong Core stage callbacks'
+            cat "$TMP/core-stage-calls"; exit 1;
+        }
+        if [ "$result" -eq 0 ]; then
+            grep -qx "FOREIGN_CORE_PROJECT=$PROJECT" "$TMP/core-stage-report"
+            grep -qx 'FOREIGN_CORE_STAGE=CORE_COMMITTED' "$TMP/core-stage-report"
+            grep -qx 'FOREIGN_CORE_NEXT=EXISTING_SANAEI_GATEWAY_SIGNED_PAIRING' "$TMP/core-stage-report"
+        else
+            ! grep -q '^FOREIGN_CORE_STAGE=CORE_COMMITTED' "$TMP/core-stage-report"
+        fi
+    }
+    # No host Core action, not even resume read, before signed release.
+    case_core 2 'release'
+    RELEASE_FIXTURE=pass
+    case_core 0 
+release\nbegin\ninstall\ncommit'
+    touch "$TMP/core-current.json"
+    FIX_STAGE=CORE_PENDING
+    case_core 0 
+release\nresume\ninstall\ncommit'
+    MOCK_NODE_FAIL=1
+    case_core 2 
+release\nresume\ninstall'
+    MOCK_NODE_FAIL=0
+    FIX_STAGE=CORE_READY_TO_COMMIT
+    case_core 0 
+release\nresume\ncommit'
+    FIX_STAGE=CORE_COMMITTED
+    case_core 0 
+release\nresume'
+    FIX_STAGE=INVALID
+    case_core 2 
+release\nresume'
+    PROJECT=not_an_owned_project
+    FIX_STAGE=CORE_PENDING
+    case_core 2 
+release\nresume'
+    ln -s "$PACKET" "$TMP/symlink-packet"
+    : > "$TMP/core-stage-calls"
+    if smite_install_unified_foreign_core_stage "$TMP/symlink-packet" \
+        > "$TMP/core-stage-symlink" 2>&1; then
+        echo 'FAIL: symlinked private packet accepted'; exit 1
+    fi
+    [ ! -s "$TMP/core-stage-calls" ]
+    echo 'UNIFIED_FOREIGN_CORE_STAGE=PASS_ISOLATED_RESUME_AND_NO_RECREATE'
+)
+
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'
