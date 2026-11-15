@@ -153,6 +153,97 @@ class UnifiedForeignOption2(unittest.TestCase):
             self.assertNotIn("node_secret", raw)
             self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
 
+    def test_original_rc9_core_owner_handoff_to_existing_host_and_identity_journals(self):
+        # Core is committed by the ORIGINAL fresh U-OPTI journal; this
+        # test exercises real source/image/scope checks before the existing
+        # Sanaei, 443 and signed-identity phase sequence, with NO host I/O.
+        import subprocess
+        core_mod = load("option2_original_rc9_core_owner",
+                        ROOT / "modules" / "smite-rc6-install-journal.py")
+        p = self.fixture
+        source = core_mod.RC9_SOURCE
+        p.write(p.state, p.state.read_text().replace(
+            "SMITE_MANAGED_VERSION=2.0.0-rc.7",
+            "SMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF="+source))
+        root = p.base / "core-owner"
+        root.mkdir(mode=0o700)
+        current = {}
+        def runner(args, **kwargs):
+            if args[:3] == ["docker", "--host", "unix:///var/run/docker.sock"]:
+                action = args[3]
+                if action == "ps":
+                    output = "smite-node\n" if current else ""
+                elif action == "inspect":
+                    self.assertEqual(args[4], "smite-node")
+                    output = json.dumps([current["smite-node"]])
+                else:
+                    raise AssertionError("No Docker mutation allowed")
+                return subprocess.CompletedProcess(args, 0, output, "")
+            raise AssertionError("No system/service access allowed")
+        owner = core_mod.Journal(root, runner)
+        owner.folder.mkdir(parents=True, mode=0o700)
+        scope = ("panel.example.com", "kh.example.com",
+                 p.doc["node_name"], p.doc["node_id"],
+                 "/smite-node/" + "a"*32)
+        project = owner.begin("foreign", source=source,
+                              resumable_foreign=True, foreign_inputs=scope)
+        self.assertEqual(owner.load()["state"], "INSTALLING")
+        # A partially installed, or an inconsistent Core cannot start the
+        # Host journal or redeem a grant.
+        self.events.clear()
+        with self.assertRaises(host.Hold):
+            self.run_option2(core_owner=owner)
+        self.assertEqual(self.events, [])
+        self.assert_no_identity()
+        node = root / "opt/smite-node"
+        node.mkdir(parents=True)
+        env = node / ".env"
+        env.write_text("SMITE_NODE_PANEL_AUTH_MODE=paused\n")
+        env.chmod(0o600)
+        state = root / "etc/u-opti/smite/state.env"
+        state.parent.mkdir(parents=True)
+        state.write_text(p.state.read_text())
+        state.chmod(0o600)
+        current["smite-node"] = dict(
+            Id="a"*64, Name="/smite-node", State={"Running":True},
+            Config={"Image":core_mod.RC9_IMAGES["smite-node"],
+                    "Env":["SMITE_NODE_PANEL_AUTH_MODE=paused"],
+                    "Labels":{"com.docker.compose.project":project}},
+            HostConfig={"RestartPolicy":{"Name":"unless-stopped"}})
+        self.assertEqual(owner.commit(), "RC6_INSTALL_TRANSACTION=COMMITTED")
+        record = owner.load()
+        record["foreign_inputs"]["foreign_domain"]="spoofed.example.com"
+        owner.save(record)
+        self.events.clear()
+        with self.assertRaises(host.Hold):
+            self.run_option2(core_owner=owner)
+        self.assertEqual(self.events, [])
+        self.assert_no_identity()
+        record["foreign_inputs"]["foreign_domain"]=scope[1]
+        owner.save(record)
+        current["smite-node"]["Config"]["Image"]=core_mod.RC7_IMAGES["smite-node"]
+        with self.assertRaises(host.Hold):
+            self.run_option2(core_owner=owner)
+        self.assertEqual(self.events, [])
+        self.assert_no_identity()
+        current["smite-node"]["Config"]["Image"]=core_mod.RC9_IMAGES["smite-node"]
+        report = self.run_option2(core_owner=owner)
+        self.assertEqual(report["phase"], "FOREIGN_OPTION2_OFFLINE_READY")
+        self.assertFalse(report["connected"])
+        self.assertFalse(report["activation_allowed"])
+        self.assertEqual(self.events.count("install_sanaei"), 1)
+        self.assertEqual(self.events.count("install_gateway"), 1)
+        before = p.live.read_bytes()
+        self.events.clear()
+        p.calls.clear()
+        self.assertEqual(self.run_option2(core_owner=owner), report)
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertEqual(p.live.read_bytes(), before)
+        self.assertEqual(p.calls, ["/api/node-control/installation-status"])
+        self.assertNotIn(p.doc["installation_code"], owner.path.read_text())
+        with self.assertRaises(core_mod.Hold):
+            owner.rollback()
     def test_rc9_exact_source_checked_before_any_host_stage_mutation(self):
         # Use the original gateway packet/state admission, NOT a second
         # source validator. A real RC9 Foreign state has to match the exact
