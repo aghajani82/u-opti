@@ -426,7 +426,10 @@ def rehearse_option2(*, directory, packet_path, state_path,
                     != {"smite-node"}):
                 deny()
         except (OSError, ValueError, TypeError, KeyError,
-                AttributeError, Hold):
+                AttributeError, RuntimeError, Hold):
+            # Original Core Journal.Hold derives from RuntimeError rather
+            # than this Host module's ValueError-Hold. Normalize all such
+            # source/Compose/identity drift to the same pre-host HOLD.
             deny()
 
     # All predicates are the EXISTING signed/owned Foreign adapters. A failed
