@@ -158,8 +158,24 @@ class UnifiedForeignOption2(unittest.TestCase):
         # test exercises real source/image/scope checks before the existing
         # Sanaei, 443 and signed-identity phase sequence, with NO host I/O.
         import subprocess
+        import os
+        import stat
         core_mod = load("option2_original_rc9_core_owner",
                         ROOT / "modules" / "smite-rc6-install-journal.py")
+        # The production Journal explicitly requires root-owned files.
+        # This suite runs without root: enforce the IDENTICAL path/mode
+        # predicates against the owner of this private disposable fixture.
+        # Never relax the actual module or run Docker under elevated rights.
+        original_trusted = core_mod.trusted
+        def fixture_trusted(path, directory=False):
+            st = Path(path).lstat()
+            if (stat.S_ISLNK(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_mode & 0o022
+                    or (directory and not stat.S_ISDIR(st.st_mode))):
+                raise core_mod.Hold("UNTRUSTED_PATH")
+            return st
+        core_mod.trusted = fixture_trusted
+        self.addCleanup(setattr, core_mod, "trusted", original_trusted)
         p = self.fixture
         source = core_mod.RC9_SOURCE
         p.write(p.state, p.state.read_text().replace(
