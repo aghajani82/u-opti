@@ -47,6 +47,25 @@ SMITE_INSTALL_PROFILE=clean-rc
 SMITE_SELECTED_FRESH=1
 MODE=ok
 calls=()
+# The ORIGINAL RC9 Core Journal is called by the selected after-core
+# coordinator after Sanaei RO attachment. Mock only this read-only CLI;
+# leave the real Panel packet / TTL validator fully exercised.
+: > "$TMP/foreign-core-witness-calls"
+python3() {
+    if [[ "${2:-}" == "$ROOT/modules/smite-rc6-install-journal.py" ]] &&
+       [ "${3:-}" = resume-foreign ]; then
+        printf '%s\n' "$*" >> "$TMP/foreign-core-witness-calls"
+        [[ "$*" == *'--attached-sanaei'* ]] &&
+        [[ "$*" == *'--foreign-packet-file '* ]] &&
+        [[ "$*" == *'--installer-pid '* ]] || return 2
+        [ "$MODE" != foreign_core_owner_drift ] || return 2
+        printf '%s\n' \
+            'FOREIGN_CORE_STAGE=CORE_COMMITTED' \
+            'FOREIGN_CORE_PROJECT=uopti_rc6_0123456789abcdef0123456789abcdef'
+    else
+        command python3 "$@"
+    fi
+}
 smite_install_unified_signed_pair_review() {
     calls+=(signed)
     [ "$MODE" != bad_signature ]
@@ -138,6 +157,14 @@ run 0 signed,paused,compose,sanaei,gateway,paused,compose
 printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=iran.example.org\nSMITE_FOREIGN_DOMAIN=kh.example.org\nSMITE_NODE_NAME=node-kh\n' > "$SMITE_STATE_FILE"
 chmod 0600 "$SMITE_STATE_FILE"
 MODE=ok; run 0 signed,paused,compose,sanaei,gateway,paused,compose
+grep -q 'resume-foreign --foreign-packet-file' "$TMP/foreign-core-witness-calls"
+grep -q -- '--attached-sanaei' "$TMP/foreign-core-witness-calls"
+grep -q -- '--installer-pid' "$TMP/foreign-core-witness-calls"
+# Existing Sanaei is not removed/reinstalled merely because the current
+# signed owner is unverified. Gateway must not start under owner drift.
+MODE=foreign_core_owner_drift
+run 2 signed,paused,compose,sanaei
+MODE=ok
 sed -i 's/^SMITE_UPSTREAM_REF=.*/SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000/' "$SMITE_STATE_FILE"
 run 2 ""
 sed -i '/^SMITE_UPSTREAM_REF=/d' "$SMITE_STATE_FILE"
