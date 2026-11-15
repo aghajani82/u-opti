@@ -2255,6 +2255,246 @@ def rollback_node_to_paused_field_trial(
     print("LEGACY_AUTH_FALLBACK=NO")
 
 
+
+def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
+                                   domain: str, compose: list[str]) -> None:
+    """Original RC9 fresh-Iran install: reuse signed env and ingress renderers.
+
+    Keep the two-file step in the EXISTING RC6/RC9 owner directory. All
+    recovery files are 0600 and durable BEFORE either live write. On failure
+    restore only the exact two owned configs, never Node, FRP, replay or DB.
+    This is called only by the selected Iran option 1, after Node+admin.
+    """
+    import importlib.util
+
+    if (not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", project)
+            or not _DOMAIN.fullmatch(domain)
+            or stage_dir.name != "iran-foreign-ready"
+            or stage_dir.parent != Path("/var/lib/u-opti/rc6-install-journal")):
+        raise WizardHold("Fresh Iran Foreign stage requires original install owner")
+    parent = stage_dir.parent
+    if (parent.is_symlink() or parent.lstat().st_uid != 0
+            or stat.S_IMODE(parent.stat().st_mode) != 0o700):
+        raise WizardHold("Fresh Iran installation journal is not private")
+    module_dir = Path(__file__).parent
+
+    def original(name):
+        filename = module_dir / (name + ".py")
+        if filename.is_symlink() or not filename.is_file():
+            raise WizardHold("Existing Foreign admission module unavailable")
+        spec = importlib.util.spec_from_file_location("ir_ready_" + name.replace("-", "_"), filename)
+        if spec is None or spec.loader is None:
+            raise WizardHold("Existing Foreign admission module unavailable")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    rendered = original("smite-foreign-install-panel-ingress")
+    original_stage = original("smite-unified-panel-stage")
+    paths = {"env": PANEL_ENV, "nginx": NGINX_BACKEND}
+    modes = {"env": 0o600, "nginx": stat.S_IMODE(NGINX_BACKEND.lstat().st_mode)}
+    def live():
+        return {"env": _regular(PANEL_ENV, mode=0o600, limit=65536),
+                "nginx": _regular(NGINX_BACKEND, limit=262144)}
+
+    def sealed(file: Path) -> bytes:
+        st = file.lstat()
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
+                or st.st_size > 262144):
+            raise WizardHold("Fresh Iran foreign receipt is unsafe")
+        return file.read_bytes()
+
+    def synced(dirpath):
+        fd = os.open(dirpath, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    if not stage_dir.exists() and not stage_dir.is_symlink():
+        baseline = live()
+        try:
+            desired = {
+                "env": original_stage._candidate_env(baseline["env"]),
+                "nginx": rendered.render(baseline["nginx"], domain),
+            }
+        except (ValueError, RuntimeError) as exc:
+            raise WizardHold("Fresh Iran foreign renderer refused baseline") from exc
+        temp = Path(tempfile.mkdtemp(prefix=".iran-foreign-ready-", dir=parent))
+        try:
+            os.chmod(temp, 0o700)
+            for tag, payload in {**{"before-" + k: v for k, v in baseline.items()},
+                                 **{"after-" + k: v for k, v in desired.items()}}.items():
+                f = temp / tag
+                fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            receipt = {"schema": 1, "role": "panel-iran", "source": "e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
+                       "project": project, "domain": domain,
+                       "mode": modes["nginx"],
+                       "sha256": {tag: hashlib.sha256(sealed(temp / tag)).hexdigest()
+                                  for tag in ("before-env", "before-nginx", "after-env", "after-nginx")}}
+            fd = os.open(temp / "receipt.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as stream:
+                json.dump(receipt, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            synced(temp)
+            os.rename(temp, stage_dir)
+            synced(parent)
+        finally:
+            if temp.exists():
+                # Only an unpublished PREPARE temp is eligible for removal.
+                for file in temp.iterdir():
+                    file.unlink()
+                temp.rmdir()
+    if (stage_dir.is_symlink() or not stage_dir.is_dir()
+            or stage_dir.lstat().st_uid != 0
+            or stat.S_IMODE(stage_dir.lstat().st_mode) != 0o700
+            or {p.name for p in stage_dir.iterdir()}
+               not in ({"before-env", "before-nginx", "after-env", "after-nginx", "receipt.json"},
+                       {"before-env", "before-nginx", "after-env", "after-nginx", "receipt.json", "complete"})):
+        raise WizardHold("Fresh Iran foreign checkpoint is incomplete or changed")
+    receipt = json.loads(sealed(stage_dir / "receipt.json"))
+    if (set(receipt) != {"schema", "role", "source", "project", "domain", "mode", "sha256"}
+            or receipt["schema"] != 1 or receipt["role"] != "panel-iran"
+            or receipt["source"] != "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+            or receipt["project"] != project or receipt["domain"] != domain
+            or receipt["mode"] != modes["nginx"]):
+        raise WizardHold("Fresh Iran foreign checkpoint owner mismatch")
+    before = {k: sealed(stage_dir / ("before-" + k)) for k in paths}
+    after = {k: sealed(stage_dir / ("after-" + k)) for k in paths}
+    for prefix, contents in (("before-", before), ("after-", after)):
+        for key in paths:
+            if receipt["sha256"].get(prefix + key) != hashlib.sha256(contents[key]).hexdigest():
+                raise WizardHold("Fresh Iran foreign snapshot integrity mismatch")
+    try:
+        if (original_stage._candidate_env(before["env"]) != after["env"]
+                or rendered.render(before["nginx"], domain) != after["nginx"]
+                or rendered.render(after["nginx"], domain) != after["nginx"]):
+            raise WizardHold("Fresh Iran foreign retained renderer mismatch")
+    except (ValueError, RuntimeError) as exc:
+        raise WizardHold("Fresh Iran foreign retained policy mismatch") from exc
+    if any(live()[key] not in (before[key], after[key]) for key in paths):
+        raise WizardHold("Foreign Iran config drift: retain checkpoint for manual review")
+
+    def effective_ready() -> bool:
+        try:
+            return (_run(["docker", "exec", "smite-panel", "python3", "-B", "-c",
+                          "from app.config import settings; "
+                          "assert settings.smite_foreign_install_enabled is True; "
+                          "assert settings.smite_foreign_install_origin_trust_enabled is True; "
+                          "assert settings.smite_node_registration_mode == 'signed'; "
+                          "assert settings.smite_panel_agent_auth_mode == 'signed'; "
+                          "print('PANEL_FOREIGN_INSTALL_RUNTIME=READY')"],
+                         timeout=20, capture=True)
+                    == "PANEL_FOREIGN_INSTALL_RUNTIME=READY")
+        except (WizardHold, OSError):
+            return False
+
+    if (live() == after and effective_ready()):
+        _run(["nginx", "-t"], timeout=20)
+        if (stage_dir / "complete").exists():
+            if sealed(stage_dir / "complete") != b"FOREIGN_IR_READY\n":
+                raise WizardHold("Foreign Iran completion checkpoint drift")
+        else:
+            fd = os.open(stage_dir / "complete", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(b"FOREIGN_IR_READY\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            synced(stage_dir)
+        print("IR_FOREIGN_INSTALL=READY_SIGNED_443")
+        return
+
+    try:
+        for key in ("env", "nginx"):
+            if live()[key] != after[key]:
+                _atomic_write(paths[key], after[key], modes[key])
+        _run(["nginx", "-t"], timeout=20)
+        _run(compose + ["up", "-d", "--no-build", "--no-deps",
+                        "--pull", "never", "--force-recreate", "smite-panel"], timeout=120)
+        _wait_container("smite-panel", 90)
+        if not effective_ready():
+            raise WizardHold("Foreign Iran signed Panel feature flags are not active")
+        _run(["systemctl", "reload", "nginx"], timeout=30)
+        if live() != after:
+            raise WizardHold("Fresh Iran Foreign config changed during activation")
+    except Exception as exc:
+        # Compensation ONLY if both current files still equal the exact
+        # original or the exact owned candidate. Never overwrite other work.
+        try:
+            current = live()
+            if any(current[key] not in (before[key], after[key]) for key in paths):
+                raise WizardHold("Foreign Iran rollback ownership drift")
+            for key in ("nginx", "env"):
+                if current[key] != before[key]:
+                    _atomic_write(paths[key], before[key], modes[key])
+            _run(["nginx", "-t"], timeout=20)
+            _run(compose + ["up", "-d", "--no-build", "--no-deps",
+                            "--pull", "never", "--force-recreate", "smite-panel"], timeout=120)
+            _wait_container("smite-panel", 90)
+            _run(["systemctl", "reload", "nginx"], timeout=30)
+            if live() != before:
+                raise WizardHold("Foreign Iran rollback could not restore exact files")
+        except Exception:
+            raise WizardHold("CRITICAL: Foreign Iran stage rollback NOT verified; retain checkpoint") from exc
+        raise WizardHold("Foreign Iran stage compensated; retry option 1") from exc
+
+    if not (stage_dir / "complete").exists():
+        fd = os.open(stage_dir / "complete", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(b"FOREIGN_IR_READY\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        synced(stage_dir)
+    print("IR_FOREIGN_INSTALL=READY_SIGNED_443")
+
+
+def complete_local_ir_foreign_install(state: dict[str, str]) -> None:
+    """Connect the existing Foreign flags/redeem+status 443 to Iran option 1."""
+    _field_trial_gate()
+    if (os.geteuid() != 0 or state.get("SMITE_ROLE") != "panel-iran"
+            or state.get("SMITE_CONNECTION_MODE") != "standard"
+            or state.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.9"
+            or state.get("SMITE_UPSTREAM_REF") !=
+               "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"):
+        raise WizardHold("Fresh signed RC9 Iran install required for Foreign preparation")
+    import importlib.util
+    journal_path = Path(__file__).with_name("smite-rc6-install-journal.py")
+    if journal_path.is_symlink() or not journal_path.is_file():
+        raise WizardHold("Original RC9 install journal unavailable")
+    spec = importlib.util.spec_from_file_location("iran_foreign_original_journal", journal_path)
+    journal_lib = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(journal_lib)
+    journal = journal_lib.Journal()
+    try:
+        record = journal.load()
+        journal._ir_witness(record)
+        if (record.get("source") != journal_lib.RC9_SOURCE
+                or record.get("ir_phase") not in ("ADMIN_CREATED", "COMPLETE")):
+            raise WizardHold("Fresh Iran Node/admin checkpoint not committed")
+        if journal.admin_present() != 0:
+            raise WizardHold("Fresh Iran administrator not verified")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WizardHold("Original fresh Iran signed install proof required") from exc
+    before_identity = _identity_record()
+    if not _replay_artifacts_valid():
+        raise WizardHold("Iran identity/replay continuity not verified")
+    project = _panel_compose_command()
+    _fresh_ir_foreign_ready_config(
+        stage_dir=journal.folder / "iran-foreign-ready",
+        project=record["id"], domain=state["SMITE_PANEL_DOMAIN"],
+        compose=project)
+    journal._ir_witness(journal.load())
+    if _identity_record() != before_identity or not _replay_artifacts_valid():
+        raise WizardHold("Fresh Iran foreign stage changed signed identity/replay")
+
+
 def _determine_role(state: dict[str, str]) -> str:
     return "iran" if state.get("SMITE_ROLE") in ("iran", "panel-iran") else "foreign"
 
@@ -2266,6 +2506,7 @@ def run(argv: list[str] | None = None) -> int:
     actions.add_argument("--prepare-store", action="store_true")
     actions.add_argument("--enable-panel-field-trial", action="store_true")
     actions.add_argument("--complete-local-ir-install", action="store_true")
+    actions.add_argument("--complete-local-ir-foreign", action="store_true")
     actions.add_argument("--redeem-field-trial", action="store_true")
     # Backward-compatible name for older inert callers; live use still requires
     # the new explicit Field Trial gate and confirmation.
@@ -2319,6 +2560,9 @@ def run(argv: list[str] | None = None) -> int:
 
         if args.complete_local_ir_install:
             complete_local_ir_install(state)
+            return 0
+        if args.complete_local_ir_foreign:
+            complete_local_ir_foreign_install(state)
             return 0
 
         if args.activate_ir_node_field_trial:
