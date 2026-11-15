@@ -2026,11 +2026,20 @@ def activate_foreign_node_field_trial(
     else:
         panel, _domain, control_url = _foreign_gateway_preflight(current)
     rc7 = current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
-    if reviewed_unified_trial and not rc7:
-        raise WizardHold("Unified signed pair requires exact RC7 Foreign baseline")
-    if rc7:
+    rc9 = (current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.9"
+           and current.get("SMITE_UPSTREAM_REF") ==
+           "e7f76185e9a7da51d7069d5d0a829dc192cc1e06")
+    # The original selected Foreign option 2 installs RC9, NOT RC7.
+    # Prevent a released unified selector from applying trial image/identity
+    # on any legacy RC7/RC2 host or mismatched source. Keep RC7 unchanged
+    # when explicitly selected through its original legacy lane.
+    if reviewed_unified_trial and not rc9:
+        raise WizardHold("Unified signed pair requires exact RC9 Foreign source")
+    managed = rc7 or reviewed_unified_trial
+    if managed:
         _rc7_foreign_compose_command()
-        # The trial selector cannot silently adopt the old official RC7 image.
+        # Reuse the ORIGINAL project/file/image witness for both immutably
+        # pinned RC7 and signed RC9; no alternate Compose project is created.
         if reviewed_unified_trial:
             _rc7_foreign_pinned_image_verified(review_unified_trial=True)
         else:
@@ -2049,7 +2058,7 @@ def activate_foreign_node_field_trial(
     _prepare_security_candidate()
     _provision_replay_once()
     candidate_command = (
-        _rc7_foreign_compose_command(staged_candidate=True) if rc7
+        _rc7_foreign_compose_command(staged_candidate=True) if managed
         else ["docker", "compose", "-f", str(NODE_COMPOSE),
               "-f", str(NODE_SECURITY_CANDIDATE)]
     )
@@ -2064,7 +2073,7 @@ def activate_foreign_node_field_trial(
             "--force-recreate", "smite-node",
         ], timeout=120)
         _wait_container("smite-node", 90)
-        if rc7:
+        if managed:
             # A successful compose up is insufficient: inspect the actual
             # live container labels, local pinned image and candidate file
             # AFTER it is recreated and BEFORE any signed proof is claimed.
@@ -2106,7 +2115,7 @@ def activate_foreign_node_field_trial(
         # Keep evidence of the SAME pinned signed candidate at completion.
         # A changed Compose label/image after the Panel probe is a failure,
         # not a successful Connected report.
-        if rc7:
+        if managed:
             _rc7_foreign_compose_command(verify_active_candidate=True)
             if reviewed_unified_trial:
                 _rc7_foreign_pinned_image_verified(review_unified_trial=True)
@@ -2121,7 +2130,7 @@ def activate_foreign_node_field_trial(
         if recreated:
             try:
                 rollback_command = (
-                    _rc7_foreign_compose_command(rollback=True) if rc7
+                    _rc7_foreign_compose_command(rollback=True) if managed
                     else ["docker", "compose", "-f", str(NODE_COMPOSE)]
                 )
                 _run(rollback_command + [
@@ -2137,7 +2146,7 @@ def activate_foreign_node_field_trial(
                     "SMITE_NODE_PANEL_AUTH_MODE=paused" in effective
                     and "SMITE_AGENT_AUTH_MODE=strict" in effective
                 )
-                if rollback_ok and rc7:
+                if rollback_ok and managed:
                     if reviewed_unified_trial:
                         _rc7_foreign_paused_rollback_verified(
                             expected_identity=retained_identity,
@@ -2187,9 +2196,16 @@ def rollback_node_to_paused_field_trial(
         current.get("SMITE_ROLE") == "foreign"
         and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.7"
     )
-    if reviewed_unified_trial and not rc7_foreign:
-        raise WizardHold("Unified rollback requires exact RC7 Foreign baseline")
-    if rc7_foreign:
+    rc9_foreign = (
+        current.get("SMITE_ROLE") == "foreign"
+        and current.get("SMITE_MANAGED_VERSION") == "2.0.0-rc.9"
+        and current.get("SMITE_UPSTREAM_REF") ==
+            "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+    )
+    if reviewed_unified_trial and not rc9_foreign:
+        raise WizardHold("Unified rollback requires exact RC9 Foreign source")
+    managed_foreign = rc7_foreign or reviewed_unified_trial
+    if managed_foreign:
         if reviewed_unified_trial:
             _rc7_foreign_pinned_image_verified(review_unified_trial=True)
         else:
@@ -2199,12 +2215,12 @@ def rollback_node_to_paused_field_trial(
     # unsafe or partially provisioned identity must never be overwritten.
     retained_identity = None
     retained_replay = False
-    if rc7_foreign and (IDENTITY_FILE.exists() or IDENTITY_FILE.is_symlink()):
+    if managed_foreign and (IDENTITY_FILE.exists() or IDENTITY_FILE.is_symlink()):
         retained_identity = _identity_record()
         retained_replay = _replay_artifacts_valid()
     command = (
         _rc7_foreign_compose_command(rollback=True)
-        if rc7_foreign
+        if managed_foreign
         else ["docker", "compose", "-f", str(NODE_COMPOSE)]
     )
     _run(command + [
@@ -2217,7 +2233,7 @@ def rollback_node_to_paused_field_trial(
     ).splitlines()
     if "SMITE_NODE_PANEL_AUTH_MODE=paused" not in env or "SMITE_AGENT_AUTH_MODE=strict" not in env:
         raise WizardHold("Node did not return to paused+strict state")
-    if rc7_foreign:
+    if managed_foreign:
         if reviewed_unified_trial:
             _rc7_foreign_paused_rollback_verified(
                 expected_identity=retained_identity,
