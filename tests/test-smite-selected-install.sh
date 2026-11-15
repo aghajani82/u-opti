@@ -272,19 +272,19 @@ smite_install_unified_signed_pair_review() { :; }
 smite_install_sanaei_retained() { return 1; }
 smite_install_unified_foreign_begin_core_from_panel() {
     [ "$2" -gt 0 ] || return 2
-    printf '%s\\n' 'FOREIGN_CORE_OWNER=uopti_rc6_0123456789abcdef0123456789abcdef'
+    printf '%s\n' 'FOREIGN_CORE_OWNER=uopti_rc6_0123456789abcdef0123456789abcdef'
 }
 smite_install_foreign_node() { return 2; }
 python3() {
     if [[ "${2:-}" == */smite-rc6-install-journal.py ]]; then
-        printf '%s\\n' "$*" >> "$TMP/foreign-journal-calls"
+        printf '%s\n' "$*" >> "$TMP/foreign-journal-calls"
         case "$*" in
             *'recover-foreign-core '*)
                 [ "${DENY_FOREIGN_ROLLBACK:-0}" = 0 ] || return 2
                 echo 'RC6_ROLLBACK=PASS_DATA_RETAINED' ;;
             *'resume-foreign '*)
                 [ "${DENY_FOREIGN_RESUME:-0}" = 0 ] || return 2
-                printf '%s\\n' \
+                printf '%s\n' \
                     'FOREIGN_CORE_STAGE=CORE_COMMITTED' \
                     'FOREIGN_CORE_PROJECT=uopti_rc6_0123456789abcdef0123456789abcdef' ;;
             *' commit') echo 'RC6_INSTALL_TRANSACTION=COMMITTED' ;;
