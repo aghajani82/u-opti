@@ -674,7 +674,7 @@ class Journal:
                     or auth == 'signed' and env.get('SMITE_AGENT_AUTH_MODE') != 'strict'):
                 raise Hold('IR_RESUME_SIGNED_NODE_DRIFT')
 
-    def foreign_resume(self):
+    def foreign_resume(self, packet_path=None):
         """Read-only pre-enrollment disposition of the ORIGINAL RC9 Core.
 
         Reuse the same durable owner on an interrupted selected option 2.
@@ -686,7 +686,13 @@ class Journal:
         if (d.get('role') != 'foreign' or d.get('source') != RC9_SOURCE
                 or d.get('foreign_resumable_version') != 1):
             raise Hold('FOREIGN_RESUME_NOT_THIS_OWNER')
-        self.foreign_inputs(d)
+        scope = self.foreign_inputs(d)
+        if packet_path is not None:
+            exact = self.foreign_packet_inputs(packet_path)
+            names = ('panel_domain', 'foreign_domain', 'node_name',
+                     'node_id', 'control_path')
+            if tuple(scope[key] for key in names) != tuple(exact):
+                raise Hold('FOREIGN_RESUME_PANEL_SCOPE_MISMATCH')
         if (d.get('installer_start')
                 and process_start(d.get('installer_pid')) == d['installer_start']):
             raise Hold('FOREIGN_INSTALLER_STILL_RUNNING')
@@ -887,7 +893,7 @@ def main():
                 if project is not None:
                     print('IR_INSTALL_PROJECT=' + project)
             elif a.action == 'resume-foreign':
-                stage, project = j.foreign_resume()
+                stage, project = j.foreign_resume(a.foreign_packet_file)
                 print('FOREIGN_CORE_STAGE=' + stage)
                 if project is not None:
                     print('FOREIGN_CORE_PROJECT=' + project)
