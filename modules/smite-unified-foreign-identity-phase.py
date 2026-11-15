@@ -126,34 +126,43 @@ def rehearse(*, packet_path, state_path, gateway_path, node_env_path,
             packet, state_path=state, gateway_path=gateway,
             node_env_path=env, client=client)
 
-        encoded = _packet_record(packet)
-        # A completed promotion means the live identity exists: never
-        # call enroll again; check the exact receipt and signed proof instead.
-        if not os.path.lexists(live):
-            result = client.enroll(
-                encoded, directory=private, live_identity=live,
-                transport=transport, now=now)
-            if result.get("status") != "enrolled":
-                deny()
-        promoted = promotion.promote(
-            encoded, client=client, directory=private, live_identity=live,
-            state_path=state, gateway_path=gateway, node_env_path=env,
-            transport=transport, now=now)
-        if (promoted.get("status") != "identity_promoted"
-                or promoted.get("node_id") != packet.scope["node_id"]
-                or promoted.get("runtime_activation") != "not_performed"):
-            deny()
-        return {
-            "phase": "IDENTITY_PROMOTED_OFFLINE",
-            "node_id": packet.scope["node_id"],
-            "signed_panel_proof": "PASS",
-            "runtime_activation": "NOT_PERFORMED",
-            "connected": False,
-        }
+        return _execute_original_identity(
+            packet, client=client, promotion=promotion, transport=transport,
+            directory=private, live_identity=live, state_path=state,
+            gateway_path=gateway, node_env_path=env, now=now)
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
             client.Hold, promotion.Hold, gateway_plan.Hold):
         deny()
 
+
+def _execute_original_identity(packet, *, client, promotion, transport,
+                               directory, live_identity, state_path,
+                               gateway_path, node_env_path, now):
+    """Reuse the original grant client, HMAC proof and no-overwrite promoter."""
+    encoded = _packet_record(packet)
+    # A completed promotion means the live_identity identity exists: never
+    # call enroll again; check the exact receipt and signed proof instead.
+    if not os.path.lexists(live_identity):
+        result = client.enroll(
+            encoded, directory=directory, live_identity=live_identity,
+            transport=transport, now=now)
+        if result.get("status") != "enrolled":
+            deny()
+    promoted = promotion.promote(
+        encoded, client=client, directory=directory, live_identity=live_identity,
+        state_path=state_path, gateway_path=gateway_path, node_env_path=node_env_path,
+        transport=transport, now=now)
+    if (promoted.get("status") != "identity_promoted"
+            or promoted.get("node_id") != packet.scope["node_id"]
+            or promoted.get("runtime_activation") != "not_performed"):
+        deny()
+    return {
+        "phase": "IDENTITY_PROMOTED_OFFLINE",
+        "node_id": packet.scope["node_id"],
+        "signed_panel_proof": "PASS",
+        "runtime_activation": "NOT_PERFORMED",
+        "connected": False,
+    }
 
 # The pre-existing enrollment and promotion modules already own their
 # credential/identity receipts. This is ONLY an operation-level interruption
