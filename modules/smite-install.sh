@@ -2342,6 +2342,75 @@ smite_install_unified_foreign_begin_core_from_panel() {
     echo "FOREIGN_CORE_OWNER=$project"
 }
 
+# Continue the ORIGINAL Foreign Core owner inside the eventual ONE option-2
+# selection. The same bounded Panel packet, signed-release gate, and root
+# RC6 Journal own this step. An interrupted Core is never silently adopted,
+# re-created or rekeyed: original resume-foreign decides the exact cursor.
+# The public menu remains HOST_RELEASE_HOLD and the original Journal denies
+# any new real-root RC9 Foreign owner until separately approved.
+smite_install_unified_foreign_core_stage() {
+    local packet="${1:-}" module_dir journal_file output stage project commit_result
+    local -a lines=()
+    if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
+       [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" != e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] ||
+       [ "${SMITE_NODE_IMAGE:-}" != 'ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2' ] ||
+       [ -z "$packet" ] || [ ! -f "$packet" ] || [ -L "$packet" ]; then
+        echo 'HOLD: Selected Foreign Core stage needs an exact signed RC9 private Panel packet.' >&2
+        return 2
+    fi
+    # A missing/replaced signed release is a HOLD before opening the Core
+    # Journal, creating any directories or running Docker.
+    smite_install_unified_signed_pair_review || return 2
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-rc6-install-journal.py" ] &&
+    [ ! -L "$module_dir/smite-rc6-install-journal.py" ] || return 2
+    journal_file=/var/lib/u-opti/rc6-install-journal/current.json
+
+    if [ -e "$journal_file" ] || [ -L "$journal_file" ]; then
+        # The original Journal independently checks the packet TTL, exact
+        # node/domain/control scope, running image and Compose ownership.
+        # It refuses another active installer and partially written Core.
+        output="$(python3 -B "$module_dir/smite-rc6-install-journal.py" \
+            resume-foreign --foreign-packet-file "$packet")" || return 2
+        mapfile -t lines <<< "$output"
+        [ "${#lines[@]}" -eq 2 ] || return 2
+        stage="${lines[0]#FOREIGN_CORE_STAGE=}"
+        project="${lines[1]#FOREIGN_CORE_PROJECT=}"
+        [ "${lines[0]}" = "FOREIGN_CORE_STAGE=$stage" ] &&
+        [ "${lines[1]}" = "FOREIGN_CORE_PROJECT=$project" ] || return 2
+    else
+        output="$(smite_install_unified_foreign_begin_core_from_panel "$packet")" || return 2
+        [[ "$output" =~ ^FOREIGN_CORE_OWNER=uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+        project="${output#FOREIGN_CORE_OWNER=}"
+        stage=CORE_PENDING
+    fi
+    [[ "$project" =~ ^uopti_rc6_[a-f0-9]{32}$ ]] || return 2
+
+    # The original signed paused/strict Node installer creates files ONLY
+    # for a pristine owned CORE_PENDING cursor. An already verified Core
+    # resumes at its next phase, not another Docker or identity operation.
+    case "$stage" in
+        CORE_PENDING)
+            COMPOSE_PROJECT_NAME="$project" \
+            UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet" \
+                smite_install_foreign_node || {
+                echo 'HOLD: Foreign Core installation interrupted; original journal retains ownership.' >&2
+                return 2
+            }
+            ;;
+        CORE_READY_TO_COMMIT|CORE_COMMITTED) ;;
+        *) echo 'HOLD: Foreign Core journal returned an unknown stage.' >&2; return 2 ;;
+    esac
+    if [ "$stage" != CORE_COMMITTED ]; then
+        commit_result="$(python3 -B "$module_dir/smite-rc6-install-journal.py" commit)" || return 2
+        [ "$commit_result" = RC6_INSTALL_TRANSACTION=COMMITTED ] || return 2
+    fi
+    echo "FOREIGN_CORE_PROJECT=$project"
+    echo 'FOREIGN_CORE_STAGE=CORE_COMMITTED'
+    echo 'FOREIGN_CORE_NEXT=EXISTING_SANAEI_GATEWAY_SIGNED_PAIRING'
+}
+
 # Unified option-2 building block: reuse the existing Sanaei installer and
 # exact read-only DB attachment, without sending the caller back to the menu.
 # The complete Foreign enrollment/Gateway orchestration must explicitly call
