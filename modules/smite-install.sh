@@ -2558,13 +2558,13 @@ smite_install_unified_foreign_identity_stage() {
         echo 'HOLD: Signed Pairing identity not committed; retain verified Core/Sanaei/Gateway and original staged identity.' >&2
         return 2
     }
-    [ "$output" = "$(printf '%s\\n' \
+    [ "$output" = "$(printf '%s\n' \
         'UNIFIED_FOREIGN_IDENTITY=SIGNED_PROOF_RETAINED_NOT_ACTIVATED' \
         'FOREIGN_CONNECTED=NOT_PROVEN')" ] || {
         echo 'HOLD: Original signed identity journal receipt not verified.' >&2
         return 2
     }
-    printf '%s\\n' "$output"
+    printf '%s\n' "$output"
 }
 
 # One-choice composition uses only original per-stage owners. Deliberately
