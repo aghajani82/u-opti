@@ -2433,12 +2433,23 @@ smite_install_unified_foreign_node_image_review() {
 smite_install_unified_foreign_after_core() {
     local packet="$1" helper_dir admitted="" recorded="" domain site
     local gateway_state="$SMITE_STATE_DIR/foreign-gateway.env"
+    # Propagate the already validated, private Panel-issued packet to the
+    # existing Gateway functions for the SAME option-2 invocation.
+    local UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet"
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
        [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
        [ ! -f "$SMITE_STATE_FILE" ] || [ -L "$SMITE_STATE_FILE" ] ||
-       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE" ||
-       ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
-        echo 'HOLD: Unified Foreign post-core requires a fresh reviewed RC7 transaction.' >&2
+       ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: Unified Foreign post-core requires a fresh reviewed signed Node.' >&2
+        return 2
+    fi
+    if grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.9' "$SMITE_STATE_FILE"; then
+        [ "$(grep -Fxc 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06' "$SMITE_STATE_FILE")" = 1 ] || {
+            echo 'HOLD: Foreign RC9 source is not the exact signed Panel-issued candidate.' >&2
+            return 2
+        }
+    elif ! grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.7' "$SMITE_STATE_FILE"; then
+        echo 'HOLD: Foreign post-core source is not reviewed.' >&2
         return 2
     fi
     [ -n "$packet" ] || {
