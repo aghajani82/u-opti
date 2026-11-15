@@ -272,6 +272,43 @@ class RecoveryTests(unittest.TestCase):
         self.objects['a'*64]['State']['Health']['Status']='healthy'
         self.assertEqual(self.j.commit(),'RC6_INSTALL_TRANSACTION=COMMITTED')
         self.assertEqual(self.j.foreign_resume(),('CORE_COMMITTED',tx))
+        # The same option is interrupted AFTER the original RO Sanaei
+        # attachment. Only a retained COMMITTED Core and exact managed,
+        # read-only Docker DB mount can adopt the intentional inventory
+        # change; plain pre-Core resume must still HOLD.
+        attached=clean.replace(
+            'SMITE_SANAEI_INVENTORY_ENABLED=false',
+            'SMITE_SANAEI_INVENTORY_ENABLED=true\n'
+            'SMITE_ENGINE_INVENTORY_MODE=managed\n'
+            'SMITE_SANAEI_DB_HOST_PATH=/opt/3x-ui/instances/01/db')
+        env.write_text(attached)
+        self.objects['a'*64]['Mounts']=[{
+            'Type':'bind','Source':'/opt/3x-ui/instances/01/db',
+            'Destination':'/run/smite-sanaei-ro','RW':False}]
+        self.objects['a'*64]['Config']['Env']=[
+            'SMITE_NODE_PANEL_AUTH_MODE=paused',
+            'SMITE_AGENT_AUTH_MODE=strict',
+            'SMITE_ENGINE_INVENTORY_MODE=managed',
+            'SMITE_SANAEI_INVENTORY_ENABLED=true']
+        with self.assertRaises(m.Hold):self.j.foreign_resume()
+        self.assertEqual(
+            self.j.foreign_resume(attached_sanaei=True),
+            ('CORE_COMMITTED',tx))
+        self.objects['a'*64]['Mounts'][0]['RW']=True
+        with self.assertRaises(m.Hold):self.j.foreign_resume(attached_sanaei=True)
+        self.objects['a'*64]['Mounts'][0]['RW']=False
+        self.objects['a'*64]['Config']['Env'][-1]='SMITE_SANAEI_INVENTORY_ENABLED=false'
+        with self.assertRaises(m.Hold):self.j.foreign_resume(attached_sanaei=True)
+        self.objects['a'*64]['Config']['Env'][-1]='SMITE_SANAEI_INVENTORY_ENABLED=true'
+        env.write_text(attached.replace(
+            '/opt/3x-ui/instances/01/db','/opt/3x-ui/instances/99/db'))
+        with self.assertRaises(m.Hold):self.j.foreign_resume(attached_sanaei=True)
+        env.write_text(attached)
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume(attached_sanaei='true')
+        self.assertEqual(
+            self.j.foreign_resume(attached_sanaei=True),
+            ('CORE_COMMITTED',tx))
         self.assert_no_stop()
         with self.assertRaises(m.Hold):self.j.rollback()
 
