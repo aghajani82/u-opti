@@ -2552,22 +2552,23 @@ smite_install_unified_foreign_identity_preflight() {
         --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env" \
         --site-file "$site" --node-env-file "$SMITE_NODE_DIR/.env" \
         --prepairing-read-only)" || {
-        # The original pre-pairing stage demands a FRESH grant before
-        # redemption. An ALREADY STAGED identity may survive the 2-hour
-        # bearer TTL. The original signed identity transaction must prove
-        # its exact receipt before any bypass of this pre-redeem TTL gate.
-        # Same original Gateway packet/site admission stays mandatory.
-        [ "$packet" = /var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json ] &&
-        python3 -B "$module_dir/smite-unified-foreign-identity-phase.py" \
-            --verify-owned-expired-resume >/dev/null 2>&1 &&
-        python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
-            --packet-file "$packet" --state-file "$SMITE_STATE_FILE" \
-            --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env" \
-            --site-file "$site" >/dev/null || {
+        # The bearer may expire AFTER original signed enrollment, but
+        # expiry NEVER bypasses the full original pre-Pairing Gateway,
+        # paused/strict Node .env, vhost and immutable scope witnesses.
+        # The alternate read-only entry independently verifies the same
+        # signed release and exact staged INTENT/promoter receipts first.
+        [ "$packet" = /var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json ] || {
             echo 'HOLD: Original Panel/Gateway/Node scope changed before Signed Pairing.' >&2
             return 2
         }
-        result='FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY'
+        result="$(python3 -B "$module_dir/smite-unified-foreign-gateway-plan.py" \
+            --packet-file "$packet" --state-file "$SMITE_STATE_FILE" \
+            --gateway-state-file "$SMITE_STATE_DIR/foreign-gateway.env" \
+            --site-file "$site" --node-env-file "$SMITE_NODE_DIR/.env" \
+            --prepairing-owned-expired)" || {
+            echo 'HOLD: Original signed enrollment or complete Gateway/Node preflight changed.' >&2
+            return 2
+        }
     }
     [ "$result" = 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY' ] || return 2
     echo "$result"

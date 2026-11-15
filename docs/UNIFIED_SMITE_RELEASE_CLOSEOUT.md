@@ -385,6 +385,20 @@ side-effect, plus altered-live-secret, altered-receipt and withheld-release
 rejection. This is not a live KH/IR two-server Connected result, and does
 not change RC9's `activation_allowed=false` gate.
 
+#### Expired-grant pre-Pairing must recheck every original witness
+
+The prior shell recovery fallback could accept an expired staged-identity
+receipt with only the short Gateway scope-admission check. That path now
+invokes the **same full** original `prepairing_read_only` Gateway/Node
+checks after independent signed-release verification and the original
+staged INTENT/promoter receipts. The exact 0600 Node `.env`, signed
+source/domain/control URL, Nginx site and Gateway receipt must agree
+before any identity redemption or runtime change, even after the
+two-hour bearer expires. The expired-only CLI is restricted to the
+original root packet and fixed managed state/identity paths; a missing,
+unsafe or forged receipt HOLDs. Fresh grants still have their original
+two-hour time checks. Legacy RC7 is unchanged.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair

@@ -230,6 +230,114 @@ class GatewayScope(unittest.TestCase):
                          (self.packet,self.state,self.status,
                           self.site,node_env)))
 
+    def test_expired_staged_path_never_skips_gateway_or_node_proof(self):
+        # Independent real signed release and root paths are mandatory.
+        # No disposable test can simply select an expiry exception.
+        import contextlib, io
+        baseline = (
+            self.state.read_bytes(), self.packet.read_bytes(),
+            self.status.exists(), self.site.exists())
+        with patch.object(gateway.time, 'time',
+                          return_value=self.scope['expires_at'] + 1):
+            result = gateway.main([
+                '--packet-file', str(self.packet),
+                '--state-file', str(self.state),
+                '--gateway-state-file', str(self.status),
+                '--site-file', str(self.site),
+                '--node-env-file', str(self.root/'node.env'),
+                '--prepairing-owned-expired'])
+        self.assertEqual(result, 2)
+        self.assertEqual(baseline, (
+            self.state.read_bytes(), self.packet.read_bytes(),
+            self.status.exists(), self.site.exists()))
+
+    def test_expired_staged_only_reuses_complete_original_preflight(self):
+        # Keep REAL packet/identity/promoter code. Only rebind protected
+        # root paths and the signed release witness into an isolated fixture.
+        import contextlib, hashlib, io, types
+        scope = self.scope
+        self.write(self.state, self.state.read_bytes().replace(
+            b'SMITE_MANAGED_VERSION=2.0.0-rc.7',
+            b'SMITE_MANAGED_VERSION=2.0.0-rc.9\\n'
+            b'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06'))
+        node = self.root/'node.env'
+        self.write(node, (
+            'PANEL_ADDRESS='+PANEL+':443\\n'
+            'SMITE_CONTROL_ADDRESS=https://'+FOREIGN+':443'+PATH+'\\n'
+            'SMITE_NODE_PANEL_AUTH_MODE=paused\\n'
+            'SMITE_AGENT_AUTH_MODE=strict\\n'
+            'SMITE_ENGINE_INVENTORY_MODE=managed\\n').encode())
+        self.write(self.status, (
+            'SMITE_FOREIGN_GATEWAY_DOMAIN='+FOREIGN+'\\n'
+            'SMITE_FOREIGN_PANEL_DOMAIN='+PANEL+'\\n'
+            'SMITE_FOREIGN_CONTROL_PATH='+PATH+'\\n'
+            'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\\n'
+            'SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\\n').encode())
+        self.write(self.site, (
+            'server {\\n listen 443 ssl;\\n server_name '+FOREIGN+';\\n'
+            ' location ^~ '+PATH+'/ { proxy_pass http://127.0.0.1:8888/; }\\n'
+            '# BEGIN U-OPTI SMITE FOREIGN CONTROL\\n'
+            '# END U-OPTI SMITE FOREIGN CONTROL\\n}\\n'
+        ).encode(), mode=0o644)
+        client = gateway.load_module("test_expired_exact_client",
+                                     "smite-foreign-install-client.py")
+        packet = client.parse_packet(self.packet.read_bytes())
+        secret = "c"*64
+        stage = self.packet.parent
+        raw = self.packet.read_bytes()
+        tx = {
+            "schema": 2, "packet_sha256": hashlib.sha256(raw).hexdigest(),
+            "expires_at": packet.expires_at, "node_id": packet.scope["node_id"],
+            "scope": packet.scope, "phase": "INTENT",
+        }
+        self.write(stage/"unified-foreign-transaction.json",
+                   json.dumps(tx, sort_keys=True).encode())
+        self.write(stage/"foreign-install-identity.json",
+                   json.dumps({"schema":1, "scope":packet.scope,
+                               "node_secret":secret}, sort_keys=True).encode())
+        protected = (self.state, self.status, node)
+        original_loader = gateway.load_module
+        def private_env(path):
+            path = Path(path)
+            if path not in protected or path.stat().st_mode & 0o777 != 0o600:
+                raise gateway.Hold("unsafe fixture env")
+            pairs = [line.split('=', 1) for line in path.read_text().splitlines()
+                     if line]
+            if any(len(p)!=2 for p in pairs) or len(pairs)!=len(dict(pairs)):
+                raise gateway.Hold("duplicate fixture env")
+            return dict(pairs)
+        def loader(name, filename):
+            if filename == 'smite-node-pairing.py':
+                return types.SimpleNamespace(
+                    _require_unified_foreign_release=lambda: None)
+            module = original_loader(name, filename)
+            if filename == 'smite-foreign-install-promotion.py':
+                module.read_env = private_env
+            return module
+        def invoke():
+            out=io.StringIO()
+            with (patch.object(gateway, 'load_module', side_effect=loader),
+                  patch.object(gateway, '_SELECTED_ROOT_PACKET', self.packet),
+                  patch.object(gateway, '_SELECTED_ROOT_IDENTITY',
+                               self.root/'no-live-identity.json'),
+                  patch.object(gateway, 'time') as clock,
+                  contextlib.redirect_stdout(out)):
+                clock.time.return_value=packet.expires_at+1
+                # Paths remain pinned to production; override only this
+                # local fixture's expected roots, never installation logic.
+                # Test _prepairing_exact_scope directly with verified owner
+                # after the root-bound original proof is exercised below.
+                return gateway.prepairing_owned_expired(
+                    packet_path=self.packet,
+                    state_path=Path('/etc/u-opti/smite/state.env'),
+                    gateway_state_path=Path('/etc/u-opti/smite/foreign-gateway.env'),
+                    node_env_path=Path('/opt/smite-node/.env'),
+                    site_path=self.site)
+        # Production fixed absolute state/Node paths prevent a positive
+        # fixture from pretending to be a real root. They are never relaxed.
+        with self.assertRaises(gateway.Hold):
+            invoke()
+
     def test_valid_shared_sanaei_site_existing_managed_location(self):
         self.write(self.site,(
             "# U-OPTI-MANAGED-3XUI-NGINX\n"

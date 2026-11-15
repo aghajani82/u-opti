@@ -177,17 +177,14 @@ def precore_fields(packet_path, *, now=None, for_core_owner=False):
     return panel, foreign, name, packet.scope['control_url']
 
 
-def prepairing_read_only(*, packet_path, state_path, gateway_state_path,
-                         node_env_path, site_path, now=None):
-    """Original pre-promotion packet/Gateway/Node checks, without redemption.
+def _prepairing_exact_scope(*, packet_path, state_path, gateway_state_path,
+                            node_env_path, site_path):
+    """Unchanged original read-only scope, Gateway and Node verification.
 
-    The one-use packet, current source-bound state, existing HTTPS/443
-    location and paused/strict managed Node .env must all agree BEFORE
-    the separate signed HMAC enrollment journal can consume the code.
-    No runtime, filesystem, Panel API or identity mutation occurs.
+    Both a FRESH bearer and an independently proven already-staged expired
+    bearer must pass ALL of these same checks. A receipt alone is never a
+    reason to skip the original Node .env or Gateway security witness.
     """
-    # The exact original private packet + TTL check is authoritative.
-    precore_fields(packet_path, now=now)
     client = load_module("uopti_pre_pair_client", "smite-foreign-install-client.py")
     promotion = load_module(
         "uopti_pre_pair_promotion", "smite-foreign-install-promotion.py")
@@ -204,6 +201,72 @@ def prepairing_read_only(*, packet_path, state_path, gateway_state_path,
     return "FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY"
 
 
+def prepairing_read_only(*, packet_path, state_path, gateway_state_path,
+                         node_env_path, site_path, now=None):
+    """Original fresh-only pre-promotion verification, including 2h TTL."""
+    precore_fields(packet_path, now=now)
+    return _prepairing_exact_scope(
+        packet_path=packet_path, state_path=state_path,
+        gateway_state_path=gateway_state_path,
+        node_env_path=node_env_path, site_path=site_path)
+
+
+# Original selected Foreign path only. Does NOT change legacy RC7 admission.
+_SELECTED_ROOT_PACKET = Path(
+    "/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json")
+_SELECTED_ROOT_IDENTITY = Path(
+    "/etc/u-opti/smite/identities/node-identity.json")
+
+
+def prepairing_owned_expired(*, packet_path, state_path, gateway_state_path,
+                            node_env_path, site_path, now=None):
+    """Same FULL pre-Pairing checks after separately verified staged identity.
+
+    A consumed one-use grant cannot be redeemed again after TTL. Only the
+    existing immutable RC9 signed release and the ORIGINAL exact private
+    INTENT/staged-identity/promotion receipts permit skipping the fresh
+    bearer-time check. All other Gateway/Node checks remain mandatory.
+    This function is read-only; no host operations or credentials printed.
+    """
+    if (Path(packet_path) != _SELECTED_ROOT_PACKET
+            or Path(state_path) != Path("/etc/u-opti/smite/state.env")
+            or Path(gateway_state_path) != Path("/etc/u-opti/smite/foreign-gateway.env")
+            or Path(node_env_path) != Path("/opt/smite-node/.env")
+            or not Path(site_path).is_absolute()):
+        deny()
+    try:
+        pairing = load_module(
+            "uopti_existing_expired_pairing_release", "smite-node-pairing.py")
+        pairing._require_unified_foreign_release()
+        client = load_module(
+            "uopti_existing_expired_gateway_client", "smite-foreign-install-client.py")
+        promotion = load_module(
+            "uopti_existing_expired_gateway_promotion", "smite-foreign-install-promotion.py")
+        identity = load_module(
+            "uopti_existing_expired_original_identity", "smite-unified-foreign-identity-phase.py")
+        packet = private_packet(packet_path, client, promotion)
+        moment = int(time.time()) if now is None else now
+        if type(moment) is not int or moment < packet.expires_at:
+            deny()
+        with promotion.private_directory(_SELECTED_ROOT_PACKET.parent) as folder:
+            raw = promotion.read_optional(
+                folder, _SELECTED_ROOT_PACKET.name, client)
+        if raw is None or client.parse_packet(raw) != packet:
+            deny()
+        identity._selected_expired_packet_resume(
+            packet, raw, client=client, promotion=promotion,
+            directory=_SELECTED_ROOT_PACKET.parent,
+            live_identity=_SELECTED_ROOT_IDENTITY)
+    except Exception:
+        # Release, malicious receipt, changed packet or unsafe on-disk
+        # ownership all HOLD before any Node/Gateway mutation.
+        deny()
+    return _prepairing_exact_scope(
+        packet_path=packet_path, state_path=state_path,
+        gateway_state_path=gateway_state_path,
+        node_env_path=node_env_path, site_path=site_path)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--packet-file', required=True)
@@ -212,11 +275,12 @@ def main(argv=None):
     parser.add_argument('--site-file')
     parser.add_argument('--precore-fields', action='store_true')
     parser.add_argument('--prepairing-read-only', action='store_true')
+    parser.add_argument('--prepairing-owned-expired', action='store_true')
     parser.add_argument('--node-env-file')
     args = parser.parse_args(argv)
     try:
         if args.precore_fields:
-            if (args.prepairing_read_only or args.node_env_file
+            if (args.prepairing_read_only or args.prepairing_owned_expired or args.node_env_file
                     or args.state_file or args.gateway_state_file
                     or args.site_file):
                 deny()
@@ -225,16 +289,19 @@ def main(argv=None):
             result = precore_fields(args.packet_file)
             for field in result:
                 print(field)
-        elif args.prepairing_read_only:
-            if not all((args.state_file, args.gateway_state_file,
-                        args.site_file, args.node_env_file)):
+        elif args.prepairing_read_only or args.prepairing_owned_expired:
+            if (not all((args.state_file, args.gateway_state_file,
+                         args.site_file, args.node_env_file))
+                    or (args.prepairing_read_only and args.prepairing_owned_expired)):
                 deny()
-            print(prepairing_read_only(
+            fn = (prepairing_owned_expired if args.prepairing_owned_expired
+                  else prepairing_read_only)
+            print(fn(
                 packet_path=args.packet_file, state_path=args.state_file,
                 gateway_state_path=args.gateway_state_file,
                 site_path=args.site_file, node_env_path=args.node_env_file))
         else:
-            if args.node_env_file or not args.state_file:
+            if args.prepairing_owned_expired or args.node_env_file or not args.state_file:
                 deny()
             result = admit(
                 packet_path=args.packet_file,
