@@ -686,6 +686,24 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     smite_foreign_gateway_domain() { printf '%s\n' kh.example.org; }
     smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/3xui-kh.example.org"; }
     READONLY_PROOF=PASS
+    READONLY_OWNER=PASS
+    : > "$TMP/identity-runtime-probes"
+    smite_install_unified_foreign_node_image_review() {
+        printf 'signed-image\n' >> "$TMP/identity-runtime-probes"
+        [ "$READONLY_OWNER" = PASS ]
+    }
+    smite_foreign_gateway_require_rc_paused() {
+        printf 'paused-strict\n' >> "$TMP/identity-runtime-probes"
+        [ "$READONLY_OWNER" = PASS ]
+    }
+    smite_foreign_gateway_rc7_compose() {
+        printf 'compose %s\n' "$*" >> "$TMP/identity-runtime-probes"
+        [ "$READONLY_OWNER" = PASS ] && [ "$*" = 'config --quiet' ]
+    }
+    smite_install_sanaei_retained() {
+        printf 'sanaei-ro-sqlite\n' >> "$TMP/identity-runtime-probes"
+        [ "$READONLY_OWNER" = PASS ]
+    }
     python3() {
         printf '%s\n' "$*" >> "$TMP/identity-readonly-cli"
         [ "$READONLY_PROOF" = PASS ] || return 2
@@ -693,6 +711,9 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     output="$(smite_install_unified_foreign_identity_preflight "$PACKET")"
     [ "$output" = 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY' ]
+    [ "$(cat "$TMP/identity-runtime-probes")" = "$(printf 'signed-image\npaused-strict\ncompose config --quiet\nsanaei-ro-sqlite')" ] || {
+        echo 'FAIL: final signed runtime/RO witnesses not exercised'; exit 1;
+    }
     grep -F -- "--packet-file $PACKET --state-file $SMITE_STATE_FILE --gateway-state-file $SMITE_STATE_DIR/foreign-gateway.env --site-file $TMP/3xui-kh.example.org --node-env-file $SMITE_NODE_DIR/.env --prepairing-read-only" \
         "$TMP/identity-readonly-cli" >/dev/null
     ! grep -Fq 'smi1_B' "$TMP/identity-readonly-cli"
@@ -703,6 +724,14 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     fi
     ! grep -q '^FOREIGN_SIGNED_PAIRING_PREFLIGHT=' "$TMP/identity-readonly-hold"
     READONLY_PROOF=PASS
+    READONLY_OWNER=HOLD
+    : > "$TMP/identity-readonly-cli"
+    if smite_install_unified_foreign_identity_preflight "$PACKET" \
+       > "$TMP/identity-runtime-drift" 2>&1; then
+        echo 'FAIL: unverified signed Node/Sanaei runtime admitted'; exit 1
+    fi
+    [ ! -s "$TMP/identity-readonly-cli" ]
+    READONLY_OWNER=PASS
     SMITE_SELECTED_FRESH=0
     : > "$TMP/identity-readonly-cli"
     if smite_install_unified_foreign_identity_preflight "$PACKET" \
