@@ -475,6 +475,101 @@ class UnifiedForeignOption2(unittest.TestCase):
         self.assertNotIn("install_sanaei", self.events)
         self.assertNotIn("install_gateway", self.events)
 
+    def test_expired_grant_renewal_recovers_original_host_and_identity_without_reinstall(self):
+        """Real private packet intake -> original Host -> HMAC Identity journals.
+
+        Failure AFTER the original Host Gateway commit but BEFORE proof
+        must preserve the same staged key. On expiry, renew ONLY the one-use
+        packet for the exact same reserved Node; retry never installs
+        Sanaei/Gateway or regenerates its signed HMAC identity.
+        """
+        import hashlib
+        import io
+        intake = load("option2_original_packet_intake",
+                      ROOT / "modules" / "smite-unified-foreign-packet-intake.py")
+        p = self.fixture
+        p.wrong_proof = True
+        with self.assertRaises(host.Hold):
+            self.run_option2()
+        self.assertEqual((self.states["sanaei"], self.states["gateway"]),
+                         ("READY", "READY"))
+        identity_staged = p.stage / "foreign-install-identity.json"
+        initial = identity_staged.read_bytes()
+        self.assertFalse(p.live.exists())
+        self.assertEqual(json.loads((p.stage / host.JOURNAL).read_text())
+                         ["phase"], "GATEWAY_443_VERIFIED")
+        self.assertEqual(json.loads((p.stage /
+                        "unified-foreign-transaction.json").read_text())
+                         ["phase"], "INTENT")
+        old_end = p.doc["expires_at"]
+        old_packet = p.packet.read_bytes()
+        old_host = (p.stage / host.JOURNAL).read_bytes()
+        old_identity_tx = (p.stage / "unified-foreign-transaction.json").read_bytes()
+
+        # Original intake rejects a changed code before expiry without
+        # modifying a completed Host checkpoint or identity secret.
+        new_code = "smi1_" + "c"*43
+        updated = dict(p.doc, installation_code=new_code,
+                       expires_at=old_end + 3600)
+        def capture(at, changed=updated):
+            return intake.capture_disposable(
+                io.StringIO(json.dumps(changed) + "\n\n"),
+                target=p.packet, expected_panel=p.doc["panel_url"],
+                expected_domain=p.doc["origin"],
+                expected_node=p.doc["node_name"], now=at,
+                disposable_capability=True, allow_expired_renewal=True)
+        with self.assertRaises(intake.Hold):
+            capture(old_end - 1)
+        self.assertEqual(p.packet.read_bytes(), old_packet)
+        self.assertEqual(identity_staged.read_bytes(), initial)
+        self.assertEqual((p.stage / host.JOURNAL).read_bytes(), old_host)
+        self.assertEqual((p.stage / "unified-foreign-transaction.json").read_bytes(),
+                         old_identity_tx)
+
+        p.now = old_end
+        self.assertEqual(capture(old_end)["status"], "RENEWED_PRIVATE")
+        p.doc = updated
+        self.assertNotEqual(p.packet.read_bytes(), old_packet)
+        self.assertEqual(identity_staged.read_bytes(), initial)
+        self.assertEqual((p.stage / host.JOURNAL).read_bytes(), old_host)
+        self.assertEqual((p.stage / "unified-foreign-transaction.json").read_bytes(),
+                         old_identity_tx)
+
+        p.wrong_proof = False
+        self.events.clear()
+        p.calls.clear()
+        report = self.run_option2()
+        self.assertEqual(report["phase"], "FOREIGN_OPTION2_OFFLINE_READY")
+        self.assertFalse(report["connected"])
+        self.assertFalse(report["activation_allowed"])
+        self.assertEqual(report["signed_panel_proof"], "PASS")
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        self.assertEqual(identity_staged.read_bytes(), initial)
+        self.assertEqual(json.loads(p.live.read_text())["node_secret"],
+                         json.loads(initial)["node_secret"])
+        self.assertEqual(json.loads((p.stage / host.JOURNAL).read_text())
+                         ["packet_sha256"],
+                         hashlib.sha256(p.packet.read_bytes()).hexdigest())
+        self.assertEqual(json.loads((p.stage /
+                        "unified-foreign-transaction.json").read_text())
+                         ["phase"], "IDENTITY_PROMOTED_OFFLINE")
+        # Retained promoted key: a final same-option retry uses only a
+        # fresh signed Panel proof, never another bearer-code redemption.
+        live_before = p.live.read_bytes()
+        p.calls.clear()
+        self.events.clear()
+        self.assertEqual(self.run_option2(), report)
+        self.assertEqual(p.calls, ["/api/node-control/installation-status"])
+        self.assertEqual(p.live.read_bytes(), live_before)
+        self.assertNotIn("install_sanaei", self.events)
+        self.assertNotIn("install_gateway", self.events)
+        for file in (p.stage / host.JOURNAL,
+                     p.stage / "unified-foreign-transaction.json"):
+            text = file.read_text()
+            self.assertNotIn(new_code, text)
+            self.assertNotIn("node_secret", text)
+
     def test_foreign_gateway_drift_after_redeem_blocks_success_without_rekey(self):
         original = self.verify_gateway
         count = [0]
