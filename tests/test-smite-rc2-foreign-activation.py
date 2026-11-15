@@ -104,6 +104,7 @@ class RC2ActivationTests(unittest.TestCase):
              patch.object(pairing, "_regular", return_value=b"reviewed"), \
              patch.object(pairing, "_prepare_security_candidate") as stage, \
              patch.object(pairing, "_provision_replay_once") as replay, \
+             patch.object(pairing, "_replay_artifacts_valid", return_value=True), \
              patch.object(pairing, "_wait_container"), \
              patch.object(pairing, "_local_signed_replay_probe") as signed_hmac, \
              patch.object(pairing, "_run", side_effect=fake_run):
