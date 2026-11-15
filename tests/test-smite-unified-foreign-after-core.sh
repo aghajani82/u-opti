@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # One-choice Foreign option-2 post-core choreography, offline only.
 # No Docker, network, TLS, certificate issuance, Nginx or host writes.
-set -euo pipefail
+set -Eeuo pipefail
+# Failure-only CI diagnostic; print source line, never command text or secrets.
+trap 'echo "FOREIGN_OPTION2_TEST_FAILED_AT_LINE=$LINENO" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
