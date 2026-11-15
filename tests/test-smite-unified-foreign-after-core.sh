@@ -110,6 +110,16 @@ smite_install_unified_foreign_sanaei() {
     calls+=(sanaei)
     [ "$MODE" != failed_sanaei ]
 }
+# The real selected installer reuses original read-only Sanaei/443 witnesses
+# AFTER a successful Gateway stage; fixture callbacks never change the host.
+smite_install_sanaei_retained() {
+    calls+=(post_ro)
+    [ "$MODE" != post_ro_drift ]
+}
+smite_foreign_gateway_verify_local() {
+    calls+=(verified_tls)
+    [ "$MODE" != post_tls_drift ]
+}
 smite_foreign_gateway_configure() {
     calls+=(gateway)
     [ "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" = "$PACKET" ] || return 2
@@ -149,14 +159,14 @@ run() {
     ! grep -q 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/output"
 }
 
-run 0 signed,paused,compose,sanaei,gateway,paused,compose
+run 0 signed,paused,compose,sanaei,gateway,paused,compose,post_ro,verified_tls
 
 # The SAME original Sanaei/Gateway choreography admits signed RC9 only with
 # the exact sealed source. This still uses a stubbed release verifier and
 # cannot be invoked on a real host while activation remains default-off.
 printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\nSMITE_CONNECTION_MODE=standard\nSMITE_PANEL_DOMAIN=iran.example.org\nSMITE_FOREIGN_DOMAIN=kh.example.org\nSMITE_NODE_NAME=node-kh\n' > "$SMITE_STATE_FILE"
 chmod 0600 "$SMITE_STATE_FILE"
-MODE=ok; run 0 signed,paused,compose,sanaei,gateway,paused,compose
+MODE=ok; run 0 signed,paused,compose,sanaei,gateway,paused,compose,post_ro,verified_tls
 grep -q 'resume-foreign --foreign-packet-file' "$TMP/foreign-core-witness-calls"
 grep -q -- '--attached-sanaei' "$TMP/foreign-core-witness-calls"
 grep -q -- '--installer-pid' "$TMP/foreign-core-witness-calls"
@@ -228,6 +238,8 @@ MODE=post_wrong_image; run 2 signed,paused,compose,sanaei,gateway
 MODE=post_wrong_runtime_id; run 2 signed,paused,compose,sanaei,gateway
 MODE=post_bad_paused; run 2 signed,paused,compose,sanaei,gateway,paused
 MODE=post_bad_compose; run 2 signed,paused,compose,sanaei,gateway,paused,compose
+MODE=post_ro_drift; run 2 signed,paused,compose,sanaei,gateway,paused,compose,post_ro
+MODE=post_tls_drift; run 2 signed,paused,compose,sanaei,gateway,paused,compose,post_ro,verified_tls
 
 # Retry a completed Gateway in place to preserve the selected vhost.
 smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/foreign-site"; }
@@ -240,11 +252,11 @@ smite_foreign_gateway_recreate_node() {
     [ "$UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE" = "$PACKET" ]
 }
 MODE=ok
-run 0 signed,paused,compose,sanaei,gateway,paused,compose
+run 0 signed,paused,compose,sanaei,gateway,paused,compose,post_ro,retained_tls
 calls=()
 smite_install_unified_foreign_after_core "$PACKET" > "$TMP/retained"
 grep -qx 'UNIFIED_FOREIGN_GATEWAY=VERIFIED_RETAINED' "$TMP/retained"
-[ "$(IFS=,; echo "${calls[*]}")" = signed,paused,compose,sanaei,retained_tls,retained_node,paused,compose ]
+[ "$(IFS=,; echo "${calls[*]}")" = signed,paused,compose,sanaei,retained_tls,retained_node,paused,compose,post_ro ]
 MODE=drifted_tls
 calls=()
 status=0
