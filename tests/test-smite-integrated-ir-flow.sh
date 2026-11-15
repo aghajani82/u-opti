@@ -1,5 +1,7 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
+# Keep a failure-only source-line marker; never print commands or credentials.
+trap 'echo "IR_OPTION1_REGRESSION_FAILED_AT_LINE=$LINENO" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
