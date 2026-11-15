@@ -720,7 +720,7 @@ class Journal:
         # BEFORE any stop, rename or file quarantine. Only this Core is owned.
         return self.rollback(installer_pid=installer_pid)
 
-    def foreign_resume(self, packet_path=None, *, attached_sanaei=False):
+    def foreign_resume(self, packet_path=None, *, attached_sanaei=False, installer_pid=None):
         """Read-only pre-enrollment disposition of the ORIGINAL RC9 Core.
 
         Reuse the same durable owner on an interrupted selected option 2.
@@ -739,8 +739,13 @@ class Journal:
                      'node_id', 'control_path')
             if tuple(scope[key] for key in names) != tuple(exact):
                 raise Hold('FOREIGN_RESUME_PANEL_SCOPE_MISMATCH')
+        # The same active option-2 installer may reverify a committed Core
+        # and read-only Sanaei attachment before it starts Gateway. Another
+        # running installer cannot borrow this immutable owner or its lock.
         if (d.get('installer_start')
-                and process_start(d.get('installer_pid')) == d['installer_start']):
+                and process_start(d.get('installer_pid')) == d['installer_start']
+                and (installer_pid != d.get('installer_pid')
+                     or process_start(installer_pid) != d['installer_start'])):
             raise Hold('FOREIGN_INSTALLER_STILL_RUNNING')
         if d['state'] == 'ROLLED_BACK':
             return 'FRESH_ALLOWED', None
@@ -969,7 +974,8 @@ def main():
                     print('IR_INSTALL_PROJECT=' + project)
             elif a.action == 'resume-foreign':
                 stage, project = j.foreign_resume(
-                    a.foreign_packet_file, attached_sanaei=a.attached_sanaei)
+                    a.foreign_packet_file, attached_sanaei=a.attached_sanaei,
+                    installer_pid=a.installer_pid)
                 print('FOREIGN_CORE_STAGE=' + stage)
                 if project is not None:
                     print('FOREIGN_CORE_PROJECT=' + project)
