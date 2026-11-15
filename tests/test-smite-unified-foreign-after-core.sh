@@ -438,4 +438,42 @@ PY
     ! grep -q 'UNIFIED_FOREIGN_SANAEI_GATEWAY=PREPARED' "$TMP/release-hold"
     ! grep -q 'smi1_B' "$TMP/release-hold"
 )
+# The exact future selected option-2 Core entry must pass the EXISTING
+# signed-release gate before even reading the private one-use packet or
+# creating a Core owner. The original Core Journal remains real-host HOLD.
+SMITE_SELECTED_FRESH=1
+SMITE_INSTALL_PROFILE=clean-rc
+SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+SMITE_NODE_IMAGE=ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2
+RELEASE_FIXTURE=HOLD
+smite_install_unified_signed_pair_review() { [ "$RELEASE_FIXTURE" = pass ]; }
+: > "$TMP/foreign-core-cli-calls"
+python3() {
+    printf '%s\n' "$*" >> "$TMP/foreign-core-cli-calls"
+    case "$*" in
+        *smite-unified-foreign-gateway-plan.py*--precore-fields) return 0 ;;
+        *smite-rc6-install-journal.py*--foreign-packet-file*--source*)
+            printf 'uopti_rc6_%s\n' "$(printf 'a%.0s' {1..32})" ;;
+        *) echo 'FAIL: unexpected Core packet/Journaling call' >&2; return 77 ;;
+    esac
+}
+status=0
+smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-core-release-hold" 2>&1 || status=$?
+[ "$status" = 2 ]
+[ ! -s "$TMP/foreign-core-cli-calls" ]
+! grep -q 'FOREIGN_CORE_OWNER=' "$TMP/foreign-core-release-hold"
+RELEASE_FIXTURE=pass
+smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-core-owner-fixture" 2>&1
+grep -qx "FOREIGN_CORE_OWNER=uopti_rc6_$(printf 'a%.0s' {1..32})" "$TMP/foreign-core-owner-fixture"
+[ "$(wc -l < "$TMP/foreign-core-cli-calls")" -eq 2 ]
+grep -F -- "--resumable-foreign --foreign-packet-file $PACKET --source e7f76185e9a7da51d7069d5d0a829dc192cc1e06" "$TMP/foreign-core-cli-calls" >/dev/null
+! grep -q -- '--foreign-inputs' "$TMP/foreign-core-cli-calls"
+! grep -q -- 'smi1_B' "$TMP/foreign-core-cli-calls"
+SMITE_NODE_IMAGE=ghcr.io/aghajani82/smite-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+: > "$TMP/foreign-core-cli-calls"
+status=0
+smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-core-wrong-image" 2>&1 || status=$?
+[ "$status" = 2 ] && [ ! -s "$TMP/foreign-core-cli-calls" ]
+echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_HOST_WRITES'
+
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'
