@@ -70,6 +70,15 @@ class GatewayScope(unittest.TestCase):
         self.assertEqual(
             gateway.precore_fields(self.packet, now=1799999000),
             (PANEL, FOREIGN, NODE, 'https://'+FOREIGN+':443'+PATH))
+        # Internal Core owner uses this same parser and TTL, never the
+        # one-use code; the existing 4-field install prompt is unchanged.
+        self.assertEqual(
+            gateway.precore_fields(
+                self.packet, now=1799999000, for_core_owner=True),
+            (PANEL, FOREIGN, NODE, self.scope['node_id'], PATH))
+        with self.assertRaises(gateway.Hold):
+            gateway.precore_fields(
+                self.packet, now=1799999000, for_core_owner='yes')
         import contextlib, io
         output=io.StringIO()
         with patch.object(gateway.time,'time',return_value=1799999000), \
