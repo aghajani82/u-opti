@@ -228,6 +228,26 @@ class ForeignRC7Tests(unittest.TestCase):
                 self.assertEqual(p._foreign_gateway_preflight(
                     current, review_unified_trial=True),
                     ("iran.grandoptical.ir", "grandoptical.ir", trial_control))
+                # The existing Foreign HTTPS/443 read-only witness also
+                # recognizes the sealed RC9 source, never an unpinned
+                # upgrade or the mutable legacy activation path.
+                exact_rc9 = {**current, "SMITE_MANAGED_VERSION":"2.0.0-rc.9",
+                    "SMITE_UPSTREAM_REF":"e7f76185e9a7da51d7069d5d0a829dc192cc1e06"}
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(exact_rc9)
+                self.assertEqual(p._foreign_gateway_preflight(
+                    exact_rc9, review_unified_trial=True),
+                    ("iran.grandoptical.ir", "grandoptical.ir", trial_control))
+                for untrusted in ("0"*40, "9a1270b31e8d44f13d09b71ab6b9798410b09c12"):
+                    with self.assertRaises(p.WizardHold):
+                        p._foreign_gateway_preflight(
+                            {**exact_rc9, "SMITE_UPSTREAM_REF":untrusted},
+                            review_unified_trial=True)
+                with self.assertRaises(p.WizardHold):
+                    p._foreign_gateway_preflight(
+                        {key:value for key,value in exact_rc9.items()
+                         if key != "SMITE_UPSTREAM_REF"},
+                        review_unified_trial=True)
                 # A missing :443 or drifted control address must HOLD in
                 # the trial lane, even if HTTPS would reach the same host.
                 (node / ".env").write_text(original_node_env)
