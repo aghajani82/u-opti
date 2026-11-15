@@ -312,6 +312,112 @@ class RecoveryTests(unittest.TestCase):
         self.assert_no_stop()
         with self.assertRaises(m.Hold):self.j.rollback()
 
+    def _staged_rc9_foreign_core_failure(self):
+        # The original RC9 Journal owns this unpaired disposable Core;
+        # no external Sanaei, Gateway, identity or signed Node exists.
+        import time
+        self.j.rollback()
+        scope = ('panel.example.com', 'kh.example.com', 'node-kh',
+                 'foreign-node-1234', '/smite-node/' + 'a'*32)
+        project = self.j.begin(
+            'foreign', source=m.RC9_SOURCE,
+            resumable_foreign=True, foreign_inputs=scope)
+        private = self.root / 'private-foreign-grant'
+        private.mkdir(mode=0o700)
+        packet = private / 'foreign-install-packet.json'
+        packet.write_text(json.dumps(dict(
+            protocol='smi1', panel_url='https://' + scope[0] + ':443',
+            node_id=scope[3], node_name=scope[2],
+            origin='https://' + scope[1] + ':443',
+            control_url='https://' + scope[1] + ':443' + scope[4],
+            installation_code='smi1_' + 'b'*43,
+            expires_at=int(time.time()) + 3600)))
+        packet.chmod(0o600)
+        core = self.root / 'opt/smite-node'
+        core.mkdir(parents=True)
+        (core / '.env').write_text('uncommitted-private-state\\n')
+        (core / '.env').chmod(0o600)
+        self.objects['a'*64] = dict(
+            Id='a'*64, Name='/smite-node',
+            State={'Running': True},
+            Config={'Image': m.RC9_IMAGES['smite-node'],
+                    'Env': ['SMITE_NODE_PANEL_AUTH_MODE=paused'],
+                    'Labels': {'com.docker.compose.project': project}},
+            HostConfig={'RestartPolicy': {'Name': 'unless-stopped'}})
+        return project, packet, core
+
+    def test_option2_auto_core_rollback_quarantines_only_uncommitted_core(self):
+        project, packet, core = self._staged_rc9_foreign_core_failure()
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume(packet)  # Partial Core must not be adopted.
+        receipt = self.j.foreign_recover_incomplete_core(packet)
+        self.assertEqual(receipt, 'RC6_ROLLBACK=PASS_DATA_RETAINED')
+        self.assertEqual(self.j.load()['state'], 'ROLLED_BACK')
+        archived = core.with_name(core.name + '.rc6-rollback-' + project)
+        self.assertFalse(core.exists())
+        self.assertEqual((archived / '.env').read_text(),
+                         'uncommitted-private-state\\n')
+        self.assertFalse(self.objects['a'*64]['State']['Running'])
+        self.assertEqual(len(self.objects), 1)  # Keep stopped container/data.
+        self.assertFalse(any('rm' in c for c in self.calls))
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        # The same option may start only a new UNCOMMITTED Core owner.
+        self.assertNotEqual(project, self.j.begin(
+            'foreign', source=m.RC9_SOURCE, resumable_foreign=True,
+            foreign_inputs=('panel.example.com', 'kh.example.com', 'node-kh',
+                            'foreign-node-1234', '/smite-node/' + 'a'*32)))
+
+    def test_option2_auto_core_rollback_refuses_scope_and_owner_drift(self):
+        project, packet, core = self._staged_rc9_foreign_core_failure()
+        original = json.loads(packet.read_text())
+        changed = dict(original, node_name='different-foreign')
+        packet.write_text(json.dumps(changed))
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        packet.write_text(json.dumps(original))
+        self.objects['a'*64]['Config']['Labels'][
+            'com.docker.compose.project'] = 'unowned_foreign'
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        self.objects['a'*64]['Config']['Labels'][
+            'com.docker.compose.project'] = project
+        self.objects['a'*64]['Config']['Image'] = m.RC7_IMAGES['smite-node']
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        self.assert_no_stop()
+        self.assertTrue(core.exists())
+        self.assertEqual(self.j.load()['state'], 'INSTALLING')
+
+    def test_option2_auto_core_rollback_refuses_enrolled_and_completed(self):
+        project, packet, core = self._staged_rc9_foreign_core_failure()
+        identity = core / 'config/identity'
+        identity.mkdir(parents=True)
+        (identity / 'node-identity.json').write_text('retain')
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        self.assert_no_stop()
+        (identity / 'node-identity.json').unlink()
+        identity.rmdir()
+        record = self.j.load()
+        record['state'] = 'COMMITTED'
+        self.j.save(record)
+        with self.assertRaises(m.Hold):
+            self.j.foreign_recover_incomplete_core(packet)
+        self.assert_no_stop()
+        self.assertTrue(core.exists())
+
+    def test_option2_auto_core_rollback_refuses_concurrent_installer(self):
+        _, packet, core = self._staged_rc9_foreign_core_failure()
+        record = self.j.load()
+        record.update(installer_pid=123, installer_start='fixture-active')
+        self.j.save(record)
+        with patch.object(m, 'process_start', return_value='fixture-active'):
+            with self.assertRaises(m.Hold):
+                self.j.foreign_recover_incomplete_core(packet, installer_pid=456)
+        self.assert_no_stop()
+        self.assertTrue(core.exists())
+
     def test_retained_rc9_foreign_owner_is_readable_but_not_creatable(self):
         # This is a disposition of a FAKE retained signed image owner, not
         # permission to begin a new RC9 Foreign install on a live host.
