@@ -667,4 +667,57 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     echo 'UNIFIED_FOREIGN_PRE_PAIRING_STAGE=PASS_ISOLATED_ORIGINAL_OWNERS'
 )
 
+# Exercise the ACTUAL non-mutating pre-Signed-Pairing adapter with its
+# original verified source/packet files but a fake Python process. The
+# original Python boundary is separately tested with genuine modules.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    SMITE_STATE_DIR="$TMP"
+    SMITE_STATE_FILE="$TMP/state.env"
+    SMITE_NODE_DIR="$TMP/foreign-node"
+    mkdir -p "$SMITE_NODE_DIR"
+    printf 'NODE_ROLE=foreign\n' > "$SMITE_NODE_DIR/.env"
+    printf 'SMITE_ROLE=foreign\n' > "$SMITE_STATE_FILE"
+    : > "$TMP/identity-readonly-cli"
+    REAL_PREFLIGHT="$(declare -f smite_install_unified_foreign_identity_preflight)"
+    eval "$REAL_PREFLIGHT"
+    dirname() { printf '%s\n' "$ROOT/modules"; }
+    smite_foreign_gateway_domain() { printf '%s\n' kh.example.org; }
+    smite_foreign_gateway_site_path() { printf '%s\n' "$TMP/3xui-kh.example.org"; }
+    READONLY_PROOF=PASS
+    python3() {
+        printf '%s\n' "$*" >> "$TMP/identity-readonly-cli"
+        [ "$READONLY_PROOF" = PASS ] || return 2
+        printf 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY\n'
+    }
+    output="$(smite_install_unified_foreign_identity_preflight "$PACKET")"
+    [ "$output" = 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY' ]
+    grep -F -- "--packet-file $PACKET --state-file $SMITE_STATE_FILE --gateway-state-file $SMITE_STATE_DIR/foreign-gateway.env --site-file $TMP/3xui-kh.example.org --node-env-file $SMITE_NODE_DIR/.env --prepairing-read-only" \
+        "$TMP/identity-readonly-cli" >/dev/null
+    ! grep -Fq 'smi1_B' "$TMP/identity-readonly-cli"
+    READONLY_PROOF=HOLD
+    if smite_install_unified_foreign_identity_preflight "$PACKET" \
+       > "$TMP/identity-readonly-hold" 2>&1; then
+        echo 'FAIL: drifted promotion admission was accepted'; exit 1
+    fi
+    ! grep -q '^FOREIGN_SIGNED_PAIRING_PREFLIGHT=' "$TMP/identity-readonly-hold"
+    READONLY_PROOF=PASS
+    SMITE_SELECTED_FRESH=0
+    : > "$TMP/identity-readonly-cli"
+    if smite_install_unified_foreign_identity_preflight "$PACKET" \
+       > "$TMP/identity-readonly-unselected" 2>&1; then
+        echo 'FAIL: unselected Foreign identity admission accepted'; exit 1
+    fi
+    [ ! -s "$TMP/identity-readonly-cli" ]
+    SMITE_SELECTED_FRESH=1
+    ln -s "$PACKET" "$TMP/identity-preflight-symlink"
+    if smite_install_unified_foreign_identity_preflight "$TMP/identity-preflight-symlink" \
+       > "$TMP/identity-readonly-symlink" 2>&1; then
+        echo 'FAIL: symlinked Foreign identity packet accepted'; exit 1
+    fi
+    [ ! -s "$TMP/identity-readonly-cli" ]
+    echo 'FOREIGN_ORIGINAL_SIGNED_IDENTITY_READ_ONLY_BOUNDARY=PASS'
+)
+
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'
