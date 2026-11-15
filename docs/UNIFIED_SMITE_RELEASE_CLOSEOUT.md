@@ -67,6 +67,46 @@ promotion journal and signed activation/rollback, then an authorized
 disposable two-host Connected + restart/interruption acceptance. Only
 after this may the public option-2 guard and final merge be reviewed.
 
+#### Foreign option-2 original Sanaei/Gateway stage witnesses — 2026-11-15
+
+Completed the next **integration-only** checkpoint on the existing branch.
+The SAME original `smite-rc6-install-journal.py::foreign_resume` now
+accepts the **same active installer PID** under its existing operation
+lock, while still refusing a different running installer. Immediately
+after the original Sanaei return/RO attachment and BEFORE HTTPS/443
+Gateway changes, `smite-install.sh` requires a fresh, exact RC9
+`CORE_COMMITTED` receipt from that original owner with the packet,
+same active installer lease and `--attached-sanaei`. The Journal
+independently checks immutable source, Node, Compose/project, current
+paused+strict runtime and the actual read-only DB bind; no new
+installer or second journal was introduced.
+
+After the existing HTTPS/443 Gateway completes, the same selected
+internal path additionally reuses the original read-only Sanaei mount
+and Nginx/TLS local witnesses before reporting readiness for Pairing.
+Drift at either boundary HOLDS without deleting or reinstalling any
+previously committed Core/Sanaei/Gateway stage. Existing stage-owned
+Sanaei pending rollback and Gateway pending snapshot recovery remain
+the source of truth. Separate menu option 7, independent RC7 paths,
+Smite main, U-OPTI main and operational hosts are untouched.
+
+[Full three-job signed source / Foreign stage CI PASS](https://github.com/aghajani82/u-opti/actions/runs/43722010503)
+at source `5365dcfbb145be189b593fa2cae6d6766f67fc6f`.
+CI includes same-installer lease takeover-denial and a real-shell
+option-2 post-core fixture testing owner drift, RO Sanaei drift,
+TLS/443 drift, retained Gateway and honest not-Connected reporting.
+These are **offline tests only**, not a live root or cross-server
+Connected acceptance.
+
+**Next closure boundary:** reuse the existing original Foreign
+identity/redeem/activation journal under reviewed real-root admission,
+complete per-stage failed-Pairing rollback and same-option retry, then
+obtain actual signed Iran+Foreign two-way Connected and interruption
+proof on the two disposable hosts. Public option 2 remains
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`; the sealed RC9
+manifest still explicitly disallows activation. No release flag was
+relaxed or production deployment authorized.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
