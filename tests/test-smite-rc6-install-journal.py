@@ -139,6 +139,18 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(owner.startswith('uopti_rc6_'))
         self.assertEqual(self.j.load()['foreign_inputs']['node_id'],scope[3])
         self.assertEqual(self.j.load()['foreign_inputs']['control_path'],scope[4])
+        with patch('time.time',return_value=now):
+            self.assertEqual(self.j.foreign_resume(packet),('CORE_PENDING',owner))
+            payload['node_name']='other-node'
+            packet.write_text(json.dumps(payload))
+            with self.assertRaises(m.Hold):self.j.foreign_resume(packet)
+            payload['node_name']=scope[2]
+            payload['expires_at']=now-1
+            packet.write_text(json.dumps(payload))
+            with self.assertRaises(m.Hold):self.j.foreign_resume(packet)
+            payload['expires_at']=now+3600
+            packet.write_text(json.dumps(payload))
+            self.assertEqual(self.j.foreign_resume(packet),('CORE_PENDING',owner))
         self.assertNotIn(payload['installation_code'],self.j.path.read_text())
         self.assertNotIn('node_secret',self.j.path.read_text())
         self.assertFalse(any('stop' in call for call in self.calls))
