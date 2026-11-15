@@ -16,6 +16,36 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 original Foreign Core selected-stage reuse (no menu or real-root activation)
+
+The existing Foreign Node installer is now composed with original
+`begin/resume-foreign/commit` into one **internal** selected-stage
+function in `smite-install.sh`. It verifies the signed RC9 release,
+one private Panel packet, and original immutable Core Journal before
+any host action. The same option can distinguish pristine
+`CORE_PENDING` from `CORE_READY_TO_COMMIT` and
+`CORE_COMMITTED`, with no duplicate Node/identity on retained
+installation. A new Core is installed only through the previously
+existing `smite_install_foreign_node`, then its original Journal
+performs the durable commit. A mismatched source, owner, packet or
+ambiguous partial Core never triggers a reinstall.
+
+The signed-release witness is kept out of the machine-readable Core
+receipt, preventing a false parse failure after real release approval.
+The original public Foreign option 2 and real-host signed Journal
+both still HOLD before any Core mutation; no unsupported live install
+was made available. The dedicated isolated shell test checks actual
+step selection with mocked Docker/CLI and a private temp Journal.
+[All jobs PASS](https://github.com/aghajani82/u-opti/actions/runs/43711626279).
+
+Remaining scope stays narrow: safely connect this Core stage to the
+**existing** Sanaei RO/Gateway 443/Identity journal operations with
+owned retry and compensation *after* inventory attachment, obtain a
+separately reviewed signed release that actually admits host activation,
+then align Iran Panel's existing Foreign flags and test both servers
+using one immutable U-OPTI revision. No separate installer or new
+feature is required.
+
 ### 2026-11-15 original Foreign Core exact-state COMMIT and resume
 
 The **existing** fresh Core Journal now checks its private Node

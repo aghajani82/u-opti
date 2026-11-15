@@ -409,6 +409,57 @@ with that release. No test VPS rebuild is needed for the offline
 change. Production Grandoptical, FRP, Backhaul and `main` remain
 untouched.
 
+#### RC9 Foreign Core selected-stage execution and recovery — CI PASS, live HOLD
+
+The existing `modules/smite-install.sh` now contains an **internal**
+`smite_install_unified_foreign_core_stage` that reuses the original
+`smite_install_unified_foreign_begin_core_from_panel`, original
+`smite_install_foreign_node`, and original
+`smite-rc6-install-journal.py begin/resume-foreign/commit` in a
+**single stage**. One exact, private Panel-issued grant supplies the
+Core scope. When no owner exists, the original signed release gate
+is checked *before* any Core work and the signed pinned owner begins.
+For a retained owner, original `resume-foreign` determines one of
+three unambiguous states:
+
+- `CORE_PENDING`: install using the existing Foreign Node installer
+  and the same Compose project; ambiguous partial Core remains HOLD.
+- `CORE_READY_TO_COMMIT`: commit the already verified original Node
+  without running `docker up` again.
+- `CORE_COMMITTED`: retain the exact signed Core, skip Node install
+  and Core commit, and proceed to the later owned stages.
+
+The internal helper prints only exact, nonsecret Core receipts; the
+informational `UNIFIED_FOREIGN_IMAGE_PAIR` line cannot corrupt its
+parsed owner ID. It never prints an installation code or regenerates a
+Node identity. The previous stage Journal validates source,
+control/443 URL, strict paused mode, immutable digest, project,
+Compose file and health; different/missing/untrusted output fails.
+The CI harness tests this *same shell function* with a disposable
+journal path and mocked host commands. It verifies signed-release
+HOLD before any action, first Core run, empty interrupted retry,
+no-recreate ready/committed branches, stage errors, bad owner and
+symlinked grant. Actual production journal and signed host gate are
+unchanged. [Full CI 3/3 PASS](https://github.com/aghajani82/u-opti/actions/runs/43711626279).
+
+**Important:** the function is still an **internal building block**,
+not wired into the public Foreign option 2. The public menu still
+returns `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+The existing signed trial pair continues to deny host activation,
+and the original Journal still disallows a new RC9 Foreign owner
+under the real host root `/`. No VPS can be installed from this
+partial code.
+
+**Next closure work:** the original stage-owned Host Sanaei/Gateway
+journal and Identity pairing journal must become a complete safe
+*real-root* continuation, including a resume after Sanaei changes
+the initially disabled inventory setting, interruption compensation,
+one-time grant expiry/reissue for the SAME Node, and post-promotion
+identity/HTTPS proof. Only then can the public option 2, separately
+signed host-activation approval, and Iran Panel Foreign capability
+flags be coordinated for a matched two-host test. No main merge,
+rebuild or production modification is authorized by this CI result.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;
