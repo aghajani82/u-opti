@@ -197,6 +197,72 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(m.Hold):self.j.rollback()
         self.assertFalse(any('stop' in a for a in self.calls))
 
+    def test_rc9_foreign_resume_verifies_same_core_and_does_not_recreate(self):
+        scope=('panel.example.com','kh.example.com','node-kh',
+               'foreign-node-1234','/smite-node/'+'a'*32)
+        self.j.rollback()
+        tx=self.j.begin('foreign',source=m.RC9_SOURCE,
+                        resumable_foreign=True,foreign_inputs=scope)
+        self.assertEqual(self.j.foreign_resume(),('CORE_PENDING',tx))
+        node=self.root/'opt/smite-node'
+        node.mkdir(parents=True)
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume()  # Interrupted files, not a blank Core
+        env=node/'.env'
+        clean=('NODE_NAME='+scope[2]+'\n'
+               'NODE_ROLE=foreign\n'
+               'PANEL_ADDRESS='+scope[0]+':443\n'
+               'SMITE_CONTROL_ADDRESS=https://'+scope[1]+':443'+scope[4]+'\n'
+               'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
+               'SMITE_AGENT_AUTH_MODE=strict\n'
+               'SMITE_SANAEI_INVENTORY_ENABLED=false\n')
+        env.write_text(clean)
+        env.chmod(0o600)
+        state=self.root/'etc/u-opti/smite/state.env'
+        state.parent.mkdir(parents=True)
+        state.write_text(
+            'SMITE_ROLE=foreign\n'
+            'SMITE_MANAGED_VERSION=2.0.0-rc.9\n'
+            'SMITE_UPSTREAM_REF='+m.RC9_SOURCE+'\n'
+            'SMITE_CONNECTION_MODE=standard\n'
+            'SMITE_PANEL_DOMAIN='+scope[0]+'\n'
+            'SMITE_FOREIGN_DOMAIN='+scope[1]+'\n'
+            'SMITE_NODE_NAME='+scope[2]+'\n')
+        state.chmod(0o600)
+        self.objects['a'*64]=dict(
+            Id='a'*64,Name='/smite-node',
+            State={'Running':True,'Health':{'Status':'healthy'}},
+            Config={'Image':m.RC9_IMAGES['smite-node'],
+                    'Env':['SMITE_NODE_PANEL_AUTH_MODE=paused'],
+                    'Labels':{
+                        'com.docker.compose.project':tx,
+                        'com.docker.compose.service':'smite-node',
+                        'com.docker.compose.project.config_files':
+                           '/opt/smite-node/docker-compose.yml',
+                    }},
+            HostConfig={'RestartPolicy':{'Name':'unless-stopped'}})
+        self.assertEqual(self.j.foreign_resume(),('CORE_READY_TO_COMMIT',tx))
+        env.write_text(clean.replace(scope[4],'/smite-node/'+'f'*32))
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume()
+        env.write_text(clean)
+        self.objects['a'*64]['Config']['Labels'][
+            'com.docker.compose.project.config_files'
+        ]='/tmp/foreign-compose.yml'
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume()
+        self.objects['a'*64]['Config']['Labels'][
+            'com.docker.compose.project.config_files'
+        ]='/opt/smite-node/docker-compose.yml'
+        self.objects['a'*64]['State']['Health']['Status']='unhealthy'
+        with self.assertRaises(m.Hold):
+            self.j.foreign_resume()
+        self.objects['a'*64]['State']['Health']['Status']='healthy'
+        self.assertEqual(self.j.commit(),'RC6_INSTALL_TRANSACTION=COMMITTED')
+        self.assertEqual(self.j.foreign_resume(),('CORE_COMMITTED',tx))
+        self.assert_no_stop()
+        with self.assertRaises(m.Hold):self.j.rollback()
+
     def test_retained_rc9_foreign_owner_is_readable_but_not_creatable(self):
         # This is a disposition of a FAKE retained signed image owner, not
         # permission to begin a new RC9 Foreign install on a live host.
