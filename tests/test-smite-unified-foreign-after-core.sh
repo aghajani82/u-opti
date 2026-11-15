@@ -512,6 +512,7 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     smite_install_unified_foreign_begin_core_from_panel() {
         printf 'begin\n' >> "$TMP/core-stage-calls"
+        printf '%s\n' "${2:-missing}" > "$TMP/core-stage-installer-pid"
         printf 'FOREIGN_CORE_OWNER=%s\n' "$PROJECT"
     }
     smite_install_foreign_node() {
@@ -533,7 +534,9 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     case_core() {
         local expected_rc="$1" expected_calls="$2" result=0
+        local expected_installer_pid="$BASHPID"
         : > "$TMP/core-stage-calls"
+        : > "$TMP/core-stage-installer-pid"
         smite_install_unified_foreign_core_stage "$PACKET" \
             > "$TMP/core-stage-report" 2>&1 || result=$?
         [ "$result" -eq "$expected_rc" ] || {
@@ -543,6 +546,11 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
             echo 'FAIL: wrong Core stage callbacks'
             cat "$TMP/core-stage-calls"; exit 1;
         }
+        if grep -qx 'begin' "$TMP/core-stage-calls"; then
+            [ "$(cat "$TMP/core-stage-installer-pid")" = "$expected_installer_pid" ] || {
+                echo 'FAIL: Core journal inherited transient child PID, not installer process'; exit 1;
+            }
+        fi
         if [ "$result" -eq 0 ]; then
             ! grep -q '^UNIFIED_FOREIGN_IMAGE_PAIR=' "$TMP/core-stage-report"
             grep -qx "FOREIGN_CORE_PROJECT=$PROJECT" "$TMP/core-stage-report"
