@@ -489,7 +489,9 @@ class UnifiedForeignOption2(unittest.TestCase):
                       ROOT / "modules" / "smite-unified-foreign-packet-intake.py")
         p = self.fixture
         p.wrong_proof = True
-        with self.assertRaises(host.Hold):
+        # The existing identity phase has its own ValueError-based Hold,
+        # separate from the Host stage's Hold. Both retain owned state.
+        with self.assertRaises(ValueError):
             self.run_option2()
         self.assertEqual((self.states["sanaei"], self.states["gateway"]),
                          ("READY", "READY"))
