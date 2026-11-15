@@ -570,10 +570,10 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     python3() {
         case "$*" in
-            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET --attached-sanaei")
+            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET --installer-pid "*" --attached-sanaei")
                 printf 'resume-ro\n' >> "$TMP/core-stage-calls"
                 printf 'FOREIGN_CORE_STAGE=%s\nFOREIGN_CORE_PROJECT=%s\n' "$FIX_STAGE" "$PROJECT" ;;
-            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET")
+            *"smite-rc6-install-journal.py resume-foreign --foreign-packet-file $PACKET --installer-pid "*)
                 printf 'resume\n' >> "$TMP/core-stage-calls"
                 printf 'FOREIGN_CORE_STAGE=%s\nFOREIGN_CORE_PROJECT=%s\n' "$FIX_STAGE" "$PROJECT" ;;
             *"smite-rc6-install-journal.py commit")
