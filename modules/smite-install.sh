@@ -2429,6 +2429,35 @@ smite_install_unified_foreign_core_stage() {
     echo 'FOREIGN_CORE_NEXT=EXISTING_SANAEI_GATEWAY_SIGNED_PAIRING'
 }
 
+# Internal one-choice hand-off: the original Core Journal chooses whether
+# to install/commit/resume, then the original Sanaei + HTTPS/443 coordinator
+# verifies and continues without returning to the menu. The identity and
+# host-activation gates remain independent; no Connected claim is made.
+#
+# IMPORTANT: call the Core stage DIRECTLY, not through $(...), otherwise
+# a transient subshell could own the install-process lease and make safe
+# interruption recovery impossible.
+smite_install_unified_foreign_pre_pairing_stages() {
+    local packet="${1:-}"
+    if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
+       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
+       [ -z "$packet" ] || [ ! -f "$packet" ] || [ -L "$packet" ]; then
+        echo 'HOLD: Signed option 2 private packet/selection is missing.' >&2
+        return 2
+    fi
+    smite_install_unified_foreign_core_stage "$packet" || return 2
+    # The existing after-core function owns RO Sanaei attachment and
+    # exact Nginx 443 Gateway. Its original failure recovery retains
+    # only the interrupted stage and the same previously owned Core.
+    smite_install_unified_foreign_after_core "$packet" || {
+        echo 'HOLD: Foreign Core retained; resume original Sanaei/Gateway stage with the SAME Node.' >&2
+        return 2
+    }
+    echo 'FOREIGN_OPTION2_PRE_PAIRING=SIGNED_CORE_SANAEI_RO_GATEWAY_443_PREPARED'
+    echo 'FOREIGN_IDENTITY=AWAITING_ORIGINAL_SIGNED_PAIRING'
+    echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+}
+
 # Unified option-2 building block: reuse the existing Sanaei installer and
 # exact read-only DB attachment, without sending the caller back to the menu.
 # The complete Foreign enrollment/Gateway orchestration must explicitly call
