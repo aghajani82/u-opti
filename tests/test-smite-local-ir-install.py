@@ -183,5 +183,141 @@ class BootstrapTests(unittest.TestCase):
                 p.complete_local_ir_install(state)
         self.assertEqual(self.events, [])
 
+
+class SelectedFreshIranForeignReadyTests(unittest.TestCase):
+    """Exact original renderer/config snapshots; never touches host Docker."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="smite-ir-fixture-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.folder = self.root / "rc6-install-journal"
+        self.folder.mkdir(mode=0o700)
+        self.stage = self.folder / "iran-foreign-ready"
+        self.panel_env = self.root / ".env"
+        self.backend = self.root / "u-opti-smite-panel-backend.conf"
+        fixture_spec = importlib.util.spec_from_file_location(
+            "ir_foreign_test_baseline", ROOT / "tests/test-smite-foreign-install-panel-ingress.py")
+        fixture = importlib.util.module_from_spec(fixture_spec)
+        fixture_spec.loader.exec_module(fixture)
+        self.old_backend = fixture.baseline("panel.example.com")
+        self.old_env = (
+            "PANEL_DOMAIN=panel.example.com\n"
+            "DB_TYPE=sqlite\n"
+            "DB_PATH=./data/smite.db\n"
+            "SMITE_NODE_REGISTRATION_MODE=signed\n"
+            "SMITE_PANEL_AGENT_AUTH_MODE=signed\n"
+            "SMITE_NODE_PAIRING_PREVIEW_ENABLED=true\n"
+            "SMITE_NODE_PAIRING_MASTER_KEY=" + "A"*43 + "=\n"
+            "SMITE_NODE_PAIRING_INGRESS_TOKEN=" + "b"*64 + "\n"
+            "SMITE_FOREIGN_INSTALL_ENABLED=false\n"
+            "SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=false\n"
+        ).encode()
+        self.panel_env.write_bytes(self.old_env)
+        self.panel_env.chmod(0o600)
+        self.backend.write_bytes(self.old_backend)
+        self.backend.chmod(0o644)
+        self.events = []
+        self.fail_next_nginx = False
+        self.enterContext(patch.object(p, "PANEL_ENV", self.panel_env))
+        self.enterContext(patch.object(p, "NGINX_BACKEND", self.backend))
+        self.enterContext(patch.object(p, "_run", side_effect=self.host))
+        self.enterContext(patch.object(p, "_wait_container",
+                                      side_effect=lambda *args: self.events.append("panel-healthy")))
+
+    def host(self, args, **kwargs):
+        if args[:3] == ["docker", "exec", "smite-panel"]:
+            self.events.append("runtime-flags")
+            env = self.panel_env.read_text()
+            if ("SMITE_FOREIGN_INSTALL_ENABLED=true" in env
+                    and "SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true" in env):
+                return "PANEL_FOREIGN_INSTALL_RUNTIME=READY"
+            raise p.WizardHold("fixture Panel has original flags")
+        if args == ["nginx", "-t"]:
+            self.events.append("nginx-test")
+            if self.fail_next_nginx:
+                self.fail_next_nginx = False
+                raise p.WizardHold("injected nginx failure")
+            return ""
+        if args == ["systemctl", "reload", "nginx"]:
+            self.events.append("nginx-reloaded")
+            return ""
+        if args[:2] == ["docker", "compose"]:
+            self.events.append("panel-recreated")
+            self.assertIn("--no-deps", args)
+            self.assertEqual(args[-1], "smite-panel")
+            return ""
+        self.fail("Unexpected host command: " + repr(args))
+
+    def apply(self, *, fixture_capability=True):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            p._fresh_ir_foreign_ready_config(
+                stage_dir=self.stage, project="uopti_rc6_"+"a"*32,
+                domain="panel.example.com", compose=["docker", "compose"],
+                fixture_capability=fixture_capability)
+        return output.getvalue()
+
+    def test_selected_ir_uses_existing_signed_renderers_without_node_recreation(self):
+        self.assertIn("IR_FOREIGN_INSTALL=READY_SIGNED_443", self.apply())
+        self.assertIn(b"SMITE_FOREIGN_INSTALL_ENABLED=true", self.panel_env.read_bytes())
+        self.assertIn(b"SMITE_FOREIGN_INSTALL_ORIGIN_TRUST_ENABLED=true",
+                      self.panel_env.read_bytes())
+        self.assertEqual(self.backend.read_bytes().count(
+            b"location = /api/foreign-install/redeem {"), 1)
+        self.assertEqual(self.backend.read_bytes().count(
+            b"location = /api/node-control/installation-status {"), 1)
+        self.assertIn("panel-recreated", self.events)
+        self.assertEqual(self.events.count("panel-recreated"), 1)
+        self.assertTrue((self.stage/"complete").exists())
+        self.events.clear()
+        self.apply()
+        self.assertNotIn("panel-recreated", self.events)
+        self.assertIn("nginx-reloaded", self.events)
+
+    def test_original_step_snapshot_compensates_nginx_failure_only(self):
+        self.fail_next_nginx = True
+        with self.assertRaisesRegex(p.WizardHold, "compensated"):
+            self.apply()
+        self.assertEqual(self.panel_env.read_bytes(), self.old_env)
+        self.assertEqual(self.backend.read_bytes(), self.old_backend)
+        self.assertTrue((self.stage/"receipt.json").exists())
+        self.assertFalse((self.stage/"complete").exists())
+        self.apply()
+        self.assertIn(b"SMITE_FOREIGN_INSTALL_ENABLED=true",
+                      self.panel_env.read_bytes())
+
+    def test_crash_after_one_file_can_resume_same_journal_without_new_identity(self):
+        self.apply()
+        (self.stage/"complete").unlink()
+        self.backend.write_bytes(self.old_backend)
+        self.backend.chmod(0o644)
+        self.events.clear()
+        self.assertIn("READY_SIGNED_443", self.apply())
+        self.assertEqual(self.events.count("panel-recreated"), 1)
+        self.assertTrue((self.stage/"complete").exists())
+
+    def test_signed_checkpoint_drift_and_modified_live_config_fail_closed(self):
+        self.apply()
+        self.panel_env.write_bytes(self.old_env)
+        self.panel_env.chmod(0o600)
+        self.events.clear()
+        with self.assertRaisesRegex(p.WizardHold, "Completed.*drift"):
+            self.apply()
+        self.assertEqual(self.panel_env.read_bytes(), self.old_env)
+        self.assertNotIn("panel-recreated", self.events)
+        self.panel_env.write_bytes((self.stage/"after-env").read_bytes())
+        corrupted = self.stage/"before-nginx"
+        corrupted.write_bytes(b"malicious")
+        corrupted.chmod(0o600)
+        with self.assertRaisesRegex(p.WizardHold, "integrity mismatch"):
+            self.apply()
+
+    def test_fixture_cannot_authorize_live_root_path(self):
+        with self.assertRaisesRegex(p.WizardHold, "original root journal"):
+            self.apply(fixture_capability=False)
+        self.assertFalse(self.stage.exists())
+
+
 if __name__ == '__main__':
     unittest.main()
