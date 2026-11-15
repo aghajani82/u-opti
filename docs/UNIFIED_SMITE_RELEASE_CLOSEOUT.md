@@ -280,6 +280,65 @@ All work above is committed directly to
 `trial/unified-smite-install`; no new GitHub PR or workflow definitions
 were required.
 
+#### Final selected Foreign menu wiring and two-hour recovery — 2026-11-15
+
+The public **Foreign option 2** now delegates to
+`smite_install_selected_foreign_fresh` and then the **existing**
+`smite_install_unified_foreign_selected_stages`, in the same Smite
+management menu. This reuses the RC9 Core Journal, old signed
+Panel-packet intake, Sanaei RO database attachment, HTTPS/443 Gateway,
+original enrolment/promotion transaction, and the original
+`smite-node-pairing.py` HMAC dual-direction activation with its
+verified signed→paused rollback. No second installer, extra public port,
+new tunnel/FRP activity, or standalone pairing feature is introduced.
+Legacy `clean-rc` and menu option 7 are not diverted.
+
+**The public path is signed-release gated BEFORE any host write.**
+A local sha256-bound manifest read first requires both
+`release_approved=true` and `activation_allowed=true` (this is only
+a fail-closed early rejection). After that, and *only* after that, the
+original pinned Cosign bootstrap, independent verified signature/pair
+release admission and exact source/journal validation occur before
+the selected stage runner. The current signed prerelease
+`v2.0.0-rc.9` has **both flags false** and its authoritative trial
+verifier explicitly returns `host_activation_allowed=False`.
+Thus public option 2 still returns
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` now. Do NOT
+change these flags by hand to circumvent actual reviewed publication.
+
+**Original Iran-Panel two-hour packet:** for a new/never-enrolled
+Foreign Node, the original `smi1` code must still be unexpired at
+redemption; if the expiry precedes successful enrollment, request a
+new code for the **same Panel-reserved Node and control URL**. If
+enrollment has already written the original 0600 staged secret and
+owner-bound transaction `INTENT`, an expired code cannot be
+redeemed again and must not cause a rebuild. The selected option-2
+coordinator now verifies the same code hash, original scope, staged
+secret, exact promotion/prepared/completed receipts (where applicable)
+and private identity, then resumes directly at the *original*
+signed identity stage, without reinstalling Core, Sanaei or Gateway.
+The original foreign Core journal independently verifies its
+immutable role/source/Node scope, current paused+strict image/Compose
+and Sanaei RO mount. The final signed Panel STATUS, not an expired
+bearer code, confirms enrollment continuity. Missing or mismatched
+INTENT/identity receipts still HOLD. A previously connected runtime
+is not silently recreated merely to report `Connected`.
+
+**Offline evidence only:** test fixtures validate original-stage ordering,
+wrong source/image rejection, HMAC two-way activation requirements,
+signed→paused compensation, owner PID, no new Node/rekey after expired
+code, and fail-before-host-changes for public option 2. Do not treat
+green GitHub tests as proof of two hosts actually Connected.
+
+**Unchanged release blockers:** independently authorize a signed
+host-installation pair (with reviewed immutable manifest and trusted
+source), run the real fresh Iran+Foreign acceptance including intentional
+stage interruption and retained-stage rollback, witness authenticated
+Foreign `Connected` in the Iran Panel, verify restart/replay continuity,
+then merge to `main` only with those records. No server rebuild is
+requested before these release gates. The original legacy FRP/backhaul
+and Sanaei installations remain outside the installation transaction.
+
 ## Closeout gates — in order, do not skip
 
 ### Gate 1 — release source and image pair
