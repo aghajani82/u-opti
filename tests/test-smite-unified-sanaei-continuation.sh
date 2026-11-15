@@ -120,10 +120,10 @@ mkdir -p "$SMITE_NODE_DIR"
 printf 'services:\n  smite-node: {}\n' > "$SMITE_NODE_COMPOSE"
 printf 'SMITE_NODE_PANEL_AUTH_MODE=paused\nSMITE_AGENT_AUTH_MODE=strict\n' > "$SMITE_NODE_DIR/.env"
 OWNED_PROJECT="uopti_rc6_$(printf 'a%.0s' {1..32})"
-DOCKER_CALLS=0
 DOCKER_BAD_OWNER=0
+: > "$TMP/docker-calls"
 docker() {
-    DOCKER_CALLS=$((DOCKER_CALLS + 1))
+    printf '%s\n' "$*" >> "$TMP/docker-calls"
     case "$*" in
         *com.docker.compose.project.config_files*) printf '%s\n' "$SMITE_NODE_COMPOSE" ;;
         *com.docker.compose.project*) [ "$DOCKER_BAD_OWNER" != 1 ] && echo "$OWNED_PROJECT" || echo other ;;
@@ -137,7 +137,7 @@ docker_3xui_install() { INSTANCE_INSTALLS=$((INSTANCE_INSTALLS + 1)); return 99;
 smite_install_sanaei_retained() { return 0; }
 status=0
 smite_install_sanaei_foreign > "$TMP/rc9-owned-result" 2>&1 || status=$?
-[ "$status" -eq 0 ] && [ "$DOCKER_CALLS" -eq 3 ] &&
+[ "$status" -eq 0 ] && [ "$(wc -l < "$TMP/docker-calls")" -eq 3 ] &&
 [ "$INSTANCE_INSTALLS" -eq 0 ] &&
 grep -qx 'KH_SANAEI_INVENTORY=ALREADY_ATTACHED_VERIFIED' "$TMP/rc9-owned-result" || {
     cat "$TMP/rc9-owned-result"; echo "FAIL: exact RC9 original Sanaei stage not retained"; exit 1;
@@ -151,14 +151,14 @@ for unsafe in wrong_source missing_source missing_role wrong_compose standalone 
         standalone) SMITE_SELECTED_FRESH=0 ;;
         wrong_profile) SMITE_INSTALL_PROFILE=stable ;;
     esac
-    DOCKER_CALLS=0
+    : > "$TMP/docker-calls"
     status=0
     smite_install_sanaei_foreign > "$TMP/rc9-hold" 2>&1 || status=$?
     [ "$status" -ne 0 ] && [ "$INSTANCE_INSTALLS" -eq 0 ] || {
         echo "FAIL: unsafe RC9 Sanaei $unsafe admitted original installer"; exit 1;
     }
     case "$unsafe" in
-        wrong_source|missing_source) [ "$DOCKER_CALLS" -eq 0 ] || { echo "FAIL: RC9 $unsafe touched Docker"; exit 1; } ;;
+        wrong_source|missing_source) [ ! -s "$TMP/docker-calls" ] || { echo "FAIL: RC9 $unsafe touched Docker"; exit 1; } ;;
     esac
     printf 'SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\n' > "$SMITE_STATE_FILE"
     DOCKER_BAD_OWNER=0
