@@ -176,6 +176,45 @@ def _replace_private_packet(fd, name, data):
             pass
 
 
+def _original_core_reissue_witness(journal, owner, packet, installer_pid):
+    """Read-only SAME foreign Core owner; never reparse expired bearer TTL.
+
+    This delegates the actual Docker/Compose/Sanaei verification to the
+    existing RC9 Core Journal rather than inventing a replacement witness.
+    """
+    record = journal.load()
+    if (record.get("source") != owner.RC9_SOURCE
+            or record.get("role") != "foreign"
+            or record.get("foreign_resumable_version") != 1
+            or record.get("state") not in ("INSTALLING", "COMMITTED")):
+        deny()
+    exact = journal.foreign_inputs(record)
+    expected = (
+        urlsplit(packet.scope["panel_url"]).hostname,
+        urlsplit(packet.scope["origin"]).hostname,
+        packet.scope["node_name"], packet.scope["node_id"],
+        urlsplit(packet.scope["control_url"]).path,
+    )
+    if tuple(exact[key] for key in (
+            "panel_domain", "foreign_domain", "node_name",
+            "node_id", "control_path")) != expected:
+        deny()
+    # The expired code cannot redeem. Only the host-state witness omits
+    # revalidating that OLD code's TTL; the NEW grant is checked separately.
+    stage = None
+    for attached in (False, True):
+        try:
+            stage, project = journal.foreign_resume(
+                attached_sanaei=attached, installer_pid=installer_pid)
+            break
+        except owner.Hold:
+            continue
+    if (stage not in ("CORE_PENDING", "CORE_READY_TO_COMMIT",
+                      "CORE_COMMITTED") or project != record.get("id")):
+        deny()
+    return stage
+
+
 def _renew_expired_owned_root(*, target, data, packet, now, client,
                              installer_pid=None):
     """Reissue a 2-hour IR Panel grant to the SAME paused Foreign owner only.
@@ -266,41 +305,8 @@ def _renew_expired_owned_root(*, target, data, packet, now, client,
                                    for x in staged["node_secret"])):
                         deny()
                 journal = owner.Journal()
-                record = journal.load()
-                if (record.get("source") != owner.RC9_SOURCE
-                        or record.get("role") != "foreign"
-                        or record.get("foreign_resumable_version") != 1
-                        or record.get("state") not in ("INSTALLING", "COMMITTED")):
-                    deny()
-                exact = journal.foreign_inputs(record)
-                expected = (
-                    urlsplit(packet.scope["panel_url"]).hostname,
-                    urlsplit(packet.scope["origin"]).hostname,
-                    packet.scope["node_name"], packet.scope["node_id"],
-                    urlsplit(packet.scope["control_url"]).path,
-                )
-                if tuple(exact[key] for key in (
-                        "panel_domain", "foreign_domain", "node_name",
-                        "node_id", "control_path")) != expected:
-                    deny()
-                # No bearer-TTL bypass: the expired code cannot redeem.
-                # For the renewal ADMISSION alone, reuse the original
-                # source-bound Core Journal's read-only verification without
-                # asking it to parse the already expired packet.
-                stage = None
-                for attached in (False, True):
-                    try:
-                        stage, project = journal.foreign_resume(
-                            attached_sanaei=attached,
-                            installer_pid=installer_pid)
-                        break
-                    except owner.Hold:
-                        continue
-                if (stage not in (
-                        "CORE_PENDING", "CORE_READY_TO_COMMIT",
-                        "CORE_COMMITTED")
-                        or project != record.get("id")):
-                    deny()
+                _original_core_reissue_witness(
+                    journal, owner, packet, installer_pid)
                 if files.read_optional(directory, target.name, client) != previous:
                     deny()
                 # Replacing the original packet is the ONLY write to
