@@ -2470,6 +2470,7 @@ smite_install_unified_foreign_core_stage() {
         fi
         output="$(python3 -B "$module_dir/smite-rc6-install-journal.py" \
             resume-foreign --foreign-packet-file "$packet" \
+            --installer-pid "$installer_pid" \
             "${attached_sanaei_flag[@]}")" || {
             # Only an uncommitted, same-scope Core may be compensated.
             # A committed Core, already-attached Sanaei or signed identity
