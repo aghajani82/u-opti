@@ -496,6 +496,10 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     local_definition="${local_definition/$original_locator/journal_file=$TMP\/core-current.json}"
     eval "$local_definition"
+    # This fixture copies the production function into a temporary shell:
+    # BASH_SOURCE then points at this test, not the original module.
+    # Resolve ONLY that test-local dirname to the real module directory.
+    dirname() { printf '%s\n' "$ROOT/modules"; }
     PROJECT="uopti_rc6_$(printf 'a%.0s' {1..32})"
     : > "$TMP/core-stage-calls"
     RELEASE_FIXTURE=HOLD
