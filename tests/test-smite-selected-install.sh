@@ -259,3 +259,73 @@ assert section.index('IR_NODE_CONTAINER=HEALTHY_NOT_YET_PAIRED') > section.index
 PY_IR_NODE_NOTICE
 echo 'SMITE_ADVANCED_SIGNED_PAIRING=PASS_ISOLATED_NO_AUTO_REGISTRATION'
 
+
+# Real selected option-2 SHELL dispatch regression: the original Core
+# journal compensates an interrupted Core from the SAME menu selection.
+# All helpers are mocked; private state is under TMP, never the host.
+# Existing menu option 7 is deliberately not part of this execution.
+printf 'private-fixture-only' > "$TMP/foreign-packet.json"
+chmod 0600 "$TMP/foreign-packet.json"
+rm -f "$TMP/current.json"
+: > "$TMP/foreign-journal-calls"
+smite_install_unified_signed_pair_review() { :; }
+smite_install_sanaei_retained() { return 1; }
+smite_install_unified_foreign_begin_core_from_panel() {
+    [ "$2" -gt 0 ] || return 2
+    printf '%s\\n' 'FOREIGN_CORE_OWNER=uopti_rc6_0123456789abcdef0123456789abcdef'
+}
+smite_install_foreign_node() { return 2; }
+python3() {
+    if [[ "${2:-}" == */smite-rc6-install-journal.py ]]; then
+        printf '%s\\n' "$*" >> "$TMP/foreign-journal-calls"
+        case "$*" in
+            *'recover-foreign-core '*)
+                [ "${DENY_FOREIGN_ROLLBACK:-0}" = 0 ] || return 2
+                echo 'RC6_ROLLBACK=PASS_DATA_RETAINED' ;;
+            *'resume-foreign '*)
+                [ "${DENY_FOREIGN_RESUME:-0}" = 0 ] || return 2
+                printf '%s\\n' \
+                    'FOREIGN_CORE_STAGE=CORE_COMMITTED' \
+                    'FOREIGN_CORE_PROJECT=uopti_rc6_0123456789abcdef0123456789abcdef' ;;
+            *' commit') echo 'RC6_INSTALL_TRANSACTION=COMMITTED' ;;
+            *) return 98 ;;
+        esac
+    else
+        command python3 "$@"
+    fi
+}
+smite_foreign_core_fixture() {
+    SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1 \
+    SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06 \
+    SMITE_NODE_IMAGE=ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2 \
+        smite_install_unified_foreign_core_stage "$TMP/foreign-packet.json"
+}
+if smite_foreign_core_fixture > "$TMP/foreign-compensation.log" 2>&1; then
+    echo 'FAIL: interrupted Foreign Core was mistaken for success'; exit 1
+fi
+grep -q 'FOREIGN_CORE=ROLLED_BACK_RETRY_OPTION_2' "$TMP/foreign-compensation.log"
+grep -q 'recover-foreign-core --foreign-packet-file' "$TMP/foreign-journal-calls"
+grep -q -- '--installer-pid' "$TMP/foreign-journal-calls"
+# Failed compensation is a HOLD, never a silently accepted install.
+: > "$TMP/foreign-journal-calls"
+if DENY_FOREIGN_ROLLBACK=1 smite_foreign_core_fixture > "$TMP/foreign-denied.log" 2>&1; then
+    echo 'FAIL: denied Foreign Core rollback was treated as success'; exit 1
+fi
+grep -q 'retain original stage journal' "$TMP/foreign-denied.log"
+! grep -q 'FOREIGN_CORE=ROLLED_BACK_RETRY_OPTION_2' "$TMP/foreign-denied.log"
+# On resume, the original committed Core is independently verified, NEVER
+# reinstalled or compensated simply because the same option is selected.
+touch "$TMP/current.json"
+: > "$TMP/foreign-journal-calls"
+smite_foreign_core_fixture > "$TMP/foreign-committed.log" 2>&1
+grep -q 'FOREIGN_CORE_STAGE=CORE_COMMITTED' "$TMP/foreign-committed.log"
+grep -q 'resume-foreign --foreign-packet-file' "$TMP/foreign-journal-calls"
+! grep -q 'recover-foreign-core' "$TMP/foreign-journal-calls"
+# An untrusted/failed resume MUST NOT jump to install or COMMITTED.
+: > "$TMP/foreign-journal-calls"
+if DENY_FOREIGN_RESUME=1 DENY_FOREIGN_ROLLBACK=1 \
+    smite_foreign_core_fixture > "$TMP/foreign-resume-denied.log" 2>&1; then
+    echo 'FAIL: Foreign drifted resume was treated as success'; exit 1
+fi
+! grep -q 'FOREIGN_CORE_STAGE=CORE_COMMITTED' "$TMP/foreign-resume-denied.log"
+echo 'FOREIGN_OPTION2_ORIGINAL_CORE_AUTO_COMPENSATION=PASS_ISOLATED'
