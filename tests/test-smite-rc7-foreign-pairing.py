@@ -800,7 +800,8 @@ class ForeignRC7Tests(unittest.TestCase):
 
     def test_unified_release_selector_fails_closed_and_never_changes_default(self):
         state={
-            "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.7",
+            "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.9",
+            "SMITE_UPSTREAM_REF":"e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
             "SMITE_CONNECTION_MODE":"standard", "SMITE_NODE_NAME":"node-kh",
         }
         for selector in (None, "true", 1, 0, {}):
@@ -844,7 +845,8 @@ class ForeignRC7Tests(unittest.TestCase):
 
     def test_unified_trial_activation_failure_uses_same_pinned_rollback_contract(self):
         state={
-            "SMITE_ROLE":"foreign","SMITE_MANAGED_VERSION":"2.0.0-rc.7",
+            "SMITE_ROLE":"foreign","SMITE_MANAGED_VERSION":"2.0.0-rc.9",
+            "SMITE_UPSTREAM_REF":"e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
             "SMITE_CONNECTION_MODE":"standard","SMITE_NODE_NAME":"node-kh",
         }
         retained=("node-12345678","a"*64)
