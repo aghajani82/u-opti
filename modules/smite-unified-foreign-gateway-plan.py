@@ -177,6 +177,33 @@ def precore_fields(packet_path, *, now=None, for_core_owner=False):
     return panel, foreign, name, packet.scope['control_url']
 
 
+def prepairing_read_only(*, packet_path, state_path, gateway_state_path,
+                         node_env_path, site_path, now=None):
+    """Original pre-promotion packet/Gateway/Node checks, without redemption.
+
+    The one-use packet, current source-bound state, existing HTTPS/443
+    location and paused/strict managed Node .env must all agree BEFORE
+    the separate signed HMAC enrollment journal can consume the code.
+    No runtime, filesystem, Panel API or identity mutation occurs.
+    """
+    # The exact original private packet + TTL check is authoritative.
+    precore_fields(packet_path, now=now)
+    client = load_module("uopti_pre_pair_client", "smite-foreign-install-client.py")
+    promotion = load_module(
+        "uopti_pre_pair_promotion", "smite-foreign-install-promotion.py")
+    packet = private_packet(packet_path, client, promotion)
+    control = admit(
+        packet_path=packet_path, state_path=state_path,
+        gateway_state_path=gateway_state_path, site_path=site_path)
+    if (control != urlsplit(packet.scope["control_url"]).path
+            or promotion.verify_gateway(
+                packet, state_path=state_path,
+                gateway_path=gateway_state_path,
+                node_env_path=node_env_path, client=client) is not True):
+        deny()
+    return "FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--packet-file', required=True)
@@ -184,18 +211,30 @@ def main(argv=None):
     parser.add_argument('--gateway-state-file')
     parser.add_argument('--site-file')
     parser.add_argument('--precore-fields', action='store_true')
+    parser.add_argument('--prepairing-read-only', action='store_true')
+    parser.add_argument('--node-env-file')
     args = parser.parse_args(argv)
     try:
         if args.precore_fields:
-            if args.state_file or args.gateway_state_file or args.site_file:
+            if (args.prepairing_read_only or args.node_env_file
+                    or args.state_file or args.gateway_state_file
+                    or args.site_file):
                 deny()
             # Four already-validated nonsecret fields; never include
             # node_id, installation_code, private HMAC secret or packet JSON.
             result = precore_fields(args.packet_file)
             for field in result:
                 print(field)
+        elif args.prepairing_read_only:
+            if not all((args.state_file, args.gateway_state_file,
+                        args.site_file, args.node_env_file)):
+                deny()
+            print(prepairing_read_only(
+                packet_path=args.packet_file, state_path=args.state_file,
+                gateway_state_path=args.gateway_state_file,
+                site_path=args.site_file, node_env_path=args.node_env_file))
         else:
-            if not args.state_file:
+            if args.node_env_file or not args.state_file:
                 deny()
             result = admit(
                 packet_path=args.packet_file,
