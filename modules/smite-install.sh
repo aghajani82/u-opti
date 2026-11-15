@@ -2622,8 +2622,21 @@ smite_install_unified_foreign_identity_stage() {
 # NOT an alternate menu action: this becomes the selected option-2 body
 # after the already published false release gate is reviewed and approved.
 smite_install_unified_foreign_selected_stages() {
-    local packet="${1:-}"
+    local packet="${1:-}" module_dir="" rc6_lock
     if [ -z "$packet" ]; then
+        # Same operation.lock as the successful Iran option 1. The entire
+        # selected Foreign install, including hidden Panel packet capture,
+        # Core, Sanaei, Gateway and signed Identity, must hold ONE lease.
+        # The current unapproved release HOLDS before journal preparation.
+        [ "$EUID" = 0 ] || return 2
+        smite_install_unified_signed_pair_review >/dev/null || return 2
+        module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+        python3 -B "$module_dir/smite-rc6-install-journal.py" prepare || return 2
+        exec {rc6_lock}<> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
+        flock -n "$rc6_lock" || {
+            echo 'HOLD: Another Iran/Foreign Smite installation is still running.' >&2
+            return 2
+        }
         smite_install_unified_foreign_capture_owned_packet || return 2
         packet=/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json
     fi
