@@ -2348,6 +2348,25 @@ smite_install_unified_foreign_begin_core_from_panel() {
     echo "FOREIGN_CORE_OWNER=$project"
 }
 
+# Same-option compensation of an UNCOMMITTED foreign Core only. This is
+# deliberately separate from the legacy menu recovery option: use the
+# ORIGINAL Core owner/packet and quarantine only an incomplete Core stage.
+# The original Journal refuses identity, grants, routes or owner drift.
+smite_install_unified_foreign_core_step_rollback() {
+    local module_dir="$1" packet="$2" installer_pid="$3" result
+    result="$(python3 -B "$module_dir/smite-rc6-install-journal.py" \
+        recover-foreign-core --foreign-packet-file "$packet" \
+        --installer-pid "$installer_pid")" || {
+        echo 'HOLD: Foreign Core rollback not independently verified; retain original stage journal.' >&2
+        return 2
+    }
+    [ "$result" = RC6_ROLLBACK=PASS_DATA_RETAINED ] || {
+        echo 'HOLD: Foreign Core rollback receipt not verified.' >&2
+        return 2
+    }
+    echo 'FOREIGN_CORE=ROLLED_BACK_RETRY_OPTION_2'
+}
+
 # Continue the ORIGINAL Foreign Core owner inside the eventual ONE option-2
 # selection. The same bounded Panel packet, signed-release gate, and root
 # RC6 Journal own this step. An interrupted Core is never silently adopted,
@@ -2390,7 +2409,15 @@ smite_install_unified_foreign_core_stage() {
         fi
         output="$(python3 -B "$module_dir/smite-rc6-install-journal.py" \
             resume-foreign --foreign-packet-file "$packet" \
-            "${attached_sanaei_flag[@]}")" || return 2
+            "${attached_sanaei_flag[@]}")" || {
+            # Only an uncommitted, same-scope Core may be compensated.
+            # A committed Core, already-attached Sanaei or signed identity
+            # is preserved: the original journal will refuse this recovery.
+            smite_install_unified_foreign_core_step_rollback \
+                "$module_dir" "$packet" "$installer_pid" || return 2
+            echo 'HOLD: Fresh Core stage compensated; retry option 2 for the same reserved Node.' >&2
+            return 2
+        }
         mapfile -t lines <<< "$output"
         [ "${#lines[@]}" -eq 2 ] || return 2
         stage="${lines[0]#FOREIGN_CORE_STAGE=}"
@@ -2413,7 +2440,9 @@ smite_install_unified_foreign_core_stage() {
             COMPOSE_PROJECT_NAME="$project" \
             UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet" \
                 smite_install_foreign_node || {
-                echo 'HOLD: Foreign Core installation interrupted; original journal retains ownership.' >&2
+                smite_install_unified_foreign_core_step_rollback \
+                    "$module_dir" "$packet" "$installer_pid" || return 2
+                echo 'HOLD: Foreign Core rolled back; retry option 2 with the same Panel Node.' >&2
                 return 2
             }
             ;;
@@ -2421,7 +2450,12 @@ smite_install_unified_foreign_core_stage() {
         *) echo 'HOLD: Foreign Core journal returned an unknown stage.' >&2; return 2 ;;
     esac
     if [ "$stage" != CORE_COMMITTED ]; then
-        commit_result="$(python3 -B "$module_dir/smite-rc6-install-journal.py" commit)" || return 2
+        commit_result="$(python3 -B "$module_dir/smite-rc6-install-journal.py" commit)" || {
+            smite_install_unified_foreign_core_step_rollback \
+                "$module_dir" "$packet" "$installer_pid" || return 2
+            echo 'HOLD: Foreign Core commit failed; only this stage was rolled back.' >&2
+            return 2
+        }
         [ "$commit_result" = RC6_INSTALL_TRANSACTION=COMMITTED ] || return 2
     fi
     echo "FOREIGN_CORE_PROJECT=$project"
