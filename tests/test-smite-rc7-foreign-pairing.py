@@ -876,6 +876,73 @@ class ForeignRC7Tests(unittest.TestCase):
                     prep.assert_not_called()
                     run.assert_not_called()
 
+    def test_selected_rc9_uses_original_both_way_signed_activation_success(self):
+        # In-memory rehearsal: the original Pairing controller owns a single
+        # managed Compose project, pinned RC9 image and signed HMAC proof.
+        # No Docker or network calls, no tunnel or Panel mutations.
+        import contextlib
+        import io
+        state={
+            "SMITE_ROLE":"foreign", "SMITE_MANAGED_VERSION":"2.0.0-rc.9",
+            "SMITE_UPSTREAM_REF":"e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
+            "SMITE_CONNECTION_MODE":"standard", "SMITE_NODE_NAME":"node-kh",
+        }
+        identity=("foreign-node-1234", "b"*64)
+        commands=[]
+        def run(args, **_kw):
+            commands.append(args)
+            if args[-2:]==["config","--quiet"]:
+                return ""
+            if "up" in args:
+                self.assertIn("--project-name", args)
+                self.assertIn("--force-recreate", args)
+                self.assertNotIn("--build",args)
+                return ""
+            if args[:3]==["docker","inspect","-f"]:
+                return ("SMITE_NODE_PANEL_AUTH_MODE=signed\n"
+                        "SMITE_AGENT_AUTH_MODE=strict\n"
+                        "SMITE_ENGINE_INVENTORY_MODE=managed\n")
+            if args[:3]==["python3","-B",
+                          str(Path(p.__file__).with_name(
+                              "smite-foreign-gateway-signed-check.py"))]:
+                self.assertIn("--panel-domain",args)
+                self.assertIn("--control-url",args)
+                return ""
+            raise AssertionError(args)
+        with patch.object(p,"_field_trial_gate"), \
+             patch.object(p,"_require_unified_foreign_release"), \
+             patch.object(p,"_require_no_active_engine_overlays"), \
+             patch.object(p,"_foreign_gateway_preflight",
+                          return_value=("iran.example.org","kh.example.org",
+                              "https://kh.example.org:443/smite-node/"+"a"*32)), \
+             patch.object(p,"_rc7_foreign_compose_command",
+                          return_value=["docker","compose","--project-name",PROJECT,
+                                        "-f",str(p.NODE_COMPOSE)]) as owned, \
+             patch.object(p,"_rc7_foreign_pinned_image_verified") as pinned, \
+             patch.object(p,"_identity_record",return_value=identity), \
+             patch.object(p,"_regular",return_value=b"owned"), \
+             patch.object(p,"_prepare_security_candidate"), \
+             patch.object(p,"_provision_replay_once"), \
+             patch.object(p,"_run",side_effect=run), \
+             patch.object(p,"_wait_container"), \
+             patch.object(p,"_local_signed_replay_probe"), \
+             patch.object(p,"_replay_artifacts_valid",return_value=True):
+            output=io.StringIO()
+            with contextlib.redirect_stdout(output):
+                p.activate_foreign_node_field_trial(
+                    state, reviewed_unified_trial=True)
+            self.assertIn("KH_TO_PANEL_SIGNED_CHECKIN_AND_GATEWAY=PASS",
+                          output.getvalue())
+            self.assertIn("PANEL_TO_KH_SIGNED_HMAC=PASS",output.getvalue())
+            self.assertIn("KH_LOCAL_HMAC_REPLAY=PASS",output.getvalue())
+            self.assertEqual(sum("up" in call for call in commands),1)
+            self.assertTrue(any(call.kwargs==
+                                {"verify_active_candidate":True}
+                                for call in owned.call_args_list))
+            self.assertTrue(all(call.kwargs==
+                                {"review_unified_trial":True}
+                                for call in pinned.call_args_list))
+
     def test_unified_trial_activation_failure_uses_same_pinned_rollback_contract(self):
         state={
             "SMITE_ROLE":"foreign","SMITE_MANAGED_VERSION":"2.0.0-rc.9",
