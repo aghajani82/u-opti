@@ -2296,6 +2296,39 @@ smite_install_unified_foreign_capture_packet() {
     return 0
 }
 
+# Original selected Panel-packet capture with a DURABLE private owner.
+# The old temporary fixture path remains isolated for CI. This real-root
+# branch reuses that SAME hidden TTY reader and atomic no-overwrite stager,
+# gated by the same signed Pairing release before creating anything.
+smite_install_unified_foreign_capture_owned_packet() {
+    local module_dir selected_dir
+    [ "${SMITE_SELECTED_FRESH:-0}" = 1 ] &&
+    [ "${SMITE_INSTALL_PROFILE:-}" = clean-rc ] &&
+    [ "${SMITE_FIELD_TRIAL_SOURCE_SHA:-}" = e7f76185e9a7da51d7069d5d0a829dc192cc1e06 ] &&
+    [ "$EUID" = 0 ] || return 2
+    smite_install_unified_signed_pair_review >/dev/null || {
+        echo 'HOLD: Foreign private grant cannot be captured before signed release.' >&2
+        return 2
+    }
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-packet-intake.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-packet-intake.py" ] || return 2
+    selected_dir=/var/lib/u-opti/rc6-install-journal/foreign-staging
+    python3 -B "$module_dir/smite-rc6-install-journal.py" prepare || return 2
+    umask 077
+    if [ ! -e "$selected_dir" ] && [ ! -L "$selected_dir" ]; then
+        mkdir -m 0700 -- "$selected_dir" || return 2
+    fi
+    [ -d "$selected_dir" ] && [ ! -L "$selected_dir" ] &&
+    [ "$(stat -c '%a:%u' "$selected_dir")" = "700:$EUID" ] || {
+        echo 'HOLD: Foreign private grant directory ownership changed.' >&2
+        return 2
+    }
+    python3 -B "$module_dir/smite-unified-foreign-packet-intake.py" \
+        --capture-owned-foreign || return 2
+    echo 'FOREIGN_ONE_CHOICE_INPUT=VERIFIED_RETAINED_PRIVATE_PANEL_PACKET'
+}
+
 # Exact Foreign Core ownership hand-off from the ONE Panel-issued packet.
 # Reuse the existing Pairing signed-release gate and original RC6/RC9
 # fresh-install Journal; never duplicate credentials or accept operator-
@@ -2572,6 +2605,10 @@ smite_install_unified_foreign_identity_stage() {
 # after the already published false release gate is reviewed and approved.
 smite_install_unified_foreign_selected_stages() {
     local packet="${1:-}"
+    if [ -z "$packet" ]; then
+        smite_install_unified_foreign_capture_owned_packet || return 2
+        packet=/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json
+    fi
     smite_install_unified_foreign_pre_pairing_stages "$packet" || return 2
     smite_install_unified_foreign_identity_stage "$packet" || return 2
     echo 'FOREIGN_OPTION2_IDENTITY=SIGNED_PROOF_PREPARED'
