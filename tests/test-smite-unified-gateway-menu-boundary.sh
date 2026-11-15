@@ -122,6 +122,27 @@ PY
 chmod 0600 "$PACKET"
 expect 2 yes no 'not-an-ip'
 
+# The SAME approved option-2 Gateway handler accepts RC9 only when its
+# persisted Node source matches the signed Panel/Node pair; mismatches HOLD
+# before packages, certificates, Nginx or Compose writes.
+SMITE_INSTALL_PROFILE=clean-rc
+sed -i 's/^SMITE_MANAGED_VERSION=2.0.0-rc.7$/SMITE_MANAGED_VERSION=2.0.0-rc.9/' "$SMITE_STATE_FILE"
+printf 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\n' >> "$SMITE_STATE_FILE"
+expect 2 yes yes
+sed -i 's/^SMITE_UPSTREAM_REF=.*/SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000/' "$SMITE_STATE_FILE"
+expect 2 no no
+sed -i '/^SMITE_UPSTREAM_REF=/d' "$SMITE_STATE_FILE"
+expect 2 no no
+printf 'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06\n' >> "$SMITE_STATE_FILE"
+SMITE_SELECTED_FRESH=0
+expect 2 no no
+SMITE_SELECTED_FRESH=1
+SMITE_INSTALL_PROFILE=stable
+expect 2 no no
+SMITE_INSTALL_PROFILE=clean-rc
+sed -i 's/^SMITE_MANAGED_VERSION=2.0.0-rc.9$/SMITE_MANAGED_VERSION=2.0.0-rc.7/' "$SMITE_STATE_FILE"
+sed -i '/^SMITE_UPSTREAM_REF=/d' "$SMITE_STATE_FILE"
+unset SMITE_INSTALL_PROFILE
 # An independent Gateway repair still has its own Y/N confirmation.
 # It cannot inherit the option-2 install approval.
 UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE=
