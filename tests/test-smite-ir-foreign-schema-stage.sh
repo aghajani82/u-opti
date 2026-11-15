@@ -37,10 +37,22 @@ docker() {
         *) echo 'FAIL: unexpected Docker call' >&2; return 77 ;;
     esac
 }
+# The original Panel controller owns the Foreign flags and exact TLS ingress.
+# Mock only its receipt, never an independent installer or live runtime.
+python3() {
+    if [[ "$*" == *"smite-node-pairing.py --complete-local-ir-foreign" ]]; then
+        printf 'foreign-ready\n' >> "$TMP/calls"
+        [ "${FAIL_FOREIGN_443:-0}" != 1 ] || return 2
+        printf 'IR_FOREIGN_INSTALL=READY_SIGNED_443\n'
+    else
+        command python3 "$@"
+    fi
+}
 : > "$TMP/calls"
 smite_install_ir_foreign_schema_stage > "$TMP/first"
 grep -qx 'IR_FOREIGN_SCHEMA=READY' "$TMP/first"
-grep -qx 'IR_FOREIGN_FLAGS=UNCHANGED' "$TMP/first"
+grep -qx 'IR_FOREIGN_FLAGS=ENABLED_SIGNED_443' "$TMP/first"
+grep -qx 'IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION' "$TMP/first"
 [ -f "$TMP/ready" ]
 [ "$(grep -c -- '--migrate' "$TMP/calls")" = 1 ]
 [ "$(grep -c -- '--review' "$TMP/calls")" = 2 ]
@@ -49,6 +61,49 @@ smite_install_ir_foreign_schema_stage > "$TMP/second"
 [ "$(grep -c -- '--review' "$TMP/calls")" = 2 ]
 ! grep -q -- '--migrate' "$TMP/calls"
 grep -qx 'IR_FOREIGN_SCHEMA=VERIFIED_RETAINED' "$TMP/second"
+# Failure after additive schema must not claim Foreign ready or repeat migration.
+: > "$TMP/calls"
+if FAIL_FOREIGN_443=1 smite_install_ir_foreign_schema_stage >"$TMP/blocked" 2>&1; then
+    echo 'FAIL: Foreign ingress verification was ignored' >&2
+    exit 1
+fi
+! grep -q -- '--migrate' "$TMP/calls"
+[ "$(grep -c '^foreign-ready
+for line in 'SMITE_ROLE=foreign' 'SMITE_MANAGED_VERSION=2.0.0-rc.7' \
+            'SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000'; do
+    cp "$SMITE_STATE_FILE" "$TMP/backup-state"
+    key="${line%%=*}"
+    sed -i "s/^$key=.*/$line/" "$SMITE_STATE_FILE"
+    : > "$TMP/calls"
+    if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then
+        echo 'FAIL: untrusted source/role accepted' >&2; exit 1
+    fi
+    [ ! -s "$TMP/calls" ]
+    mv "$TMP/backup-state" "$SMITE_STATE_FILE"
+done
+ln -s "$SMITE_STATE_FILE" "$TMP/link.env"
+SMITE_STATE_FILE="$TMP/link.env"
+: > "$TMP/calls"
+if smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
+[ ! -s "$TMP/calls" ]
+SMITE_STATE_FILE="$TMP/state.env"
+: > "$TMP/calls"
+if BAD_REVIEW=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
+! grep -q -- '--migrate' "$TMP/calls"
+rm -f "$TMP/ready"
+: > "$TMP/calls"
+if FAIL_MIGRATE=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
+[ ! -f "$TMP/ready" ]
+: > "$TMP/calls"
+if BAD_RECEIPT=1 smite_install_ir_foreign_schema_stage >/dev/null 2>&1; then exit 1; fi
+[ -f "$TMP/ready" ]
+: > "$TMP/calls"
+smite_install_ir_foreign_schema_stage > "$TMP/retry"
+! grep -q -- '--migrate' "$TMP/calls"
+grep -qx 'IR_FOREIGN_SCHEMA=READY' "$TMP/retry"
+echo 'IR_OPTION_1_RC9_FOREIGN_SCHEMA_AND_SIGNED_443=PASS_ISOLATED_RETRY_AND_HOLD'
+ "$TMP/calls")" = 1 ]
+! grep -q 'IR_FOREIGN_FLAGS=ENABLED_SIGNED_443' "$TMP/blocked"
 for line in 'SMITE_ROLE=foreign' 'SMITE_MANAGED_VERSION=2.0.0-rc.7' \
             'SMITE_UPSTREAM_REF=0000000000000000000000000000000000000000'; do
     cp "$SMITE_STATE_FILE" "$TMP/backup-state"
