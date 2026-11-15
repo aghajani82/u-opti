@@ -240,12 +240,18 @@ class UnifiedForeignOption2(unittest.TestCase):
         state.write_text(p.state.read_text())
         state.chmod(0o600)
         current["smite-node"] = dict(
-            Id="a"*64, Name="/smite-node", State={"Running":True},
+            Id="a"*64, Name="/smite-node",
+            State={"Running":True, "Health":{"Status":"healthy"}},
             Config={"Image":core_mod.RC9_IMAGES["smite-node"],
                     "Env":["SMITE_NODE_PANEL_AUTH_MODE=paused"],
-                    "Labels":{"com.docker.compose.project":project}},
+                    "Labels":{"com.docker.compose.project":project,
+                              "com.docker.compose.service":"smite-node",
+                              "com.docker.compose.project.config_files":
+                                  "/opt/smite-node/docker-compose.yml"}},
             HostConfig={"RestartPolicy":{"Name":"unless-stopped"}})
+        self.assertEqual(owner.foreign_resume(), ("CORE_READY_TO_COMMIT", project))
         self.assertEqual(owner.commit(), "RC6_INSTALL_TRANSACTION=COMMITTED")
+        self.assertEqual(owner.foreign_resume(), ("CORE_COMMITTED", project))
         record = owner.load()
         record["foreign_inputs"]["foreign_domain"]="spoofed.example.com"
         owner.save(record)
