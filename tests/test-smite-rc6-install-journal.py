@@ -150,8 +150,15 @@ class RecoveryTests(unittest.TestCase):
                              resumable_foreign=True,foreign_inputs=scope)
         node=self.root/'opt/smite-node'
         node.mkdir(parents=True)
-        (node/'.env').write_text('SMITE_NODE_PANEL_AUTH_MODE=paused')
-        (node/'.env').chmod(0o600)
+        env=node/'.env'
+        clean_env=('NODE_NAME='+scope[2]+'\nNODE_ROLE=foreign\n'
+                   'PANEL_ADDRESS='+scope[0]+':443\n'
+                   'SMITE_CONTROL_ADDRESS=https://'+scope[1]+':443'+scope[4]+'\n'
+                   'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
+                   'SMITE_AGENT_AUTH_MODE=strict\n'
+                   'SMITE_SANAEI_INVENTORY_ENABLED=false\n')
+        env.write_text(clean_env)
+        env.chmod(0o600)
         self.objects['a'*64]=dict(
             Id='a'*64,Name='/smite-node',State={'Running':True},
             Config={'Image':m.RC9_IMAGES['smite-node'],
@@ -176,6 +183,16 @@ class RecoveryTests(unittest.TestCase):
         state_write(scope[1])
         with self.assertRaises(m.Hold):self.j.commit()
         self.objects['a'*64]['Config']['Image']=m.RC9_IMAGES['smite-node']
+        env.write_text(clean_env.replace(scope[4],'/smite-node/'+'b'*32))
+        with self.assertRaises(m.Hold):self.j.commit()
+        self.assertEqual(self.j.load()['state'],'INSTALLING')
+        env.write_text(clean_env.replace('SMITE_AGENT_AUTH_MODE=strict',
+                                         'SMITE_AGENT_AUTH_MODE=legacy'))
+        with self.assertRaises(m.Hold):self.j.commit()
+        env.write_text(clean_env)
+        env.chmod(0o644)
+        with self.assertRaises(m.Hold):self.j.commit()
+        env.chmod(0o600)
         self.assertEqual(self.j.commit(),'RC6_INSTALL_TRANSACTION=COMMITTED')
         with self.assertRaises(m.Hold):self.j.rollback()
         self.assertFalse(any('stop' in a for a in self.calls))
