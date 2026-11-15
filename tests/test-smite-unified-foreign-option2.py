@@ -161,12 +161,12 @@ class UnifiedForeignOption2(unittest.TestCase):
         original=self.fixture.state.read_text()
         exact=original.replace(
             "SMITE_MANAGED_VERSION=2.0.0-rc.7",
-            "SMITE_MANAGED_VERSION=2.0.0-rc.9\\nSMITE_UPSTREAM_REF="+source
+            "SMITE_MANAGED_VERSION=2.0.0-rc.9\nSMITE_UPSTREAM_REF="+source
         )
         self.fixture.write(self.fixture.state,exact)
         for invalid in (
             exact.replace(source,"0"*40),
-            exact.replace("SMITE_UPSTREAM_REF="+source+"\\n",""),
+            exact.replace("SMITE_UPSTREAM_REF="+source+"\n",""),
             exact.replace("SMITE_ROLE=foreign","SMITE_ROLE=panel-iran"),
             exact.replace("SMITE_NODE_NAME=node-kh","SMITE_NODE_NAME=other-kh"),
             exact.replace("SMITE_FOREIGN_DOMAIN=kh.example.com",
