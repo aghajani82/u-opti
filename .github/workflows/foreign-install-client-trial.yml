@@ -34,6 +34,7 @@ on:
       - tests/test-smite-rc6-install-journal.py
       - tests/test-smite-selected-install.sh
       - tests/test-smite-integrated-ir-flow.sh
+      - tests/test-smite-ir-foreign-schema-stage.sh
       - tests/test-smite-unified-foreign-after-core.sh
       - modules/smite-foreign-gateway.sh
       - modules/smite-unified-foreign-gateway-plan.py
@@ -128,6 +129,7 @@ jobs:
       - run: python -B tests/test-uopti-update-file-list.py
       - run: sudo bash tests/test-smite-selected-install.sh
       - run: bash tests/test-smite-integrated-ir-flow.sh
+      - run: bash tests/test-smite-ir-foreign-schema-stage.sh
       - run: sudo bash tests/test-smite-ir-gateway-stage-rollback.sh
       # The original fresh-install journal requires root-owned paths in
       # its disposable fixture. No real Docker/systemd services are touched.
