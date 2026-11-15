@@ -220,9 +220,90 @@ def _write_journal_once_locked(fd, record):
             pass
 
 
+# Selected option 2 uses only these original, root-owned managed paths.
+# The private Panel packet must survive a shell interruption, unlike an
+# ephemeral installer tempdir. No bearer code or secret is passed by argv.
+_SELECTED_PRIVATE = Path("/var/lib/u-opti/rc6-install-journal/foreign-staging")
+_SELECTED_PACKET = _SELECTED_PRIVATE / "foreign-install-packet.json"
+_SELECTED_STATE = Path("/etc/u-opti/smite/state.env")
+_SELECTED_GATEWAY = Path("/etc/u-opti/smite/foreign-gateway.env")
+_SELECTED_NODE_ENV = Path("/opt/smite-node/.env")
+_SELECTED_IDENTITY = Path("/etc/u-opti/smite/identities/node-identity.json")
+
+
+def _selected_option2_boundary(*, packet_path, state_path, gateway_path,
+                               node_env_path, directory, live_identity,
+                               installer_pid):
+    """Fail closed on the REAL root before any identity journal or network.
+
+    The original pairing release gate is the single authorization source.
+    Current RC9 has activation_allowed=false, so this path refuses BEFORE
+    any redeem, secret staging or host change. No environment flag or test
+    callback may authorize a real host.
+    """
+    if (os.geteuid() != 0
+            or type(installer_pid) is not int or installer_pid <= 1
+            or tuple(map(Path, (packet_path, state_path, gateway_path,
+                                node_env_path, directory, live_identity)))
+            != (_SELECTED_PACKET, _SELECTED_STATE, _SELECTED_GATEWAY,
+                _SELECTED_NODE_ENV, _SELECTED_PRIVATE, _SELECTED_IDENTITY)):
+        deny()
+    for name in ("smite-node-pairing.py", "smite-rc6-install-journal.py",
+                 "smite-unified-foreign-gateway-plan.py"):
+        path = Path(__file__).with_name(name)
+        if path.is_symlink() or not path.is_file():
+            deny()
+    pairing = load("uopti_selected_existing_pairing", "smite-node-pairing.py")
+    core = load("uopti_selected_existing_core_owner", "smite-rc6-install-journal.py")
+    plan = load("uopti_selected_existing_gateway", "smite-unified-foreign-gateway-plan.py")
+    client = load("uopti_selected_existing_grant", "smite-foreign-install-client.py")
+    promotion = load("uopti_selected_existing_promoter", "smite-foreign-install-promotion.py")
+    try:
+        # Same signed two-image release policy as original Pairing activation.
+        pairing._require_unified_foreign_release()
+        # Source-owning selected Core Journal must be COMMITTED and must
+        # independently verify paused+strict runtime and Sanaei RO mount.
+        stage, _project = core.Journal().foreign_resume(
+            str(_SELECTED_PACKET), attached_sanaei=True,
+            installer_pid=installer_pid)
+        if stage != "CORE_COMMITTED":
+            deny()
+        with promotion.private_directory(_SELECTED_PRIVATE) as fd:
+            raw = promotion.read_optional(
+                fd, "foreign-install-packet.json", client)
+        if raw is None:
+            deny()
+        packet = client.parse_packet(raw)
+        scope = packet.scope
+        control = plan.admit(packet_path=_SELECTED_PACKET,
+                             state_path=_SELECTED_STATE,
+                             gateway_state_path=_SELECTED_GATEWAY)
+        pairing._require_no_active_engine_overlays()
+        current = pairing.state_values()
+        panel, foreign, url = pairing._foreign_gateway_preflight(
+            current, review_unified_trial=True)
+        if (control != urlsplit(scope["control_url"]).path
+                or scope["control_url"] != url
+                or urlsplit(scope["panel_url"]).hostname != panel
+                or urlsplit(scope["origin"]).hostname != foreign
+                or scope["node_name"] != current.get("SMITE_NODE_NAME")):
+            deny()
+        promotion.verify_gateway(
+            packet, state_path=_SELECTED_STATE, gateway_path=_SELECTED_GATEWAY,
+            node_env_path=_SELECTED_NODE_ENV, client=client)
+        # No untrusted staging directory/symlink can be created by this
+        # identity transaction: the original owner must have prepared it.
+        with promotion.private_directory(_SELECTED_IDENTITY.parent):
+            pass
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            RuntimeError):
+        deny()
+
+
 def rehearse_transaction(*, packet_path, state_path, gateway_path,
                          node_env_path, directory, live_identity, transport,
-                         now, disposable_capability=False):
+                         now, disposable_capability=False,
+                         selected_capability=False, installer_pid=None):
     """Run existing grant/promote steps once with a crash-recoverable lock.
 
     The production CLI provides no entry to this function. The operation
@@ -231,13 +312,23 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
     key. Re-running a completed journal *still* checks
     fresh signed proof through the existing promotion module.
     """
-    if (not disposable_capability or not callable(transport)
-            or type(now) is not int):
+    if (not callable(transport) or type(now) is not int):
         deny()
-    _fixture_boundary(
-        directory=directory, live_identity=live_identity,
-        packet_path=packet_path, state_path=state_path,
-        gateway_path=gateway_path, node_env_path=node_env_path)
+    if selected_capability is True:
+        if disposable_capability is True:
+            deny()
+        _selected_option2_boundary(
+            directory=directory, live_identity=live_identity,
+            packet_path=packet_path, state_path=state_path,
+            gateway_path=gateway_path, node_env_path=node_env_path,
+            installer_pid=installer_pid)
+    elif disposable_capability is True and selected_capability is False:
+        _fixture_boundary(
+            directory=directory, live_identity=live_identity,
+            packet_path=packet_path, state_path=state_path,
+            gateway_path=gateway_path, node_env_path=node_env_path)
+    else:
+        deny()
     client = load("uopti_journal_client", "smite-foreign-install-client.py")
     promotion = load("uopti_journal_promotion", "smite-foreign-install-promotion.py")
     gateway_plan = load("uopti_journal_gateway", "smite-unified-foreign-gateway-plan.py")
@@ -308,12 +399,23 @@ def rehearse_transaction(*, packet_path, state_path, gateway_path,
                 # promotion the existing client and promoter reconcile
                 # with their *original* key, signed HMAC proof and
                 # PREPARED/COMPLETED receipts.
-                result = rehearse(
-                    packet_path=packet_path, state_path=state_path,
-                    gateway_path=gateway_path, node_env_path=node_env_path,
-                    directory=directory, live_identity=live_identity,
-                    transport=transport, now=now,
-                    disposable_capability=True)
+                if selected_capability is True:
+                    # The same transaction/lock/receipts, with the original
+                    # client and promoter (real TLS/443) after the reviewed
+                    # release and exact root boundary. No runtime activation.
+                    result = _execute_original_identity(
+                        packet, client=client, promotion=promotion,
+                        transport=transport, directory=directory,
+                        live_identity=live_identity, state_path=state_path,
+                        gateway_path=gateway_path,
+                        node_env_path=node_env_path, now=now)
+                else:
+                    result = rehearse(
+                        packet_path=packet_path, state_path=state_path,
+                        gateway_path=gateway_path, node_env_path=node_env_path,
+                        directory=directory, live_identity=live_identity,
+                        transport=transport, now=now,
+                        disposable_capability=True)
                 if (result.get("phase") != "IDENTITY_PROMOTED_OFFLINE"
                         or result.get("connected") is not False):
                     deny()
