@@ -7,14 +7,36 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 
 ## Current release decision (authoritative; older checkpoints below are historical)
 
-- **User-facing IR option 1 (trial branch only):** a **new disposable Iran install** now selects the exact signed RC9 pair from source `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`, using the original Panel/Node, Gateway HTTPS/443, signed Pairing, administrator and resumable Journal stages. The RC7 Journal stays the original default for old-source readers and retained upgrade rehearsals. An existing RC7 journal is never adopted as a fresh RC9 install. The U-OPTI `main` installer is still RC7; there is **no live RC9 installation or Connected proof yet**.
+- **User-facing IR option 1 (trial branch only):** a **new disposable Iran install** now selects the exact signed RC9 pair from source `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`, using the original Panel/Node, Gateway HTTPS/443, signed Pairing, administrator and resumable Journal stages. The RC7 Journal stays the original default for old-source readers and retained upgrade rehearsals. An existing RC7 journal is never adopted as a fresh RC9 install. The U-OPTI `main` installer is still RC7; the **disposable Iran RC9 live installation has passed its original audit and UI showed local `node-ir` Connected**, but independent restart/interrupt and two-server signed Connected proofs are still outstanding.
 - **User-facing Foreign option 2:** explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`. No partially installed Node, code redemption or host mutation is permitted until the complete released chain is present.
 - **Unified signed Smite pair:** RC9 tag [v2.0.0-rc.9](https://github.com/aghajani82/Smite/releases/tag/v2.0.0-rc.9) at exact source `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`; signed Panel/Node candidate SHA-256 manifest `f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60`. [Independent Cosign](https://github.com/aghajani82/Smite/actions/runs/43631412672) and [U-OPTI source verification](https://github.com/aghajani82/u-opti/actions/runs/43685809177) passed. The manifest still has `release_approved:false` and `activation_allowed:false`; signed provenance does **not** itself authorize production deployment.
 - **IR unified Panel transaction:** `smite-unified-panel-stage.py` performs private staging; existing `smite-unified-panel-transaction.py` permits **disposable-root rehearsal and config-only rollback**, not production apply. Recent tests compare complete registered Node rows, pending Pairing codes, inbound Panel nonces, grants, signed identities and replay against sealed snapshots. This protects existing local Iran and new Foreign identities.
 - **Foreign internal sequence:** one hidden private Panel-issued `smi1` packet, exact HTTPS/443 and Node name; original Sanaei read-only attachment; Gateway no-recreate witness; same signed Pairing/rollback entry points; durable one-key redemption and promotion. Its assembled internal helpers are tested offline but **not yet permitted from the public option 2**.
 - **Real cross-repository offline proof:** Panel staging/rehearsal, the actual pinned Smite SQLite grant issue and idempotent redemption, and refusal to roll back Panel config after enrollment have passed alongside the existing ASGI/HTTPS/HMAC tests. This is NOT a live two-server Connected result. Verified U-OPTI CI: https://github.com/aghajani82/u-opti/actions/runs/43382017487
-- **What still blocks release:** separate release acceptance of the already signed RC9 pair; a live fresh-host Iran option-1 validation, including retained stage recovery and bidirectional authenticated `Connected`; a safely reviewed production Panel upgrade/rollback path if retained RC7 is to be upgraded; public option-2 wiring and interrupted-install recovery; real two-server proof preserving FRP/Sanaei/Backhaul; final operator acceptance. Do not merge to `main` or use trial code on operational hosts until these pass.
+- **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
+
+### 2026-11-15 next integration — remove post-IR schema manual step; pin RC9 Foreign review
+
+On the trial branch, **new** Iran option-1 installs reuse the original
+Smite additive Foreign SQLite migration *after* local signed Pairing and
+administrator verification and *before* publishing the durable COMPLETE
+receipt. If schema was already READY, it is just reviewed; otherwise
+the original private backup-first migration is used. A failure is HOLD,
+leaving the existing ADMIN_CREATED journal for safe same-choice retry.
+No Foreign flag, existing Iran Node, or runtime is changed by this
+repository-only work. The already-running `03.grandoptical.ir` Panel
+was migrated manually earlier and does **not** require a rebuild.
+
+The Foreign read-only witnesses now validate
+`SMITE_MANAGED_VERSION=2.0.0-rc.9` together with exact upstream source
+`e7f76185e9a7da51d7069d5d0a829dc192cc1e06`. RC7 compatibility
+remains for the old read-only fixture. Negative tests reject missing
+source, RC7 source spoofing, and legacy RC9 activation; the actual shared
+Gateway preflight is tested with RC9. This does **not** admit a new RC9
+Foreign owner into the fresh-install Journal or open public option 2.
+Those remain the next engineering gates along with existing per-stage
+Core/Sanaei/Gateway identity rollback integration and live proof.
 
 ### 2026-11-15 Iran Foreign schema migration — READY, activation still HOLD
 
