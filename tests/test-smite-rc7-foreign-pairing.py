@@ -843,6 +843,39 @@ class ForeignRC7Tests(unittest.TestCase):
             candidate.assert_not_called()
             run.assert_not_called()
 
+    def test_rc9_selected_signed_activation_rejects_rc7_and_source_drift_before_recreate(self):
+        rc9 = {
+            "SMITE_ROLE": "foreign", "SMITE_MANAGED_VERSION": "2.0.0-rc.9",
+            "SMITE_CONNECTION_MODE": "standard", "SMITE_NODE_NAME": "node-kh",
+            "SMITE_UPSTREAM_REF": "e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
+        }
+        for state in (
+            {**rc9, "SMITE_MANAGED_VERSION": "2.0.0-rc.7"},
+            {**rc9, "SMITE_UPSTREAM_REF": "0"*40},
+            {**rc9, "SMITE_MANAGED_VERSION": "2.0.0-rc.8"},
+        ):
+            with self.subTest(state=state):
+                with patch.object(p, "_field_trial_gate"), \
+                     patch.object(p, "_require_unified_foreign_release"), \
+                     patch.object(p, "_require_no_active_engine_overlays"), \
+                     patch.object(p, "_foreign_gateway_preflight",
+                                  return_value=("iran.example.org", "kh.example.org",
+                                                "https://kh.example.org:443/smite-node/"+ "a"*32)), \
+                     patch.object(p, "_rc7_foreign_compose_command") as compose, \
+                     patch.object(p, "_rc7_foreign_pinned_image_verified") as image, \
+                     patch.object(p, "_prepare_security_candidate") as prep, \
+                     patch.object(p, "_run") as run:
+                    with self.assertRaisesRegex(p.WizardHold, "exact RC9"):
+                        p.activate_foreign_node_field_trial(
+                            state, reviewed_unified_trial=True)
+                    with self.assertRaisesRegex(p.WizardHold, "exact RC9"):
+                        p.rollback_node_to_paused_field_trial(
+                            state, reviewed_unified_trial=True)
+                    compose.assert_not_called()
+                    image.assert_not_called()
+                    prep.assert_not_called()
+                    run.assert_not_called()
+
     def test_unified_trial_activation_failure_uses_same_pinned_rollback_contract(self):
         state={
             "SMITE_ROLE":"foreign","SMITE_MANAGED_VERSION":"2.0.0-rc.9",
