@@ -153,6 +153,50 @@ class UnifiedForeignOption2(unittest.TestCase):
             self.assertNotIn("node_secret", raw)
             self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
 
+    def test_rc9_exact_source_checked_before_any_host_stage_mutation(self):
+        # Use the original gateway packet/state admission, NOT a second
+        # source validator. A real RC9 Foreign state has to match the exact
+        # signed RC9 Panel/Node release before Sanaei/Gateway can be touched.
+        source="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+        original=self.fixture.state.read_text()
+        exact=original.replace(
+            "SMITE_MANAGED_VERSION=2.0.0-rc.7",
+            "SMITE_MANAGED_VERSION=2.0.0-rc.9\\nSMITE_UPSTREAM_REF="+source
+        )
+        self.fixture.write(self.fixture.state,exact)
+        for invalid in (
+            exact.replace(source,"0"*40),
+            exact.replace("SMITE_UPSTREAM_REF="+source+"\\n",""),
+            exact.replace("SMITE_ROLE=foreign","SMITE_ROLE=panel-iran"),
+            exact.replace("SMITE_NODE_NAME=node-kh","SMITE_NODE_NAME=other-kh"),
+            exact.replace("SMITE_FOREIGN_DOMAIN=kh.example.com",
+                          "SMITE_FOREIGN_DOMAIN=spoofed.example.com"),
+        ):
+            with self.subTest(invalid=invalid):
+                self.fixture.write(self.fixture.state,invalid)
+                self.events.clear()
+                with self.assertRaises(host.Hold):
+                    self.run_option2()
+                self.assertEqual(self.events,[])
+                self.assert_no_identity()
+                self.assertFalse((self.fixture.stage / host.JOURNAL).exists())
+        self.fixture.write(self.fixture.state,exact)
+        result=self.run_option2()
+        self.assertEqual(result["phase"],"FOREIGN_OPTION2_OFFLINE_READY")
+        self.assertFalse(result["activation_allowed"])
+        self.assertFalse(result["connected"])
+        self.assertEqual(self.events.count("install_sanaei"),1)
+        self.assertEqual(self.events.count("install_gateway"),1)
+        key=self.fixture.live.read_bytes()
+        self.events.clear()
+        self.fixture.calls.clear()
+        self.assertEqual(self.run_option2(),result)
+        self.assertNotIn("install_sanaei",self.events)
+        self.assertNotIn("install_gateway",self.events)
+        self.assertEqual(self.fixture.live.read_bytes(),key)
+        self.assertEqual(self.fixture.calls,
+                         ["/api/node-control/installation-status"])
+
     def test_gateway_must_be_verified_before_any_code_redeem(self):
         self.fail_after = "gateway"
         with self.assertRaises(KeyboardInterrupt):

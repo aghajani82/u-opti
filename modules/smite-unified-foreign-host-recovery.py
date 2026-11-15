@@ -365,7 +365,21 @@ def rehearse_option2(*, directory, packet_path, state_path,
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         deny()
 
-    # All predicates are the EXISTING signed/owned RC7 adapters. A failed
+    # Reuse the EXISTING strict Panel packet ↔ persisted Foreign Node/source
+    # admission before even the first Core/Sanaei/Gateway callback. The
+    # identity journal already requires this check later, but that is too
+    # late to prevent host changes on a mismatched RC9 source, role, origin
+    # or reserved Node. Never rely on an unsigned packet alone.
+    gateway_plan = load("uopti_option2_prehost_scope",
+                        "smite-unified-foreign-gateway-plan.py")
+    try:
+        gateway_plan.admit(
+            packet_path=packet_path, state_path=state_path,
+            gateway_state_path=gateway_path)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        deny()
+
+    # All predicates are the EXISTING signed/owned Foreign adapters. A failed
     # or interrupted Sanaei/Gateway stage is compensated only under its
     # durable HOST_INTENT checkpoint. The identity code is not consumed
     # until both host stages have been independently verified.
