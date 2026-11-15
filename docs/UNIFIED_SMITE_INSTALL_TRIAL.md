@@ -16,6 +16,34 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 original signed identity preflight after Core/Sanaei/443
+
+The **same existing** one-choice internal Foreign
+Core→Sanaei-Read-Only→Gateway-443 sequence now hands off to the
+existing `smite-foreign-install-promotion.py::verify_gateway` before
+reporting signed identity *readiness*. The original
+`smite-unified-foreign-gateway-plan.py` now orchestrates that
+**read-only** witness (including the original private `smi1`
+packet/TTL, source-bound State, Gateway control path and live
+paused/strict managed Node `.env`), without implementing a
+replacement certificate, Pairing or identity system. A wrong
+Panel domain, source, control path, expired grant or non-strict Node
+returns HOLD with no redeem, identity promotion or runtime changes.
+
+The shell coordinator requires the explicit exact
+`FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY` receipt; it never
+claims Connected and cannot enable the still-disabled public option
+2. Python fixtures call the real existing packet/promotion modules;
+the shell fixture exercises the actual CLI arguments and failure
+ordering. The final release gate remains OFF, and no host was touched.
+
+**Next:** bind the *existing* identity grant/HMAC promotion journal
+to that verified preflight with its original one-use replay guarantees
+and per-stage recovery, then independently authorize the signed
+release, coordinate the fresh Iran Panel Foreign flags and verify
+both real hosts under one immutable U-OPTI SHA. Keep RC7 and production
+tunnels unchanged.
+
 ### 2026-11-15 interrupted post-Sanaei Core resume and direct Core-to-Gateway selection
 
 Closed the original resume conflict: the *correct* Sanaei RO attachment

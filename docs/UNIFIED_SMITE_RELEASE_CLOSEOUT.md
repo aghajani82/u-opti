@@ -509,6 +509,47 @@ Iran↔KH authenticated Connected/runtime-activation receipt are not yet
 proved. The current retained Iran install was not rebuilt or changed;
 `main`, Grandoptical, FRP 20182 and Backhaul remain unchanged.
 
+#### Original Foreign Signed Pairing read-only handoff — CI acceptance
+
+The existing selected option-2 **internal** Core→Sanaei-RO→Gateway-443
+sequence now refuses to output its pre-pairing readiness receipt unless
+the *original* Smite foreign-install promotion verifier approves the
+CURRENT exact same private Panel-issued `smi1` packet, the existing
+Foreign `state.env`, the retained Gateway receipt, the Nginx shared
+3xUI/HTTPS control site and the current paused/strict managed Node
+`.env`. The check reuses
+`smite-unified-foreign-gateway-plan.py::precore_fields` (fresh TTL),
+`::admit` (source-bound role/name/Panel/Foreign/443), and the
+existing `smite-foreign-install-promotion.py::verify_gateway`.
+It is exposed only as an internal **read-only** flag on the existing
+Gateway-plan helper; the Bash one-choice pre-pairing coordinator
+requires the exact nonsecret receipt
+`FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY`.
+
+No one-time code is included in CLI arguments, state or output. Neither
+the new read-only check nor its tests call the Panel redeem endpoint,
+create/overwrite an identity, change Node Compose, install Sanaei,
+restart Nginx or enable runtime. Incorrect source, revoked/expired
+packet, changed Gateway path, untrusted settings, or a Node no longer
+in strict HMAC mode all HOLD *after retaining the already verified
+Core/Sanaei/Gateway stages*. Existing CI tests exercise the actual
+original parser + original promotion verifier in isolated fixtures
+and the actual one-choice shell function with mocked host commands,
+including fail-closed order and no false Connected receipt.
+
+**Still unimplemented / not authorized:** a real-root, release-approved
+Identity journal and one-use Panel redeem/HMAC proof handoff inside
+the public option 2, stage-owned identity rollback/replay continuity
+and runtime Connected proof. The old
+`smite-unified-foreign-identity-phase.py` remains **disposable-only**
+and the public option 2 continues
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`; the signed
+RC9 manifest explicitly does **not** approve host activation. The
+Iran Panel Foreign-enable/origin trust flags should be coordinated
+only with that gate and tested from a matching fresh Iran+KH install.
+Do not rebuild Iran yet, modify Grandoptical/FRP/Backhaul, or merge
+to `main` on these offline results alone.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;
