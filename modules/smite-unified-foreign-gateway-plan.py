@@ -145,7 +145,7 @@ def admit(*, packet_path, state_path, gateway_state_path=None, site_path=None):
     return path
 
 
-def precore_fields(packet_path, *, now=None):
+def precore_fields(packet_path, *, now=None, for_core_owner=False):
     """Return only pre-validated nonsecret Node/domain fields for SAME option 2.
 
     The privately staged packet is the single authority for fresh Foreign
@@ -163,6 +163,14 @@ def precore_fields(packet_path, *, now=None):
     foreign = split(packet.scope['origin']).hostname
     name = packet.scope['node_name']
     if panel == foreign:
+        deny()
+    # The original Core Journal needs Node ID and control-path too, but
+    # never the one-use installation code. Reuse the SAME private packet
+    # parsing and time window used by the existing Foreign core prompts.
+    if for_core_owner is True:
+        return (panel, foreign, name, packet.scope['node_id'],
+                split(packet.scope['control_url']).path)
+    if for_core_owner is not False:
         deny()
     # The already-validated exact 443 control URL is set before first
     # Node boot, so the Gateway can verify it without recreating the Node.
