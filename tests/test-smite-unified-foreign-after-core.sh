@@ -853,6 +853,37 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
     ! grep -q 'FOREIGN_OPTION2=CONNECTED' "$TMP/selected-activation-denied"
 )
 
+# Once the existing original INTENT + staged secret proves that a code
+# was ALREADY consumed, the same selected option 2 skips the FRESH-only
+# Core/Sanaei/Gateway install and runs original identity+activation only.
+# This is a command-interception rehearsal; NEVER access the root path.
+(
+    private=/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json
+    : > "$TMP/expired-identity-stage-sequence"
+    python3() {
+        case "$*" in
+            *smite-unified-foreign-identity-phase.py*--verify-owned-expired-resume)
+                printf 'owned-intent-proved\n' >> "$TMP/expired-identity-stage-sequence"
+                return 0 ;;
+            *) echo 'FAIL: unexpected expiry-stage Python helper' >&2; return 77 ;;
+        esac
+    }
+    smite_install_unified_foreign_pre_pairing_stages() {
+        echo 'FAIL: expired consumed grant reinstalled Foreign Core' >&2
+        return 77
+    }
+    smite_install_unified_foreign_identity_stage() {
+        printf 'original-identity\n' >> "$TMP/expired-identity-stage-sequence"
+    }
+    smite_install_unified_foreign_activate_signed_stage() {
+        printf 'signed-pairing\n' >> "$TMP/expired-identity-stage-sequence"
+    }
+    smite_install_unified_foreign_selected_stages "$private" > "$TMP/expired-identity-stage-output"
+    [ "$(cat "$TMP/expired-identity-stage-sequence")" = "$(printf 'owned-intent-proved\noriginal-identity\nsigned-pairing')" ]
+    grep -qx 'FOREIGN_OPTION2=CONNECTED_SIGNED_BIDIRECTIONAL' "$TMP/expired-identity-stage-output"
+)
+echo 'FOREIGN_OPTION2_EXPIRED_CONSUMED_GRANT_SKIPS_FRESH_STAGES=PASS_ISOLATED'
+
 # The actual root identity stage must refuse a temporary/symlinked or
 # otherwise non-owned packet BEFORE release review, Python, or redemption.
 (
