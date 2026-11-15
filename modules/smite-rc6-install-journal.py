@@ -185,6 +185,45 @@ class Journal:
             raise Hold('FOREIGN_PACKET_SCOPE_INVALID')
         return fields
 
+    def foreign_core_env(self, record):
+        """The ORIGINAL foreign Core's saved Node configuration must be exact.
+
+        A journal cannot advance to COMMITTED merely because an image tag,
+        Node name and Panel domain match while the Node is bound to an
+        unapproved control path or a different paused/strict auth baseline.
+        This is a read-only check on the existing private .env file.
+        """
+        scope = self.foreign_inputs(record)
+        path = self.root / 'opt/smite-node/.env'
+        item = trusted(path)
+        if (not stat.S_ISREG(item.st_mode) or item.st_nlink != 1
+                or stat.S_IMODE(item.st_mode) != 0o600):
+            raise Hold('FOREIGN_CORE_ENV_NOT_PRIVATE')
+        values = {}
+        for line in path.read_text().splitlines():
+            if not line or line.startswith('#'):
+                continue
+            key, sep, value = line.partition('=')
+            if (not sep or not re.fullmatch(r'[A-Z][A-Z0-9_]*', key)
+                    or key in values):
+                raise Hold('FOREIGN_CORE_ENV_INVALID')
+            values[key] = value
+        expected = {
+            'NODE_NAME': scope['node_name'],
+            'NODE_ROLE': 'foreign',
+            'PANEL_ADDRESS': scope['panel_domain'] + ':443',
+            'SMITE_CONTROL_ADDRESS': (
+                'https://' + scope['foreign_domain'] + ':443'
+                + scope['control_path']),
+            'SMITE_NODE_PANEL_AUTH_MODE': 'paused',
+            'SMITE_AGENT_AUTH_MODE': 'strict',
+            'SMITE_SANAEI_INVENTORY_ENABLED': 'false',
+        }
+        for key, value in expected.items():
+            if values.get(key) != value:
+                raise Hold('FOREIGN_CORE_ENV_SCOPE_OR_AUTH_DRIFT')
+        return scope
+
     def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None,
               resumable_foreign=False, foreign_inputs=None,
               foreign_packet_path=None, source=None):
@@ -566,7 +605,7 @@ class Journal:
                     or lines.count('SMITE_NODE_NAME=' + name) != 1):
                 raise Hold('IR_CORE_INPUT_DRIFT')
         if d.get('foreign_resumable_version') == 1:
-            scope = self.foreign_inputs(d)
+            scope = self.foreign_core_env(d)
             for key, value in (
                 ('SMITE_PANEL_DOMAIN', scope['panel_domain']),
                 ('SMITE_FOREIGN_DOMAIN', scope['foreign_domain']),
