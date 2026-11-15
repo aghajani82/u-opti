@@ -554,6 +554,105 @@ class OperatorPacketIntake(unittest.TestCase):
         self.assertNotIn(self.grant["installation_code"],
                          check.stdout+check.stderr)
 
+    def test_reissued_iran_panel_code_uses_original_core_owner_without_new_node(self):
+        # The IR Panel issues a replacement two-hour code for the SAME
+        # reserved Node and retains its original control_url. The original
+        # RC9 Core journal must prove the unchanged owner and actual paused/
+        # strict/R-O runtime, not the expired bearer code's TTL.
+        from types import SimpleNamespace
+
+        self.operator_paste()
+        packet = module.client_module().parse_packet(self.file.read_bytes())
+        class CoreHold(RuntimeError):
+            pass
+        class OriginalOwner:
+            def __init__(self):
+                self.resume_calls = []
+                self.record = {
+                    "source": "signed-rc9", "role": "foreign",
+                    "foreign_resumable_version": 1, "state": "COMMITTED",
+                    "id": "uopti_rc6_" + "a" * 32,
+                }
+                self.scope = {
+                    "panel_domain": "panel.example.com",
+                    "foreign_domain": "kh.example.com",
+                    "node_name": "node-kh",
+                    "node_id": self_id,
+                    "control_path": "/smite-node/" + "a" * 32,
+                }
+            def load(self):
+                return dict(self.record)
+            def foreign_inputs(self, doc):
+                return dict(self.scope)
+            def foreign_resume(self, *, attached_sanaei=False, installer_pid=None):
+                self.resume_calls.append((attached_sanaei, installer_pid))
+                if not attached_sanaei:
+                    raise CoreHold("Sanaei already attached, do not undo it")
+                return "CORE_COMMITTED", self.record["id"]
+
+        self_id = packet.scope["node_id"]
+        original = OriginalOwner()
+        owner = SimpleNamespace(RC9_SOURCE="signed-rc9", Hold=CoreHold)
+        self.assertEqual(
+            module._original_core_reissue_witness(
+                original, owner, packet, installer_pid=6123),
+            "CORE_COMMITTED")
+        self.assertEqual(original.resume_calls, [(False, 6123), (True, 6123)])
+        # Switching the reserved Node or its HTTPS/443 path must HOLD
+        # without replacing the on-disk original grant.
+        saved = self.file.read_bytes()
+        cases = [
+            ("node_id", "another-foreign-node"),
+            ("foreign_domain", "other.example.com"),
+            ("control_path", "/smite-node/" + "b" * 32),
+            ("source", "unsigned-source"),
+            ("state", "ROLLING_BACK"),
+        ]
+        for key, value in cases:
+            with self.subTest(key=key):
+                previous_scope = dict(original.scope)
+                previous_record = dict(original.record)
+                if key in original.scope:
+                    original.scope[key] = value
+                else:
+                    original.record[key] = value
+                with self.assertRaises(module.Hold):
+                    module._original_core_reissue_witness(
+                        original, owner, packet, installer_pid=6123)
+                original.scope = previous_scope
+                original.record = previous_record
+                self.assertEqual(self.file.read_bytes(), saved)
+
+    def test_reissue_refuses_foreign_core_without_runtime_witness(self):
+        from types import SimpleNamespace
+
+        self.operator_paste()
+        packet = module.client_module().parse_packet(self.file.read_bytes())
+        class CoreHold(RuntimeError):
+            pass
+        class UnverifiedOwner:
+            def load(self):
+                return {
+                    "source": "signed-rc9", "role": "foreign",
+                    "foreign_resumable_version": 1, "state": "COMMITTED",
+                    "id": "uopti_rc6_" + "a"*32,
+                }
+            def foreign_inputs(self, _doc):
+                return {
+                    "panel_domain": "panel.example.com",
+                    "foreign_domain": "kh.example.com",
+                    "node_name": "node-kh",
+                    "node_id": packet.scope["node_id"],
+                    "control_path": "/smite-node/" + "a"*32,
+                }
+            def foreign_resume(self, **_kwargs):
+                raise CoreHold("Foreign Node/Compose is unverified")
+        with self.assertRaises(module.Hold):
+            module._original_core_reissue_witness(
+                UnverifiedOwner(),
+                SimpleNamespace(RC9_SOURCE="signed-rc9", Hold=CoreHold),
+                packet, installer_pid=100)
+
     def test_owned_host_packet_cannot_be_staged_without_reviewed_release(self):
         # The exact durable owner is not interchangeable with the
         # disposable fixture. No credential, enrollment or host write is
