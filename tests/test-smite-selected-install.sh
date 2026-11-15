@@ -97,7 +97,7 @@ python3() {
         case "$*" in
             *' prepare') touch "$TMP/operation.lock" ;;
             *' status') echo "RC6_INSTALL_SOURCE=$SMITE_FIELD_TRIAL_SOURCE_SHA" ;;
-            *' begin '*) echo "$PROJECT" ;;
+            *' begin '*) [[ "$*" == *"--source $SMITE_FIELD_TRIAL_SOURCE_SHA"* ]] || return 97; echo "$PROJECT" ;;
             *' commit-ir-panel '*) : ;;
             *' recover-ir-core '*)
                 if [ -e "$TMP/current.json" ]; then

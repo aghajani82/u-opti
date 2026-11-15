@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fresh RC6/RC7 rollback journal (legacy path and confirmation retained). Never an active-install migration/recovery tool.
+"""Fresh RC6/RC7/RC9 rollback journal (legacy path and confirmation retained). Never an active-install migration/recovery tool.
 
 Rollback quarantines fresh files and retains stopped containers and volumes.
 It refuses completed installs, foreign containers, pairing, grants and routes.
@@ -18,24 +18,27 @@ import subprocess
 import sys
 import uuid
 
-SOURCE = 'e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+# Retained RC7 is the original, unchanged default for the journal API.
+# RC9 can be selected ONLY for an explicit new resumable Iran install.
+SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
 IMAGES = {
-    'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e',
-    'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2',
-}
-VERSION = '2.0.0-rc.9'
-# Preserve original RC7 journal/image ownership for safe read and rollback.
-RC7_SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
-RC7_IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8',
     'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263',
+}
+VERSION = '2.0.0-rc.7'
+RC7_SOURCE = SOURCE
+RC7_IMAGES = IMAGES
+RC9_SOURCE = 'e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+RC9_IMAGES = {
+    'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e',
+    'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2',
 }
 LEGACY_SOURCE = '25ff25585be3f7ff1c8b73b39a23d0509f9a2312'
 LEGACY_IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:1e5b34652abe24c5c1971dbbdb579bb270c6c571d289198ed15cd0373da1a0f4',
     'smite-node': 'ghcr.io/aghajani82/smite-node@sha256:60a7027b56b17ceb46348f7e107a3361723a95a9b1712634dc8d90b31f928388',
 }
-CANDIDATES = {SOURCE: (VERSION, IMAGES), RC7_SOURCE: ('2.0.0-rc.7', RC7_IMAGES),
+CANDIDATES = {SOURCE: (VERSION, IMAGES), RC9_SOURCE: ('2.0.0-rc.9', RC9_IMAGES),
               LEGACY_SOURCE: ('2.0.0-rc.6', LEGACY_IMAGES)}
 TARGETS = (
     'opt/smite', 'opt/smite-node', 'opt/u-opti-smite', 'etc/u-opti/smite',
@@ -119,11 +122,15 @@ class Journal:
             raise Hold('INVALID_JOURNAL')
         return d
 
-    def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None):
+    def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None, source=None):
         if type(resumable_ir) is not bool or (resumable_ir and role != 'panel-iran'):
             raise Hold('INVALID_RESUMABLE_INSTALL_ROLE')
         if ir_inputs is not None and not resumable_ir:
             raise Hold('INVALID_IR_CORE_INPUTS')
+        source = SOURCE if source is None else source
+        if source not in (SOURCE, RC9_SOURCE) or (source == RC9_SOURCE and
+                (role != 'panel-iran' or not resumable_ir or ir_inputs is None)):
+            raise Hold('RC9_SOURCE_NOT_ADMITTED_FOR_THIS_FRESH_INSTALL')
         archive = None
         if os.path.lexists(self.path):
             old = self.load()
@@ -153,7 +160,7 @@ class Journal:
             unit = self.command(['systemctl', 'show', SERVICE, '--property=LoadState', '--value']).strip()
             if unit != 'not-found':
                 raise Hold('EXISTING_SERVICE')
-        d = dict(schema=1, source=SOURCE, id='uopti_rc6_' + uuid.uuid4().hex,
+        d = dict(schema=1, source=source, id='uopti_rc6_' + uuid.uuid4().hex,
                  role=role, state='INSTALLING', installer_pid=installer_pid,
                  installer_start=process_start(installer_pid))
         if resumable_ir:
@@ -249,7 +256,7 @@ class Journal:
         return unit.exists()
 
     def ir_inputs(self, d):
-        if (d.get('role') != 'panel-iran' or d.get('source') not in (SOURCE, RC7_SOURCE)
+        if (d.get('role') != 'panel-iran' or d.get('source') not in (SOURCE, RC9_SOURCE)
                 or d.get('ir_resumable_version') != 1):
             raise Hold('INVALID_IR_CORE_OWNER')
         values = d.get('ir_inputs') or {}
@@ -471,7 +478,7 @@ class Journal:
         """Read-only retained-install proof; never start/recreate containers."""
         if (d.get('state') != 'COMMITTED'
                 or d.get('role') != 'panel-iran'
-                or d.get('source') not in (SOURCE, RC7_SOURCE)
+                or d.get('source') not in (SOURCE, RC9_SOURCE)
                 or d.get('ir_resumable_version') != 1
                 or d.get('ir_phase') not in IR_PHASES):
             raise Hold('IR_RESUME_NOT_OWNED_BY_THIS_INSTALL')
@@ -532,7 +539,7 @@ class Journal:
         if d['state'] == 'ROLLED_BACK':
             return 'FRESH_ALLOWED', None
         if (d.get('state') != 'COMMITTED' or d.get('role') != 'panel-iran'
-                or d.get('source') not in (SOURCE, RC7_SOURCE)
+                or d.get('source') not in (SOURCE, RC9_SOURCE)
                 or d.get('ir_resumable_version') != 1
                 or d.get('ir_phase') not in IR_PHASES):
             raise Hold('IR_GATEWAY_RECOVERY_NOT_ADMITTED')
@@ -598,6 +605,7 @@ def main():
                                        'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir',
                                        'prepare', 'recover-ir-core', 'commit-ir-panel'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
+    ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted source for new Iran RC9 only')
     ap.add_argument('--resumable-ir', action='store_true')
     ap.add_argument('--ir-inputs', nargs=2)
     ap.add_argument('--phase', choices=IR_PHASES)
@@ -624,7 +632,7 @@ def main():
                 if not a.role: raise Hold('ROLE_REQUIRED')
                 if not a.installer_pid or not process_start(a.installer_pid):
                     raise Hold('INSTALLER_PROCESS_REQUIRED')
-                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir, ir_inputs=a.ir_inputs))
+                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir, ir_inputs=a.ir_inputs, source=a.source))
             elif a.action == 'prepare':
                 fd = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
                 os.close(fd)

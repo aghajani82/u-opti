@@ -52,6 +52,20 @@ class RecoveryTests(unittest.TestCase):
     def assert_no_stop(self):
         self.assertFalse(any('stop' in a or 'rename' in a or 'disable' in a for a in self.calls))
 
+    def test_new_rc9_requires_explicit_ir_owner_and_preserves_default_rc7(self):
+        self.assertEqual(self.j.load()['source'], m.SOURCE)
+        self.assertEqual(m.SOURCE, '9a1270b31e8d44f13d09b71ab6b9798410b09c12')
+        self.assertEqual(m.RC9_SOURCE, 'e7f76185e9a7da51d7069d5d0a829dc192cc1e06')
+        with self.assertRaises(m.Hold):
+            self.j.begin('foreign', source=m.RC9_SOURCE)
+        with self.assertRaises(m.Hold):
+            self.j.begin('panel-iran', source=m.RC9_SOURCE)
+        with self.assertRaises(m.Hold):
+            self.j.begin('panel-iran', resumable_ir=True, source=m.RC9_SOURCE)
+        # Failure is before any journal rewrite, existing owner remains intact.
+        self.assertEqual(self.j.load()['source'], m.SOURCE)
+        self.assert_no_stop()
+
     def test_before_files_rollback_and_retry(self):
         self.assertIn('PASS', self.j.rollback())
         self.assertIn('ALREADY', self.j.rollback())

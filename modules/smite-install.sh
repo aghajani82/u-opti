@@ -2715,10 +2715,10 @@ try:
             or expected.get("activation_allowed") is not False
             or expected.get("release_approved") is not False
             or expected.get("images")!={"panel":"ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e","node":"ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"}
-            or mod.SOURCE!=source or mod.VERSION!=version
-            or mod.IMAGES!={"smite-panel":expected["images"]["panel"],
+            or mod.RC9_SOURCE!=source or mod.CANDIDATES.get(source, (None,))[0]!=version
+            or mod.RC9_IMAGES!={"smite-panel":expected["images"]["panel"],
                             "smite-node":expected["images"]["node"]}
-            or mod.CANDIDATES.get(source)!=(version,mod.IMAGES)):
+            or mod.CANDIDATES.get(source)!=(version,mod.RC9_IMAGES)):
         hold()
     if (old.get("source_commit")!="9a1270b31e8d44f13d09b71ab6b9798410b09c12"
             or old.get("publish_ref")!="refs/tags/v2.0.0-rc.7"
@@ -2726,6 +2726,8 @@ try:
             or old.get("release_approved") is not False
             or old.get("activation_allowed") is not False
             or old.get("images")!={"panel":"ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8","node":"ghcr.io/aghajani82/smite-node@sha256:03ae4ca0f6d516374671fad4e32d44c13fbb46d0e4309bccb0265230d6fc4263"}
+            or mod.SOURCE!=old["source_commit"] or mod.VERSION!="2.0.0-rc.7"
+            or mod.IMAGES!=mod.RC7_IMAGES
             or mod.RC7_SOURCE!=old["source_commit"]
             or mod.RC7_IMAGES!={"smite-panel":old["images"]["panel"],
                                 "smite-node":old["images"]["node"]}
@@ -2985,7 +2987,8 @@ smite_install_selected_fresh() (
             smite_clean_rc_prepare_gateway_packages || return 2
         fi
         project="$(python3 -B "$module_dir/smite-rc6-install-journal.py" begin --role "$role" \
-            --installer-pid "$installer_pid" --resumable-ir --ir-inputs "$panel_domain" "$node_name")" || return 2
+            --installer-pid "$installer_pid" --resumable-ir --ir-inputs "$panel_domain" "$node_name" \
+            --source "$SMITE_FIELD_TRIAL_SOURCE_SHA")" || return 2
         [[ "$project" =~ ^uopti_rc6_[0-9a-f]{32}$ ]] || return 2
         export COMPOSE_PROJECT_NAME="$project"
         if ! smite_install_ir_panel_core "$panel_domain" 127.0.0.1 ||
