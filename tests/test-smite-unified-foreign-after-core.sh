@@ -463,8 +463,10 @@ smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-co
 [ ! -s "$TMP/foreign-core-cli-calls" ]
 ! grep -q 'FOREIGN_CORE_OWNER=' "$TMP/foreign-core-release-hold"
 RELEASE_FIXTURE=pass
+EXPECTED_INSTALLER_PID="$BASHPID"
 smite_install_unified_foreign_begin_core_from_panel "$PACKET" > "$TMP/foreign-core-owner-fixture" 2>&1
 grep -qx "FOREIGN_CORE_OWNER=uopti_rc6_$(printf 'a%.0s' {1..32})" "$TMP/foreign-core-owner-fixture"
+grep -F -- "--installer-pid $EXPECTED_INSTALLER_PID --resumable-foreign" "$TMP/foreign-core-cli-calls" >/dev/null
 [ "$(wc -l < "$TMP/foreign-core-cli-calls")" -eq 2 ]
 grep -F -- "--resumable-foreign --foreign-packet-file $PACKET --source e7f76185e9a7da51d7069d5d0a829dc192cc1e06" "$TMP/foreign-core-cli-calls" >/dev/null
 ! grep -q -- '--foreign-inputs' "$TMP/foreign-core-cli-calls"
