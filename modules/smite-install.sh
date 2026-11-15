@@ -3262,6 +3262,88 @@ smite_install_rc7_verified_cosign() {
     return 2
 }
 
+# Existing public Foreign choice 2, using the original selected RC9
+# Core/Sanaei/Gateway/Identity/Pairing implementation. This is NOT a
+# second installer: it supplies the same pinned context as Iran option 1,
+# and invokes the existing selected Foreign staged continuation ONCE.
+# In the current signed RC9 trial, release_approved/activation_allowed are
+# false; the public entry returns HOLD before even a temp verifier, package
+# install, packet prompt, Docker, Journal or service mutation.
+smite_install_selected_foreign_fresh() (
+    local module_dir workdir="" SMITE_SELECTED_TRUSTED_ROOT
+    smite_install_selected_paths || {
+        echo 'HOLD: Unreviewed U-OPTI Smite managed destination.' >&2
+        return 2
+    }
+    [ "$EUID" = 0 ] && [ "$(uname -m)" = x86_64 ] || {
+        echo 'HOLD: Selected Foreign install requires root on amd64.' >&2
+        return 2
+    }
+    unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
+    local SMITE_INSTALL_PROFILE=clean-rc SMITE_SELECTED_FRESH=1
+    local SMITE_INSTALL_FAILURE_CODE=2 SMITE_RC_SIGNED_REGISTRY=1
+    local SMITE_FIELD_TRIAL_APPROVED=YES
+    local SMITE_FIELD_TRIAL_SOURCE_SHA=e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+    local SMITE_FIELD_TRIAL_PUBLISH_REF=refs/tags/v2.0.0-rc.9
+    local SMITE_FIELD_TRIAL_VERSION=2.0.0-rc.9
+    local SMITE_FIELD_TRIAL_MANIFEST_SHA256=f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60
+    local SMITE_FIELD_TRIAL_COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+    local SMITE_UPSTREAM_RAW="https://raw.githubusercontent.com/aghajani82/Smite/$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_REF="$SMITE_FIELD_TRIAL_SOURCE_SHA"
+    local SMITE_UPSTREAM_VERSION=2.0.0-rc.9
+    local SMITE_PANEL_IMAGE='ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e'
+    local SMITE_NODE_IMAGE='ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2'
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+
+    # A non-approved trial is rejected locally and without side effects.
+    # This read-only preliminary check is NOT the signature verifier.
+    # The ORIGINAL signed Pairing verifier must separately approve both
+    # images, the immutable source and HOST activation before any writes.
+    if ! python3 -B - "$module_dir/smite-unified-trial-registry-pair.json" \
+            "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" <<'PY_FOREIGN_RELEASE_DECISION'
+import hashlib,json,os,pathlib,stat,sys
+p=pathlib.Path(sys.argv[1])
+try:
+    st=p.lstat()
+    assert stat.S_ISREG(st.st_mode) and st.st_nlink==1 and not p.is_symlink()
+    raw=p.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==sys.argv[2]
+    doc=json.loads(raw)
+    assert doc["kind"]=="smite_signed_registry_pair_candidate"
+    assert doc["source_commit"]=="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+    assert doc["publish_ref"]=="refs/tags/v2.0.0-rc.9"
+    assert doc["version"]=="2.0.0-rc.9"
+    assert doc["release_approved"] is True
+    assert doc["activation_allowed"] is True
+except (OSError,ValueError,KeyError,TypeError,AssertionError):
+    raise SystemExit(2)
+PY_FOREIGN_RELEASE_DECISION
+    then
+        echo 'HOLD: RC9 signed Foreign release is not approved. No installation started.' >&2
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
+        return 2
+    fi
+
+    # Only after explicit signed manifest release: use the existing pinned
+    # Cosign bootstrap used by Iran option 1, in an ephemeral private dir.
+    # Future signed publication must update all immutable pins together.
+    workdir="$(mktemp -d)" || return 2
+    trap 'rm -rf -- "$workdir"' EXIT
+    smite_install_rc7_verified_cosign \
+        "$workdir/cosign" "$SMITE_FIELD_TRIAL_COSIGN_SHA256" || return 2
+    chmod 0700 "$workdir/cosign" || return 2
+    local PATH="$workdir:$PATH"
+    SMITE_SELECTED_TRUSTED_ROOT="$module_dir/smite-rc7-sigstore-trusted-root.json"
+    [ -f "$SMITE_SELECTED_TRUSTED_ROOT" ] &&
+    [ ! -L "$SMITE_SELECTED_TRUSTED_ROOT" ] || return 2
+    smite_install_unified_signed_pair_review >/dev/null || return 2
+    smite_install_selected_pair_journal_review "$module_dir" || return 2
+    echo 'FOREIGN_ONE_CHOICE=ORIGINAL_RC9_STAGES_STARTED'
+    smite_install_unified_foreign_selected_stages || return 2
+    echo 'FOREIGN_ONE_CHOICE_INSTALL=SIGNED_CONNECTED_VERIFIED'
+)
+
 smite_install_selected_fresh() (
     local role="$1" module_dir workdir containers path confirm
     case "$role" in panel-iran|foreign) ;; *) return 2 ;; esac
@@ -3270,19 +3352,12 @@ smite_install_selected_fresh() (
         if [ "$role" = panel-iran ]; then smite_install_panel_iran; else smite_install_foreign_node; fi
         return
     fi
-    # The current public Foreign choice still selects the *old* official
-    # RC7 image. The signed unified pair is READ-ONLY and has
-    # activation_allowed=false: starting a new Node here would leave a
-    # stranded, incomplete installation with an expiring Panel grant.
-    # Fail BEFORE Docker, package changes, prompting, journaling or writing
-    # any host installation files. Keep this explicit until the existing
-    # signed runtime/rollback and complete one-choice transaction are
-    # released and tested. Iran's disposable RC9 option 1 remains separate.
+    # The public Foreign menu now reaches the SAME selected stage owners
+    # ONLY after its independent signed-release gate. Today's RC9 trial
+    # still fails closed, before prompting or writing anything to the host.
     if [ "$role" = foreign ]; then
-        echo 'HOLD: Signed unified Foreign runtime activation is not yet released; no installation started.'
-        echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
-        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
-        return 2
+        smite_install_selected_foreign_fresh
+        return $?
     fi
     smite_install_selected_paths || { echo 'HOLD: Selected recovery requires standard managed paths'; return 2; }
     [ "$EUID" = 0 ] || { echo 'HOLD: root required'; return 2; }
