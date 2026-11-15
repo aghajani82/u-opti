@@ -26,6 +26,8 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Foreign consolidated option 2 | `smite-unified-foreign-host-recovery.py::rehearse_option2` composes the existing two journals, with 15 integration tests; **disposable-only** |
 | Foreign RC9 read-only security witnesses | Existing Gateway/activation/witness adapters now admit exact RC9 **only for read-only inspection** when `SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06`; invalid/missing source denied. RC7 legacy read-only lane remains. No actual RC9 Foreign host install/activation or Connected claim yet |
 | Retained RC9 Foreign Journal | In isolated CI, an existing RC9 owner receipt is read with the exact RC9 image, refuses a substituted RC7 image or enrolled identity rollback, then safely quarantines only a fresh unpaired disposable fixture. **Starting a new RC9 Foreign journal remains explicitly disallowed** until selected option-2 stage ownership and release gates are complete |
+| Exact RC9 existing Sanaei + Foreign HTTPS/443 Gateway | Original 3xUI install, paused strict Node RO-attachment and owned Compose/HTTPS Gateway functions admit exact RC9 **only inside the selected option-2 scope**. RC7 and standalone paths retained; signature/release gate still blocks actual Foreign host mutation. Isolated CI validates source/ownership/default-off, reused stage compensation and no Node re-creation |
+| New RC9 Foreign Core Journal (fixture-only) | Original `smite-rc6-install-journal.py` now models an exact source-pinned `foreign` Core owner with nonsecret Panel domain, Foreign domain, Node name/ID, control path. A new RC9 Foreign `begin` is rejected on real root `/` until the signed release + complete executor are reviewed. No one-use codes or node secrets in the journal |
 | Public Foreign menu option 2 | Explicit `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`, unchanged |
 | Production hosts and U-OPTI main | Awaiting live authorization and evidence. Smite source was merged in [PR #58](https://github.com/aghajani82/Smite/pull/58). |
 
@@ -218,6 +220,47 @@ activation approval; required live two-server receipt and Rollback.
 The public option 2 remains `HOLD_BEFORE_HOST_CHANGES`. No changes
 were applied on the live Iran RC9, Grandoptical, retained FRP/Backhaul,
 or U-OPTI `main`.
+
+#### Exact RC9 reuse of original Foreign installer and fresh-core Journal — 2026-11-15
+
+The existing U-OPTI Sanaei/3xUI Foreign continuation now recognizes
+`2.0.0-rc.9` **only** in the selected fresh option-2 scope, paired to the
+exact Smite source `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`.
+It still calls the **original** `docker_3xui_install` and original
+`smite_install_sanaei_attachment_stage` (private pending snapshot,
+original owned Compose, database RO probe, rollback on interruption),
+without a second installer or a new user-facing option. A fresh
+RC9 source mismatch is rejected before Docker calls. Independent
+RC7 and stable/standalone behavior is retained.
+
+The same original `smite-foreign-gateway.sh` functions now admit
+RC9 only with an exact scope, original fresh Compose owner,
+Standard HTTPS/443 and a private Panel packet. It retains the already
+running paused/strict Node with its prebound exact control path, refusing
+recreation or fallback to legacy anonymous metadata. Wrong source,
+missing source, nonselected or wrong profile is rejected **before**
+packages, certificate, Nginx or container changes. The existing
+shared renewal-hook compensation and staged Nginx rollback are unchanged.
+
+In `smite-rc6-install-journal.py`, a **new RC9 Foreign Core transaction
+can now be rehearsed only under a disposable alternate root**, reusing
+the existing journal `begin/status/commit/rollback` ownership model,
+and binding only nonsecret Panel-issued node scope (Panel/Foreign
+domains, name, Node ID and exact control path). It rejects source,
+scope or role mismatch and deliberately refuses creation under
+the real server root `/`: this is **not** an available live installer.
+The original Host and Identity recovery journals remain the later
+stage owners, including one-time grant/replay/identity preservation.
+The public option 2 still returns
+`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES`.
+
+Independent GitHub Actions for these code integrations finished
+**3/3 PASS**: [43702421794](https://github.com/aghajani82/u-opti/actions/runs/43702421794).
+The practical blockers remain source-owned live Core executor + approved
+signed release, binding Core ownership to Host/Identity stage hand-off,
+and an actual two-host Iran↔Foreign authenticated Connected/rollback test
+on a disposable KH server. No change to `main`, existing Iran RC9,
+Grandoptical, FRP 20182, Backhaul or active Sanaei.
 
 ### Gate 2 — Iran Panel live change (currently HOLD)
 

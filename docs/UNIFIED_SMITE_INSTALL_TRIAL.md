@@ -16,6 +16,33 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 RC9 option-2 existing Sanaei/Gateway and fresh owner rehearsal
+
+Closed two specific RC7 assumptions in the **existing Foreign
+installation path**, without adding a second installer: the original
+Sanaei/3xUI RO mount and owned pending-attachment rollback accept RC9
+*only* for the selected fresh option 2 with an exact upstream source;
+the original HTTPS/443 Gateway and no-recreate paused Node guard now
+accept the same exact RC9 source/Panel packet, never anonymous fallback
+or a mismatched Compose project. Failure injection proves wrong
+source and nonselected runs stop before Docker/package/Nginx writes.
+
+The existing `smite-rc6-install-journal.py` also models a **new** exact
+RC9 Foreign Core owner with the Panel-issued nonsecret node scope
+(panel/foreign domain, node name/ID and control path). This owner
+starts only under disposable test roots; its real-root `/` begin
+continues to HOLD. No one-time code, secret, active Node or public
+listener is changed. CI:
+https://github.com/aghajani82/u-opti/actions/runs/43702421794
+(three jobs passed).
+
+**Next step is narrowly defined:** finish live-safe Foreign Core
+stage executor/hand-off to existing Sanaei/Gateway/Identity journals,
+review actual signed release admission, then and only then authorize
+creating a disposable KH server for option 2 and signed two-host
+Connected/rollback proof. Current Iran `03.grandoptical.ir` remains
+untouched. Do not merge to `main` or rebuild Iran prematurely.
+
 ### 2026-11-15 option-2 pre-host source binding and existing witness integration
 
 The existing disposable `rehearse_option2` now invokes the ORIGINAL
