@@ -613,6 +613,12 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     : > "$TMP/prepair-stage-calls"
     CORE_ALLOWED=1
     HOST_ALLOWED=1
+    IDENTITY_PREFLIGHT_ALLOWED=1
+    smite_install_unified_foreign_identity_preflight() {
+        printf 'identity-preflight\n' >> "$TMP/prepair-stage-calls"
+        [ "$IDENTITY_PREFLIGHT_ALLOWED" = 1 ] || return 2
+        printf 'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY\n'
+    }
     smite_install_unified_foreign_core_stage() {
         printf 'core\n' >> "$TMP/prepair-stage-calls"
         [ "$CORE_ALLOWED" = 1 ]
@@ -651,8 +657,13 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     HOST_ALLOWED=0
     expect_preparing 2 "$(printf 'core\nhost')"
     HOST_ALLOWED=1
-    expect_preparing 0 "$(printf 'core\nhost')"
-    expect_preparing 0 "$(printf 'core\nhost')"
+    # The real original one-choice wrapper also refuses to claim Pairing
+    # readiness when the final READ-ONLY promotion witness drifts.
+    IDENTITY_PREFLIGHT_ALLOWED=0
+    expect_preparing 2 "$(printf 'core\nhost\nidentity-preflight')"
+    IDENTITY_PREFLIGHT_ALLOWED=1
+    expect_preparing 0 "$(printf 'core\nhost\nidentity-preflight')"
+    expect_preparing 0 "$(printf 'core\nhost\nidentity-preflight')"
     echo 'UNIFIED_FOREIGN_PRE_PAIRING_STAGE=PASS_ISOLATED_ORIGINAL_OWNERS'
 )
 
