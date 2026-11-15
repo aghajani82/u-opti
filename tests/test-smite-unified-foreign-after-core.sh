@@ -551,29 +551,22 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     # No host Core action, not even resume read, before signed release.
     case_core 2 'release'
     RELEASE_FIXTURE=pass
-    case_core 0 
-release\nbegin\ninstall\ncommit'
+    case_core 0 "$(printf 'release\nbegin\ninstall\ncommit')"
     touch "$TMP/core-current.json"
     FIX_STAGE=CORE_PENDING
-    case_core 0 
-release\nresume\ninstall\ncommit'
+    case_core 0 "$(printf 'release\nresume\ninstall\ncommit')"
     MOCK_NODE_FAIL=1
-    case_core 2 
-release\nresume\ninstall'
+    case_core 2 "$(printf 'release\nresume\ninstall')"
     MOCK_NODE_FAIL=0
     FIX_STAGE=CORE_READY_TO_COMMIT
-    case_core 0 
-release\nresume\ncommit'
+    case_core 0 "$(printf 'release\nresume\ncommit')"
     FIX_STAGE=CORE_COMMITTED
-    case_core 0 
-release\nresume'
+    case_core 0 "$(printf 'release\nresume')"
     FIX_STAGE=INVALID
-    case_core 2 
-release\nresume'
+    case_core 2 "$(printf 'release\nresume')"
     PROJECT=not_an_owned_project
     FIX_STAGE=CORE_PENDING
-    case_core 2 
-release\nresume'
+    case_core 2 "$(printf 'release\nresume')"
     ln -s "$PACKET" "$TMP/symlink-packet"
     : > "$TMP/core-stage-calls"
     if smite_install_unified_foreign_core_stage "$TMP/symlink-packet" \
