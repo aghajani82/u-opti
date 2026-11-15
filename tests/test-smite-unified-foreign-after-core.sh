@@ -317,7 +317,11 @@ mv "$PACKET.unavailable" "$PACKET"
 SMITE_INSTALL_PROFILE=stable
 status=0
 smite_install_selected_fresh foreign > "$TMP/foreign-preflight-hold" 2>&1 || status=$?
-[ "$status" = 2 ]
+[ "$status" = 2 ] || {
+    echo "FOREIGN_MENU_HOLD_UNEXPECTED_EXIT=$status" >&2
+    sed -n '1,8p' "$TMP/foreign-preflight-hold" >&2
+    exit 1
+}
 grep -qx 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES' "$TMP/foreign-preflight-hold"
 grep -qx 'FOREIGN_CONNECTED=NOT_PROVEN' "$TMP/foreign-preflight-hold"
 ! grep -q 'Install Complete' "$TMP/foreign-preflight-hold"
