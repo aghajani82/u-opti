@@ -88,14 +88,16 @@ class RecoveryTests(unittest.TestCase):
                       'id':'uopti_rc6_'+'a'*32}
             journal.write_text(json.dumps(record))
             os.chmod(journal, 0o600)
-            state.write_text(
-                'SMITE_ROLE=panel-iran\\n'
-                'SMITE_MANAGED_VERSION=' + version + '\\n'
-                'SMITE_UPSTREAM_REF=' + source + '\\n')
+            state.write_text(chr(10).join((
+                'SMITE_ROLE=panel-iran',
+                'SMITE_MANAGED_VERSION=' + version,
+                'SMITE_UPSTREAM_REF=' + source,
+                '',
+            )))
             os.chmod(state, 0o600)
             return broker._verified_ir_install_journal()
-        with patch.object(broker, 'IR_INSTALL_JOURNAL', journal), \\
-             patch.object(broker, 'IR_INSTALL_STATE', state):
+        with patch.object(broker, 'IR_INSTALL_JOURNAL', journal), (
+             patch.object(broker, 'IR_INSTALL_STATE', state)):
             self.assertTrue(verify(m.SOURCE, m.VERSION))
             self.assertTrue(verify(m.RC9_SOURCE, '2.0.0-rc.9'))
             self.assertFalse(verify(m.RC9_SOURCE, m.VERSION))
