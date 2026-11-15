@@ -2305,7 +2305,6 @@ smite_install_unified_foreign_sanaei() {
     local result=0
 
     if [ "${SMITE_SELECTED_FRESH:-0}" != 1 ] ||
-       [ "${SMITE_INSTALL_PROFILE:-}" != clean-rc ] ||
        [ ! -f "$SMITE_STATE_FILE" ] ||
        [ -L "$SMITE_STATE_FILE" ] ||
        ! grep -qx 'SMITE_ROLE=foreign' "$SMITE_STATE_FILE"; then
