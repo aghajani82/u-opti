@@ -181,6 +181,44 @@ host. The source-aware Foreign stage owner and signed identity
 promotion remain to be integrated with the two existing host/identity
 journals before anything may reach the Panel.
 
+#### RC9 option-2 pre-host admission and full witness composition — 2026-11-15
+
+The existing *disposable-only* option-2 composition now calls the
+original `smite-unified-foreign-gateway-plan.py::admit` **before the first
+Core/Sanaei/Gateway callback**. It compares the private, Panel-issued
+one-time packet against the persisted Foreign role, version, source
+(`SMITE_UPSTREAM_REF` must match the exact RC9 SHA), Panel domain,
+Foreign domain, node name and existing Gateway scope, without creating
+credentials or starting any container. Previously this strict
+packet↔state comparison was only guaranteed later by the identity
+promotion path, after some simulated host stages had completed.
+
+CI failures now inject wrong RC9 source (including the retained RC7 SHA),
+missing source, mismatched role, node name and Foreign domain. Every
+case HOLDs with **zero host callbacks, zero host journal creation and
+zero identity redemption**. Exact RC9 passes the original host-stage
+journal, signed Panel HMAC proof and once-only identity promotion; repeat
+does not reinstall or rotate the key.
+
+A further integration test wires the **actual existing read-only
+signed-pair, immutable Docker image, paused/strict Compose, Sanaei RO
+and HTTPS/443** witness adapter into the *same* existing option-2 Host
+and Identity journals, instead of relying solely on callbacks that
+return READY. It denies unsigned/source-drifted or swapped-image
+fixtures before host work. The positive result is deliberately
+`FOREIGN_OPTION2_OFFLINE_READY`, **not** Connected; no real host
+Docker/Nginx/identity is touched. CI PASS:
+[43700423929](https://github.com/aghajani82/u-opti/actions/runs/43700423929).
+
+**Remaining to authorize creating a KH live-install host:** the
+still-disallowed **new RC9 Foreign owner Journal** and its completed
+host executor, exact runtime image and per-stage compensation for
+Core→Sanaei RO→Gateway 443→signed Pairing; separate signed release
+activation approval; required live two-server receipt and Rollback.
+The public option 2 remains `HOLD_BEFORE_HOST_CHANGES`. No changes
+were applied on the live Iran RC9, Grandoptical, retained FRP/Backhaul,
+or U-OPTI `main`.
+
 ### Gate 2 — Iran Panel live change (currently HOLD)
 
 1. Make the original provider/server snapshot and offsite recovery copy;

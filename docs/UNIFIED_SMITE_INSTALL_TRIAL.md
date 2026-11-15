@@ -16,6 +16,26 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separately approved signed RC9 deployment decision; restart/interruption recovery and independently captured signed Iran two-way receipts (the live fresh-install and UI checks already passed); source-owned RC9 Foreign host Journal, public option-2 wiring and stage rollback; actual two-server signed Connected preserving FRP/Sanaei/Backhaul; a reviewed production Panel upgrade only if existing RC7 is to be upgraded; final acceptance. Do not merge to `main` or deploy trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 option-2 pre-host source binding and existing witness integration
+
+The existing disposable `rehearse_option2` now invokes the ORIGINAL
+Foreign packet/state/Gateway read-only admission **before any host stage
+callback**. An RC9 source mismatch, missing source, wrong Node name,
+role or Foreign domain cannot start Sanaei, Gateway, a host journal, or
+a one-time identity redemption. This closes the previous gap where
+the same strict check was only run again before the identity phase.
+
+The original signed-image/paused Compose/Sanaei RO/HTTPS/443
+`ExistingWitnesses` adapter was then connected in an isolated
+end-to-end test to the existing Host and Identity recovery journals
+and the signed Panel HMAC test transport. It verifies no reinstallation
+or identity rotation on retry. The exact RC9 positive result remains
+**OFFLINE_READY, NOT Connected**, and the public option 2 still HOLDS
+before host writes. [Full CI PASS](https://github.com/aghajani82/u-opti/actions/runs/43700423929).
+Next engineering barrier: source-owned **new** RC9 Foreign installation
+journal, complete per-stage executor/rollback and approved activation
+gate. No user server must be rebuilt for these code-only changes.
+
 ### 2026-11-15 retained RC9 Foreign Journal guard — fixture-only
 
 The original `smite-rc6-install-journal.py` can now be exercised in
