@@ -135,6 +135,101 @@ class GatewayScope(unittest.TestCase):
         self.write(self.state,baseline)
         self.assertEqual(self.admit(),PATH)
 
+    def test_existing_promotion_read_only_pre_pairing_boundary(self):
+        # Exercise the actual original packet parser, source/443 admission
+        # and promotion.verify_gateway together. Only read_env is adapted
+        # to a temporary CI root because production rejects /tmp ancestors
+        # for real host credential files; production security is unchanged.
+        import contextlib, io
+        self.write(self.state, self.state.read_bytes().replace(
+            b'SMITE_MANAGED_VERSION=2.0.0-rc.7',
+            b'SMITE_MANAGED_VERSION=2.0.0-rc.9\n'
+            b'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+        ))
+        node_env=self.root/'node.env'
+        self.write(node_env,(
+            'PANEL_ADDRESS='+PANEL+':443\n'
+            'SMITE_CONTROL_ADDRESS=https://'+FOREIGN+':443'+PATH+'\n'
+            'SMITE_NODE_PANEL_AUTH_MODE=paused\n'
+            'SMITE_AGENT_AUTH_MODE=strict\n'
+            'SMITE_ENGINE_INVENTORY_MODE=managed\n').encode())
+        self.write(self.status,(
+            'SMITE_FOREIGN_GATEWAY_DOMAIN='+FOREIGN+'\n'
+            'SMITE_FOREIGN_PANEL_DOMAIN='+PANEL+'\n'
+            'SMITE_FOREIGN_CONTROL_PATH='+PATH+'\n'
+            'SMITE_FOREIGN_GATEWAY_MODE=https-control-path\n'
+            'SMITE_FOREIGN_GATEWAY_PUBLIC_PORT=443\n').encode())
+        self.write(self.site,(
+            'server {\n listen 443 ssl;\n server_name '+FOREIGN+';\n'
+            ' location ^~ '+PATH+'/ { proxy_pass http://127.0.0.1:8888/; }\n'
+            '# BEGIN U-OPTI SMITE FOREIGN CONTROL\n'
+            '# END U-OPTI SMITE FOREIGN CONTROL\n}\n'
+        ).encode(),mode=0o644)
+        original_loader=gateway.load_module
+        protected=(self.state,self.status,node_env)
+        def read_private_fixture(path):
+            path=Path(path)
+            if (path not in protected or path.is_symlink()
+                    or path.stat().st_mode & 0o777 != 0o600):
+                raise gateway.Hold('invalid CI private file')
+            lines=path.read_text().splitlines()
+            pairs=[line.split('=',1) for line in lines if line]
+            if any(len(x)!=2 for x in pairs) or len(dict(pairs))!=len(pairs):
+                raise gateway.Hold('CI duplicate or invalid key')
+            return dict(pairs)
+        def loader(name,filename):
+            mod=original_loader(name,filename)
+            if filename=='smite-foreign-install-promotion.py':
+                mod.read_env=read_private_fixture
+            return mod
+        args=['--packet-file',str(self.packet),
+              '--state-file',str(self.state),
+              '--gateway-state-file',str(self.status),
+              '--site-file',str(self.site),
+              '--node-env-file',str(node_env),
+              '--prepairing-read-only']
+        protected_bytes=tuple(x.read_bytes() for x in
+                              (self.packet,self.state,self.status,
+                               self.site,node_env))
+        def invoke(now=1799999000):
+            out=io.StringIO()
+            err=io.StringIO()
+            with patch.object(gateway,'load_module',side_effect=loader), (
+                 patch.object(gateway.time,'time',return_value=now)), (
+                 contextlib.redirect_stdout(out)), (
+                 contextlib.redirect_stderr(err)):
+                code=gateway.main(args)
+            self.assertNotIn(CODE,out.getvalue()+err.getvalue())
+            self.assertNotIn(self.scope['node_id'],
+                             out.getvalue()+err.getvalue())
+            return code,out.getvalue()
+        self.assertEqual(invoke(),(0,
+            'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY\n'))
+        self.assertEqual(protected_bytes,tuple(x.read_bytes() for x in
+                         (self.packet,self.state,self.status,
+                          self.site,node_env)))
+        original_env=node_env.read_bytes()
+        self.write(node_env,original_env.replace(
+            b'SMITE_AGENT_AUTH_MODE=strict',
+            b'SMITE_AGENT_AUTH_MODE=legacy'))
+        self.assertEqual(invoke()[0],2)
+        self.write(node_env,original_env)
+        self.write(self.status,self.status.read_bytes().replace(
+            PATH.encode(),b'/smite-node/'+b'c'*32))
+        self.assertEqual(invoke()[0],2)
+        self.write(self.status,protected_bytes[2])
+        self.write(self.state,self.state.read_bytes().replace(
+            b'SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06',
+            b'SMITE_UPSTREAM_REF='+b'0'*40))
+        self.assertEqual(invoke()[0],2)
+        self.write(self.state,protected_bytes[1])
+        self.assertEqual(invoke(now=1800000001)[0],2)
+        self.assertEqual(invoke(),(0,
+            'FOREIGN_SIGNED_PAIRING_PREFLIGHT=EXACT_READ_ONLY\n'))
+        self.assertEqual(protected_bytes,tuple(x.read_bytes() for x in
+                         (self.packet,self.state,self.status,
+                          self.site,node_env)))
+
     def test_valid_shared_sanaei_site_existing_managed_location(self):
         self.write(self.site,(
             "# U-OPTI-MANAGED-3XUI-NGINX\n"
