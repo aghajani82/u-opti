@@ -16,6 +16,28 @@ Base: aaf863a38eb256ed96d7ea5594f83a62cb3619fd
 - **What still blocks release:** separate release acceptance of the already signed RC9 pair; a live fresh-host Iran option-1 validation, including retained stage recovery and bidirectional authenticated `Connected`; a safely reviewed production Panel upgrade/rollback path if retained RC7 is to be upgraded; public option-2 wiring and interrupted-install recovery; real two-server proof preserving FRP/Sanaei/Backhaul; final operator acceptance. Do not merge to `main` or use trial code on operational hosts until these pass.
 - **Operational exclusions:** no changes to live IR/Grandoptical, Sanaei, Node IDs, FRP `20182`, Backhaul, firewall, or existing runtime; do not recreate running Nodes or restart FRP as part of trial.
 
+### 2026-11-15 live Iran validation — operator-confirmed RC9 option 1
+
+The disposable Iran server was rebuilt, installed from U-OPTI
+`6946540f5ac5de5d05477da085ae247a1bdb6fb2` on
+`03.grandoptical.ir`, and the operator supplied an SSH read-only audit
+and browser screenshot. State reports `SMITE_MANAGED_VERSION=2.0.0-rc.9`
+with source `e7f76185e9a7da51d7069d5d0a829dc192cc1e06`, Journal
+`COMMITTED/COMPLETE`, exact RC9 Panel and Node digests both healthy,
+signed Pairing `ENABLED`, replay `READY`, signed database identity PASS,
+and three HTTP 200 probes (Panel, Node, HTTPS/443), with `nginx -t` PASS.
+Panel UI shows `node-ir` as `Connected`. No host command changed services.
+
+**Interpretation:** fresh Iran one-choice installation has passed its first
+live qualification; **this is not** a signed restart/interrupt recovery
+receipt or a two-host Iran↔Foreign proof. Do not rebuild this working Iran
+host merely for further trial. The Foreign one-choice remains HOLD.
+In particular, existing Foreign review adapters still require an **RC7
+state baseline** even while inspecting an RC9 trial Node image; changing
+that source/journal owner without exhaustive rollback review would be
+unsafe. See `docs/UNIFIED_SMITE_RELEASE_CLOSEOUT.md` for the evidence,
+remaining gates and read-only Foreign preflight boundary.
+
 ### 2026-11-15 checkpoint — RC9 fresh Iran option 1, no production activation
 
 - Existing **option 1** now selects the RC9 Panel/Node pair in the trial branch only, with a sealed source/manifest check and the *original* gateway/pairing/admin/resume flow. No parallel installer was introduced.
