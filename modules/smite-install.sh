@@ -2741,11 +2741,11 @@ smite_install_unified_foreign_after_core() {
     # read-only database bind after attachment. This is read-only and uses
     # the existing operation lock, not the legacy menu recovery action.
     if grep -qx 'SMITE_MANAGED_VERSION=2.0.0-rc.9' "$SMITE_STATE_FILE"; then
-        local core_witness="" owner_stage="" owner_project=""
+        local core_witness="" owner_stage="" owner_project="" installer_pid="$BASHPID"
         local -a core_lines=()
         core_witness="$(python3 -B "$helper_dir/smite-rc6-install-journal.py" \
             resume-foreign --foreign-packet-file "$packet" --attached-sanaei \
-            --installer-pid "$BASHPID")" || {
+            --installer-pid "$installer_pid")" || {
             echo 'HOLD: Original Foreign Core/Sanaei ownership verification failed; keep completed stages.' >&2
             return 2
         }
