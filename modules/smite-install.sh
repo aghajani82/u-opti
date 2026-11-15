@@ -2666,7 +2666,7 @@ smite_install_selected_paths() {
     [ "$SMITE_NODE_COMPOSE" = /opt/smite-node/docker-compose.yml ]
 }
 
-# Check that the chosen signed RC7 Panel/Node source matches the ORIGINAL
+# Check that the chosen signed RC9 Panel/Node source matches the ORIGINAL
 # fresh-install rollback journal before Docker or any install transaction.
 # The separately signed unified trial is NOT an admitted release.
 # A single exact selected RC9 pair for a NEW disposable Iran install.
@@ -2798,7 +2798,7 @@ smite_install_selected_fresh() (
     # Fail BEFORE Docker, package changes, prompting, journaling or writing
     # any host installation files. Keep this explicit until the existing
     # signed runtime/rollback and complete one-choice transaction are
-    # released and tested. Iran option 1 remains unaffected.
+    # released and tested. Iran's disposable RC9 option 1 remains separate.
     if [ "$role" = foreign ]; then
         echo 'HOLD: Signed unified Foreign runtime activation is not yet released; no installation started.'
         echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
@@ -2904,7 +2904,7 @@ smite_install_selected_fresh() (
                 fi
             fi
             resumed="$(python3 -B "$module_dir/smite-rc6-install-journal.py" resume-ir)" || {
-                echo 'HOLD: existing installation is not a verified resumable Iran RC7 transaction.' >&2
+                echo 'HOLD: existing installation is not a verified resumable signed Iran RC9 transaction.' >&2
                 return 2
             }
             if [ "$resumed" != 'IR_INSTALL_STAGE=FRESH_ALLOWED' ]; then
@@ -2932,7 +2932,7 @@ smite_install_selected_fresh() (
         done
         echo 'Selected Smite 2.0.0-rc.9: disposable Iran qualification candidate, not production.'
         if [ -z "$panel_domain" ]; then
-            read -rp 'Prepare verified RC7 fresh installation? [y/N]: ' confirm || return 2
+            read -rp 'Install exact signed RC9 on this disposable Iran test host? [y/N]: ' confirm || return 2
             case "$confirm" in y|Y|yes|YES) ;; *) return 2 ;; esac
             read -rp 'Panel domain (example: ir.example.com): ' panel_domain || return 2
             panel_domain="${panel_domain,,}"
@@ -3196,7 +3196,7 @@ smite_install_selected_rollback() (
     local module_dir answer
     module_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 2
     python3 -B "$module_dir/smite-rc6-install-journal.py" status || return 2
-    echo 'Only an interrupted fresh RC6/RC7 install can be rolled back.'
+    echo 'Only an interrupted fresh RC6/RC7/RC9 install can be rolled back.'
     echo 'Completed installs, pairing, grants, routes and foreign containers are refused.'
     echo 'Files, containers and volumes are retained. Packages/images are not uninstalled.'
     read -rp 'Type ROLLBACK-RC6 to quarantine the interrupted install: ' answer || return 2
@@ -3245,7 +3245,7 @@ show_smite_install_menu() {
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
         echo "6) Configure Foreign HTTPS/443 Gateway (before pairing)"
         echo
-        echo "7) Recover interrupted RC6/RC7 install (retain data / rollback)"
+        echo "7) Recover interrupted RC6/RC7/RC9 install (retain data / rollback)"
         echo "8) Update Panel appearance (UI only / backup first)"
         echo "9) Roll back previous Panel appearance (UI only)"
         echo "0) Back"
