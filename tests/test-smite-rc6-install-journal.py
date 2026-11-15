@@ -66,6 +66,43 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.j.load()['source'], m.SOURCE)
         self.assert_no_stop()
 
+
+    def test_ir_broker_journal_accepts_only_matching_rc7_or_rc9_source(self):
+        # The existing broker provisioner is reused by both fresh Iran
+        # install versions; no host mutations or Docker are performed.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'ir_broker_provision',
+            ROOT / 'modules/smite-rc5-xhttp-broker-provision.py')
+        broker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(broker)
+        root = self.root / 'broker-fixture'
+        journal = root / 'var/lib/u-opti/rc6-install-journal/current.json'
+        state = root / 'etc/u-opti/smite/state.env'
+        journal.parent.mkdir(parents=True, mode=0o700)
+        os.chmod(journal.parent, 0o700)
+        state.parent.mkdir(parents=True)
+        def verify(source, version, *, role='panel-iran'):
+            record = {'schema':1, 'source':source,
+                      'role':role, 'state':'COMMITTED',
+                      'id':'uopti_rc6_'+'a'*32}
+            journal.write_text(json.dumps(record))
+            os.chmod(journal, 0o600)
+            state.write_text(
+                'SMITE_ROLE=panel-iran\\n'
+                'SMITE_MANAGED_VERSION=' + version + '\\n'
+                'SMITE_UPSTREAM_REF=' + source + '\\n')
+            os.chmod(state, 0o600)
+            return broker._verified_ir_install_journal()
+        with patch.object(broker, 'IR_INSTALL_JOURNAL', journal), \\
+             patch.object(broker, 'IR_INSTALL_STATE', state):
+            self.assertTrue(verify(m.SOURCE, m.VERSION))
+            self.assertTrue(verify(m.RC9_SOURCE, '2.0.0-rc.9'))
+            self.assertFalse(verify(m.RC9_SOURCE, m.VERSION))
+            self.assertFalse(verify(m.SOURCE, '2.0.0-rc.9'))
+            self.assertFalse(verify('0'*40, '2.0.0-rc.9'))
+            self.assertFalse(verify(m.RC9_SOURCE, '2.0.0-rc.9', role='foreign'))
+
     def test_before_files_rollback_and_retry(self):
         self.assertIn('PASS', self.j.rollback())
         self.assertIn('ALREADY', self.j.rollback())

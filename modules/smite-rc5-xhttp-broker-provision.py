@@ -43,11 +43,14 @@ class ProvisionHold(RuntimeError):
     pass
 
 
-# Live IR admission is bound to a private RC7 install journal, not an
-# arbitrary VPS hostname. The old exact "ir" name remains compatible.
+# Live IR admission is bound to a private exact-source signed install journal,
+# never an arbitrary VPS hostname. The old exact 'ir' name remains compatible.
 IR_INSTALL_JOURNAL = Path("/var/lib/u-opti/rc6-install-journal/current.json")
 IR_INSTALL_STATE = Path("/etc/u-opti/smite/state.env")
-IR_INSTALL_SOURCE = "9a1270b31e8d44f13d09b71ab6b9798410b09c12"
+IR_INSTALL_SOURCE_VERSIONS = {
+    "9a1270b31e8d44f13d09b71ab6b9798410b09c12": "2.0.0-rc.7",
+    "e7f76185e9a7da51d7069d5d0a829dc192cc1e06": "2.0.0-rc.9",
+}
 
 
 def _trusted_ir_file(path: Path, expected_mode: int) -> bytes:
@@ -91,7 +94,7 @@ def _verified_ir_install_journal() -> bool:
         doc = json.loads(_trusted_ir_file(IR_INSTALL_JOURNAL, 0o600),
                          object_pairs_hook=_strict_ir_object)
         if (type(doc) is not dict or doc.get("schema") != 1
-                or doc.get("source") != IR_INSTALL_SOURCE
+                or doc.get("source") not in IR_INSTALL_SOURCE_VERSIONS
                 or doc.get("role") != "panel-iran"
                 or type(doc.get("id")) is not str
                 or re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", doc["id"]) is None):
@@ -109,7 +112,9 @@ def _verified_ir_install_journal() -> bool:
         state = _trusted_ir_file(IR_INSTALL_STATE, 0o600).decode("utf-8")
         fields = state.splitlines()
         return (fields.count("SMITE_ROLE=panel-iran") == 1
-                and fields.count("SMITE_MANAGED_VERSION=2.0.0-rc.7") == 1)
+                and fields.count("SMITE_MANAGED_VERSION=" +
+                    IR_INSTALL_SOURCE_VERSIONS[doc["source"]]) == 1
+                and fields.count("SMITE_UPSTREAM_REF=" + doc["source"]) == 1)
     except (OSError, ValueError, IndexError, UnicodeError, ProvisionHold):
         return False
 
