@@ -3273,10 +3273,14 @@ smite_install_selected_foreign_fresh() (
     local module_dir workdir="" SMITE_SELECTED_TRUSTED_ROOT
     smite_install_selected_paths || {
         echo 'HOLD: Unreviewed U-OPTI Smite managed destination.' >&2
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
         return 2
     }
     [ "$EUID" = 0 ] && [ "$(uname -m)" = x86_64 ] || {
         echo 'HOLD: Selected Foreign install requires root on amd64.' >&2
+        echo 'FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES'
+        echo 'FOREIGN_CONNECTED=NOT_PROVEN'
         return 2
     }
     unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_CONFIG COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
