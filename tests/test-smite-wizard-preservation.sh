@@ -43,7 +43,14 @@
 # 2026-11-09 RC8: reviewed one-line manifest filename change to the byte-exact
 # RC7 archive; fresh installation keeps all RC7 pins and behavior while the
 # selected manifest becomes RC8 release evidence. No other installer edits.
-# 2026-11-11 RC7 KH staged identity: reviewed read-only Sanaei attach recovery\n# gate, explicit operator confirmation and identity-hash preservation; only\n# the Smite installer source pin is updated for that audited exception.\n# 2026-11-11 PR #199: user-requested selected RC7 installation now includes
+# 2026-11-11 RC7 KH staged identity: reviewed read-only Sanaei attach recovery\n# gate, explicit operator confirmation and identity-hash preservation; only\n# the Smite installer source pin is updated for that audited exception.\n# 2026-11-15 unified fresh-host integration (draft PR #202): the user
+# explicitly asked for existing option 1 Iran Panel+Node and option 2
+# Foreign Node to own the same stage/recovery journals. Reviewed the exact
+# RC9 source/manifest gates, signed Node and admin-before-Foreign schema,
+# now integrated original Foreign flags and TLS/443 ingress. Legacy Docker,
+# private-network, EasyTier, FRP and Backhaul files remain independently
+# byte-pinned below. This exact installer SHA MUST change only after review.
+# 2026-11-11 PR #199: user-requested selected RC7 installation now includes
 # HTTPS/443, secure local IR enrollment and signed verification before admin
 # creation. Reviewed installer diff only; all unrelated wizard pins preserved.
 # test-smite-integrated-ir-flow.sh and test-smite-local-ir-install.py cover
@@ -67,7 +74,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-2980848d20f5e477f3f517c40f29e6dfde55f752 modules/smite-install.sh
+238ab31e6bed53c6565538f51dee1701b2dda1d8 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
