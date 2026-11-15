@@ -19,7 +19,9 @@ import sys
 import uuid
 
 # Retained RC7 is the original, unchanged default for the journal API.
-# RC9 can be selected ONLY for an explicit new resumable Iran install.
+# A NEW RC9 Foreign owner may be rehearsed only with an exact nonsecret
+# Panel-issued scope in a disposable test root; live Foreign activation
+# remains unapproved and must not be admitted by this journal CLI.
 SOURCE = '9a1270b31e8d44f13d09b71ab6b9798410b09c12'
 IMAGES = {
     'smite-panel': 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8',
@@ -120,17 +122,68 @@ class Journal:
                 or d.get('role') not in ('panel-iran', 'foreign')
                 or d.get('state') not in ('INSTALLING', 'ROLLING_BACK', 'ROLLED_BACK', 'COMMITTED')):
             raise Hold('INVALID_JOURNAL')
+        if d.get('foreign_resumable_version') is not None:
+            self.foreign_inputs(d)
         return d
 
-    def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None, source=None):
+    def foreign_inputs(self, record):
+        """Validate the existing Panel packet's NONSECRET immutable scope.
+
+        Never store a one-use code or Node secret here. The original Foreign
+        Host/Identity journals remain the only owners of later stages.
+        """
+        scope = record.get('foreign_inputs')
+        required = ('panel_domain', 'foreign_domain', 'node_name',
+                    'node_id', 'control_path')
+        if (record.get('foreign_resumable_version') != 1
+                or record.get('source') != RC9_SOURCE
+                or record.get('role') != 'foreign'
+                or not isinstance(scope, dict)
+                or tuple(scope) != required
+                or any(type(scope.get(key)) is not str for key in required)):
+            raise Hold('INVALID_FOREIGN_RC9_OWNER_SCOPE')
+        panel, foreign, name, node_id, control = (scope[key] for key in required)
+        domain = r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}'
+        if (not re.fullmatch(domain, panel)
+                or not re.fullmatch(domain, foreign)
+                or panel == foreign
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', name)
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', node_id)
+                or node_id.startswith('smi1_')
+                or not re.fullmatch(r'/smite-node/[0-9a-f]{32}', control)):
+            raise Hold('UNTRUSTED_FOREIGN_RC9_SCOPE')
+        return scope
+
+    def begin(self, role, installer_pid=None, *, resumable_ir=False, ir_inputs=None,
+              resumable_foreign=False, foreign_inputs=None, source=None):
         if type(resumable_ir) is not bool or (resumable_ir and role != 'panel-iran'):
             raise Hold('INVALID_RESUMABLE_INSTALL_ROLE')
+        if type(resumable_foreign) is not bool or (resumable_foreign and role != 'foreign'):
+            raise Hold('INVALID_FOREIGN_RESUMABLE_ROLE')
         if ir_inputs is not None and not resumable_ir:
             raise Hold('INVALID_IR_CORE_INPUTS')
+        if foreign_inputs is not None and not resumable_foreign:
+            raise Hold('INVALID_FOREIGN_CORE_INPUTS')
+        if resumable_ir and resumable_foreign:
+            raise Hold('CONFLICTING_INSTALL_OWNERS')
         source = SOURCE if source is None else source
-        if source not in (SOURCE, RC9_SOURCE) or (source == RC9_SOURCE and
-                (role != 'panel-iran' or not resumable_ir or ir_inputs is None)):
-            raise Hold('RC9_SOURCE_NOT_ADMITTED_FOR_THIS_FRESH_INSTALL')
+        if source not in (SOURCE, RC9_SOURCE):
+            raise Hold('UNREVIEWED_SOURCE')
+        if source == RC9_SOURCE:
+            if role == 'panel-iran':
+                if not resumable_ir or ir_inputs is None:
+                    raise Hold('RC9_IR_OWNER_REQUIRED')
+            elif role == 'foreign':
+                # The signed candidate still has activation_allowed=false.
+                # Only private-root fixtures may model the future RC9 owner.
+                # The installed / journal CLI cannot create one yet.
+                if (self.root == Path('/') or not resumable_foreign
+                        or foreign_inputs is None):
+                    raise Hold('RC9_FOREIGN_HOST_RELEASE_NOT_APPROVED')
+            else:
+                raise Hold('RC9_ROLE_NOT_APPROVED')
+        elif resumable_foreign or foreign_inputs is not None:
+            raise Hold('FOREIGN_RC9_SCOPE_REQUIRES_SIGNED_RC9_SOURCE')
         archive = None
         if os.path.lexists(self.path):
             old = self.load()
@@ -168,6 +221,12 @@ class Journal:
         if ir_inputs is not None:
             d['ir_inputs'] = dict(zip(('domain', 'name'), ir_inputs, strict=True))
             self.ir_inputs(d)
+        if resumable_foreign:
+            d['foreign_resumable_version'] = 1
+            keys = ('panel_domain', 'foreign_domain', 'node_name',
+                    'node_id', 'control_path')
+            d['foreign_inputs'] = dict(zip(keys, foreign_inputs, strict=True))
+            self.foreign_inputs(d)
         if archive is not None and not archive.exists():
             self.save(old, destination=archive)
         self.save(d)
@@ -468,6 +527,16 @@ class Journal:
             if (lines.count('SMITE_PANEL_DOMAIN=' + domain) != 1
                     or lines.count('SMITE_NODE_NAME=' + name) != 1):
                 raise Hold('IR_CORE_INPUT_DRIFT')
+        if d.get('foreign_resumable_version') == 1:
+            scope = self.foreign_inputs(d)
+            for key, value in (
+                ('SMITE_PANEL_DOMAIN', scope['panel_domain']),
+                ('SMITE_FOREIGN_DOMAIN', scope['foreign_domain']),
+                ('SMITE_NODE_NAME', scope['node_name']),
+                ('SMITE_CONNECTION_MODE', 'standard'),
+            ):
+                if lines.count(key + '=' + value) != 1:
+                    raise Hold('FOREIGN_CORE_SCOPE_DRIFT')
         d['state'] = 'COMMITTED'
         if d.get('ir_resumable_version') == 1:
             d['ir_phase'] = 'CORE_COMMITTED'
@@ -605,7 +674,9 @@ def main():
                                        'resume-ir', 'advance-ir', 'admin-present', 'gateway-recover-ir',
                                        'prepare', 'recover-ir-core', 'commit-ir-panel'))
     ap.add_argument('--role', choices=('panel-iran', 'foreign'))
-    ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted source for new Iran RC9 only')
+    ap.add_argument('--source', choices=(SOURCE, RC9_SOURCE), help='Exact admitted signed-source owner')
+    ap.add_argument('--resumable-foreign', action='store_true')
+    ap.add_argument('--foreign-inputs', nargs=5)
     ap.add_argument('--resumable-ir', action='store_true')
     ap.add_argument('--ir-inputs', nargs=2)
     ap.add_argument('--phase', choices=IR_PHASES)
@@ -632,7 +703,9 @@ def main():
                 if not a.role: raise Hold('ROLE_REQUIRED')
                 if not a.installer_pid or not process_start(a.installer_pid):
                     raise Hold('INSTALLER_PROCESS_REQUIRED')
-                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir, ir_inputs=a.ir_inputs, source=a.source))
+                print(j.begin(a.role, a.installer_pid, resumable_ir=a.resumable_ir,
+                              ir_inputs=a.ir_inputs, resumable_foreign=a.resumable_foreign,
+                              foreign_inputs=a.foreign_inputs, source=a.source))
             elif a.action == 'prepare':
                 fd = os.open(j.folder / 'operation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
                 os.close(fd)
