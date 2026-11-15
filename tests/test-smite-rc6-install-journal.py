@@ -67,6 +67,31 @@ class RecoveryTests(unittest.TestCase):
         self.assert_no_stop()
 
 
+    def test_root_foreign_owner_requires_same_selected_panel_packet_and_signed_release(self):
+        # The live root can be admitted only by the existing signed Pairing
+        # release gate; passing manual Node identifiers or a random packet
+        # path can never satisfy it. Current pinned trial stays a HOLD.
+        import inspect
+        gate = inspect.getsource(m.Journal.require_foreign_selected_release)
+        self.assertIn('smite-node-pairing.py', gate)
+        self.assertIn('pairing._require_unified_foreign_release()', gate)
+        self.assertIn('foreign-install-packet.json', gate)
+        before = self.j.path.read_bytes()
+        self.j.root = Path('/')
+        for invalid in (
+                None,
+                Path('/tmp/foreign-install-packet.json'),
+                Path('/etc/u-opti/smite/foreign-install-packet.json'),
+                Path('/var/lib/u-opti/rc6-install-journal/foreign-staging/'
+                     '../foreign-install-packet.json')):
+            with self.subTest(invalid=invalid), self.assertRaises(m.Hold):
+                self.j.require_foreign_selected_release(invalid)
+        self.assertEqual(self.j.path.read_bytes(), before)
+        self.j.root = self.root
+        # The fixture still models the original RC9 owner without releasing
+        # a real host, keeping legacy RC7 journal tests unchanged.
+        self.assertIsNone(self.j.require_foreign_selected_release(None))
+
     def test_future_rc9_foreign_owner_is_disposable_only_and_scope_bound(self):
         scope = ('panel.example.com', 'kh.example.com', 'node-kh',
                  'foreign-node-1234', '/smite-node/' + 'a'*32)
