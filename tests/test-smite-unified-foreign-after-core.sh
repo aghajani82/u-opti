@@ -603,4 +603,57 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     echo 'UNIFIED_FOREIGN_CORE_STAGE=PASS_ISOLATED_RESUME_AND_NO_RECREATE'
 )
 
+# Exercise the ACTUAL internal one-choice Core -> Sanaei/Gateway hand-off.
+# The already unit-tested functions are stubbed only at their boundaries;
+# the wrapper must never run Host after failed Core, or falsely mark
+# Connected after a prepared Gateway. One retry retains the same Core.
+(
+    SMITE_SELECTED_FRESH=1
+    SMITE_INSTALL_PROFILE=clean-rc
+    : > "$TMP/prepair-stage-calls"
+    CORE_ALLOWED=1
+    HOST_ALLOWED=1
+    smite_install_unified_foreign_core_stage() {
+        printf 'core\n' >> "$TMP/prepair-stage-calls"
+        [ "$CORE_ALLOWED" = 1 ]
+    }
+    smite_install_unified_foreign_after_core() {
+        printf 'host\n' >> "$TMP/prepair-stage-calls"
+        [ "$HOST_ALLOWED" = 1 ]
+    }
+    expect_preparing() {
+        local status=0 expected="$1" calls="$2"
+        : > "$TMP/prepair-stage-calls"
+        smite_install_unified_foreign_pre_pairing_stages "$PACKET" \
+            > "$TMP/prepair-stage-result" 2>&1 || status=$?
+        [ "$status" -eq "$expected" ] || {
+            echo "FAIL: pre-pairing $status expected $expected"; exit 1;
+        }
+        [ "$(cat "$TMP/prepair-stage-calls")" = "$calls" ] || {
+            echo "FAIL: pre-pairing order wrong"; cat "$TMP/prepair-stage-calls"; exit 1;
+        }
+        if [ "$expected" -eq 0 ]; then
+            grep -qx 'FOREIGN_OPTION2_PRE_PAIRING=SIGNED_CORE_SANAEI_RO_GATEWAY_443_PREPARED' \
+                "$TMP/prepair-stage-result"
+            grep -qx 'FOREIGN_IDENTITY=AWAITING_ORIGINAL_SIGNED_PAIRING' \
+                "$TMP/prepair-stage-result"
+            grep -qx 'FOREIGN_CONNECTED=NOT_PROVEN' "$TMP/prepair-stage-result"
+        else
+            ! grep -q '^FOREIGN_OPTION2_PRE_PAIRING=' "$TMP/prepair-stage-result"
+        fi
+    }
+    SMITE_SELECTED_FRESH=0
+    expect_preparing 2 ''
+    SMITE_SELECTED_FRESH=1
+    CORE_ALLOWED=0
+    expect_preparing 2 'core'
+    CORE_ALLOWED=1
+    HOST_ALLOWED=0
+    expect_preparing 2 "$(printf 'core\nhost')"
+    HOST_ALLOWED=1
+    expect_preparing 0 "$(printf 'core\nhost')"
+    expect_preparing 0 "$(printf 'core\nhost')"
+    echo 'UNIFIED_FOREIGN_PRE_PAIRING_STAGE=PASS_ISOLATED_ORIGINAL_OWNERS'
+)
+
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'
