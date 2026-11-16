@@ -275,6 +275,31 @@ class SelectedFreshIranForeignReadyTests(unittest.TestCase):
         self.assertNotIn("panel-recreated", self.events)
         self.assertNotIn("nginx-reloaded", self.events)
 
+    def test_completed_ir_foreign_runtime_drift_never_recreates_panel(self):
+        self.apply()
+        before_env = self.panel_env.read_bytes()
+        before_backend = self.backend.read_bytes()
+        checkpoint = (self.stage/"complete").read_bytes()
+        self.events.clear()
+
+        # Keep the original sealed env and TLS/443 renderer intact, but
+        # simulate a stale/nonmatching effective container runtime. The
+        # already COMPLETED option-1 stage must not force-recreate Panel.
+        old_host = self.host
+        def drifted_host(args, **kwargs):
+            if args[:3] == ["docker", "exec", "smite-panel"]:
+                self.events.append("runtime-flags-drift")
+                return "PANEL_FOREIGN_INSTALL_RUNTIME=NOT_READY"
+            return old_host(args, **kwargs)
+        with patch.object(p, "_run", side_effect=drifted_host):
+            with self.assertRaisesRegex(
+                    p.WizardHold, "Completed Foreign Iran Panel runtime drift"):
+                self.apply()
+        self.assertEqual(self.events, ["runtime-flags-drift"])
+        self.assertEqual(self.panel_env.read_bytes(), before_env)
+        self.assertEqual(self.backend.read_bytes(), before_backend)
+        self.assertEqual((self.stage/"complete").read_bytes(), checkpoint)
+
     def test_original_step_snapshot_compensates_nginx_failure_only(self):
         self.fail_next_nginx = True
         with self.assertRaisesRegex(p.WizardHold, "compensated"):

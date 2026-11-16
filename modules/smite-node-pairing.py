@@ -2412,6 +2412,12 @@ def _fresh_ir_foreign_ready_config(*, stage_dir: Path, project: str,
         if (sealed(stage_dir / "complete") != b"FOREIGN_IR_READY\n"
                 or live() != after):
             raise WizardHold("Completed Foreign Iran stage drift; do not auto-enable")
+        # A sealed completed checkpoint is a READ-ONLY retry, never an
+        # authorization to recreate the already installed Panel. A later
+        # in-memory feature-flag drift must HOLD for reviewed repair.
+        if not effective_ready():
+            raise WizardHold(
+                "Completed Foreign Iran Panel runtime drift; retain signed checkpoint")
     if (live() == after and effective_ready()):
         _run(["nginx", "-t"], timeout=20)
         if (stage_dir / "complete").exists():
