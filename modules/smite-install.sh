@@ -3849,9 +3849,15 @@ smite_install_finish_local_ir() {
     fi
     if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
+    elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
+        # The original UI-only helper is pinned to the old RC7 Panel image.
+        # RC9 already contains its own signed static UI. Never probe/push
+        # RC7 assets onto an RC9 container or emit a misleading UI HOLD.
+        echo 'IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED'
+        smite_install_ir_advance COMPLETE || return 2
     else
-        # Cosmetic UI is independent; the existing backup/rollback at menu
-        # 8/9 remains intact, without a second appearance system.
+        # Preserve the independent legacy RC7 UI backup/rollback behavior.
+        # This branch never runs for the selected signed RC9 installer.
         if smite_install_ui_action apply; then
             echo 'IR_PANEL_STATIC_UI=APPLIED'
         else

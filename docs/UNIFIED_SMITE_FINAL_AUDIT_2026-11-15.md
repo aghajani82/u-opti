@@ -451,3 +451,41 @@ administrator creation, delete the journal, or rebuild the disposable
 Iran host for this defect. Keep Foreign untouched until Iran
 `IR_FOREIGN_INSTALL=READY_SIGNED_443` and full option 1 PASS are
 independently witnessed. Do not infer those live results from offline CI.
+
+## Live Iran RC9: native Panel UI retained, legacy RC7 UI mismatch isolated — 2026-11-16
+
+The operator's **disposable** Iran install on signed RC9 Panel/Node
+completed after in-place source-loader repair: original option 1 resumed
+at `ADMIN_CREATED`, verified HTTPS Gateway, signed local pairing,
+existing admin, ready Foreign schema, and `IR_FOREIGN_FLAGS=ENABLED_SIGNED_443`
+plus `IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION`.
+It committed `IR_INSTALL_STAGE=COMPLETE` and
+`PANEL_AND_IR_INSTALL=COMPLETE`. A user-provided browser screenshot
+shows `node-ir` in Iran Nodes with a green `Connected` badge.
+This is **Iran-only** evidence; Foreign live Connected, power-loss
+recovery and signed bidirectional Foreign HMAC are still unproven.
+
+A remaining **cosmetic-only** console HOLD came from automatically calling
+the existing RC7 static UI update helper against the **new signed RC9**
+Panel digest, which intentionally fails its original image admission.
+The RC9 signed UI was already serving correctly. Do not weaken or
+retarget that pinned RC7 UI helper: those assets belong to a different
+immutable image and a blind carryover could corrupt the RC9 frontend.
+
+The original selected fresh Iran RC9 option 1 now retains its **native
+signed RC9 UI** and emits `IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED`,
+then commits the existing COMPLETE checkpoint. The original RC7-only
+UI helper, existing backup/rollback menu 8/9 behavior and non-RC9
+paths remain unchanged. The existing Panel UI test suite includes a
+**functional no-host original stage replay** that raises on any attempt
+to invoke RC7 UI, verifies Foreign readiness, and asserts the original
+COMPLETE phase. The original installer blob pin is adjusted for this
+reviewed narrow change. No frontend build, new UI feature, workflow,
+PR, host change or Docker mutation is involved.
+
+The **already completed Iran test host does not need an update for
+this cosmetic correction**. Do not select menu 8 to apply an RC7 UI
+bundle to RC9. Next user action is to reserve a Foreign node in the
+already ready Iran Panel, then install selected Foreign option 2 on
+the separate disposable KH host using the exact reviewed source, while
+retaining the real host signed/rollback evidence.

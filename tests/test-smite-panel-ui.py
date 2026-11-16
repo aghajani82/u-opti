@@ -56,6 +56,49 @@ class Updates(unittest.TestCase):
     def test_path_traversal_and_bad_encoding_rejected(self):
         for files in [dict(OLD,**{'../main.py':'YQ=='}), {'index.html':'not base64'}]:
             with self.assertRaises(ValueError):ui.validate(files)
+    def test_signed_rc9_iran_option1_keeps_its_native_ui(self):
+        # Exercise the original option-1 phase owner with ONLY local bash
+        # stubs. The RC7 UI bundle must never be attempted on signed RC9.
+        script = r"""
+set -euo pipefail
+source modules/smite-install.sh
+SMITE_IR_RESUMABLE=1
+SMITE_IR_STAGE=ADMIN_CREATED
+smite_gateway_configure_panel() { :; }
+smite_gateway_panel_domain() { printf '%s\n' 04.example.org; }
+smite_gateway_verify_443() { :; }
+python3() {
+    case "$*" in
+        *'smite-node-pairing.py --complete-local-ir-install')
+            echo IR_INSTALL_ENROLLMENT=VERIFIED_ACTIVE ;;
+        *) echo 'Unexpected Python invocation' >&2; return 77 ;;
+    esac
+}
+smite_install_ir_admin_present() { :; }
+smite_install_ir_foreign_schema_stage() {
+    echo IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION
+}
+smite_install_ui_action() {
+    echo 'FORBIDDEN_RC7_UI_ON_RC9' >&2
+    return 77
+}
+smite_install_ir_advance() {
+    test "$1" = COMPLETE || return 77
+    echo "ADVANCE=$1"
+}
+smite_install_pause() { :; }
+smite_install_finish_local_ir
+"""
+        proc = subprocess.run(
+            ['bash', '-c', script], cwd=ROOT,
+            capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn('FORBIDDEN_RC7_UI_ON_RC9', proc.stdout + proc.stderr)
+        self.assertIn('IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED', proc.stdout)
+        self.assertIn('ADVANCE=COMPLETE', proc.stdout)
+        self.assertIn('PANEL_AND_IR_INSTALL=COMPLETE', proc.stdout)
+        self.assertIn('IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION', proc.stdout)
+
     def test_pinned_source_and_90_percent_desktop_density(self):
         files=ui.bundle(BUNDLE)
         metadata=json.loads(BUNDLE.read_text())

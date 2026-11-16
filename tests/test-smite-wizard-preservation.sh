@@ -91,7 +91,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-819da27e694ac550e63b110c0d87c06ee180c7e7 modules/smite-install.sh
+5be8e1852671f1919ab27de906139b7849f2c5ee modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
