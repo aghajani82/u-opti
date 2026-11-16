@@ -50,6 +50,11 @@
 # now integrated original Foreign flags and TLS/443 ingress. Legacy Docker,
 # private-network, EasyTier, FRP and Backhaul files remain independently
 # byte-pinned below. This exact installer SHA MUST change only after review.
+# 2026-11-16 RC9: reviewed retained-packet Foreign resume path only:
+# resolve the original identity-phase module outside the fresh capture branch,
+# refuse missing/symlinked helper before any stage callbacks. The exact
+# interrupted-resume regression checks helper argv/path. No release flags,
+# other guided wizards, FRP/Backhaul, Node identity or installer menu changed.
 # 2026-11-11 PR #199: user-requested selected RC7 installation now includes
 # HTTPS/443, secure local IR enrollment and signed verification before admin
 # creation. Reviewed installer diff only; all unrelated wizard pins preserved.
@@ -74,7 +79,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-238ab31e6bed53c6565538f51dee1701b2dda1d8 modules/smite-install.sh
+242c68eb21f36619c8e05dea7b0e0046e9c6f055 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
