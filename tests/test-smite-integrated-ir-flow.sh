@@ -81,8 +81,9 @@ SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=CORE_COMMITTED
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-fresh"
-[ "$(cat "$TMP/events")" = $'gateway\ntls\ncheckpoint:GATEWAY_VERIFIED\npairing\ncheckpoint:PAIRING_VERIFIED\nadmin\ncheckpoint:ADMIN_CREATED\nschema\nui\ncheckpoint:COMPLETE' ]
+[ "$(cat "$TMP/events")" = $'gateway\ntls\ncheckpoint:GATEWAY_VERIFIED\npairing\ncheckpoint:PAIRING_VERIFIED\nadmin\ncheckpoint:ADMIN_CREATED\nschema\ncheckpoint:COMPLETE' ]
 grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/resume-fresh"
+grep -qx 'IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED' "$TMP/resume-fresh"
 SMITE_IR_STAGE=GATEWAY_VERIFIED
 : > "$TMP/events"
 FAIL_STAGE=pairing
@@ -96,7 +97,8 @@ SMITE_IR_STAGE=PAIRING_VERIFIED
 ADMIN_EXISTS=1
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-admin"
-[ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nschema\nui\ncheckpoint:COMPLETE' ]
+[ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nschema\ncheckpoint:COMPLETE' ]
+grep -qx 'IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED' "$TMP/resume-admin"
 # An unreadable/unknown Panel DB must NEVER be treated as an empty
 # admin table: it is an unsafe state, and no new admin may be created.
 SMITE_IR_STAGE=PAIRING_VERIFIED
@@ -126,8 +128,9 @@ fi
 ! grep -q '^PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/schema-failure"
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/schema-retry"
-[ "$(cat "$TMP/events")" = $'tls\npairing\nschema\nui\ncheckpoint:COMPLETE' ]
+[ "$(cat "$TMP/events")" = $'tls\npairing\nschema\ncheckpoint:COMPLETE' ]
 grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/schema-retry"
+grep -qx 'IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED' "$TMP/schema-retry"
 SMITE_IR_STAGE=GATEWAY_VERIFIED
 : > "$TMP/events"
 FAIL_STAGE=tls
