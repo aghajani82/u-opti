@@ -2,6 +2,30 @@
 # Isolated dispatch/provenance tests: no Docker, network, packages or host writes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# RC9 one-choice Foreign dependencies must be installed by BOTH the
+# original fresh installer and the original in-place updater. This was
+# missed in the first real disposable KH test: signed release passed,
+# but option 2 exited immediately before requesting its Panel packet.
+# Never mutate a host or import security helpers to test this contract.
+for required in \
+    smite-unified-foreign-identity-phase.py \
+    smite-unified-foreign-host-recovery.py \
+    smite-unified-foreign-packet-intake.py \
+    smite-unified-foreign-gateway-plan.py \
+    smite-rc9-owner-approved-manifest.json \
+    smite-rc9-owner-approved.sigstore.json; do
+    [ -f "$ROOT/modules/$required" ] || {
+        echo "FAIL: Required Foreign RC9 module absent in repository: $required" >&2
+        exit 1
+    }
+    for list in "$ROOT/install.sh" "$ROOT/u-opti"; do
+        grep -Fq "\"$required\"" "$list" || {
+            echo "FAIL: Foreign RC9 helper missing from $list: $required" >&2
+            exit 1
+        }
+    done
+done
+echo 'FOREIGN_RC9_INSTALL_AND_UPDATE_MODULE_CLOSURE=PASS'
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Replace only the fixed lock path in a temporary copy; production path guard

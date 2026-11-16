@@ -489,3 +489,45 @@ bundle to RC9. Next user action is to reserve a Foreign node in the
 already ready Iran Panel, then install selected Foreign option 2 on
 the separate disposable KH host using the exact reviewed source, while
 retaining the real host signed/rollback evidence.
+
+## Real disposable KH option 2: missing installed identity/recovery helpers — 2026-11-16
+
+On the operator's first disposable Foreign test, public option 2 printed
+`RC7_COSIGN_SHA256=VERIFIED`,
+`SELECTED_RC9_PAIR_JOURNAL=EXACT_MATCH`,
+`FOREIGN_ONE_CHOICE=ORIGINAL_RC9_STAGES_STARTED`, then returned
+`HOLD: Foreign Node installation did not complete` **without reaching
+the hidden Panel packet prompt**. The original
+`smite_install_unified_foreign_selected_stages()` returns status 2
+silently when the required same-directory
+`smite-unified-foreign-identity-phase.py` helper is missing. Both the
+fresh `install.sh` distribution manifest and the `u-opti` updater
+manifest omitted that already-present source file. The original
+`smite-unified-foreign-packet-intake.py` can also require the
+`smite-unified-foreign-host-recovery.py` helper for original expired
+grant reissue, which was omitted by both distribution manifests.
+
+**Defect repair (no new functionality):** include both exact original
+Python modules in both existing installation/update file lists. Add an
+offline package-closure regression to
+`tests/test-smite-selected-install.sh`, already executed by the
+existing CI and Foreign client suites, requiring the same original
+Identity/Host recovery/intake/Gateway and owner-approved signed artifact
+inputs to be **present in both distribution lists**. No new workflow,
+PR, service, image, Panel code, TTY protocol, certificate, identity,
+FRP or Backhaul was introduced.
+
+**Operator policy:** On the fresh Foreign test host, use the same
+exact-head `U_OPTI_BRANCH` in-place **Update U-OPTI** after the exact
+head's full CI is green. Verify both modules are ordinary installed
+files BEFORE choosing option 2 again. Do not rebuild the KH host,
+delete/rewrite an existing journal, rekey or create another
+`node-kh`. The Iran Panel currently returns HTTP 200 to
+`/api/foreign-install/issue` but its frontend still reports an error
+without displaying the one-use JSON; the original Foreign installer
+**cannot proceed past packet capture** until that frontend-side failure
+is independently diagnosed and a valid, unexpired, private Panel-issued
+packet is available. Do not paste the bearer code in logs or chat.
+This audit records a source-level explanation for KH's first immediate
+HOLD, not yet an independently verified KH filesystem witness; full
+two-host Connected/rollback/restart remain unproven.

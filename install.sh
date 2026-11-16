@@ -104,6 +104,8 @@ MODULES=(
     "smite-unified-panel-host-driver.py"
     "smite-foreign-install-client.py"
     "smite-foreign-install-promotion.py"
+    "smite-unified-foreign-identity-phase.py"
+    "smite-unified-foreign-host-recovery.py"
     "smite-unified-foreign-packet-intake.py"
     "smite-unified-foreign-gateway-plan.py"
     "smite-rc7-sigstore-trusted-root.json"
