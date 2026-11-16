@@ -408,3 +408,46 @@ two-way real `Connected`, or interrupted rollback. No host operation,
 new UI/menu/Workflow/PR, or `main` merge was performed by this commit.
 Observe all release/host preflights on the two disposable servers
 before asserting production readiness.
+
+## Real Iran option 1 post-admin HOLD: state-loader RC9 source omission — 2026-11-16
+
+The operator's real disposable Iran host completed original signed RC9
+Panel/Node installation (both exact published digests RUNNING/HEALTHY),
+verified Iran Node and created the Panel administrator. The retained
+original journal recorded `RC6_INSTALL_TRANSACTION=COMMITTED` and source
+`e7f76185e9a7da51d7069d5d0a829dc192cc1e06`. The signed Foreign
+schema migration returned `IR_FOREIGN_SCHEMA=READY`, but the next
+original `complete_local_ir_foreign_install(state)` refused with
+`Fresh signed RC9 Iran install required for Foreign preparation`,
+leaving the option-1 journal at `ADMIN_CREATED`. A previous network
+interruption had been followed by the same option-1 recovery path.
+
+Read-only host evidence showed all four required state.env fields were
+actually present and exact: `SMITE_ROLE=panel-iran`,
+`SMITE_CONNECTION_MODE=standard`,
+`SMITE_MANAGED_VERSION=2.0.0-rc.9`, and
+`SMITE_UPSTREAM_REF=e7f76185e9a7da51d7069d5d0a829dc192cc1e06`.
+**Root cause** is the old `smite-node-pairing.py::state_values()` whitelist:
+it returned version/role/mode but silently omitted the existing
+`SMITE_UPSTREAM_REF` from its returned mapping. The downstream
+exact-source guard therefore always failed even with an untouched,
+valid on-disk state. This is NOT evidence of an invalid image or
+broken journal, and manually editing the original state file would
+not fix a loader omission.
+
+Corrective change: include only the **existing** `SMITE_UPSTREAM_REF`
+field in the original state loader; preserve the exact fail-closed
+source checks in the Iran Foreign stage and RC9 Foreign activation/
+rollback. Add a no-host test to the existing Pairing suite proving
+the real source survives the state load for Iran/Foreign, mismatched
+source remains mismatched, and absent source is never invented.
+No Pairing API/feature, new workflow, service or identity was added.
+
+**Recovery policy:** update only the U-OPTI trial code once CI is green,
+verify the actual loader returns the exact pinned source on the host,
+then use the SAME original option 1 to resume the retained
+`ADMIN_CREATED` journal. Never rekey/recreate the Iran Node, repeat
+administrator creation, delete the journal, or rebuild the disposable
+Iran host for this defect. Keep Foreign untouched until Iran
+`IR_FOREIGN_INSTALL=READY_SIGNED_443` and full option 1 PASS are
+independently witnessed. Do not infer those live results from offline CI.

@@ -51,6 +51,29 @@ class PreviewTests(unittest.TestCase):
             with self.assertRaises(pairing.WizardHold):
                 pairing.state_values(path)
 
+    def test_rc9_state_loader_retains_source_for_resumed_iran_foreign(self):
+        # Real-host regression: an ADMIN_CREATED Iran Journal can be sound,
+        # while the next Foreign/443 stage requires the immutable RC9 source.
+        # Load only ordinary fixture state; never touch hosts or a credential.
+        source = "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "state.env"
+            for role in ("panel-iran", "foreign"):
+                prefix = (
+                    f"SMITE_ROLE={role}\\n"
+                    "SMITE_CONNECTION_MODE=standard\\n"
+                    "SMITE_MANAGED_VERSION=2.0.0-rc.9\\n"
+                )
+                for ref in (source, "0" * 40):
+                    path.write_text(prefix + f"SMITE_UPSTREAM_REF={ref}\\n")
+                    state = pairing.state_values(path)
+                    self.assertEqual(state["SMITE_UPSTREAM_REF"], ref)
+                    self.assertEqual(state["SMITE_MANAGED_VERSION"], "2.0.0-rc.9")
+                    self.assertEqual(state["SMITE_ROLE"], role)
+                # Never invent a source for an old or incomplete state.
+                path.write_text(prefix)
+                self.assertNotIn("SMITE_UPSTREAM_REF", pairing.state_values(path))
+
     def test_private_exclusive_identity(self):
         with tempfile.TemporaryDirectory() as folder:
             parent = Path(folder) / "identity"

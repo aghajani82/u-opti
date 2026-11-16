@@ -215,7 +215,8 @@ def state_values(path: Path = STATE) -> dict[str, str]:
         if not row or row.startswith("#") or "=" not in row:
             continue
         k, v = row.split("=", 1)
-        if k in ("SMITE_ROLE", "SMITE_CONNECTION_MODE", "SMITE_PANEL_DOMAIN", "SMITE_NODE_NAME", "SMITE_MANAGED_VERSION"):
+        if k in ("SMITE_ROLE", "SMITE_CONNECTION_MODE", "SMITE_PANEL_DOMAIN",
+                 "SMITE_NODE_NAME", "SMITE_MANAGED_VERSION", "SMITE_UPSTREAM_REF"):
             state[k] = v
     if state.get("SMITE_CONNECTION_MODE") != "standard":
         raise WizardHold("Only Standard HTTPS/443 mode is supported in this preview")
