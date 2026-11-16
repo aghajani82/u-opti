@@ -785,13 +785,16 @@ class ForeignRC7Tests(unittest.TestCase):
              patch.object(p,"_rc7_foreign_compose_command") as compose, \
              patch.object(p,"_prepare_security_candidate") as candidate, \
              patch.object(p,"_run") as run:
-            with self.assertRaisesRegex(p.WizardHold,"NOT released"):
+            # The strict host-release contract rejects this unchanged
+            # false/false RC9 candidate BEFORE unnecessary Cosign calls.
+            # Both activation and rollback must fail before host mutations.
+            with self.assertRaisesRegex(p.WizardHold,"release verification failed"):
                 p.activate_foreign_node_field_trial(
                     state, reviewed_unified_trial=True)
-            with self.assertRaisesRegex(p.WizardHold,"NOT released"):
+            with self.assertRaisesRegex(p.WizardHold,"release verification failed"):
                 p.rollback_node_to_paused_field_trial(
                     state, reviewed_unified_trial=True)
-            self.assertEqual(len(commands),4)
+            self.assertEqual(commands, [])
             overlays.assert_not_called()
             gateway.assert_not_called()
             compose.assert_not_called()
