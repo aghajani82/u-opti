@@ -3334,12 +3334,12 @@ smite_install_selected_foreign_fresh() (
     local SMITE_NODE_IMAGE='ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2'
     module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
 
-    # A non-approved trial is rejected locally and without side effects.
-    # This read-only preliminary check is NOT the signature verifier.
-    # The ORIGINAL signed Pairing verifier must separately approve both
-    # images, the immutable source and HOST activation before any writes.
-    if ! python3 -B - "$module_dir/smite-unified-trial-registry-pair.json" \
-            "$SMITE_FIELD_TRIAL_MANIFEST_SHA256" <<'PY_FOREIGN_RELEASE_DECISION'
+    # Preserve the ORIGINAL candidate SHA for source/rollback Journal checks.
+    # The separate owner-signed true/true release supplies the approval SHA,
+    # followed by the original two-image + owner Cosign verifier BEFORE
+    # Core, Docker, Journal, Sanaei or Gateway host changes.
+    if ! python3 -B - "$module_dir/smite-rc9-owner-approved-manifest.json" \
+            "a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f" <<'PY_FOREIGN_RELEASE_DECISION'
 import hashlib,json,os,pathlib,stat,sys
 p=pathlib.Path(sys.argv[1])
 try:

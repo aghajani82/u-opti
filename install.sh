@@ -94,6 +94,8 @@ MODULES=(
     "smite-selected-candidate.json"
     "smite-rc7-registry-pair.json"
     "smite-unified-trial-registry-pair.json"
+    "smite-rc9-owner-approved-manifest.json"
+    "smite-rc9-owner-approved.sigstore.json"
     "smite-unified-trial-pair-admission.py"
     "smite-foreign-install-panel-ingress.py"
     "smite-unified-panel-stage.py"

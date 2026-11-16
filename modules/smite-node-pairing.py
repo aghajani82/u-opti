@@ -1946,18 +1946,19 @@ def _rc7_foreign_paused_rollback_verified(
 
 
 def _require_unified_foreign_release() -> None:
-    """Reuse the existing exact signed Panel/Node trial-pair verifier.
+    """Reuse existing image + OIDC owner-signature verification.
 
-    This is a FAIL-CLOSED release boundary. The pinned trial manifest
-    explicitly says activation_allowed=false; no runtime write follows
-    until a separately reviewed signed release permits host activation.
+    The original false/false candidate stays intact for read-only review;
+    selected Foreign activation requires the separately signed true/true
+    manifest and original exact two-digest provenance.
     """
     import importlib.util
     module_path = Path(__file__).with_name("smite-unified-trial-pair-admission.py")
-    manifest = Path(__file__).with_name("smite-unified-trial-registry-pair.json")
+    manifest = Path(__file__).with_name("smite-rc9-owner-approved-manifest.json")
+    approval_bundle = Path(__file__).with_name("smite-rc9-owner-approved.sigstore.json")
     trust = Path(__file__).with_name("smite-rc7-sigstore-trusted-root.json")
     if any(path.is_symlink() or not path.is_file()
-           for path in (module_path, manifest, trust)):
+           for path in (module_path, manifest, approval_bundle, trust)):
         raise WizardHold("Unified signed release verification inputs unavailable")
     spec = importlib.util.spec_from_file_location(
         "uopti_existing_unified_pair_admission", module_path)
@@ -1968,9 +1969,12 @@ def _require_unified_foreign_release() -> None:
     try:
         approved = signed.verify(
             manifest=manifest,
-            manifest_sha256="f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60",
+            manifest_sha256="a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f",
             source_sha="e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
-            trusted_root=trust, require_host_release=True)
+            trusted_root=trust, require_host_release=True,
+            approval_bundle=approval_bundle,
+            approval_bundle_sha256="d63e3d38248eb4dba9ddcb9f585c27b915247edd151ea8d689e418b49b246586",
+            approval_workflow_sha="521449e0c4112ef4d8c42b78da3d0778ae256b6e")
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
             signed.Hold) as exc:
         raise WizardHold("Unified signed pair release verification failed") from exc

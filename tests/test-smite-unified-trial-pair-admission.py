@@ -312,8 +312,16 @@ class SealedRepositoryPinContract(unittest.TestCase):
         release_gate = pairing.split(
             "def _require_unified_foreign_release()", 1)[1].split(
             "\ndef activate_foreign_node_field_trial(", 1)[0]
-        for value in (source, expected_sha, panel):
+        for value in (source, panel,
+                      "smite-rc9-owner-approved-manifest.json",
+                      "smite-rc9-owner-approved.sigstore.json",
+                      "a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f",
+                      "d63e3d38248eb4dba9ddcb9f585c27b915247edd151ea8d689e418b49b246586",
+                      "521449e0c4112ef4d8c42b78da3d0778ae256b6e"):
             self.assertIn(value, release_gate)
+        self.assertIn("approval_bundle=approval_bundle", release_gate)
+        self.assertIn("approval_bundle_sha256=", release_gate)
+        self.assertIn("approval_workflow_sha=", release_gate)
         self.assertIn("host_activation_allowed", release_gate)
         self.assertIn("require_host_release=True", release_gate)
         self.assertIn("verified_host_release_pair", release_gate)
@@ -323,6 +331,17 @@ class SealedRepositoryPinContract(unittest.TestCase):
         for value in (source, expected_sha, node):
             self.assertIn(value, installer)
         self.assertIn("FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES", installer)
+        selected = installer.split("smite_install_selected_foreign_fresh() (", 1)[1].split(
+            "smite_install_selected_fresh() (", 1)[0]
+        self.assertIn("smite-rc9-owner-approved-manifest.json", selected)
+        self.assertIn("a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f", selected)
+        self.assertIn("smite_install_unified_signed_pair_review", selected)
+        self.assertLess(selected.index("smite-rc9-owner-approved-manifest.json"),
+                        selected.index("smite_install_unified_signed_pair_review"))
+        for entrypoint in ("install.sh", "u-opti"):
+            installed = (ROOT / entrypoint).read_text()
+            self.assertIn('"smite-rc9-owner-approved-manifest.json"', installed)
+            self.assertIn('"smite-rc9-owner-approved.sigstore.json"', installed)
         # The original RC7 Panel and Node remain independent of this new
         # trial pair. Updating only the trial manifest cannot overwrite them.
         official = json.loads(
@@ -427,6 +446,12 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertTrue(bundle["verificationMaterial"]["tlogEntries"])
         self.assertTrue(bundle["verificationMaterial"]["certificate"]["rawBytes"])
         self.assertTrue(bundle["messageSignature"]["signature"])
+        self.assertEqual(
+            (ROOT / "modules" / "smite-rc9-owner-approved-manifest.json").read_bytes(),
+            manifest_raw)
+        self.assertEqual(
+            (ROOT / "modules" / "smite-rc9-owner-approved.sigstore.json").read_bytes(),
+            bundle_raw)
 
     def test_actual_trial_source_images_and_all_consumers_are_one_pair(self):
         self.assertTrue(self.repository_contract())

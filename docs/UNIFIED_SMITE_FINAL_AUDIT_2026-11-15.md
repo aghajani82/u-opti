@@ -370,3 +370,41 @@ Iran/Foreign baselines are reviewed, may host installation be attempted.
 Two-host signed `Connected`, restart/interruption rollback and
 retained FRP/Backhaul/Sanaei verification remain unproven. Keep
 `main` unchanged and PR #202 Draft.
+
+## Signed RC9 Foreign option-2 release adoption — 2026-11-16
+
+The reviewed owner-approved two-test-host release is now bound to the
+ORIGINAL `smite-node-pairing.py::_require_unified_foreign_release()`.
+The current `smite-unified-trial-pair-admission.py.verify` is reused:
+it requires `require_host_release=True`, both exact original signed
+Panel/Node image digests and publisher, the reviewed owner-signed
+`approved-manifest.json` SHA256
+`a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f`,
+the Sigstore bundle SHA256
+`d63e3d38248eb4dba9ddcb9f585c27b915247edd151ea8d689e418b49b246586`
+and the exact GitHub owner signer SHA
+`521449e0c4112ef4d8c42b78da3d0778ae256b6e`.
+Any missing/altered material, invalid image/source/role publisher OIDC,
+untrusted Sigstore root, or wrong owner Workflow signer is an immediate HOLD.
+No unsigned flag selects deployment.
+
+The original `install.sh` and `u-opti` module lists now include the
+two verified release-evidence files, installed as
+`modules/smite-rc9-owner-approved-manifest.json` and
+`modules/smite-rc9-owner-approved.sigstore.json`. The original Foreign
+option 2 uses the exactly pinned approved manifest for its preliminary
+read-only check, and invokes the SAME original Pairing owner-signature
+admission before Core/Docker/Journal. The previously pinned FALSE/FALSE
+`smite-unified-trial-registry-pair.json` stays byte-identical and still
+protects the source/rollback journal and original candidate review;
+neither the RC7 production pair nor Iran option 1 is changed.
+The EXISTING source-consistency tests require both installer module
+lists, approved SHA, bundle SHA, signer commit, exact pairing call,
+safe ordering, and byte-equality of module evidence vs archived proof.
+
+The two-test-host signed release does not by itself prove the actual
+fresh Iranian/Foreign host state, retention of FRP/Backhaul/Sanaei, a
+two-way real `Connected`, or interrupted rollback. No host operation,
+new UI/menu/Workflow/PR, or `main` merge was performed by this commit.
+Observe all release/host preflights on the two disposable servers
+before asserting production readiness.
