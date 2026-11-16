@@ -17,6 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -32,6 +33,11 @@ COSIGN_SIGNATURE_TYPES = {
 REPO = "aghajani82/Smite"
 ISSUER = "https://token.actions.githubusercontent.com"
 WORKFLOW = "https://github.com/aghajani82/Smite/.github/workflows/publish-images.yml@"
+RELEASE_OWNER = "aghajani82/u-opti"
+RELEASE_WORKFLOW = (
+    "https://github.com/aghajani82/u-opti/.github/workflows/"
+    "smite-unified-trial-signed-pair-review.yml@refs/heads/trial/unified-smite-install"
+)
 # Explicitly reviewed Sigstore root-signing snapshot: c9aa2600c1492365922f1b3f351a208aa17d0e64
 # Source: targets/trusted_root.json. TUF refresh is not claimed for this mode.
 TRUSTED_ROOT_SHA256 = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
@@ -164,7 +170,10 @@ def _unique_fields(pairs):
 def verify_pair(*, manifest: Path, manifest_sha256: str,
                 source_sha: str, publish_ref: str,
                 trusted_root: Path | None = None, runner=None,
-                required_policy: str = "candidate") -> dict:
+                required_policy: str = "candidate",
+                approval_bundle: Path | None = None,
+                approval_bundle_sha256: str | None = None,
+                approval_workflow_sha: str | None = None) -> dict:
     # Candidate review and host release are distinct, explicit policies.
     # A caller-controlled JSON flag alone never selects deployment. The
     # caller must independently pin the immutable manifest hash and choose
@@ -174,6 +183,24 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
     if required_policy == "host_release" and trusted_root is None:
         raise AdmissionHold("Pinned Sigstore root required for host release")
     approved = required_policy == "host_release"
+    if approved:
+        # A matching pair of signed IMAGES is not a signed owner decision.
+        # The separate release manifest itself MUST carry an independently
+        # reviewed, OIDC-signed blob bundle bound to the exact U-OPTI run.
+        if (not isinstance(approval_workflow_sha, str)
+                or not SHA.fullmatch(approval_workflow_sha)
+                or not isinstance(approval_bundle_sha256, str)
+                or not HASH.fullmatch(approval_bundle_sha256)
+                or not isinstance(approval_bundle, Path)):
+            raise AdmissionHold("Signed owner release approval missing")
+        if (approval_bundle.is_symlink() or not approval_bundle.is_file()):
+            raise AdmissionHold("Signed release bundle unavailable")
+        info = approval_bundle.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_mode & 0o022 or not 0 < info.st_size <= 262144):
+            raise AdmissionHold("Signed release bundle unsafe")
+        if hashlib.sha256(approval_bundle.read_bytes()).hexdigest() != approval_bundle_sha256:
+            raise AdmissionHold("Signed release bundle does not match reviewed pin")
     if not isinstance(manifest_sha256, str) or not HASH.fullmatch(manifest_sha256):
         raise AdmissionHold("Independent manifest SHA256 required")
     if not isinstance(source_sha, str) or not SHA.fullmatch(source_sha):
@@ -258,6 +285,24 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
             if not _signed_payload_match(signed, digest=digests[role],
                                          role=role, source=source_sha):
                 raise AdmissionHold("Signed digest/source/role mismatch for " + role)
+        if approved:
+            cmd = [
+                cosign, "verify-blob", "--bundle", str(approval_bundle),
+                "--trusted-root", trust_root_path,
+                "--certificate-identity=" + RELEASE_WORKFLOW,
+                "--certificate-oidc-issuer=" + ISSUER,
+                "--certificate-github-workflow-sha=" + approval_workflow_sha,
+                "--certificate-github-workflow-repository=" + RELEASE_OWNER,
+                "--certificate-github-workflow-trigger=workflow_dispatch",
+                str(manifest),
+            ]
+            try:
+                release_proof = run(cmd, capture_output=True, text=True,
+                                    timeout=60, check=False)
+            except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+                raise AdmissionHold("Signed owner approval verifier unavailable") from exc
+            if release_proof.returncode != 0:
+                raise AdmissionHold("Independent owner release signature failed")
     return {"source_sha": source_sha, "publish_ref": publish_ref,
             "images": refs, "release_policy": required_policy}
 

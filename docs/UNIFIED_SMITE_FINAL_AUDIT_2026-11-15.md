@@ -141,3 +141,41 @@ regression, not proof of host `Connected`.
 **Release remains HOLD:** the RC9 manifest still has
 `release_approved=false`, `activation_allowed=false`.
 No servers, FRP/Backhaul/Sanaei, Smite source, or `main` changed.
+
+## Owner-signed host-release proof — preparation on trial, 2026-11-16
+
+A security review identified a missing distinction in the previous
+`required_policy="host_release"` code: two valid **image** signatures,
+matching true/true manifest flags and a locally pinned manifest hash still
+do not prove that the *owner signed the deployment decision*. The existing
+common admission now additionally requires a non-symlinked, single-link
+pinned Sigstore **bundle of the exact approved-manifest bytes**, verified
+through `cosign verify-blob` against the original trusted Sigstore root,
+exact `aghajani82/u-opti` existing review-workflow identity, GitHub OIDC
+issuer, independently pinned review commit SHA and
+`workflow_dispatch` trigger. No wildcard signer or unsigned flag is
+accepted. Candidate read-only verification remains identical.
+
+The EXISTING `.github/workflows/smite-unified-trial-signed-pair-review.yml`
+now has an **owner-only manual dispatch** mode, separate from its unchanged
+read-only push mode: independently recheck the two signed RC9 image digests,
+validate explicit owner consent and exact reviewed U-OPTI source,
+produce deterministic true/true approval bytes, require a separately
+precomputed exact approved SHA256, keylessly sign and verify those bytes,
+and upload the manifest + Sigstore bundle for independent code review.
+No new workflow, image build, code feature, public port, server change
+or automatic deployment is introduced.
+
+**Current decision remains HOLD.** The pinned trial manifest is still
+`false/false`; NO owner-approved release manifest or bundle has been
+issued, and the host activation gate has no pinned manual workflow SHA,
+bundle SHA or signed approval file. A synthetic true/true fixture with a
+mocked Cosign runner is NOT real approval. Before live test, independently
+review the manual workflow result, exact approved manifest/bundle hashes,
+the signed identity and the U-OPTI pinned consumers. Only a future
+explicitly reviewed U-OPTI branch change may select those exact reviewed
+assets. A green CI on this preparation does not authorize Foreign option 2.
+
+The end goal remains the two original one-choice entries with stage-owned
+resume/rollback, followed by actual independently witnessed two-host
+signed `Connected`, retained FRP/Backhaul/Sanaei and final merge.

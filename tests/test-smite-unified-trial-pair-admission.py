@@ -47,6 +47,8 @@ class TrialPair(unittest.TestCase):
 
     def fake_signer(self, argv, **kwargs):
         self.issued.append(argv)
+        if "verify-blob" in argv:
+            return subprocess.CompletedProcess(argv,0,"Verified OK","")
         role="panel" if "smite_role=panel" in argv else "node"
         digest=PANEL if role=="panel" else NODE
         record={"critical":{"type":"cosign container image signature",
@@ -96,31 +98,64 @@ class TrialPair(unittest.TestCase):
             self.check_admission()
         self.assertEqual(self.issued, [])
 
-        approved = self.check_admission(require_host_release=True)
+        # Disposable simulated owner bundle. Only the mocked signer returns
+        # success here; no real release material or private key is generated.
+        bundle = Path(self.tmp.name)/"release.sigstore.json"
+        bundle.write_text('{"fixture":"never-a-release"}')
+        bundle_sha = hashlib.sha256(bundle.read_bytes()).hexdigest()
+        host_kwargs = {
+            "require_host_release": True,
+            "approval_bundle": bundle,
+            "approval_bundle_sha256": bundle_sha,
+            "approval_workflow_sha": "d"*40,
+        }
+        approved = self.check_admission(**host_kwargs)
         self.assertEqual(approved["status"], "verified_host_release_pair")
         self.assertTrue(approved["host_activation_allowed"])
-        self.assertEqual(len(self.issued), 2)
-        for role, command in zip(("panel", "node"), self.issued):
+        self.assertEqual(len(self.issued), 3)
+        for role, command in zip(("panel", "node"), self.issued[:2]):
             self.assertIn("--trusted-root", command)
             self.assertIn("smite_role="+role, command)
             self.assertIn(self.values["images"][role], command)
+        approval_command = self.issued[-1]
+        self.assertIn("verify-blob", approval_command)
+        self.assertIn(str(bundle), approval_command)
+        self.assertIn(str(self.manifest), approval_command)
+        self.assertIn("--certificate-identity=https://github.com/aghajani82/u-opti/.github/workflows/smite-unified-trial-signed-pair-review.yml@refs/heads/trial/unified-smite-install", approval_command)
+        self.assertIn("--certificate-github-workflow-sha="+"d"*40, approval_command)
+        self.assertIn("--certificate-github-workflow-trigger=workflow_dispatch", approval_command)
+        self.assertIn("--trusted-root", approval_command)
 
         self.issued.clear()
-        # A self-rewritten manifest or an unpinned root cannot authorize.
+        # Rehashed local booleans, unsigned approval or an unpinned
+        # workflow identity are NEVER enough to grant host deployment.
         with self.assertRaises(v.Hold):
-            self.check_admission(require_host_release=True,
-                                 manifest_sha256="0"*64)
+            self.check_admission(require_host_release=True)
+        with self.assertRaises(v.Hold):
+            self.check_admission(**{**host_kwargs,"approval_bundle_sha256":"0"*64})
+        with self.assertRaises(v.Hold):
+            self.check_admission(**{**host_kwargs,"approval_workflow_sha":"not-a-sha"})
         self.assertEqual(self.issued, [])
         with self.assertRaises(v.Hold):
-            self.check_admission(require_host_release=True,
-                                 trusted_root=Path(self.tmp.name)/"absent-root")
+            self.check_admission(**{**host_kwargs,"manifest_sha256":"0"*64})
+        self.assertEqual(self.issued, [])
+        with self.assertRaises(v.Hold):
+            self.check_admission(**{**host_kwargs,
+                                   "trusted_root":Path(self.tmp.name)/"absent-root"})
+        self.assertEqual(self.issued, [])
+
+        # Missing bundle and unsafe symlink cannot be used for approval.
+        link = Path(self.tmp.name)/"other-release.sigstore.json"
+        link.symlink_to(bundle)
+        with self.assertRaises(v.Hold):
+            self.check_admission(**{**host_kwargs,"approval_bundle":link})
         self.assertEqual(self.issued, [])
 
         # A half-approved manifest, or unreviewed boolean selector, HOLD.
         self.values["activation_allowed"] = False
         self.write()
         with self.assertRaises(v.Hold):
-            self.check_admission(require_host_release=True)
+            self.check_admission(**host_kwargs)
         self.assertEqual(self.issued, [])
         with self.assertRaises(v.Hold):
             self.check_admission(require_host_release="true")

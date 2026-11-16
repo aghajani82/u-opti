@@ -14,7 +14,9 @@ class Hold(ValueError):
 
 
 def verify(*, manifest, manifest_sha256, source_sha, trusted_root,
-           runner=None, require_host_release=False):
+           runner=None, require_host_release=False,
+           approval_bundle=None, approval_bundle_sha256=None,
+           approval_workflow_sha=None):
     if type(require_host_release) is not bool:
         raise Hold("Host release selector must be an explicit boolean")
     manifest = Path(manifest)
@@ -37,6 +39,9 @@ def verify(*, manifest, manifest_sha256, source_sha, trusted_root,
             source_sha=source_sha, publish_ref=REF, trusted_root=trusted_root,
             runner=runner,
             required_policy=("host_release" if require_host_release else "candidate"),
+            approval_bundle=approval_bundle,
+            approval_bundle_sha256=approval_bundle_sha256,
+            approval_workflow_sha=approval_workflow_sha,
         )
     except verifier.AdmissionHold as exc:
         raise Hold("Signed unified candidate pair admission HOLD") from exc
