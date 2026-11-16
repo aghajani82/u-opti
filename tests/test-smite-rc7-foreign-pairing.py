@@ -756,12 +756,18 @@ class ForeignRC7Tests(unittest.TestCase):
         self.assertIn(("compose",False,False),events[-1:])
         self.assertEqual(sum("up" in e[1] for e in events if e[0]=="command"),2)
 
-    def test_unified_pair_release_refuses_even_valid_signed_trial_before_mutation(self):
+    def test_unified_pair_release_refuses_invalid_owner_blob_before_host_mutation(self):
         import subprocess
         source="e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
         commands=[]
         def signed_trial(command, **kwargs):
             commands.append(command)
+            # Image provenance is valid; ONLY the separate signed owner
+            # approval is invalid. Never mock a successful third signature
+            # or weaken the original runtime verifier to pass this test.
+            if len(command) > 1 and command[1] == "verify-blob":
+                return subprocess.CompletedProcess(command, 1, "", "untrusted owner bundle")
+            self.assertEqual(command[1], "verify")
             role=("panel" if "smite_role=panel" in command else "node")
             signed=[{
                 "critical":{
@@ -785,16 +791,25 @@ class ForeignRC7Tests(unittest.TestCase):
              patch.object(p,"_rc7_foreign_compose_command") as compose, \
              patch.object(p,"_prepare_security_candidate") as candidate, \
              patch.object(p,"_run") as run:
-            # The strict host-release contract rejects this unchanged
-            # false/false RC9 candidate BEFORE unnecessary Cosign calls.
-            # Both activation and rollback must fail before host mutations.
+            # Original image signatures verify, but owner release
+            # verify-blob fails; both original actions must refuse before
+            # any Gateway, Node, Compose, security, or Docker mutation.
             with self.assertRaisesRegex(p.WizardHold,"release verification failed"):
                 p.activate_foreign_node_field_trial(
                     state, reviewed_unified_trial=True)
             with self.assertRaisesRegex(p.WizardHold,"release verification failed"):
                 p.rollback_node_to_paused_field_trial(
                     state, reviewed_unified_trial=True)
-            self.assertEqual(commands, [])
+            self.assertEqual(len(commands), 6)
+            for group in (commands[:3], commands[3:]):
+                self.assertEqual([cmd[1] for cmd in group],
+                                 ["verify", "verify", "verify-blob"])
+                self.assertTrue(group[0][-1].startswith(
+                    "ghcr.io/aghajani82/smite-panel@sha256:"))
+                self.assertTrue(group[1][-1].startswith(
+                    "ghcr.io/aghajani82/smite-node@sha256:"))
+                self.assertTrue(group[2][-1].endswith(
+                    "smite-rc9-owner-approved-manifest.json"))
             overlays.assert_not_called()
             gateway.assert_not_called()
             compose.assert_not_called()
