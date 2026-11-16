@@ -869,6 +869,16 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
     python3() {
         case "$*" in
             *smite-unified-foreign-identity-phase.py*--verify-owned-expired-resume)
+                # The stored-packet resume branch must NOT invoke
+                # /smite-unified-foreign-identity-phase.py from the root.
+                # It must select the same repository-owned verified helper
+                # as the fresh option-2 branch before any stage callbacks.
+                [ "${1:-}" = -B ] &&
+                [ "${2:-}" = "$ROOT/modules/smite-unified-foreign-identity-phase.py" ] &&
+                [ "${3:-}" = --verify-owned-expired-resume ] || {
+                    echo 'FAIL: retained-packet resume selected an unowned helper path' >&2
+                    return 2
+                }
                 printf 'owned-intent-proved\n' >> "$TMP/expired-identity-stage-sequence"
                 return 0 ;;
             *) echo 'FAIL: unexpected expiry-stage Python helper' >&2; return 77 ;;
