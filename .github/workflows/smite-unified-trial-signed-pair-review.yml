@@ -63,7 +63,12 @@ jobs:
     # commits. Select ONLY the exact owner sign-off commit message; the
     # job itself checks the complete before..after diff, request transition
     # and original source/digest/issuer pins BEFORE minting anything.
-    if: github.repository == 'aghajani82/u-opti' && github.actor == 'aghajani82' && github.event_name == 'push' && github.ref == 'refs/heads/trial/unified-smite-install' && github.event.head_commit.message == 'release(rc9): owner-approved signed artifact for disposable Iran + Foreign host test only'
+    if: >-
+      github.repository == 'aghajani82/u-opti' &&
+      github.actor == 'aghajani82' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/trial/unified-smite-install' &&
+      github.event.head_commit.message == 'release(rc9): owner-approved signed artifact for disposable Iran + Foreign host test only'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
