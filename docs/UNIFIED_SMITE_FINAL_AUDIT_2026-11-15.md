@@ -278,3 +278,35 @@ This is a defect correction in the **same existing** review workflow and
 same branch/PR; no new features or host authorization. The request and
 candidate flags remain `false/false` and `approved=false` respectively.
 No operational host, `main` or current signed identity changed.
+
+## Trial owner sign-off run — selection-failure correction, 2026-11-16
+
+The explicit two-disposable-host approval was recorded as the
+SINGLE-file commit `2c5e4a55b945f1d27eedde978befcf8117bfb9f6`
+after its parent passed 9/9 workflows and 19/19 CI jobs. The
+existing real GitHub Actions run
+`43808451226` **skipped** `owner-approved-release` despite
+GitHub showing `actor=aghajani82`, event `push`, exact intended
+commit message and a verified one-file request diff. Therefore
+**NO OWNER-SIGNED RELEASE WAS ISSUED** on that run; a green
+`independent-ghcr-cosign` alone is not release approval.
+
+The job-level condition depended on
+`github.event.head_commit.modified`; the actual Contents-API push did
+not match that filename list. The existing job now uses an EXACT,
+owner-authored release-approval commit **message** for selection,
+while its unmodified fail-closed shell gate independently checks the
+owner, branch, direct commit subject, entire incoming push range,
+single exact request file, prior false→current true, no other pin
+changes, signed source/digests, and downstream Cosign OIDC
+verification. A spoofed message without the original signed consent
+cannot pass the shell gate. This is a trigger-fix in the SAME workflow,
+not a second release facility or a feature.
+
+To avoid signing an already-true replay request, this correction commit
+also returns the sole request to `approved=false`. The approved
+two-test-host intent remains valid, and the next attempt must be a
+separate approval-file-only commit with the exact message. Until a
+real `owner-approved-release` SUCCESS and separately verified
+Sigstore artifact exist, the host-release gate still HOLDS. No
+server, `main`, FRP, Backhaul or Sanaei state changed.

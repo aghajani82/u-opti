@@ -366,7 +366,9 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertEqual(request["approved_sha256"],
                          hashlib.sha256(approved_bytes).hexdigest())
         workflow = (ROOT / ".github/workflows/smite-unified-trial-signed-pair-review.yml").read_text()
-        self.assertIn("github.event.head_commit.modified", workflow)
+        self.assertIn("github.event.head_commit.message == 'release(rc9): owner-approved signed artifact for disposable Iran + Foreign host test only'", workflow)
+        self.assertIn("git log -1 --format=%s", workflow)
+        self.assertNotIn("contains(github.event.head_commit.modified", workflow)
         self.assertIn("github.actor == 'aghajani82'", workflow)
         self.assertIn("github.event_name == 'push'", workflow)
         self.assertIn("prior['approved'] is False", workflow)

@@ -59,10 +59,11 @@ jobs:
   owner-approved-release:
     # This is the SAME EXISTING review workflow, run only after a
     # deliberate owner-approved request change. Other pushes stay read-only.
-    # Only an operator's deliberate EDIT of the existing approval request
-    # can select this job on the trial branch. No default-branch dispatch,
-    # no push with unrelated source changes, no auto-publish on review.
-    if: github.repository == 'aghajani82/u-opti' && github.actor == 'aghajani82' && github.event_name == 'push' && github.ref == 'refs/heads/trial/unified-smite-install' && contains(github.event.head_commit.modified, 'docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json')
+    # GitHub push event filename arrays may be absent for Contents API
+    # commits. Select ONLY the exact owner sign-off commit message; the
+    # job itself checks the complete before..after diff, request transition
+    # and original source/digest/issuer pins BEFORE minting anything.
+    if: github.repository == 'aghajani82/u-opti' && github.actor == 'aghajani82' && github.event_name == 'push' && github.ref == 'refs/heads/trial/unified-smite-install' && github.event.head_commit.message == 'release(rc9): owner-approved signed artifact for disposable Iran + Foreign host test only'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
@@ -90,6 +91,7 @@ jobs:
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/trial/unified-smite-install
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git log -1 --format=%s)" = 'release(rc9): owner-approved signed artifact for disposable Iran + Foreign host test only'
           # Check the ENTIRE push range, not just HEAD^..HEAD. A
           # multi-commit push changing the verifier or workflow before
           # the final approval-file commit must not mint a release blob.
