@@ -163,7 +163,17 @@ def _unique_fields(pairs):
 
 def verify_pair(*, manifest: Path, manifest_sha256: str,
                 source_sha: str, publish_ref: str,
-                trusted_root: Path | None = None, runner=None) -> dict:
+                trusted_root: Path | None = None, runner=None,
+                required_policy: str = "candidate") -> dict:
+    # Candidate review and host release are distinct, explicit policies.
+    # A caller-controlled JSON flag alone never selects deployment. The
+    # caller must independently pin the immutable manifest hash and choose
+    # the host-release contract before the SAME two Cosign verifications.
+    if required_policy not in ("candidate", "host_release"):
+        raise AdmissionHold("Explicit reviewed release policy required")
+    if required_policy == "host_release" and trusted_root is None:
+        raise AdmissionHold("Pinned Sigstore root required for host release")
+    approved = required_policy == "host_release"
     if not isinstance(manifest_sha256, str) or not HASH.fullmatch(manifest_sha256):
         raise AdmissionHold("Independent manifest SHA256 required")
     if not isinstance(source_sha, str) or not SHA.fullmatch(source_sha):
@@ -192,9 +202,11 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
             or doc.get("source_commit") != source_sha
             or doc.get("publish_ref") != publish_ref
             or doc.get("version") != version
-            or doc.get("activation_allowed") is not False
-            or doc.get("release_approved") is not False):
-        raise AdmissionHold("Candidate contract or external pin mismatch")
+            or type(doc.get("activation_allowed")) is not bool
+            or type(doc.get("release_approved")) is not bool
+            or doc["activation_allowed"] is not approved
+            or doc["release_approved"] is not approved):
+        raise AdmissionHold("Release policy, candidate contract or external pin mismatch")
     images = doc.get("images")
     if not isinstance(images, dict) or set(images) != ROLES:
         raise AdmissionHold("Exactly Panel and Node required")
@@ -246,7 +258,8 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
             if not _signed_payload_match(signed, digest=digests[role],
                                          role=role, source=source_sha):
                 raise AdmissionHold("Signed digest/source/role mismatch for " + role)
-    return {"source_sha": source_sha, "publish_ref": publish_ref, "images": refs}
+    return {"source_sha": source_sha, "publish_ref": publish_ref,
+            "images": refs, "release_policy": required_policy}
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)

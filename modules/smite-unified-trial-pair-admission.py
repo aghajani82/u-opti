@@ -13,7 +13,10 @@ class Hold(ValueError):
     pass
 
 
-def verify(*, manifest, manifest_sha256, source_sha, trusted_root, runner=None):
+def verify(*, manifest, manifest_sha256, source_sha, trusted_root,
+           runner=None, require_host_release=False):
+    if type(require_host_release) is not bool:
+        raise Hold("Host release selector must be an explicit boolean")
     manifest = Path(manifest)
     trusted_root = Path(trusted_root)
     for path in (manifest, trusted_root):
@@ -33,16 +36,21 @@ def verify(*, manifest, manifest_sha256, source_sha, trusted_root, runner=None):
             manifest=manifest, manifest_sha256=manifest_sha256,
             source_sha=source_sha, publish_ref=REF, trusted_root=trusted_root,
             runner=runner,
+            required_policy=("host_release" if require_host_release else "candidate"),
         )
     except verifier.AdmissionHold as exc:
         raise Hold("Signed unified candidate pair admission HOLD") from exc
 
+    expected_policy = "host_release" if require_host_release else "candidate"
+    if result.get("release_policy") != expected_policy:
+        raise Hold("Release policy not proven by independent pair verifier")
     return {
-        "status": "verified_trial_pair",
+        "status": ("verified_host_release_pair" if require_host_release
+                   else "verified_trial_pair"),
         "source_sha": result["source_sha"],
         "panel": result["images"]["panel"],
         "node": result["images"]["node"],
-        "host_activation_allowed": False,
+        "host_activation_allowed": require_host_release,
     }
 
 

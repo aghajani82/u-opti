@@ -101,3 +101,15 @@ option 2 remains HOLD, and no new IR/KH Connected or restart/interruption
 proof has been collected. Full PR checks must be evaluated on the **new
 branch head**, not conflated with a previous green commit. Production
 Grandoptical, IR/KH hosts, FRP/Backhaul and `main` are unchanged.
+
+## Signed pair release-policy contract preparation — 2026-11-16
+
+The final PR CI on the previous head `0d19279769ede8fd6a9ee09d9d1249d9176c6c9f` finished **9/9 workflow SUCCESS**, including the complete **19/19 CI** and the Foreign client CI. This is still offline evidence.
+
+The ORIGINAL `smite-registry-pair-admission.verify_pair` now supports two **explicitly selected** policies without changing its immutable source, publisher OIDC identity, two digest checks, independently pinned manifest hash or Sigstore trust-root verification:
+- `candidate` (default and all existing read-only review CLIs): requires both policy flags **false** and returns no host approval.
+- `host_release` (internal activation gate only): requires both flags **true**, a pinned trusted root and matching independently supplied exact manifest digest. The existing `smite-unified-trial-pair-admission.verify` requires a separate `require_host_release=True` selector to obtain `verified_host_release_pair`. The EXISTING original Pairing activation calls this stricter release contract. The preserved original RC6/RC9 journal separately requires policy bits to agree and exact independently pinned digest/source/image owner.
+
+The existing RC9 manifest still has **false/false**. The original Smite image publisher still emits only a **NON-activating candidate**; it has not issued an approved host release, and its two signed image digests do **not** sign the deployment decision. A future host release requires a separate reviewed publisher/owner decision, an immutable new manifest hash and coordinated pinned consumers; changing two flags alone cannot pass this code. A synthetic approved manifest appears **only in offline negative/positive regression fixtures**, never on an operational host.
+
+**Still HOLD:** real-root Foreign option 2, two-host independently witnessed signed `Connected`, restart/interruption recovery, and final `main` merge. No production hosts/FRP/Backhaul/Sanaei changed by this policy preparation.

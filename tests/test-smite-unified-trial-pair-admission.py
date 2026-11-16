@@ -82,6 +82,50 @@ class TrialPair(unittest.TestCase):
         with self.assertRaises(v.Hold):self.check_admission()
         self.assertEqual(self.issued,[])
 
+    def test_reviewed_release_policy_is_separate_and_signed(self):
+        # These are DISPOSABLE fixture flags, not a published host release.
+        # A candidate must not activate even with two valid image signatures.
+        with self.assertRaises(v.Hold):
+            self.check_admission(require_host_release=True)
+        self.assertEqual(self.issued, [])
+
+        self.values["release_approved"] = True
+        self.values["activation_allowed"] = True
+        self.write()
+        with self.assertRaises(v.Hold):
+            self.check_admission()
+        self.assertEqual(self.issued, [])
+
+        approved = self.check_admission(require_host_release=True)
+        self.assertEqual(approved["status"], "verified_host_release_pair")
+        self.assertTrue(approved["host_activation_allowed"])
+        self.assertEqual(len(self.issued), 2)
+        for role, command in zip(("panel", "node"), self.issued):
+            self.assertIn("--trusted-root", command)
+            self.assertIn("smite_role="+role, command)
+            self.assertIn(self.values["images"][role], command)
+
+        self.issued.clear()
+        # A self-rewritten manifest or an unpinned root cannot authorize.
+        with self.assertRaises(v.Hold):
+            self.check_admission(require_host_release=True,
+                                 manifest_sha256="0"*64)
+        self.assertEqual(self.issued, [])
+        with self.assertRaises(v.Hold):
+            self.check_admission(require_host_release=True,
+                                 trusted_root=Path(self.tmp.name)/"absent-root")
+        self.assertEqual(self.issued, [])
+
+        # A half-approved manifest, or unreviewed boolean selector, HOLD.
+        self.values["activation_allowed"] = False
+        self.write()
+        with self.assertRaises(v.Hold):
+            self.check_admission(require_host_release=True)
+        self.assertEqual(self.issued, [])
+        with self.assertRaises(v.Hold):
+            self.check_admission(require_host_release="true")
+        self.assertEqual(self.issued, [])
+
     def test_wrong_role_branch_version_and_legacy_claims_hold(self):
         bad=[
           ("publish_ref","refs/tags/v2.0.0-rc.7"),
@@ -212,6 +256,8 @@ class SealedRepositoryPinContract(unittest.TestCase):
         for value in (source, expected_sha, panel):
             self.assertIn(value, release_gate)
         self.assertIn("host_activation_allowed", release_gate)
+        self.assertIn("require_host_release=True", release_gate)
+        self.assertIn("verified_host_release_pair", release_gate)
         self.assertIn("is not True", release_gate)
 
         installer = (modules / "smite-install.sh").read_text()

@@ -1970,11 +1970,11 @@ def _require_unified_foreign_release() -> None:
             manifest=manifest,
             manifest_sha256="f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60",
             source_sha="e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
-            trusted_root=trust)
+            trusted_root=trust, require_host_release=True)
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
             signed.Hold) as exc:
         raise WizardHold("Unified signed pair release verification failed") from exc
-    if (approved.get("status") != "verified_trial_pair"
+    if (approved.get("status") != "verified_host_release_pair"
             or approved.get("node") != _FOREIGN_NODE_IMAGE_UNIFIED_TRIAL
             or approved.get("panel") !=
               "ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"

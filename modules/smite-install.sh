@@ -3221,8 +3221,13 @@ try:
             or expected.get("kind")!="smite_signed_registry_pair_candidate"
             or expected.get("source_commit")!=source
             or expected.get("version")!=version or expected.get("publish_ref")!=ref
-            or expected.get("activation_allowed") is not False
-            or expected.get("release_approved") is not False
+            # The exact hash above is an independent release decision.
+            # The owned journal accepts either coherent signed candidate
+            # (both false) or future separately reviewed release (both true).
+            # It never converts a candidate into host authorization.
+            or type(expected.get("activation_allowed")) is not bool
+            or type(expected.get("release_approved")) is not bool
+            or expected["activation_allowed"] is not expected["release_approved"]
             or expected.get("images")!={"panel":"ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e","node":"ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"}
             or mod.RC9_SOURCE!=source or mod.CANDIDATES.get(source, (None,))[0]!=version
             or mod.RC9_IMAGES!={"smite-panel":expected["images"]["panel"],
