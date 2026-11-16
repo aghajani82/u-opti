@@ -372,6 +372,13 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertIn("prior['approved'] is False", workflow)
         self.assertIn("all(prior[k]==doc[k] for k in doc if k!='approved')", workflow)
         self.assertIn("git diff --name-only", workflow)
+        # The release job must examine the full incoming push range,
+        # not just its final (approval-only) commit.
+        self.assertIn("PUSH_BEFORE_SHA: ${{ github.event.before }}", workflow)
+        self.assertIn('git merge-base --is-ancestor "$PUSH_BEFORE_SHA" "$GITHUB_SHA"', workflow)
+        self.assertIn('git diff --name-only "$PUSH_BEFORE_SHA" "$GITHUB_SHA"', workflow)
+        self.assertIn("os.environ['PUSH_BEFORE_SHA']+':'+str(path)", workflow)
+        self.assertNotIn('git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA"', workflow)
         self.assertIn("cosign sign-blob", workflow)
         self.assertIn("cosign verify-blob", workflow)
         self.assertIn("OWNER_RELEASE_BLOB_SIGNATURE=VERIFIED_NO_DEPLOYMENT", workflow)

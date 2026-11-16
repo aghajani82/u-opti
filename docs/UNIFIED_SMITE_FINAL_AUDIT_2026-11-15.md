@@ -251,3 +251,30 @@ blob issued and no approved U-OPTI runtime bundle pinned. Real
 Foreign option 2 remains HOLD. The exact-head checks for this
 commit must be recorded separately; do not claim real two-server
 Connected or restart/rollback proof from CI.
+
+## Owner release: entire-push review, not last-commit only — 2026-11-16
+
+The existing owner-only signing job previously checked only
+`HEAD^..HEAD` and loaded the request's prior value at `HEAD^`.
+If an operator pushed **several commits together**, including unrelated
+verifier/workflow/source edits followed by a final false→true approval-file
+commit, this checked only that last commit and could omit the prior
+changes from the mandatory release review.
+
+The original job now fetches the original full history, explicitly checks
+`github.event.before` as a real, nonzero, immutable 40-hex commit and
+requires it to be an ancestor of `github.sha`. The entire incoming push
+must change exactly `docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json`;
+the original request at the **before-push** commit must be
+`approved=false`, all immutable fields identical, and the latest request
+must be `approved=true`. New branch creation, force-push/reset, unknown
+base, multi-file or multi-commit code-change pushes fail closed.
+Existing owner, scope, signed blob, OIDC identity and two independently
+signed images remain unchanged. The original test suite now explicitly
+asserts the full-push predecessor/diff rather than the old one-commit
+comparison.
+
+This is a defect correction in the **same existing** review workflow and
+same branch/PR; no new features or host authorization. The request and
+candidate flags remain `false/false` and `approved=false` respectively.
+No operational host, `main` or current signed identity changed.

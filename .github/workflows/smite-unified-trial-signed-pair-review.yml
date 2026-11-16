@@ -73,22 +73,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          # Full history is required to compare github.event.before
+          # through github.sha, including an owner push of many commits.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Check owner-edited request and exact signed candidate (NO host writes)
         shell: bash
+        env:
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           test "$GITHUB_ACTOR" = aghajani82
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/trial/unified-smite-install
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          # The sign-off push must change ONLY the original approval
-          # request file, not source, verifier, policy or workflow code.
-          test "$(git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA")" = docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json
+          # Check the ENTIRE push range, not just HEAD^..HEAD. A
+          # multi-commit push changing the verifier or workflow before
+          # the final approval-file commit must not mint a release blob.
+          [[ "$PUSH_BEFORE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 2
+          [[ "$PUSH_BEFORE_SHA" != 0000000000000000000000000000000000000000 ]] || exit 2
+          git cat-file -e "$PUSH_BEFORE_SHA^{commit}" || exit 2
+          git merge-base --is-ancestor "$PUSH_BEFORE_SHA" "$GITHUB_SHA" || exit 2
+          test "$(git diff --name-only "$PUSH_BEFORE_SHA" "$GITHUB_SHA")" = docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json
           python3 -B - <<'PY_OWNER_REQUEST'
           import json,os,pathlib,subprocess
           path=pathlib.Path('docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json')
@@ -108,7 +117,7 @@ jobs:
           # Require an actual one-way owner decision. A second push that
           # only reformats an already-approved file must NEVER sign again.
           before=subprocess.run(
-              ['git','show',os.environ['GITHUB_SHA']+'^:'+str(path)],
+              ['git','show',os.environ['PUSH_BEFORE_SHA']+':'+str(path)],
               check=True,capture_output=True).stdout
           prior=json.loads(before,object_pairs_hook=unique)
           assert set(prior)==set(doc) and prior['approved'] is False
