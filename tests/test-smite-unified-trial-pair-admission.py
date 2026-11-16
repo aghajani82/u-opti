@@ -385,6 +385,49 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertIn("cosign verify-blob", workflow)
         self.assertIn("OWNER_RELEASE_BLOB_SIGNATURE=VERIFIED_NO_DEPLOYMENT", workflow)
 
+    def test_issued_owner_sigstore_artifacts_remain_exact_and_inert(self):
+        # Immutable public evidence from the independently witnessed owner
+        # run; NOT a permission to write to a host or change the RC9 trial
+        # candidate that remains false/false.
+        import base64
+        root = ROOT / "docs" / "rc9-release-evidence"
+        candidate_raw = (ROOT / "modules" /
+                         "smite-unified-trial-registry-pair.json").read_bytes()
+        manifest_raw = (root / "approved-manifest.json").read_bytes()
+        bundle_raw = (root / "approved.sigstore.json").read_bytes()
+        self.assertEqual(len(manifest_raw), 497)
+        self.assertEqual(len(bundle_raw), 10971)
+        self.assertEqual(hashlib.sha256(manifest_raw).hexdigest(),
+            "a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f")
+        self.assertEqual(hashlib.sha256(bundle_raw).hexdigest(),
+            "d63e3d38248eb4dba9ddcb9f585c27b915247edd151ea8d689e418b49b246586")
+        self.assertEqual(manifest_raw,
+            candidate_raw.replace(b'"activation_allowed":false',
+                                  b'"activation_allowed":true').replace(
+                b'"release_approved":false', b'"release_approved":true'))
+        doc = json.loads(manifest_raw)
+        self.assertIs(doc["activation_allowed"], True)
+        self.assertIs(doc["release_approved"], True)
+        candidate = json.loads(candidate_raw)
+        self.assertIs(candidate["activation_allowed"], False)
+        self.assertIs(candidate["release_approved"], False)
+        owner_request = json.loads((ROOT / "docs" /
+                     "RC9_OWNER_RELEASE_APPROVAL_REQUEST.json").read_bytes())
+        self.assertIs(owner_request["approved"], True)
+        self.assertEqual(owner_request["approved_sha256"],
+                         hashlib.sha256(manifest_raw).hexdigest())
+        bundle = json.loads(bundle_raw)
+        self.assertEqual(bundle["mediaType"],
+            "application/vnd.dev.sigstore.bundle.v0.3+json")
+        self.assertEqual(bundle["messageSignature"]["messageDigest"]["algorithm"],
+                         "SHA2_256")
+        self.assertEqual(base64.b64decode(
+            bundle["messageSignature"]["messageDigest"]["digest"]),
+            hashlib.sha256(manifest_raw).digest())
+        self.assertTrue(bundle["verificationMaterial"]["tlogEntries"])
+        self.assertTrue(bundle["verificationMaterial"]["certificate"]["rawBytes"])
+        self.assertTrue(bundle["messageSignature"]["signature"])
+
     def test_actual_trial_source_images_and_all_consumers_are_one_pair(self):
         self.assertTrue(self.repository_contract())
 

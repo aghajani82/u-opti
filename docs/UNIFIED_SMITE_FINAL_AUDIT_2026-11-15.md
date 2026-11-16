@@ -310,3 +310,63 @@ separate approval-file-only commit with the exact message. Until a
 real `owner-approved-release` SUCCESS and separately verified
 Sigstore artifact exist, the host-release gate still HOLDS. No
 server, `main`, FRP, Backhaul or Sanaei state changed.
+
+## RC9 owner-signed host-release issued and independently retained — 2026-11-16
+
+**Issued, signature VERIFIED; deployment not yet executed.** After explicit
+owner approval limited to the two disposable Iran/Foreign hosts, the
+original signing workflow successfully ran at
+[GitHub Actions run 43808835299](https://github.com/aghajani82/u-opti/actions/runs/43808835299)
+with both `owner-approved-release` and `independent-ghcr-cosign` SUCCESS.
+The exact signer/OIDC workflow commit is
+`521449e0c4112ef4d8c42b78da3d0778ae256b6e`,
+GitHub actor `aghajani82`, trigger `push`, branch
+`trial/unified-smite-install`. The single request file
+`docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json` changed strictly from
+`approved=false` to `approved=true`; all source/digest/scope pins
+remained unchanged.
+
+Original immutable signed Smite v2.0.0-rc.9 source:
+`e7f76185e9a7da51d7069d5d0a829dc192cc1e06`.
+Panel `sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e`;
+Node `sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2`.
+The original public **candidate** still has both policy flags false
+and remains in place for all existing read-only tests.
+
+The issued true/true manifest, WITH its original signed Sigstore bundle,
+was downloaded by the reviewer from the existing GitHub Actions
+artifact `14199846104`, then examined outside the GitHub runner:
+- `docs/rc9-release-evidence/approved-manifest.json`: SHA256
+  `a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f`;
+- `docs/rc9-release-evidence/approved.sigstore.json`: SHA256
+  `d63e3d38248eb4dba9ddcb9f585c27b915247edd151ea8d689e418b49b246586`.
+- Original ZIP: SHA256
+  `789f2da74d1a9acd4948c7e938e34e75eb8858967c53d65b624ffbe66e278ca2`,
+  [artifact run](https://github.com/aghajani82/u-opti/actions/runs/43808835299);
+  temporary run artifact expires 2026-11-23T05:14:10Z.
+- Independent inspection verified the exact SHA256 digest in the bundle,
+  ECDSA signature over the approved manifest, the Sigstore certificate
+  SAN for U-OPTI's original reviewed workflow, GitHub OIDC issuer,
+  push trigger, repository and exact signing commit. The GitHub runner
+  additionally used Cosign 3.0.6 with the original pinned Sigstore
+  root and returned `OWNER_RELEASE_BLOB_SIGNATURE=VERIFIED_NO_DEPLOYMENT`.
+  Repository evidence files preserve both signed sources after the
+  temporary ZIP expires.
+
+The EXISTING release-admission regression checks these evidence hashes,
+manifest-to-candidate byte-equivalence except for the two policy bits,
+the bundle's exact message digest and the untouched false/false trial
+candidate. No feature, PR, Workflow or host operation was created.
+
+**Important remaining execution gates:** The original U-OPTI installed
+Foreign option 2 is NOT automatically enabled merely by issuing the
+owner's signed release. Its current candidate-only preflight and original
+root-owned activation/rollback stages still require a coherent exact
+approved-bundle pin and reviewed two-test-host boundaries. DO NOT hand
+swap manifest flags or run an unsupported private Python entrypoint.
+Only after those same original consumers adopt and independently
+verify the exact approved manifest/bundle/workflow SHA, and the fresh
+Iran/Foreign baselines are reviewed, may host installation be attempted.
+Two-host signed `Connected`, restart/interruption rollback and
+retained FRP/Backhaul/Sanaei verification remain unproven. Keep
+`main` unchanged and PR #202 Draft.
