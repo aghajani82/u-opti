@@ -2688,7 +2688,13 @@ smite_install_unified_foreign_activate_signed_stage() {
 # NOT an alternate menu action: this becomes the selected option-2 body
 # after the already published false release gate is reviewed and approved.
 smite_install_unified_foreign_selected_stages() {
-    local packet="${1:-}" module_dir="" rc6_lock
+    local packet="${1:-}" module_dir rc6_lock
+    # Resume with the retained private Panel packet must resolve the SAME
+    # trusted helper as the fresh flow.  Do not fall back to "/module.py"
+    # when an existing packet skips the packet-capture branch.
+    module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
+    [ -f "$module_dir/smite-unified-foreign-identity-phase.py" ] &&
+    [ ! -L "$module_dir/smite-unified-foreign-identity-phase.py" ] || return 2
     if [ -z "$packet" ]; then
         # Same operation.lock as the successful Iran option 1. The entire
         # selected Foreign install, including hidden Panel packet capture,
@@ -2696,7 +2702,6 @@ smite_install_unified_foreign_selected_stages() {
         # The current unapproved release HOLDS before journal preparation.
         [ "$EUID" = 0 ] || return 2
         smite_install_unified_signed_pair_review >/dev/null || return 2
-        module_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 2
         python3 -B "$module_dir/smite-rc6-install-journal.py" prepare || return 2
         exec {rc6_lock}<> /var/lib/u-opti/rc6-install-journal/operation.lock || return 2
         flock -n "$rc6_lock" || {
