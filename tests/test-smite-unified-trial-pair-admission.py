@@ -362,7 +362,7 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertIs(pair["activation_allowed"], False)
         approved = dict(pair, activation_allowed=True, release_approved=True)
         approved_bytes = (json.dumps(approved, sort_keys=True,
-                                    separators=(",", ":")) + "\\n").encode()
+                                    separators=(",", ":")) + "\n").encode()
         self.assertEqual(request["approved_sha256"],
                          hashlib.sha256(approved_bytes).hexdigest())
         workflow = (ROOT / ".github/workflows/smite-unified-trial-signed-pair-review.yml").read_text()
