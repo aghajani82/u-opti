@@ -75,3 +75,29 @@ original audit remains as a record of what was missing at the time.
 **Do not rebuild live hosts or merge trial into main based on these offline
 results.** The code closure is not the signed release or real two-host
 acceptance.
+
+## Post-audit safeguard — 2026-11-16 (Iran option 1 retained completed stage)
+
+A further integration review found that the **already completed** original
+Iran Foreign flags/443 stage would fall through to the normal installer
+`docker compose up --force-recreate smite-panel` if its effective runtime
+flags subsequently drifted while its sealed `complete` receipt and two
+config snapshots still matched. This violates the established completed-stage
+read-only retry contract.
+
+The existing `smite-node-pairing.py::_fresh_ir_foreign_ready_config` now
+**HOLDs before any service mutation** when an already-sealed completed
+checkpoint has mismatched effective Panel flags. It preserves the original
+Journal, Panel env, Nginx bytes, signed identity and completion receipt, and
+requires reviewed repair instead of automatically recreating Panel. The
+existing fresh/incomplete-stage compensation and retry path is untouched.
+`tests/test-smite-local-ir-install.py` now simulates this exact runtime drift
+with original fixture configs and asserts zero Panel recreation, zero Nginx
+reload and unchanged sealed inputs.
+
+This does not remove the release/host blockers: RC9 still has
+`release_approved=false` and `activation_allowed=false`, real Foreign
+option 2 remains HOLD, and no new IR/KH Connected or restart/interruption
+proof has been collected. Full PR checks must be evaluated on the **new
+branch head**, not conflated with a previous green commit. Production
+Grandoptical, IR/KH hosts, FRP/Backhaul and `main` are unchanged.
