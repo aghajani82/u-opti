@@ -818,6 +818,10 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     SMITE_INSTALL_PROFILE=clean-rc
     : > "$TMP/public-one-choice-menu-calls"
     clear() { :; }
+    # Earlier Foreign Core tests intentionally replace read() with a
+    # fail-on-prompt stub. Restore Bash's builtin ONLY in this subshell
+    # so the real public menu can consume its isolated 1/2/0 inputs.
+    read() { builtin read "$@"; }
     smite_install_pause() { :; }
     smite_install_selected_fresh() {
         printf '%s:%s\n' "$1" "$SMITE_INSTALL_PROFILE" \
