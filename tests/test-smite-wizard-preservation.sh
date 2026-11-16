@@ -50,6 +50,9 @@
 # now integrated original Foreign flags and TLS/443 ingress. Legacy Docker,
 # private-network, EasyTier, FRP and Backhaul files remain independently
 # byte-pinned below. This exact installer SHA MUST change only after review.
+# 2026-11-16 final menu audit: only public install entries 1/2 now
+# force the integrated RC9 selector instead of inheriting a legacy clean-rc
+# environment. Original clean-rc direct helper / other menus are unchanged.
 # 2026-11-16 release policy preparation: retained installer remains pinned
 # to the exact digest/source/rollback journal. Matching true/true is ONLY
 # eligible under independently pinned manifest hash and actual signed release
@@ -84,7 +87,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-6da444a6cb990d83f13f7d40637cbe78f1411ff6 modules/smite-install.sh
+e5451c6d694f027e78191ee360653dbafdf2299b modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh

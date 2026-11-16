@@ -113,3 +113,31 @@ The ORIGINAL `smite-registry-pair-admission.verify_pair` now supports two **expl
 The existing RC9 manifest still has **false/false**. The original Smite image publisher still emits only a **NON-activating candidate**; it has not issued an approved host release, and its two signed image digests do **not** sign the deployment decision. A future host release requires a separate reviewed publisher/owner decision, an immutable new manifest hash and coordinated pinned consumers; changing two flags alone cannot pass this code. A synthetic approved manifest appears **only in offline negative/positive regression fixtures**, never on an operational host.
 
 **Still HOLD:** real-root Foreign option 2, two-host independently witnessed signed `Connected`, restart/interruption recovery, and final `main` merge. No production hosts/FRP/Backhaul/Sanaei changed by this policy preparation.
+
+## Public two-option menu dispatch closure — 2026-11-16
+
+A direct review of the original `show_smite_install_menu` exposed a user-visible
+legacy dispatch problem: `SMITE_INSTALL_PROFILE` is shell-inherited, and an
+environment left as `clean-rc` diverted BOTH public options 1 and 2 into
+`smite_install_panel_iran` / `smite_install_foreign_node`, bypassing the
+new one-choice RC9 stage coordinator. This could mislead the operator and
+violate the expectation that the **same two public menu options** own all
+previously integrated pairing, HTTPS/443 and recovery stages.
+
+Only the EXISTING menu entry call sites now scope `SMITE_INSTALL_PROFILE=stable`
+for public option 1 and option 2, so `smite_install_selected_fresh` selects
+its integrated RC9 paths and its existing fail-closed Foreign release HOLD.
+The legacy `clean-rc` direct helper, old recovery menu option 7 and all other
+wizard paths remain intact. No menu entry, permission, port, identity,
+or install feature is added.
+
+The EXISTING `test-smite-unified-foreign-after-core.sh` now executes the
+actual public menu twice from a simulated inherited legacy profile and checks
+`panel-iran:stable` / `foreign:stable`, no error, and restoration of the
+original shell profile. The reviewed install-script blob is re-pinned only
+in the existing wizard-preservation guard. This is an offline shell
+regression, not proof of host `Connected`.
+
+**Release remains HOLD:** the RC9 manifest still has
+`release_approved=false`, `activation_allowed=false`.
+No servers, FRP/Backhaul/Sanaei, Smite source, or `main` changed.

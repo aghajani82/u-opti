@@ -3932,13 +3932,18 @@ show_smite_install_menu() {
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in
             1)
-                if ! smite_install_selected_fresh panel-iran; then
+                # Public option 1 must never inherit the historical
+                # clean-rc fixture/legacy installer profile from the shell.
+                # The selected helper installs the exact RC9 pair itself.
+                if ! SMITE_INSTALL_PROFILE=stable smite_install_selected_fresh panel-iran; then
                     echo 'HOLD: Panel + Iran Node installation did not complete. Review error above.'
                     smite_install_pause
                 fi
                 ;;
             2)
-                if ! smite_install_selected_fresh foreign; then
+                # Same one-choice RC9 release/rollback gate as option 1,
+                # not the legacy clean-rc direct helper on env inheritance.
+                if ! SMITE_INSTALL_PROFILE=stable smite_install_selected_fresh foreign; then
                     echo 'HOLD: Foreign Node installation did not complete. Review error above.'
                     smite_install_pause
                 fi
