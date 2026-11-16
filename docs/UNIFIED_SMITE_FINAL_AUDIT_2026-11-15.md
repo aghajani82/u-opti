@@ -217,3 +217,37 @@ The SAME existing signed-pair review Workflow now uses its current
 approval issued, no activation authorized.** This corrects an
 unusable trial-only dispatch design without touching `main`,
 creating a new Workflow, or broadening any Smite user-facing feature.
+
+## Owner approval replay guard and independently computed hash — 2026-11-16
+
+A follow-up audit of the **existing** RC9 release gate confirmed that
+the frozen false/false candidate's exact SHA-256 still matches its
+reviewed pin. Deterministic reserialization as true/true with the
+existing canonical sorted JSON and trailing newline produces the exact
+`a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f`
+SHA already in the owner request. This is an offline calculation, **not
+an approved release**.
+
+One missing fail-closed condition was fixed in that SAME existing
+workflow: a request push must be a strict first
+`approved=false → approved=true` transition and all six other pinned
+fields must remain unchanged from its direct parent commit. A second
+push merely changing the formatting of an already true request cannot
+issue a second owner signature. The existing single-path commit
+restriction and owner/account branch checks remain in force.
+
+The existing release-admission test suite now recomputes the approved
+manifest SHA directly from the committed candidate and checks all
+request/workflow identity pins. Another offline regression simulates
+two successful image signature verifications followed by a failed
+`cosign verify-blob`, and requires an unconditional HOLD before any
+host authorization. No extra workflow/menu/service or feature.
+
+**Evidence:** previous head `c8b24084` completed 9/9 PR workflows
+and 19/19 CI jobs SUCCESS, while the existing signed-pair branch
+review completed successfully with the owner approval job SKIPPED.
+The current release request stays `approved=false`, with no owner
+blob issued and no approved U-OPTI runtime bundle pinned. Real
+Foreign option 2 remains HOLD. The exact-head checks for this
+commit must be recorded separately; do not claim real two-server
+Connected or restart/rollback proof from CI.

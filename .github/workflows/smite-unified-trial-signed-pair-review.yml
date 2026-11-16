@@ -90,7 +90,7 @@ jobs:
           # request file, not source, verifier, policy or workflow code.
           test "$(git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA")" = docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json
           python3 -B - <<'PY_OWNER_REQUEST'
-          import json,pathlib
+          import json,os,pathlib,subprocess
           path=pathlib.Path('docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json')
           def unique(items):
               result={}
@@ -105,7 +105,15 @@ jobs:
           assert doc['candidate_sha256']=='f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60'
           assert doc['approved_sha256']=='a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f'
           assert doc['scope']=='fresh-two-host-rc9'
-          print('OWNER_RELEASE_REQUEST=EXPLICIT_EXACT_REVIEW')
+          # Require an actual one-way owner decision. A second push that
+          # only reformats an already-approved file must NEVER sign again.
+          before=subprocess.run(
+              ['git','show',os.environ['GITHUB_SHA']+'^:'+str(path)],
+              check=True,capture_output=True).stdout
+          prior=json.loads(before,object_pairs_hook=unique)
+          assert set(prior)==set(doc) and prior['approved'] is False
+          assert all(prior[k]==doc[k] for k in doc if k!='approved')
+          print('OWNER_RELEASE_REQUEST=EXPLICIT_FALSE_TO_TRUE_ONLY')
           PY_OWNER_REQUEST
           echo 'f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
           python3 -B tests/test-smite-unified-trial-pair-admission.py -v

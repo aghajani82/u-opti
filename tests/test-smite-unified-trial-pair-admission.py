@@ -161,6 +161,30 @@ class TrialPair(unittest.TestCase):
             self.check_admission(require_host_release="true")
         self.assertEqual(self.issued, [])
 
+    def test_failed_signed_owner_blob_denies_even_after_two_image_signatures(self):
+        # Genuine image signatures NEVER authorize a host if the separate
+        # owner-signed release bundle cannot be verified. Offline only.
+        self.values["release_approved"] = True
+        self.values["activation_allowed"] = True
+        self.write()
+        bundle = Path(self.tmp.name) / "signed-review.sigstore.json"
+        bundle.write_text('{"fixture":"unsigned"}')
+        seen = []
+        def reject_approval(argv, **kw):
+            seen.append(argv)
+            if "verify-blob" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "INVALID")
+            return self.fake_signer(argv, **kw)
+        with self.assertRaises(v.Hold):
+            self.check_admission(
+                require_host_release=True,
+                approval_bundle=bundle,
+                approval_bundle_sha256=hashlib.sha256(bundle.read_bytes()).hexdigest(),
+                approval_workflow_sha="d"*40,
+                runner=reject_approval)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual([x[1] for x in seen], ["verify","verify","verify-blob"])
+
     def test_wrong_role_branch_version_and_legacy_claims_hold(self):
         bad=[
           ("publish_ref","refs/tags/v2.0.0-rc.7"),
@@ -317,6 +341,40 @@ class SealedRepositoryPinContract(unittest.TestCase):
         self.assertIn("--source-sha " + source, panel_ci)
         self.assertIn("HOST_INSTALL_ALLOWED=NO", signed)
         return True
+
+    def test_owner_release_request_pin_and_one_way_trigger_contract(self):
+        # Read-only test: a future explicit owner approval is permitted,
+        # but NEVER triggered by these fixtures or repository checkout.
+        pair = json.loads(
+            (ROOT / "modules/smite-unified-trial-registry-pair.json").read_bytes())
+        request = json.loads(
+            (ROOT / "docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json").read_bytes())
+        self.assertEqual(set(request), {
+            "schema", "approved", "source_sha", "candidate_sha256",
+            "approved_sha256", "scope"})
+        self.assertIs(type(request["approved"]), bool)
+        self.assertEqual(request["schema"], 1)
+        self.assertEqual(request["source_sha"], pair["source_commit"])
+        self.assertEqual(request["scope"], "fresh-two-host-rc9")
+        self.assertEqual(request["candidate_sha256"], hashlib.sha256(
+            (ROOT / "modules/smite-unified-trial-registry-pair.json").read_bytes()).hexdigest())
+        self.assertIs(pair["release_approved"], False)
+        self.assertIs(pair["activation_allowed"], False)
+        approved = dict(pair, activation_allowed=True, release_approved=True)
+        approved_bytes = (json.dumps(approved, sort_keys=True,
+                                    separators=(",", ":")) + "\\n").encode()
+        self.assertEqual(request["approved_sha256"],
+                         hashlib.sha256(approved_bytes).hexdigest())
+        workflow = (ROOT / ".github/workflows/smite-unified-trial-signed-pair-review.yml").read_text()
+        self.assertIn("github.event.head_commit.modified", workflow)
+        self.assertIn("github.actor == 'aghajani82'", workflow)
+        self.assertIn("github.event_name == 'push'", workflow)
+        self.assertIn("prior['approved'] is False", workflow)
+        self.assertIn("all(prior[k]==doc[k] for k in doc if k!='approved')", workflow)
+        self.assertIn("git diff --name-only", workflow)
+        self.assertIn("cosign sign-blob", workflow)
+        self.assertIn("cosign verify-blob", workflow)
+        self.assertIn("OWNER_RELEASE_BLOB_SIGNATURE=VERIFIED_NO_DEPLOYMENT", workflow)
 
     def test_actual_trial_source_images_and_all_consumers_are_one_pair(self):
         self.assertTrue(self.repository_contract())
