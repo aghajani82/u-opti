@@ -123,7 +123,7 @@ class TrialPair(unittest.TestCase):
         self.assertIn(str(self.manifest), approval_command)
         self.assertIn("--certificate-identity=https://github.com/aghajani82/u-opti/.github/workflows/smite-unified-trial-signed-pair-review.yml@refs/heads/trial/unified-smite-install", approval_command)
         self.assertIn("--certificate-github-workflow-sha="+"d"*40, approval_command)
-        self.assertIn("--certificate-github-workflow-trigger=workflow_dispatch", approval_command)
+        self.assertIn("--certificate-github-workflow-trigger=push", approval_command)
         self.assertIn("--trusted-root", approval_command)
 
         self.issued.clear()

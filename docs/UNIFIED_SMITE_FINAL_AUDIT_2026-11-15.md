@@ -179,3 +179,41 @@ assets. A green CI on this preparation does not authorize Foreign option 2.
 The end goal remains the two original one-choice entries with stage-owned
 resume/rollback, followed by actual independently witnessed two-host
 signed `Connected`, retained FRP/Backhaul/Sanaei and final merge.
+
+## Release-workflow trigger correction — same trial branch, 2026-11-16
+
+GitHub `workflow_dispatch` requires the workflow file to exist on the
+repository's **default branch**. The owner-signing reviewer only exists
+on `trial/unified-smite-install`, and `main` must not be changed before
+final acceptance. Therefore the earlier manual-dispatch intent could
+not actually be executed; that design has been superseded.
+
+The SAME existing signed-pair review Workflow now uses its current
+`push` trigger for a narrowly guarded owner approval:
+- An inert, explicit request at
+  `docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json` is committed with
+  `approved=false`. This does **not** authorize installation or signing.
+- Only a subsequent **owner-originated commit modifying that one
+  existing file and NO other source/workflow file** is eligible to run
+  the original workflow's approval job. Its strict JSON content must
+  have `approved=true`, exact immutable Smite source, exact candidate
+  SHA-256, precomputed approved true/true manifest SHA-256 and
+  `fresh-two-host-rc9` scope.
+- The job independently verifies both original GHCR signatures,
+  derives exactly the pinned approved manifest, uses keyless GitHub
+  OIDC to sign the **manifest bytes**, verifies its bundle using
+  `cosign verify-blob`, then publishes ONLY the signed approval
+  artifact. Both signer and consumer now require
+  `--certificate-github-workflow-trigger=push` with a pinned exact
+  U-OPTI workflow commit SHA. The existing read-only push review is
+  unaffected; no Workflow file or server outside the trial changes.
+- A successful manual owner edit and signing run is STILL NOT an
+  automatic deployment: its actual approval manifest, reviewed bundle
+  hash and signer commit SHA must be separately pinned into all
+  existing U-OPTI host consumers after code review, followed by a
+  real two-host acceptance run and final `main` review.
+
+**Current status: request default `approved=false`, no owner
+approval issued, no activation authorized.** This corrects an
+unusable trial-only dispatch design without touching `main`,
+creating a new Workflow, or broadening any Smite user-facing feature.

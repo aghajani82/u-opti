@@ -1,25 +1,6 @@
 name: Verify Unified Smite Trial Signed Pair (read only)
 
 on:
-  workflow_dispatch:
-    inputs:
-      expected_uopti_sha:
-        description: 'Exact reviewed U-OPTI commit running this workflow'
-        type: string
-        required: true
-      expected_candidate_sha256:
-        description: 'Reviewed immutable original candidate manifest SHA-256'
-        type: string
-        required: true
-      expected_approved_sha256:
-        description: 'Precomputed SHA-256 of approved true/true manifest'
-        type: string
-        required: true
-      confirm_owner_host_release:
-        description: 'Owner approves the exact RC9 pair for the reviewed two-host rollout, NOT automatic deployment'
-        type: boolean
-        required: true
-        default: false
   push:
     branches: [trial/unified-smite-install]
     paths:
@@ -29,6 +10,7 @@ on:
       - 'modules/smite-rc7-sigstore-trusted-root.json'
       - 'tests/test-smite-unified-trial-pair-admission.py'
       - '.github/workflows/smite-unified-trial-signed-pair-review.yml'
+      - 'docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json'
 
 permissions:
   contents: read
@@ -75,9 +57,12 @@ jobs:
           echo OFFICIAL_RELEASE_APPROVED=NO
 
   owner-approved-release:
-    # This is the SAME EXISTING review workflow, run only by an owner
-    # manual dispatch. Its normal branch-push job stays read-only.
-    if: github.repository == 'aghajani82/u-opti' && github.actor == 'aghajani82' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/trial/unified-smite-install'
+    # This is the SAME EXISTING review workflow, run only after a
+    # deliberate owner-approved request change. Other pushes stay read-only.
+    # Only an operator's deliberate EDIT of the existing approval request
+    # can select this job on the trial branch. No default-branch dispatch,
+    # no push with unrelated source changes, no auto-publish on review.
+    if: github.repository == 'aghajani82/u-opti' && github.actor == 'aghajani82' && github.event_name == 'push' && github.ref == 'refs/heads/trial/unified-smite-install' && contains(github.event.head_commit.modified, 'docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json')
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     permissions:
@@ -88,26 +73,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Check independent owner consent and exact reviewed candidate source
+      - name: Check owner-edited request and exact signed candidate (NO host writes)
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.expected_uopti_sha }}
-          REQUESTED_CANDIDATE: ${{ inputs.expected_candidate_sha256 }}
-          APPROVE: ${{ inputs.confirm_owner_host_release }}
         run: |
           set -euo pipefail
           test "$GITHUB_ACTOR" = aghajani82
+          test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/trial/unified-smite-install
-          test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          test "$APPROVE" = true
-          test "$REQUESTED_SHA" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$REQUESTED_CANDIDATE" = f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60
-          echo "$REQUESTED_CANDIDATE  modules/smite-unified-trial-registry-pair.json" | sha256sum -c -
+          # The sign-off push must change ONLY the original approval
+          # request file, not source, verifier, policy or workflow code.
+          test "$(git diff --name-only "$GITHUB_SHA^" "$GITHUB_SHA")" = docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json
+          python3 -B - <<'PY_OWNER_REQUEST'
+          import json,pathlib
+          path=pathlib.Path('docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json')
+          def unique(items):
+              result={}
+              for k,v in items:
+                  if k in result: raise ValueError('duplicate key')
+                  result[k]=v
+              return result
+          doc=json.loads(path.read_bytes(),object_pairs_hook=unique)
+          assert set(doc)=={'schema','approved','source_sha','candidate_sha256','approved_sha256','scope'}
+          assert doc['schema']==1 and doc['approved'] is True
+          assert doc['source_sha']=='e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+          assert doc['candidate_sha256']=='f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60'
+          assert doc['approved_sha256']=='a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f'
+          assert doc['scope']=='fresh-two-host-rc9'
+          print('OWNER_RELEASE_REQUEST=EXPLICIT_EXACT_REVIEW')
+          PY_OWNER_REQUEST
+          echo 'f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60  modules/smite-unified-trial-registry-pair.json' | sha256sum -c -
           python3 -B tests/test-smite-unified-trial-pair-admission.py -v
       - uses: docker/login-action@v3
         with:
@@ -128,7 +128,7 @@ jobs:
       - name: Produce exact reviewed approved-manifest bytes (NO host changes)
         shell: bash
         env:
-          EXPECTED_APPROVED_SHA: ${{ inputs.expected_approved_sha256 }}
+          EXPECTED_APPROVED_SHA: a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/rc9-owner-release"
@@ -170,7 +170,7 @@ jobs:
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
             --certificate-github-workflow-sha="$GITHUB_SHA" \
             --certificate-github-workflow-repository=aghajani82/u-opti \
-            --certificate-github-workflow-trigger=workflow_dispatch \
+            --certificate-github-workflow-trigger=push \
             "$dir/approved-manifest.json" >/dev/null
           echo 'OWNER_RELEASE_BLOB_SIGNATURE=VERIFIED_NO_DEPLOYMENT'
           sha256sum "$dir/approved-manifest.json" "$dir/approved.sigstore.json"

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "approved": false,
+  "source_sha": "e7f76185e9a7da51d7069d5d0a829dc192cc1e06",
+  "candidate_sha256": "f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60",
+  "approved_sha256": "a2c368a9f7da64e0494b8c6534cdccd2f4a11974927983fe298596b41ffcef2f",
+  "scope": "fresh-two-host-rc9"
+}

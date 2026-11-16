@@ -293,7 +293,7 @@ def verify_pair(*, manifest: Path, manifest_sha256: str,
                 "--certificate-oidc-issuer=" + ISSUER,
                 "--certificate-github-workflow-sha=" + approval_workflow_sha,
                 "--certificate-github-workflow-repository=" + RELEASE_OWNER,
-                "--certificate-github-workflow-trigger=workflow_dispatch",
+                "--certificate-github-workflow-trigger=push",
                 str(manifest),
             ]
             try:
