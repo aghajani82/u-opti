@@ -60,12 +60,12 @@ class PreviewTests(unittest.TestCase):
             path = Path(folder) / "state.env"
             for role in ("panel-iran", "foreign"):
                 prefix = (
-                    f"SMITE_ROLE={role}\\n"
-                    "SMITE_CONNECTION_MODE=standard\\n"
-                    "SMITE_MANAGED_VERSION=2.0.0-rc.9\\n"
+                    f"SMITE_ROLE={role}\n"
+                    "SMITE_CONNECTION_MODE=standard\n"
+                    "SMITE_MANAGED_VERSION=2.0.0-rc.9\n"
                 )
                 for ref in (source, "0" * 40):
-                    path.write_text(prefix + f"SMITE_UPSTREAM_REF={ref}\\n")
+                    path.write_text(prefix + f"SMITE_UPSTREAM_REF={ref}\n")
                     state = pairing.state_values(path)
                     self.assertEqual(state["SMITE_UPSTREAM_REF"], ref)
                     self.assertEqual(state["SMITE_MANAGED_VERSION"], "2.0.0-rc.9")
