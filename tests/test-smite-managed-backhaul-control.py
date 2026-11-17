@@ -53,13 +53,30 @@ class OperatorControl(unittest.TestCase):
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
         )
 
-    def test_no_engine_is_declared_even_when_binaries_are_bundled(self):
-        output = self.run_control("status", "--node-dir", self.node)
-        self.assertEqual(output.returncode, 0, output.stderr)
-        self.assertIn("ROLE=KH", output.stdout)
-        self.assertIn("STATE=NOT_INSTALLED", output.stdout)
-        self.assertIn("SIGNED_NODE_STATUS=NOT_QUERIED", output.stdout)
-        self.assertFalse((self.node / "config/engine-state").exists())
+    def test_rc9_unenrolled_bundle_remains_not_installed_on_both_roles(self):
+        # Bundled binaries do not imply signed inventory enrollment on
+        # either original one-choice RC9 host. Review must not create state.
+        for role, expected in (("iran", "IR"), ("foreign", "KH")):
+            with self.subTest(role=role):
+                (self.node / ".env").write_text(
+                    ENV.replace("NODE_ROLE=foreign", "NODE_ROLE=" + role))
+                for action in ("status", "review"):
+                    output = self.run_control(
+                        action, "--node-dir", self.node)
+                    self.assertEqual(output.returncode, 0, output.stderr)
+                    self.assertIn("ROLE=" + expected, output.stdout)
+                    self.assertIn("STATE=NOT_INSTALLED", output.stdout)
+                    self.assertIn("REASON=NO_ENROLLMENT", output.stdout)
+                    if action == "status":
+                        self.assertIn("SIGNED_NODE_STATUS=NOT_QUERIED",
+                                      output.stdout)
+                    else:
+                        self.assertIn("INSTALL_ALLOWED=NO", output.stdout)
+                        self.assertIn("HOST_DOCKER_ACTIONS=NONE",
+                                      output.stdout)
+                        self.assertIn("FRP_DEPENDENCY=NONE", output.stdout)
+                self.assertFalse(
+                    (self.node / "config/engine-state").exists())
 
     def test_review_refuses_real_install_and_never_requests_frp_or_ports(self):
         output = self.run_control("review", "--node-dir", self.node)

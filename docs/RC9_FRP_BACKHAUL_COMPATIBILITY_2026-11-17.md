@@ -56,7 +56,7 @@ python3 -B /usr/local/lib/u-opti/modules/smite-managed-backhaul-control.py revie
 docker exec smite-node sha256sum /usr/local/bin/frpc /usr/local/bin/frps /usr/local/bin/backhaul
 ```
 
-خروجی Backhaul هنوز از این دو میزبان دریافت نشده؛ **فعلاً دربارهٔ وضعیت نصب Backhaul ادعا نمی‌کنیم**. هش‌های چاپ‌شده فقط اثرانگشت باینری مشاهده‌شده‌اند و به‌تنهایی اعتبار release یا موتور نصب‌شده را اثبات نمی‌کنند. اگر دستور خواندنی خطا داد، علت باید قبل از نصب تحلیل شود. از `verify-rc7-bundle` برای RC9 استفاده نشود.
+**نتیجهٔ این دستورات از هر دو میزبان در 2026-11-17 دریافت شده و در بخش ۶ ثبت شده است.** هش‌های چاپ‌شده فقط اثرانگشت باینری مشاهده‌شده‌اند و به‌تنهایی اعتبار release یا موتور نصب‌شده را اثبات نمی‌کنند. از `verify-rc7-bundle` برای RC9 استفاده نشود.
 
 ## 4) ترتیب دقیق بستن Gateهای موجود، بدون اضافه‌کردن قابلیت
 
@@ -72,4 +72,40 @@ docker exec smite-node sha256sum /usr/local/bin/frpc /usr/local/bin/frps /usr/lo
 
 بر روی SHA `ffd163ac`، ۹ workflow وابسته به همین commit در GitHub Actions با نتیجه `success` ثبت شده‌اند (شامل CI و Foreign installation client). این‌ها **تست‌های repository/fixture** هستند؛ نتیجهٔ PASS معادل witnessed live tunnel یا مجوز نصب نیست.
 
-**گام فعلی:** جمع‌آوری دو خروجی خواندنی Backhaul و نسخه‌های باینری از ایران/خارج، سپس رفع فقط نقص‌های مستند در کنترل‌های موجود و آزمایش آفلاین؛ افزودن feature/Workflow/PR جدید ممنوع.
+**گام فعلی:** شواهد خواندنی Backhaul و SHA256 باینری‌ها از هر دو میزبان دریافت شد؛ گام بعد، بستن گیت WSS/Nginx/rollback با کنترل‌های موجود و تست آفلاین است؛ افزودن feature/Workflow/PR جدید ممنوع.
+
+
+## 6) شواهد تازهٔ واقعی دو میزبان — 2026-11-17
+
+**منشأ:** خروجی دستورهای خواندنی که اپراتور از `root@iran` و `root@kharej` ارائه کرد. این‌ها **شواهد مشاهده‌ای** هستند، نه امضای انتشار یا گزارش اتصال تونل.
+
+| مشاهده | ایران | خارج |
+| --- | --- | --- |
+| `smite-managed-backhaul-control.py review` | `ROLE=IR` | `ROLE=KH` |
+| `STATE / REASON` | `NOT_INSTALLED / NO_ENROLLMENT` | `NOT_INSTALLED / NO_ENROLLMENT` |
+| `INSTALL_ALLOWED` | `NO` | `NO` |
+| `HOST_DOCKER_ACTIONS` | `NONE` | `NONE` |
+| `FRP_DEPENDENCY` | `NONE` | `NONE` |
+| `NEXT` | `CI_ONLY_UNTIL_HOST_ROLLBACK_APPROVAL` | همان |
+
+هش‌های خوانده‌شده با `docker exec smite-node sha256sum` در **هر دو** میزبان، بدون اختلاف:
+
+```text
+f79fff8de3089ec711ff8bdd4b73e00dfe491a1c3d754983c8b0f8d58c21b068  /usr/local/bin/frpc
+b95dee2bf29a021c562565cdf2116376b9fa7590361bd36ef57041a04d0e6654  /usr/local/bin/frps
+7f1b1439d7fe1d15ae0b376e15614fe13d8a12f6e07a90263e310ea2a9d601fb  /usr/local/bin/backhaul
+```
+
+- **Backhaul:** هش اجراپذیر مشاهده‌شده دقیقاً با `OFFICIAL_BINARY_SHA256["amd64"]` در [بستهٔ موجود پروژه](../modules/smite-managed-backhaul.py) مطابقت دارد و با `v0.7.2` رسمی ثبت‌شده مرتبط است. این انطباق فقط باینری است، نه مجوز ثبت یا اجرای موتور.
+- **FRP:** هر دو نقش `frpc` و `frps` در دو میزبان هش یکسان دارند؛ `RC9_FRP_VERSION` پیش‌تر در بررسی WSS نسخهٔ `0.71.0` مشاهده شده است. این دو هش هنوز در این گزارش در برابر **هش مستقلِ باینری استخراج‌شده از آرشیو رسمی** تطبیق نشده‌اند؛ صرف همسانی، امضای رمزنگاری‌شدهٔ انتشار را جایگزین نمی‌کند. از پین‌های باینری نسخه RC2 به‌عنوان مرجع RC9 استفاده نشود.
+- **سازگاری:** `NOT_INSTALLED` دقیقاً به نبود ثبت inventory در میزبان اشاره دارد؛ عدم حضور executable را نتیجه نمی‌دهد. بنابراین نصب مجدد Node یا بارگیری دوبارهٔ Backhaul بر اساس این خروجی‌ها توجیه ندارد.
+- **تست بازگشت:** تست موجود `tests/test-smite-managed-backhaul-control.py` برای هر دو نقش `IR` و `KH` تأکید می‌کند که نبود enrollment نباید به `installed` یا مجوز اجرای واقعی ارتقا یابد؛ هیچ API یا ویژگی تازه‌ای اضافه نشده است.
+
+### کار باقیمانده (در همان scope)
+
+1. ابتدا برنامهٔ rollback/restore و بررسی Nginx/HTTPS 443 و تأیید signed replay برای همین RC9؛ **بدون** اجرای `smite-rc7-wss-runtime.py` روی Node RC9.
+2. سپس تطبیق و تست آفلاین stage-owned enrollment برای FRP bundled، گواه Owner/Child و WSS ایزوله از Panel، Backhaul و Sanaei.
+3. بعد از آن بررسی مستقل Backhaul با استفاده از journal/lock موجود و درستی اتصال و rollback، **بدون** خراب‌کردن FRP.
+4. فقط پس از وجود مدارک ریشهٔ واقعیِ دو سرور، دریافت مجوز نصب و تکمیل checks، بازبینی نهایی PR #202 و merge؛ `main` فعلاً تغییر نمی‌کند.
+
+**وضعیت امنیتی نهایی این بازبینی: `FRP_INSTALL=HOLD`، `BACKHAUL_INSTALL=HOLD`، `LIVE_CHANGES=NONE`.**
