@@ -56,6 +56,17 @@ manifest = json.loads((stage / "engines.candidate.json").read_text())
 expected = manifest["engines"]["frp"]
 assert expected["sha256"] == hashlib.sha256((stage / "frpc.bin").read_bytes()).hexdigest()
 assert expected["server_sha256"] == hashlib.sha256((stage / "frps.bin").read_bytes()).hexdigest()
+# Both disposable RC9 hosts reported the same in-container executable
+# fingerprints. Compare those observations with an INDEPENDENT extraction
+# from the official checksum-pinned upstream release, not with version text
+# or the image label. This is CI-only and never authorizes host enrollment.
+if arch == "amd64":
+    observed_rc9 = {
+        "sha256": "f79fff8de3089ec711ff8bdd4b73e00dfe491a1c3d754983c8b0f8d58c21b068",
+        "server_sha256": "b95dee2bf29a021c562565cdf2116376b9fa7590361bd36ef57041a04d0e6654",
+    }
+    assert expected == observed_rc9, "RC9_BUNDLED_FRP_BYTES_NOT_OFFICIAL_AMD64"
+    print("RC9_IR_KH_FRP_EXECUTABLES_MATCH_OFFICIAL_AMD64=PASS")
 assert not (lab / "node/config/engine-state/engines.json").exists()
 assert (lab / "node/docker-compose.yml").read_bytes() == original
 assert "backhaul" not in manifest["engines"]
