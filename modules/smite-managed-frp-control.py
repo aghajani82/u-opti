@@ -435,6 +435,65 @@ def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
     }
 
 
+def _rc9_wss_ir_nginx_baseline(panel: str, *, renderer=None,
+                                run=None) -> dict[str, str]:
+    """Review the EXISTING IR 443 stream/TLS layout, with no Nginx mutation.
+
+    The original RC2 renderer is used only for read-only parsing and for
+    constructing an in-memory WSS alternate-backend candidate. RC2's fixed
+    domain/hostname and mutating CLI are never invoked. No KH peer IP is
+    assumed, so this is NOT an admitted SNI+source-IP edge or FRP install.
+    """
+    if renderer is None:
+        spec = importlib.util.spec_from_file_location(
+            "rc9_original_frp_wss_edge_renderer",
+            MODULE_DIR / "smite-rc2-frp-wss-edge-plan.py")
+        if spec is None or spec.loader is None:
+            raise Hold("RC9_WSS_NGINX_RENDERER_UNAVAILABLE")
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+    try:
+        # The caller has already validated the signed Panel DNS label
+        # using the original WSS validator. The renderer's old hardcoded
+        # IR/RC2 domain must never escape into a new RC9 installation.
+        renderer.DOMAIN = panel
+        if (renderer.ALT_CANDIDATE.exists()
+                or renderer.ALT_CANDIDATE.is_symlink()):
+            raise Hold("RC9_WSS_ALT_BACKEND_ALREADY_PRESENT")
+        tls = renderer.read_safe(renderer.TLS_SOURCE)
+        stream = renderer.read_safe(renderer.STREAM_SOURCE)
+        mapping = renderer.read_safe(renderer.FRP_MAP)
+        renderer.stream_gate(stream)
+        if (not mapping.startswith(renderer.MAP_HEADER)
+                or not mapping.endswith("\n")):
+            raise Hold("RC9_WSS_IP_MAP_UNREVIEWED")
+        alternate = renderer.render_alt(tls)
+        if alternate == tls:
+            raise Hold("RC9_WSS_NGINX_CANDIDATE_IDENTICAL")
+        # Before enrollment neither the alternate TLS frontend nor the
+        # FRPS loopback listener may be owned by an unrelated process.
+        renderer.loopback_port_free(renderer.ALT_PORT)
+        renderer.loopback_port_free(7000)
+        if run is None:
+            _read_only(["nginx", "-t"])
+        else:
+            run(["nginx", "-t"])
+    except renderer.Hold as exc:
+        reason = str(exc)
+        raise Hold(reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason)
+                   else "RC9_WSS_NGINX_BASE_UNTRUSTED") from exc
+    except (OSError, UnicodeError, ValueError, TypeError,
+            subprocess.SubprocessError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        raise Hold("RC9_WSS_NGINX_BASE_UNAVAILABLE") from exc
+    return {
+        "RC9_WSS_IR_NGINX_BASE": "PASS_READ_ONLY",
+        "RC9_WSS_IR_ALT_TLS_CANDIDATE": "IN_MEMORY_ONLY",
+        "RC9_WSS_KH_PEER_IP_ACL": "NOT_VERIFIED",
+    }
+
+
 def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
                           run=None) -> dict[str, str]:
     """Reuse the ORIGINAL WSS single-key diff gate; no host mutation.
@@ -539,9 +598,15 @@ def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
             if isinstance(exc, Hold):
                 raise
             raise Hold("RC9_WSS_COMPOSE_UNTRUSTED_RESULT") from exc
+    # The Iran one-choice install already owns stream/SNI on 443 and the
+    # 8443 Panel backend. Review only that exact baseline before a future
+    # peer-bound FRP WSS edge; never claim that merely listening on 443 is
+    # proof of the /~!frp route or FRPS owner.
+    nginx_base = (_rc9_wss_ir_nginx_baseline(panel) if role == "IR" else {})
     return {
         "RC9_WSS_COMPOSE_CANDIDATE": "EXACT_ONE_ENV_ONLY",
         "RC9_WSS_SERVICES": "PANEL_AND_NODE" if role == "IR" else "NODE_ONLY",
+        **nginx_base,
         "RC9_WSS_NGINX_EDGE": "NOT_VERIFIED",
         "RC9_WSS_SIGNED_FRP": "NOT_ENROLLED",
         "RC9_WSS_RUNTIME_APPLY": "HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED",

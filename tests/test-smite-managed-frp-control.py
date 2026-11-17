@@ -528,6 +528,94 @@ class FrpOperator(unittest.TestCase):
             control._rc9_wss_compose_plan(
                 self.node, "KH", state_path=state, run=fake_run)
 
+    def test_rc9_ir_wss_base_reuses_dynamic_managed_stream_without_writes(self):
+        # An IR host may be called iran, ir, 01, etc. The original RC2
+        # renderer must use the per-install Panel DNS, not its own DOMAIN.
+        edge_source = ROOT / "modules/smite-rc2-frp-wss-edge-plan.py"
+        spec = importlib.util.spec_from_file_location(
+            "rc9_ir_edge_fixture", edge_source)
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        renderer.ALT_CANDIDATE = self.root / "not-installed-alt.conf"
+        domain = "04.grandoptical.ir"
+        tls = (
+            renderer.BACKEND_HEADER +
+            "server {\n"
+            "    listen 127.0.0.1:8443 ssl;\n"
+            "    server_name " + domain + ";\n"
+            "    location / {\n"
+            "        proxy_pass http://127.0.0.1:8000;\n"
+            "    }\n}\n"
+        )
+        stream = (
+            "# Managed by U-OPTI - Smite TCP/443 SNI gateway\n"
+            "stream {\n"
+            '  map "$ssl_preread_server_name|$remote_addr" $uopti_frp_canary_backend {\n'
+            "    include /etc/nginx/u-opti-smite-frp-sni-map.conf;\n"
+            "    default $uopti_smite_backend;\n"
+            "  }\n"
+            "  server {\n"
+            "    listen 443;\n"
+            "    ssl_preread on;\n"
+            "    proxy_pass $uopti_frp_canary_backend;\n"
+            "  }\n}\n"
+        )
+        files = {
+            renderer.TLS_SOURCE: tls,
+            renderer.STREAM_SOURCE: stream,
+            renderer.FRP_MAP: renderer.MAP_HEADER,
+        }
+        queried = []
+        renderer.read_safe = lambda path: files[path]
+        renderer.loopback_port_free = lambda port: queried.append(("ss", port))
+        def nginx_test(argv):
+            queried.append(tuple(argv))
+            self.assertEqual(argv, ["nginx", "-t"])
+            return ""
+        for candidate in ("04.grandoptical.ir", "01.grandoptical.ir",
+                          "panel.example.net"):
+            with self.subTest(domain=candidate):
+                files[renderer.TLS_SOURCE] = tls.replace(domain, candidate)
+                result = control._rc9_wss_ir_nginx_baseline(
+                    candidate, renderer=renderer, run=nginx_test)
+                self.assertEqual(result["RC9_WSS_IR_NGINX_BASE"],
+                                 "PASS_READ_ONLY")
+                self.assertEqual(result["RC9_WSS_KH_PEER_IP_ACL"],
+                                 "NOT_VERIFIED")
+                self.assertEqual(result["RC9_WSS_IR_ALT_TLS_CANDIDATE"],
+                                 "IN_MEMORY_ONLY")
+        self.assertEqual([x for x in queried if x[0] == "ss"],
+                         [("ss", 8444), ("ss", 7000)] * 3)
+        self.assertEqual(queried.count(("nginx", "-t")), 3)
+        self.assertFalse(renderer.ALT_CANDIDATE.exists())
+        self.assertFalse((self.node / "config/engine-state").exists())
+
+        # Fail before any Nginx probe when a managed source is changed:
+        # never auto-install a duplicate WSS vhost or weaken stream ACL.
+        queried.clear()
+        files[renderer.STREAM_SOURCE] = stream.replace(
+            "proxy_pass $uopti_frp_canary_backend;",
+            "proxy_pass $uopti_smite_backend;")
+        with self.assertRaisesRegex(
+                control.Hold, "STREAM_PROXY_NOT_USING_IP_MAP"):
+            control._rc9_wss_ir_nginx_baseline(
+                domain, renderer=renderer, run=nginx_test)
+        self.assertEqual(queried, [])
+        files[renderer.STREAM_SOURCE] = stream
+        files[renderer.FRP_MAP] = "# untrusted map\n"
+        with self.assertRaisesRegex(control.Hold,
+                                    "RC9_WSS_IP_MAP_UNREVIEWED"):
+            control._rc9_wss_ir_nginx_baseline(
+                domain, renderer=renderer, run=nginx_test)
+        self.assertEqual(queried, [])
+        files[renderer.FRP_MAP] = renderer.MAP_HEADER
+        renderer.ALT_CANDIDATE.write_text("unmanaged")
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_WSS_ALT_BACKEND_ALREADY_PRESENT"):
+            control._rc9_wss_ir_nginx_baseline(
+                domain, renderer=renderer, run=nginx_test)
+        self.assertEqual(queried, [])
+
     def test_rc9_wss_plan_requires_review_and_never_enables_host_install(self):
         self.assertIn('args.rc9_baseline or args.rc9_wss_plan',
                       SOURCE.read_text())
