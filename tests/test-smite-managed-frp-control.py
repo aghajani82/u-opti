@@ -354,7 +354,10 @@ class FrpOperator(unittest.TestCase):
         self.assertIn('rc9_readiness(', source)
         self.assertIn('smite-rc7-frp-enrollment.py', (
             ROOT / "modules/smite-managed-backhaul-control.py").read_text())
-        self.assertIn('HOST FRP', 'HOST FRP')  # No host operations in fixtures.
+        self.assertIn('if args.action in ("install", "rollback"):', source)
+        for blocked in ("docker compose up", "docker restart",
+                        "systemctl start", "nginx -s", "iptables "):
+            self.assertNotIn(blocked, source)
 
     def test_stage15_readiness_is_read_only_and_never_authorizes_install(self):
         signed = self.node / "docker-compose.security-candidate.yml"
