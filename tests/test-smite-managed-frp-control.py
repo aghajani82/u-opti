@@ -434,8 +434,6 @@ class FrpOperator(unittest.TestCase):
             seen.append((tuple(argv), input))
             if argv == ["docker", "inspect", "smite-node"]:
                 return json.dumps([runtime])
-            if argv[-3:] == ["config", "--format", "json"]:
-                return json.dumps(original)
             if argv[-4:] == ["-", "config", "--format", "json"]:
                 self.assertIn("SMITE_FRP_STANDARD_WSS: \"1\"", input)
                 result = json.loads(json.dumps(original))
@@ -444,6 +442,8 @@ class FrpOperator(unittest.TestCase):
                 if tamper.get("extra"):
                     result["services"]["smite-node"]["network_mode"] = "bridge"
                 return json.dumps(result)
+            if argv[-3:] == ["config", "--format", "json"]:
+                return json.dumps(original)
             raise AssertionError(argv)
         result = control._rc9_wss_compose_plan(
             self.node, "KH", state_path=state, run=fake_run)
