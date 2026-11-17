@@ -435,6 +435,118 @@ def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
     }
 
 
+def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
+                          run=None) -> dict[str, str]:
+    """Reuse the ORIGINAL WSS single-key diff gate; no host mutation.
+
+    A successful plan proves only the candidate's effective Compose diff.
+    It never authorizes the RC7 runtime apply (which recreates containers)
+    and never claims that Nginx/443, signed FRPS, or rollback is ready.
+    """
+    if run is None:
+        def run(argv, *, input=None):
+            try:
+                process = subprocess.run(
+                    argv, input=input, capture_output=True, text=True,
+                    timeout=35, check=False)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise Hold("RC9_WSS_COMPOSE_READ_FAILED") from exc
+            if process.returncode or len(process.stdout) > 512000:
+                raise Hold("RC9_WSS_COMPOSE_READ_FAILED")
+            return process.stdout.strip()
+    # This original helper enforces that the candidate changes exactly
+    # ONE environment entry, with every other Compose field identical.
+    spec = importlib.util.spec_from_file_location(
+        "rc9_original_wss_compose_diff",
+        MODULE_DIR / "smite-rc7-wss-preflight.py")
+    if spec is None or spec.loader is None:
+        raise Hold("RC9_ORIGINAL_WSS_DIFF_UNAVAILABLE")
+    original = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(original)
+    state = _unique_env(
+        frp.shared._file(state_path, max_size=16384).decode(),
+        invalid="RC9_STATE_INVALID")
+    panel = state.get("SMITE_PANEL_DOMAIN", "")
+    if (not re.fullmatch(r"[a-z0-9.-]{4,253}", panel)
+            or "." not in panel or panel.startswith(".")
+            or panel.endswith(".")
+            or role not in ("IR", "KH")):
+        raise Hold("RC9_WSS_PANEL_DOMAIN_INVALID")
+    node_env = _unique_env(
+        frp.shared._file(node / ".env", max_size=16384).decode(),
+        invalid="RC9_NODE_ENV_INVALID")
+    if node_env.get("PANEL_ADDRESS") != panel + ":443":
+        raise Hold("RC9_WSS_PANEL_SCOPE_MISMATCH")
+    services = (("smite-panel", "smite-node") if role == "IR"
+                else ("smite-node",))
+    owner = None
+    for name in services:
+        root = Path("/opt/smite") if name == "smite-panel" else node
+        overlay = (root / "docker-compose.signed-control.yml" if
+                   name == "smite-panel" else
+                   root / "docker-compose.security-candidate.yml")
+        base = root / "docker-compose.yml"
+        for path in (base, overlay):
+            frp.shared._file(path, max_size=131072)
+        try:
+            docs = json.loads(run(["docker", "inspect", name]))
+            if not isinstance(docs, list) or len(docs) != 1:
+                raise Hold("RC9_WSS_COMPOSE_RUNTIME_INVALID")
+            runtime = docs[0]
+            labels = runtime["Config"]["Labels"]
+            project = labels.get("com.docker.compose.project", "")
+            active = labels.get("com.docker.compose.project.config_files", "")
+            expected_image = (
+                "ghcr.io/aghajani82/smite-panel@sha256:"
+                "f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"
+                if name == "smite-panel" else RC9_NODE_IMAGE)
+            if (not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", project)
+                    or labels.get("com.docker.compose.service") != name
+                    or active != str(base) + "," + str(overlay)
+                    or runtime["Config"]["Image"] != expected_image
+                    or runtime["State"]["Running"] is not True
+                    or runtime["State"]["Health"]["Status"] != "healthy"):
+                raise Hold("RC9_WSS_COMPOSE_RUNTIME_DRIFT")
+            if owner is not None and owner != project:
+                raise Hold("RC9_WSS_PROJECT_OWNER_MISMATCH")
+            owner = project
+            if name == "smite-panel":
+                env = _unique_env(
+                    "\n".join(runtime["Config"]["Env"]),
+                    invalid="RC9_WSS_PANEL_ENV_INVALID")
+                if (env.get("PANEL_DOMAIN") != panel
+                        or env.get("PANEL_HOST") != "127.0.0.1"
+                        or env.get("SMITE_PANEL_AGENT_AUTH_MODE") != "signed"
+                        or env.get("SMITE_ENGINE_MANAGEMENT_MODE") != "managed"
+                        or "SMITE_FRP_STANDARD_WSS" in env):
+                    raise Hold("RC9_WSS_PANEL_POLICY_DRIFT")
+            command = ["docker", "compose", "--project-name", project,
+                       "-f", str(base), "-f", str(overlay)]
+            before = json.loads(run(command + ["config", "--format", "json"]))
+            after = json.loads(run(command + [
+                "-f", "-", "config", "--format", "json"],
+                input=original.overlay_bytes(name)))
+            original.only_wss_change(before, after, name)
+        except original.Hold as exc:
+            reason = str(exc)
+            raise Hold(reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason)
+                       else "RC9_WSS_COMPOSE_DIFF_REJECTED") from exc
+        except (OSError, KeyError, ValueError, TypeError, AttributeError,
+                UnicodeError) as exc:
+            if isinstance(exc, Hold):
+                raise
+            raise Hold("RC9_WSS_COMPOSE_UNTRUSTED_RESULT") from exc
+    return {
+        "RC9_WSS_COMPOSE_CANDIDATE": "EXACT_ONE_ENV_ONLY",
+        "RC9_WSS_SERVICES": "PANEL_AND_NODE" if role == "IR" else "NODE_ONLY",
+        "RC9_WSS_NGINX_EDGE": "NOT_VERIFIED",
+        "RC9_WSS_SIGNED_FRP": "NOT_ENROLLED",
+        "RC9_WSS_RUNTIME_APPLY": "HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED",
+        "NODE_RECREATED": "NO",
+        "LIVE_CHANGES": "NONE",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="FRP independent managed-engine read-only operator review")
     parser.add_argument("action", choices=("status", "review", "stage15", "verify-stage", "install", "rollback"))
@@ -442,18 +554,25 @@ def main() -> int:
     parser.add_argument("--stage", type=Path)
     parser.add_argument("--rc9-baseline", action="store_true",
                         help="Existing RC9 pinned Node/FRP local review; never install")
+    parser.add_argument("--rc9-wss-plan", action="store_true",
+                        help="Review exact one-key WSS Compose diff only; no apply")
     parser.add_argument("--state-path", type=Path, default=RC9_STATE)
     args = parser.parse_args()
     if args.action in ("install", "rollback"):
         print("HOLD: Real-host FRP engine activation is NOT enabled; no server changed", file=sys.stderr)
         return 2
     try:
-        if args.rc9_baseline and args.action != "review":
+        if (args.rc9_baseline or args.rc9_wss_plan) and args.action != "review":
             raise Hold("RC9_BASELINE_REVIEW_ONLY")
-        if args.rc9_baseline:
-            for key, val in rc9_readiness(
-                    args.node_dir, state_path=args.state_path).items():
+        if args.rc9_baseline or args.rc9_wss_plan:
+            result = rc9_readiness(args.node_dir, state_path=args.state_path)
+            for key, val in result.items():
                 print(f"{key}={val}")
+            if args.rc9_wss_plan:
+                for key, val in _rc9_wss_compose_plan(
+                        args.node_dir, result["ROLE"],
+                        state_path=args.state_path).items():
+                    print(f"{key}={val}")
             print("INSTALL_ALLOWED=NO")
             print("BACKHAUL_DEPENDENCY=NONE")
         elif args.action == "stage15":

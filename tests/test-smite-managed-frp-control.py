@@ -391,6 +391,107 @@ class FrpOperator(unittest.TestCase):
                         "systemctl start", "nginx -s", "iptables "):
             self.assertNotIn(blocked, source)
 
+    def test_rc9_wss_candidate_reuses_original_single_key_diff_without_host_change(self):
+        state = self.root / "state.env"
+        state.write_text(
+            "SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\n"
+            "SMITE_UPSTREAM_REF=" + control.RC9_UPSTREAM + "\n"
+            "SMITE_CONNECTION_MODE=standard\n"
+            "SMITE_PANEL_DOMAIN=04.grandoptical.ir\n")
+        state.chmod(0o600)
+        (self.node / ".env").write_text(
+            ENV + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+        signed = self.node / "docker-compose.security-candidate.yml"
+        signed.write_text(
+            "services:\n  smite-node:\n    environment:\n"
+            "      - SMITE_NODE_PANEL_AUTH_MODE=signed\n")
+        signed.chmod(0o600)
+        expected_image = control.RC9_NODE_IMAGE
+        labels = {
+            "com.docker.compose.project": "uopti_rc6_" + "a"*32,
+            "com.docker.compose.service": "smite-node",
+            "com.docker.compose.project.config_files":
+                str(self.node / "docker-compose.yml") + "," + str(signed),
+        }
+        runtime = {
+            "Config": {"Labels": labels, "Image": expected_image},
+            "State": {"Running": True, "Health": {"Status": "healthy"}},
+        }
+        original = {
+            "name": "reviewed-compose",
+            "services": {"smite-node": {
+                "environment": {
+                    "SMITE_AGENT_AUTH_MODE": "strict",
+                    "SMITE_NODE_PANEL_AUTH_MODE": "signed"
+                },
+                "image": expected_image,
+                "network_mode": "host",
+            }},
+        }
+        seen = []
+        tamper = {}
+        def fake_run(argv, *, input=None):
+            seen.append((tuple(argv), input))
+            if argv == ["docker", "inspect", "smite-node"]:
+                return json.dumps([runtime])
+            if argv[-3:] == ["config", "--format", "json"]:
+                return json.dumps(original)
+            if argv[-4:] == ["-", "config", "--format", "json"]:
+                self.assertIn("SMITE_FRP_STANDARD_WSS: \"1\"", input)
+                result = json.loads(json.dumps(original))
+                result["services"]["smite-node"]["environment"][
+                    "SMITE_FRP_STANDARD_WSS"] = "1"
+                if tamper.get("extra"):
+                    result["services"]["smite-node"]["network_mode"] = "bridge"
+                return json.dumps(result)
+            raise AssertionError(argv)
+        result = control._rc9_wss_compose_plan(
+            self.node, "KH", state_path=state, run=fake_run)
+        self.assertEqual(result["RC9_WSS_COMPOSE_CANDIDATE"],
+                         "EXACT_ONE_ENV_ONLY")
+        self.assertEqual(result["RC9_WSS_RUNTIME_APPLY"],
+                         "HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED")
+        self.assertFalse(any("up" in cmd or "restart" in cmd
+                             for cmd, _ in seen))
+        self.assertFalse((self.node / "config/engine-state").exists())
+        self.assertEqual(sum(arg is not None for _, arg in seen), 1)
+        tamper["extra"] = True
+        with self.assertRaisesRegex(
+                control.Hold, "EFFECTIVE_COMPOSE_DRIFT"):
+            control._rc9_wss_compose_plan(
+                self.node, "KH", state_path=state, run=fake_run)
+        tamper.clear()
+        labels["com.docker.compose.project.config_files"] = str(
+            self.node / "docker-compose.yml")
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_WSS_COMPOSE_RUNTIME_DRIFT"):
+            control._rc9_wss_compose_plan(
+                self.node, "KH", state_path=state, run=fake_run)
+        labels["com.docker.compose.project.config_files"] = (
+            str(self.node / "docker-compose.yml") + "," + str(signed))
+        state.write_text(state.read_text().replace(
+            "04.grandoptical.ir", "wrong.grandoptical.ir"))
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_WSS_PANEL_SCOPE_MISMATCH"):
+            control._rc9_wss_compose_plan(
+                self.node, "KH", state_path=state, run=fake_run)
+
+    def test_rc9_wss_plan_requires_review_and_never_enables_host_install(self):
+        self.assertIn('args.rc9_baseline or args.rc9_wss_plan',
+                      SOURCE.read_text())
+        self.assertIn('if args.action in ("install", "rollback"):',
+                      SOURCE.read_text())
+        self.assertIn('HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED',
+                      SOURCE.read_text())
+        for action in ("install", "rollback"):
+            with self.subTest(action=action):
+                p = subprocess.run(
+                    [sys.executable, "-B", str(SOURCE), action,
+                     "--rc9-wss-plan", "--node-dir", str(self.node)],
+                    capture_output=True, text=True, timeout=15)
+                self.assertEqual(p.returncode, 2)
+                self.assertIn("NOT enabled", p.stderr)
+
     def test_stage15_readiness_is_read_only_and_never_authorizes_install(self):
         signed = self.node / "docker-compose.security-candidate.yml"
         signed.write_text("services:\\n  smite-node:\\n    environment:\\n")
