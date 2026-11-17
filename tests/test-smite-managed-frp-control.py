@@ -381,7 +381,9 @@ class FrpOperator(unittest.TestCase):
     def test_rc9_readiness_stays_opt_in_review_only(self):
         source = SOURCE.read_text()
         self.assertIn('"--rc9-baseline"', source)
-        self.assertIn('args.rc9_baseline and args.action != "review"', source)
+        self.assertIn(
+            '(args.rc9_baseline or args.rc9_wss_plan) and args.action != "review"',
+            source)
         self.assertIn('print("INSTALL_ALLOWED=NO")', source)
         self.assertIn('rc9_readiness(', source)
         self.assertIn('smite-rc7-frp-enrollment.py', (
