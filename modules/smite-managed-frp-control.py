@@ -270,17 +270,184 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
     }
 
 
+# Exact RC9 trial baseline for the EXISTING FRP engine review. It is a
+# local, non-mutating image/Compose/role/FRP-version witness, NOT signature
+# admission, WSS enrollment, FRPS activation, or an install authorisation.
+# RC7 and Stage15 paths deliberately keep their original independent pins.
+RC9_UPSTREAM = "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+RC9_NODE_IMAGE = (
+    "ghcr.io/aghajani82/smite-node@sha256:"
+    "3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"
+)
+RC9_STATE = Path("/etc/u-opti/smite/state.env")
+
+
+def _unique_env(raw: str, *, invalid: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in raw.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise Hold(invalid)
+        key, value = line.split("=", 1)
+        if not re.fullmatch(r"[A-Z0-9_]+", key) or key in values:
+            raise Hold(invalid)
+        values[key] = value
+    return values
+
+
+def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
+                  run=None) -> dict[str, str]:
+    """Review only; never switch a running RC9 Node into an RC7/Stage15 path."""
+    if run is None:
+        run = _read_only
+    previous = inspect(node)
+    if previous["state"] != "NOT_INSTALLED":
+        raise Hold("RC9_FRP_EXISTING_OR_PARTIAL_ENROLLMENT")
+    state = _unique_env(
+        frp.shared._file(state_path, max_size=16384).decode(),
+        invalid="RC9_STATE_INVALID")
+    role = "IR" if state.get("SMITE_ROLE") == "panel-iran" else "KH"
+    if (state.get("SMITE_ROLE") not in ("panel-iran", "foreign")
+            or state.get("SMITE_MANAGED_VERSION") != "2.0.0-rc.9"
+            or state.get("SMITE_UPSTREAM_REF") != RC9_UPSTREAM
+            or state.get("SMITE_CONNECTION_MODE") != "standard"
+            or previous["role"] != role):
+        raise Hold("RC9_SIGNED_SOURCE_OR_ROLE_MISMATCH")
+
+    node_env = _unique_env(
+        frp.shared._file(node / ".env", max_size=16384).decode(),
+        invalid="RC9_NODE_ENV_INVALID")
+    if (node_env.get("SMITE_NODE_PANEL_AUTH_MODE") != "signed"
+            or node_env.get("SMITE_AGENT_AUTH_MODE") != "strict"
+            or node_env.get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
+            or (role == "KH" and node_env.get("NODE_ROLE") != "foreign")
+            or (role == "IR" and node_env.get("NODE_ROLE") not in ("iran", "panel-iran"))
+            or not re.fullmatch(r"[a-z0-9.-]+:443",
+                                node_env.get("PANEL_ADDRESS", ""))):
+        raise Hold("RC9_NODE_SIGNED_POLICY_MISMATCH")
+
+    base = node / "docker-compose.yml"
+    signed = node / "docker-compose.security-candidate.yml"
+    frp.shared._file(signed, max_size=131072)
+    try:
+        entries = json.loads(run(["docker", "inspect", "smite-node"]))
+        if not isinstance(entries, list) or len(entries) != 1:
+            raise Hold("RC9_NODE_INSPECT_INVALID")
+        runtime = entries[0]
+        config, host, active = (runtime["Config"], runtime["HostConfig"],
+                                runtime["State"])
+        if (config.get("Image") != RC9_NODE_IMAGE
+                or not re.fullmatch(r"sha256:[a-f0-9]{64}",
+                                    runtime.get("Image", ""))
+                or run(["docker", "image", "inspect", "-f", "{{.Id}}",
+                        RC9_NODE_IMAGE]) != runtime["Image"]):
+            raise Hold("RC9_NODE_IMAGE_ID_MISMATCH")
+        if (active.get("Running") is not True
+                or active.get("Health", {}).get("Status") != "healthy"):
+            raise Hold("RC9_NODE_NOT_HEALTHY")
+        if (host.get("NetworkMode") != "host"
+                or host.get("PortBindings")
+                or host.get("Privileged") is True
+                or config.get("Cmd") not in SAFE_NODE_COMMANDS):
+            raise Hold("RC9_NODE_NETWORK_OR_LOOPBACK_DRIFT")
+        env_raw = config["Env"]
+        if not isinstance(env_raw, list):
+            raise Hold("RC9_EFFECTIVE_ENV_INVALID")
+        effective = _unique_env("\n".join(env_raw),
+                                invalid="RC9_EFFECTIVE_ENV_INVALID")
+        for key in ("SMITE_NODE_PANEL_AUTH_MODE", "SMITE_AGENT_AUTH_MODE",
+                    "SMITE_ENGINE_INVENTORY_MODE", "NODE_ROLE",
+                    "PANEL_ADDRESS"):
+            if effective.get(key) != node_env.get(key):
+                raise Hold("RC9_EFFECTIVE_SIGNED_POLICY_DRIFT")
+        if "SMITE_FRP_STANDARD_WSS" in effective:
+            raise Hold("RC9_WSS_ALREADY_CONFIGURED")
+        labels = config.get("Labels") or {}
+        project = labels.get("com.docker.compose.project", "")
+        files = labels.get("com.docker.compose.project.config_files", "").split(",")
+        if (not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", project)
+                or labels.get("com.docker.compose.service") != "smite-node"
+                or files != [str(base), str(signed)]):
+            raise Hold("RC9_NODE_COMPOSE_OWNER_DRIFT")
+        mounts = runtime["Mounts"]
+        if not isinstance(mounts, list) or any(
+                m.get("Destination") in (
+                    "/usr/local/bin", "/usr/local/bin/frpc",
+                    "/usr/local/bin/frps") or
+                str(m.get("Destination", "")).startswith("/usr/local/bin/frp/")
+                for m in mounts):
+            raise Hold("RC9_FRP_BINARY_EXTERNAL_MOUNT")
+        by_target = {}
+        for mount in mounts:
+            if mount.get("Destination") in by_target:
+                raise Hold("RC9_DUPLICATE_NODE_MOUNTS")
+            by_target[mount.get("Destination")] = mount
+        for target, writable in (
+                ("/etc/smite-node", True),
+                ("/run/smite-node-identity", False),
+                ("/var/lib/smite-node/auth", True)):
+            if (target not in by_target
+                    or by_target[target].get("Type") != "bind"
+                    or by_target[target].get("RW") is not writable):
+                raise Hold("RC9_SIGNED_IDENTITY_MOUNT_DRIFT")
+        if by_target["/etc/smite-node"].get("Source") != str(node / "config"):
+            raise Hold("RC9_NODE_CONFIG_MOUNT_DRIFT")
+        if role == "KH":
+            sanaei = by_target.get("/run/smite-sanaei-ro")
+            if (not isinstance(sanaei, dict)
+                    or sanaei.get("Type") != "bind"
+                    or sanaei.get("Source") != "/opt/3x-ui/instances/01/db"
+                    or sanaei.get("RW") is not False):
+                raise Hold("RC9_SANAEI_READONLY_MOUNT_DRIFT")
+        for binary in ("frpc", "frps"):
+            version = run(["docker", "exec", "smite-node",
+                           "/usr/local/bin/" + binary, "-v"])
+            if version.strip().lstrip("v") != "0.71.0":
+                raise Hold("RC9_BUNDLED_FRP_VERSION_DRIFT")
+    except (OSError, TypeError, ValueError, KeyError, IndexError,
+            AttributeError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        raise Hold("RC9_RUNTIME_EVIDENCE_INVALID") from exc
+    return {
+        "ROLE": role,
+        "RC9_SIGNED_SOURCE": "EXACT_LOCAL_STATE",
+        "RC9_IMAGE": "PINNED_REFERENCE_AND_LOCAL_IMAGE_ID",
+        "RC9_NODE_RUNTIME": "HEALTHY_SIGNED_POLICY_LOCAL_ONLY",
+        "FRP_BINARIES": "BUNDLED_0_71_0",
+        "FRP_ENGINE_ENROLLED": "NO",
+        "FRPS_OWNER": "NOT_VERIFIED",
+        "WSS_ACTIVATION": "NOT_ENABLED",
+        "SIGNED_HMAC_REPLAY": "NOT_QUERIED",
+        "HOST_FRP_INSTALL": "HOLD_PENDING_RC9_SIGNED_WSS_AND_ROLLBACK_REVIEW",
+        "PUBLIC_PORTS_CHANGED": "NO",
+        "LIVE_CHANGES": "NONE",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="FRP independent managed-engine read-only operator review")
     parser.add_argument("action", choices=("status", "review", "stage15", "verify-stage", "install", "rollback"))
     parser.add_argument("--node-dir", type=Path, default=Path("/opt/smite-node"))
     parser.add_argument("--stage", type=Path)
+    parser.add_argument("--rc9-baseline", action="store_true",
+                        help="Existing RC9 pinned Node/FRP local review; never install")
+    parser.add_argument("--state-path", type=Path, default=RC9_STATE)
     args = parser.parse_args()
     if args.action in ("install", "rollback"):
         print("HOLD: Real-host FRP engine activation is NOT enabled; no server changed", file=sys.stderr)
         return 2
     try:
-        if args.action == "stage15":
+        if args.rc9_baseline and args.action != "review":
+            raise Hold("RC9_BASELINE_REVIEW_ONLY")
+        if args.rc9_baseline:
+            for key, val in rc9_readiness(
+                    args.node_dir, state_path=args.state_path).items():
+                print(f"{key}={val}")
+            print("INSTALL_ALLOWED=NO")
+            print("BACKHAUL_DEPENDENCY=NONE")
+        elif args.action == "stage15":
             for key, value in stage15_readiness(args.node_dir).items():
                 print(f"{key}={value}")
         elif args.action == "verify-stage":

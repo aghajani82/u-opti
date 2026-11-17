@@ -220,6 +220,142 @@ class FrpOperator(unittest.TestCase):
         self.assertEqual(install.returncode, 2)
         self.assertFalse((self.node / "config/engine-state").exists())
 
+    def test_rc9_signed_bundled_frp_review_is_read_only_and_never_installs(self):
+        # Exact live RC9 release reference + image, but no signature/replay
+        # assertion or permission to call an RC7/Stage15 mutating installer.
+        state = self.root / "state.env"
+        state.write_text(
+            "SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\n"
+            "SMITE_UPSTREAM_REF=" + control.RC9_UPSTREAM + "\n"
+            "SMITE_CONNECTION_MODE=standard\n")
+        state.chmod(0o600)
+        (self.node / ".env").write_text(
+            ENV.replace("SMITE_NODE_PANEL_AUTH_MODE=paused",
+                        "SMITE_NODE_PANEL_AUTH_MODE=signed")
+            + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+        signed = self.node / "docker-compose.security-candidate.yml"
+        signed.write_text("services:\n  smite-node:\n    environment: {}\n")
+        signed.chmod(0o600)
+        node_env = {
+            "SMITE_NODE_PANEL_AUTH_MODE": "signed",
+            "SMITE_AGENT_AUTH_MODE": "strict",
+            "SMITE_ENGINE_INVENTORY_MODE": "managed",
+            "NODE_ROLE": "foreign",
+            "PANEL_ADDRESS": "04.grandoptical.ir:443",
+        }
+        runtime = {
+            "Config": {
+                "Image": control.RC9_NODE_IMAGE,
+                "Env": [f"{k}={v}" for k, v in node_env.items()],
+                "Cmd": list(control.SAFE_NODE_COMMANDS[0]),
+                "Labels": {
+                    "com.docker.compose.project": "uopti_rc6_" + "a"*32,
+                    "com.docker.compose.service": "smite-node",
+                    "com.docker.compose.project.config_files":
+                        str(self.node / "docker-compose.yml") + "," + str(signed),
+                },
+            },
+            "Image": "sha256:" + "a"*64,
+            "State": {"Running": True, "Health": {"Status": "healthy"}},
+            "HostConfig": {"NetworkMode": "host", "PortBindings": None,
+                           "Privileged": False},
+            "Mounts": [
+                {"Destination": "/etc/smite-node", "Type": "bind",
+                 "Source": str(self.node / "config"), "RW": True},
+                {"Destination": "/run/smite-node-identity", "Type": "bind",
+                 "RW": False},
+                {"Destination": "/var/lib/smite-node/auth", "Type": "bind",
+                 "RW": True},
+                {"Destination": "/run/smite-sanaei-ro", "Type": "bind",
+                 "Source": "/opt/3x-ui/instances/01/db", "RW": False},
+            ],
+        }
+        calls = []
+        def fake_read(argv):
+            calls.append(list(argv))
+            if argv == ["docker", "inspect", "smite-node"]:
+                return json.dumps([runtime])
+            if argv[:3] == ["docker", "image", "inspect"]:
+                self.assertEqual(argv[-1], control.RC9_NODE_IMAGE)
+                return "sha256:" + "a"*64
+            if argv[:3] == ["docker", "exec", "smite-node"]:
+                return "0.71.0"
+            raise AssertionError(argv)
+
+        result = control.rc9_readiness(
+            self.node, state_path=state, run=fake_read)
+        self.assertEqual(result["FRP_BINARIES"], "BUNDLED_0_71_0")
+        self.assertEqual(result["RC9_SIGNED_SOURCE"], "EXACT_LOCAL_STATE")
+        self.assertEqual(result["HOST_FRP_INSTALL"],
+                         "HOLD_PENDING_RC9_SIGNED_WSS_AND_ROLLBACK_REVIEW")
+        self.assertEqual(result["SIGNED_HMAC_REPLAY"], "NOT_QUERIED")
+        self.assertFalse(any("compose" in cmd or "--force-recreate" in cmd
+                             or "restart" in cmd for cmd in calls))
+        self.assertFalse((self.node / "config/engine-state").exists())
+
+        # Fail-closed: version/source mismatch is rejected BEFORE Docker.
+        original = state.read_text()
+        for bad in ("SMITE_MANAGED_VERSION=2.0.0-rc.7",
+                    "SMITE_UPSTREAM_REF=" + "0"*40,
+                    "SMITE_ROLE=panel-iran"):
+            with self.subTest(bad=bad):
+                state.write_text(original.replace(
+                    bad.split("=")[0]+"="+(
+                        "2.0.0-rc.9" if bad.startswith("SMITE_MANAGED")
+                        else control.RC9_UPSTREAM if bad.startswith("SMITE_UPSTREAM")
+                        else "foreign"), bad))
+                calls.clear()
+                with self.assertRaisesRegex(
+                        control.Hold, "RC9_SIGNED_SOURCE_OR_ROLE_MISMATCH"):
+                    control.rc9_readiness(
+                        self.node, state_path=state, run=fake_read)
+                self.assertEqual(calls, [])
+        state.write_text(original)
+        for key, value, expected in (
+            ("Image", "ghcr.io/aghajani82/smite-node@sha256:"+"b"*64,
+             "RC9_NODE_IMAGE_ID_MISMATCH"),
+            ("Image", control.RC9_NODE_IMAGE, None)):
+            runtime["Config"][key] = value
+            if expected:
+                with self.assertRaisesRegex(control.Hold, expected):
+                    control.rc9_readiness(
+                        self.node, state_path=state, run=fake_read)
+        runtime["Config"]["Image"] = control.RC9_NODE_IMAGE
+        runtime["Config"]["Cmd"] = [
+            "uvicorn","main:app","--host","0.0.0.0","--port","8888"]
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_NODE_NETWORK_OR_LOOPBACK_DRIFT"):
+            control.rc9_readiness(self.node, state_path=state, run=fake_read)
+        runtime["Config"]["Cmd"] = list(control.SAFE_NODE_COMMANDS[0])
+        runtime["Config"]["Env"].append("SMITE_FRP_STANDARD_WSS=1")
+        with self.assertRaisesRegex(control.Hold,
+                                    "RC9_WSS_ALREADY_CONFIGURED"):
+            control.rc9_readiness(self.node, state_path=state, run=fake_read)
+        runtime["Config"]["Env"].pop()
+        runtime["Mounts"][-1]["RW"] = True
+        with self.assertRaisesRegex(control.Hold,
+                                    "RC9_SANAEI_READONLY_MOUNT_DRIFT"):
+            control.rc9_readiness(self.node, state_path=state, run=fake_read)
+        runtime["Mounts"][-1]["RW"] = False
+        runtime["Config"]["Labels"][
+            "com.docker.compose.project.config_files"] = str(
+                self.node / "docker-compose.yml")
+        with self.assertRaisesRegex(control.Hold,
+                                    "RC9_NODE_COMPOSE_OWNER_DRIFT"):
+            control.rc9_readiness(self.node, state_path=state, run=fake_read)
+        # A bad runtime preflight cannot mutate installed FRP state.
+        self.assertFalse((self.node / "config/engine-state").exists())
+
+    def test_rc9_readiness_stays_opt_in_review_only(self):
+        source = SOURCE.read_text()
+        self.assertIn('"--rc9-baseline"', source)
+        self.assertIn('args.rc9_baseline and args.action != "review"', source)
+        self.assertIn('print("INSTALL_ALLOWED=NO")', source)
+        self.assertIn('rc9_readiness(', source)
+        self.assertIn('smite-rc7-frp-enrollment.py', (
+            ROOT / "modules/smite-managed-backhaul-control.py").read_text())
+        self.assertIn('HOST FRP', 'HOST FRP')  # No host operations in fixtures.
+
     def test_stage15_readiness_is_read_only_and_never_authorizes_install(self):
         signed = self.node / "docker-compose.security-candidate.yml"
         signed.write_text("services:\\n  smite-node:\\n    environment:\\n")
