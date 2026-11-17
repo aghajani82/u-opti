@@ -229,10 +229,10 @@ class FrpOperator(unittest.TestCase):
             "SMITE_UPSTREAM_REF=" + control.RC9_UPSTREAM + "\n"
             "SMITE_CONNECTION_MODE=standard\n")
         state.chmod(0o600)
+        # The original RC9 installer keeps .env paused+strict; the signed
+        # Compose security candidate promotes only the effective runtime.
         (self.node / ".env").write_text(
-            ENV.replace("SMITE_NODE_PANEL_AUTH_MODE=paused",
-                        "SMITE_NODE_PANEL_AUTH_MODE=signed")
-            + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+            ENV + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
         signed = self.node / "docker-compose.security-candidate.yml"
         signed.write_text("services:\n  smite-node:\n    environment: {}\n")
         signed.chmod(0o600)
@@ -292,6 +292,38 @@ class FrpOperator(unittest.TestCase):
         self.assertFalse(any("compose" in cmd or "--force-recreate" in cmd
                              or "restart" in cmd for cmd in calls))
         self.assertFalse((self.node / "config/engine-state").exists())
+
+        # A base that is already signed is not the reviewed installer owner.
+        baseline_env = (self.node / ".env").read_text()
+        (self.node / ".env").write_text(
+            baseline_env.replace("SMITE_NODE_PANEL_AUTH_MODE=paused",
+                                 "SMITE_NODE_PANEL_AUTH_MODE=signed"))
+        calls.clear()
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_NODE_SIGNED_POLICY_MISMATCH"):
+            control.rc9_readiness(
+                self.node, state_path=state, run=fake_read)
+        self.assertEqual(calls, [])
+        (self.node / ".env").write_text(baseline_env)
+
+        # A correctly paused base with paused/missing runtime must be denied.
+        original_runtime_env = list(runtime["Config"]["Env"])
+        runtime["Config"]["Env"] = [
+            x.replace("SMITE_NODE_PANEL_AUTH_MODE=signed",
+                      "SMITE_NODE_PANEL_AUTH_MODE=paused")
+            for x in original_runtime_env]
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_EFFECTIVE_SIGNED_POLICY_DRIFT"):
+            control.rc9_readiness(
+                self.node, state_path=state, run=fake_read)
+        runtime["Config"]["Env"] = [
+            x for x in original_runtime_env
+            if not x.startswith("SMITE_NODE_PANEL_AUTH_MODE=")]
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_EFFECTIVE_SIGNED_POLICY_DRIFT"):
+            control.rc9_readiness(
+                self.node, state_path=state, run=fake_read)
+        runtime["Config"]["Env"] = original_runtime_env
 
         # Fail-closed: version/source mismatch is rejected BEFORE Docker.
         original = state.read_text()

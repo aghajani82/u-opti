@@ -318,7 +318,12 @@ def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
     node_env = _unique_env(
         frp.shared._file(node / ".env", max_size=16384).decode(),
         invalid="RC9_NODE_ENV_INVALID")
-    if (node_env.get("SMITE_NODE_PANEL_AUTH_MODE") != "signed"
+    # The ORIGINAL signed installer retains paused+strict in the immutable
+    # base .env. The separate, reviewed security-candidate Compose overlay
+    # changes ONLY the live Node's Panel auth mode to signed. Requiring
+    # signed in both places would reject every correctly paired RC9 host;
+    # accepting signed only in the base would lose the fail-closed baseline.
+    if (node_env.get("SMITE_NODE_PANEL_AUTH_MODE") != "paused"
             or node_env.get("SMITE_AGENT_AUTH_MODE") != "strict"
             or node_env.get("SMITE_ENGINE_INVENTORY_MODE") != "managed"
             or (role == "KH" and node_env.get("NODE_ROLE") != "foreign")
@@ -356,9 +361,13 @@ def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
             raise Hold("RC9_EFFECTIVE_ENV_INVALID")
         effective = _unique_env("\n".join(env_raw),
                                 invalid="RC9_EFFECTIVE_ENV_INVALID")
-        for key in ("SMITE_NODE_PANEL_AUTH_MODE", "SMITE_AGENT_AUTH_MODE",
-                    "SMITE_ENGINE_INVENTORY_MODE", "NODE_ROLE",
-                    "PANEL_ADDRESS"):
+        # Pairing admission is a deliberate paused(base) -> signed(live)
+        # transition. Preserve exact equality for every other essential
+        # security field; a missing or paused *running* Node is NEVER ready.
+        if effective.get("SMITE_NODE_PANEL_AUTH_MODE") != "signed":
+            raise Hold("RC9_EFFECTIVE_SIGNED_POLICY_DRIFT")
+        for key in ("SMITE_AGENT_AUTH_MODE", "SMITE_ENGINE_INVENTORY_MODE",
+                    "NODE_ROLE", "PANEL_ADDRESS"):
             if effective.get(key) != node_env.get(key):
                 raise Hold("RC9_EFFECTIVE_SIGNED_POLICY_DRIFT")
         if "SMITE_FRP_STANDARD_WSS" in effective:
