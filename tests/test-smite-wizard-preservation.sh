@@ -70,6 +70,12 @@
 # 2026-11-11 PR #199: user-requested selected RC7 installation now includes
 # HTTPS/443, secure local IR enrollment and signed verification before admin
 # creation. Reviewed installer diff only; all unrelated wizard pins preserved.
+# 2026-11-17: reviewed option-2 ONLY scope repair. The same private Panel
+# packet now remains local to selected_stages across original Core/Sanaei/
+# Gateway, pre-Pairing Compose ownership and signed activation. It cannot
+# leak to parent menus or bypass exact RC9 signature checks. The unchanged
+# independent wizards remain byte pinned. Isolated regression asserts the
+# packet scope at all three selected callbacks and expired-resume path.
 # test-smite-integrated-ir-flow.sh and test-smite-local-ir-install.py cover
 # ordering, fail-closed completion and identity-preserving retry behavior.
 set -euo pipefail
@@ -91,7 +97,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-5be8e1852671f1919ab27de906139b7849f2c5ee modules/smite-install.sh
+0e1c1723bf1b22fc0888883bdbc597b3e14b955d modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh

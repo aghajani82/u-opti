@@ -2711,6 +2711,12 @@ smite_install_unified_foreign_selected_stages() {
         smite_install_unified_foreign_capture_owned_packet || return 2
         packet=/var/lib/u-opti/rc6-install-journal/foreign-staging/foreign-install-packet.json
     fi
+    # Keep the SAME verified Panel packet visible across the complete
+    # Foreign option-2 transaction, not just inside after_core's local
+    # Gateway scope. Its original RC9 Compose ownership guard must still
+    # recognize the selected signed packet during identity preflight and
+    # signed activation. Never export to the parent shell or other menus.
+    local UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE="$packet"
     # If the original Panel code has expired AFTER enrollment, the
     # original INTENT/staged-secret/owned-Core/Gateway and signed proof
     # let the very same option 2 resume DIRECTLY from Identity. Do not

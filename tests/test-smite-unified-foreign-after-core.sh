@@ -854,14 +854,23 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
     STAGE_FAIL=
     : > "$TMP/selected-identity-stage-calls"
     smite_install_unified_foreign_pre_pairing_stages() {
+        [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" = "$PACKET" ] || {
+            echo 'FAIL: original pre-pairing stages lost selected Panel packet scope' >&2; return 2;
+        }
         printf 'core-sanaei-443\n' >> "$TMP/selected-identity-stage-calls"
         [ "$STAGE_FAIL" != core ]
     }
     smite_install_unified_foreign_identity_stage() {
+        [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" = "$PACKET" ] || {
+            echo 'FAIL: selected RC9 identity preflight lost signed packet scope' >&2; return 2;
+        }
         printf 'original-identity\n' >> "$TMP/selected-identity-stage-calls"
         [ "$STAGE_FAIL" != identity ]
     }
     smite_install_unified_foreign_activate_signed_stage() {
+        [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" = "$PACKET" ] || {
+            echo 'FAIL: selected RC9 activation lost signed packet scope' >&2; return 2;
+        }
         printf 'original-signed-activation\n' >> "$TMP/selected-identity-stage-calls"
         [ "$STAGE_FAIL" != activation ]
     }
@@ -922,9 +931,15 @@ echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway re
         return 77
     }
     smite_install_unified_foreign_identity_stage() {
+        [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" = "$private" ] || {
+            echo 'FAIL: consumed-grant resumed identity lost original packet scope' >&2; return 2;
+        }
         printf 'original-identity\n' >> "$TMP/expired-identity-stage-sequence"
     }
     smite_install_unified_foreign_activate_signed_stage() {
+        [ "${UOPTI_SMITE_UNIFIED_FOREIGN_PACKET_FILE:-}" = "$private" ] || {
+            echo 'FAIL: consumed-grant resumed activation lost packet scope' >&2; return 2;
+        }
         printf 'signed-pairing\n' >> "$TMP/expired-identity-stage-sequence"
     }
     smite_install_unified_foreign_selected_stages "$private" > "$TMP/expired-identity-stage-output"
