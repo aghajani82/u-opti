@@ -26,10 +26,25 @@ GATEWAY = ROOT / "modules/smite-gateway.sh"
 RENDER = ROOT / "modules/smite-backhaul-standard.sh"
 
 
-def port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def distinct_ports(count: int) -> tuple[int, ...]:
+    """Reserve all loopback ports simultaneously, then release for fixtures.
+
+    Repeated bind(0)+close can pick the SAME port on a busy CI runner.
+    Holding the reservations until every number is chosen prevents this
+    false failure without opening or changing any real-host listener.
+    """
+    held = []
+    try:
+        for _ in range(count):
+            sock = socket.socket()
+            held.append(sock)
+            sock.bind(("127.0.0.1", 0))
+        chosen = tuple(sock.getsockname()[1] for sock in held)
+        assert len(chosen) == len(set(chosen)), "duplicate reserved ports"
+        return chosen
+    finally:
+        for sock in held:
+            sock.close()
 
 
 def nginx_config(root: Path, servers: str) -> Path:
@@ -144,8 +159,8 @@ class Shared443Regression(unittest.TestCase):
                             "-days", "1", "-subj", "/CN=wrong.example.test",
                             "-keyout", str(base / "wrong-ca.key"), "-out", str(other)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            ir_https, kh_bridge, kh_bad = port(), port(), port()
-            frp_port, bh_port, child_port, panel_port = port(), port(), port(), port()
+            (ir_https, kh_bridge, kh_bad, frp_port,
+             bh_port, child_port, panel_port) = distinct_ports(7)
             self.assertEqual(len({ir_https, kh_bridge, kh_bad, frp_port, bh_port,
                                   child_port, panel_port}), 7)
             # Test-only rewrite of the canonical loopback ports. Never export
