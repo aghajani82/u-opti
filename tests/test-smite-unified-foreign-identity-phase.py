@@ -556,6 +556,35 @@ class IdentityPhase(unittest.TestCase):
             self.tx(directory=Path("/etc/u-opti/smite/foreign-staging"))
         self.assertFalse(self.calls)
 
+    def test_selected_foreign_provisions_only_original_pairing_store_after_signed_proofs(self):
+        # Production root paths are deliberately not exercised by a test
+        # fixture. Inspect the actual selected boundary and assert that the
+        # EXISTING prepare_store owner is invoked only after all the frozen
+        # host release, Core journal, Gateway/Compose and paused-node checks.
+        # This catches the KH field failure where Core+Sanaei+Gateway were
+        # VERIFIED but no private /etc/u-opti/smite/identities directory
+        # existed on a fresh host, before any enrollment was attempted.
+        import inspect
+        source = inspect.getsource(module._selected_option2_boundary)
+        checks = (
+            "pairing._require_unified_foreign_release()",
+            "owner.foreign_resume(",
+            "pairing._require_no_active_engine_overlays()",
+            "pairing._foreign_gateway_preflight(",
+            "promotion.verify_gateway(",
+        )
+        preparation = "pairing.prepare_store()"
+        self.assertEqual(source.count(preparation), 1)
+        position = source.index(preparation)
+        for check in checks:
+            self.assertLess(source.index(check), position, check)
+        self.assertLess(position,
+                        source.index("with promotion.private_directory(_SELECTED_IDENTITY.parent)"))
+        self.assertIn("pairing.WizardHold", source)
+        self.assertNotIn("mkdir(", source)
+        self.assertFalse(self.live.exists())
+        self.assertFalse(self.calls)
+
     def test_selected_root_identity_denies_without_real_release_before_network(self):
         # The selected CLI has no bearer-code arguments. Current exact RC9
         # release_approved=false must fail before staging a secret or

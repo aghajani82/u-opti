@@ -402,12 +402,18 @@ def _selected_option2_boundary(*, packet_path, state_path, gateway_path,
         promotion.verify_gateway(
             packet, state_path=_SELECTED_STATE, gateway_path=_SELECTED_GATEWAY,
             node_env_path=_SELECTED_NODE_ENV, client=client)
-        # No untrusted staging directory/symlink can be created by this
-        # identity transaction: the original owner must have prepared it.
+        # Exact original Pairing owns identity-store provisioning. A fresh
+        # selected Foreign install prepares Core/Sanaei/Gateway first and
+        # cannot have a paired identity directory yet. Reuse the existing
+        # root-only, no-symlink, mode-0700 prepare_store() AFTER signed release,
+        # original Core owner, Gateway, image/Compose and paused-node proofs.
+        # It creates only a missing final directory, never a Node identity,
+        # replay secret, grant, or a second installation owner.
+        pairing.prepare_store()
         with promotion.private_directory(_SELECTED_IDENTITY.parent):
             pass
     except (OSError, ValueError, TypeError, KeyError, AttributeError,
-            RuntimeError):
+            RuntimeError, pairing.WizardHold):
         deny()
 
 
