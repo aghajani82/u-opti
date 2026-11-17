@@ -75,12 +75,11 @@ class OperatorPacketIntake(unittest.TestCase):
     def test_leading_newlines_from_terminal_paste_are_not_a_packet_terminator(self):
         # Exact field failure: one blank line before pasted JSON previously
         # stopped capture immediately and fed the remaining lines to Bash.
-        raw = "\\n" + json.dumps(self.grant, indent=2) + "\\n\\n"
-        for prefix in ("\\n", "\\r\\n", "\\n\\n"):
+        for prefix in ("\n", "\r\n", "\n\n"):
             with self.subTest(prefix=repr(prefix)):
                 if self.file.exists():
                     self.file.unlink()
-                source = prefix + json.dumps(self.grant, indent=2) + "\\n\\n"
+                source = prefix + json.dumps(self.grant, indent=2) + "\n\n"
                 result = module.capture_disposable(
                     io.StringIO(source), target=self.file,
                     expected_panel="https://panel.example.com",
@@ -91,7 +90,7 @@ class OperatorPacketIntake(unittest.TestCase):
                 self.assertEqual(json.loads(self.file.read_text()), self.grant)
         self.file.unlink()
         # Never allow unlimited empty input or empty-only pseudo-packets.
-        for source in ("\\n\\n\\n" + json.dumps(self.grant) + "\\n\\n", "\\n\\n"):
+        for source in ("\n\n\n" + json.dumps(self.grant) + "\n\n", "\n\n"):
             with self.assertRaises(module.Hold):
                 module.capture_disposable(io.StringIO(source),
                     target=self.file, expected_panel="https://panel.example.com",
@@ -508,8 +507,8 @@ class OperatorPacketIntake(unittest.TestCase):
             with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as tty:
                 def send():
                     self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
-                    os.write(master, ("\\n" + json.dumps(self.grant, indent=2)
-                                      + "\\n\\n").encode("utf-8"))
+                    os.write(master, ("\n" + json.dumps(self.grant, indent=2)
+                                      + "\n\n").encode("utf-8"))
                 result = module.capture_disposable_hidden_tty(
                     tty, target=self.file, now=self.now,
                     expected_panel="https://panel.example.com",
