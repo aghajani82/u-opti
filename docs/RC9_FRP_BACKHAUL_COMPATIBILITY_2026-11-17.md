@@ -146,3 +146,22 @@ This is route discovery only; `nginx -T` itself **prints the full configuration*
 **CI:** On preceding commit `2cececa5`, all nine workflows completed `success` (repository/fixture evidence). All later commits require fresh CI on their own exact SHA. This does not grant any deployment approval.
 
 **Next gate:** matched RC9 HTTPS/443 edge topology and no-proxy WSS plan with strict role/owner/rollback, then FRP owner/child, then independent Backhaul; no changes to `main` until witnessed two-host recovery and permission.
+
+## 8) 2026-11-17: dynamic domain correction and actual IR/KH routes
+
+The operator explicitly requires **dynamic Panel DNS names and hostnames**, not fixed `ir`, `iran`, `01` or `04` labels. A hostname such as `iran` is not the Panel domain. RC9 derives `SMITE_PANEL_DOMAIN` from the exact per-host `/etc/u-opti/smite/state.env` and checks it against the Node `PANEL_ADDRESS=<domain>:443`; never infer one from a hardcoded legacy RC2 source constant or a particular current server number. The RC2-only hostname/domain assertions remain untouched and are **not** runnable activation tools for RC9.
+
+### Read-only observed Nginx topology
+
+| Host | `nginx -T` filtered observations | Loopback/internal `ss -lnt` |
+| --- | --- | --- |
+| IR, host `iran` | Public stream `listen 443`, `listen [::]:443`, `ssl_preread on`; TLS Panel backend `listen 127.0.0.1:8443 ssl`; `server_name 04.grandoptical.ir` | `127.0.0.1:8443` listening; neither `7000` nor `8444` listening |
+| KH, host `kharej` | Shared TLS `listen 443 ssl http2` on IPv4 and IPv6; `server_name kharej.grandoptical.ir`; existing `location ^~ /smite-node/<id>/` | No `7000`, `8443` or `8444` listener reported |
+
+The private KH Node route ID is not reproduced here. Full `nginx -T` was not shared. The previous independent Nginx syntax PASS remains valid, with only the nonfatal KH deprecated `listen ... http2` warning.
+
+**Live classification:** `IR_PANEL_STREAM_443=OBSERVED`, `IR_PANEL_TLS_BACKEND_8443=OBSERVED`, `KH_NODE_CONTROL_443_LOCATION=OBSERVED`. `IR_WSS_EDGE_8444=NOT_PRESENT`, `FRPS_OWNER_7000=NOT_LISTENING`, `SIGNED_FRPC_CHILD=NOT_PROVEN`, `FRP_ENGINE_ENROLLED=NO`, `BACKHAUL_ENGINE_ENROLLED=NO`. This is a consistent **pre-enrollment** state, not proof that the existing Panel or Node install is defective.
+
+**Actual code defect corrected within the existing RC9 review:** the prior WSS scope regex `[a-z0-9.-]{4,253}` accidentally admitted malformed DNS labels (`bad..domain`, leading/trailing label hyphens). The RC9 plan now uses the existing strict DNS-label validator from the original reusable RC7 read-only primitive, against the **dynamic signed state domain**; this is validation repair, *not* reintroducing an RC7 version/domain pin or a new feature. Existing test now checks several valid domains (including `01.grandoptical.ir` and a different suffix), malformed domain HOLD **before any Docker calls**, and preservation of `RC9_WSS_NGINX_EDGE=NOT_VERIFIED` even for a valid Compose candidate.
+
+**Still pending:** a separately reviewed RC9 live WSS/FRP/Backhaul host executor with exact signed inventory, shared 443 SNI/ACL proof, unchanged Sanaei/Node identity and stage-local rollback before running any tunnel. Never use legacy RC2/RC7 write actions on these RC9 servers. No host changes or additional public ports.

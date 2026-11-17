@@ -467,9 +467,12 @@ def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
         frp.shared._file(state_path, max_size=16384).decode(),
         invalid="RC9_STATE_INVALID")
     panel = state.get("SMITE_PANEL_DOMAIN", "")
-    if (not re.fullmatch(r"[a-z0-9.-]{4,253}", panel)
-            or "." not in panel or panel.startswith(".")
-            or panel.endswith(".")
+    # A Panel domain belongs to this installation's signed state, not to
+    # a fixed hostname or a legacy RC2/RC7 test domain. Reuse the original
+    # strict DNS-label gate, rather than accepting empty labels or leading
+    # hyphens that the old permissive RC9 regex incorrectly allowed.
+    if (not isinstance(panel, str) or len(panel) > 253
+            or original.DOMAIN.fullmatch(panel) is None
             or role not in ("IR", "KH")):
         raise Hold("RC9_WSS_PANEL_DOMAIN_INVALID")
     node_env = _unique_env(

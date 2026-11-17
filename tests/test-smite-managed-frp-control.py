@@ -461,6 +461,52 @@ class FrpOperator(unittest.TestCase):
                              for cmd, _ in seen))
         self.assertFalse((self.node / "config/engine-state").exists())
         self.assertEqual(sum(arg is not None for _, arg in seen), 1)
+
+        # The exact Panel DNS name comes from each installation's state.
+        # Never pin the trial's hostname (iran) or its current 04. domain:
+        # choosing 01.*, a different suffix, or a later hostname is valid.
+        for domain in ("01.grandoptical.ir", "panel.example.net",
+                       "04.grandoptical.ir"):
+            with self.subTest(domain=domain):
+                state.write_text(state.read_text().replace(
+                    "SMITE_PANEL_DOMAIN=04.grandoptical.ir",
+                    "SMITE_PANEL_DOMAIN=" + domain))
+                (self.node / ".env").write_text(
+                    ENV + "PANEL_ADDRESS=" + domain + ":443\n")
+                result = control._rc9_wss_compose_plan(
+                    self.node, "KH", state_path=state, run=fake_run)
+                self.assertEqual(result["RC9_WSS_COMPOSE_CANDIDATE"],
+                                 "EXACT_ONE_ENV_ONLY")
+                self.assertEqual(result["RC9_WSS_NGINX_EDGE"],
+                                 "NOT_VERIFIED")
+                state.write_text(state.read_text().replace(
+                    "SMITE_PANEL_DOMAIN=" + domain,
+                    "SMITE_PANEL_DOMAIN=04.grandoptical.ir"))
+        (self.node / ".env").write_text(
+            ENV + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+
+        # Malformed DNS labels must not reach any Docker or Nginx plan,
+        # even if the Node's PANEL_ADDRESS happens to match that string.
+        for domain in ("bad..grandoptical.ir", "-bad.grandoptical.ir",
+                       "bad_.grandoptical.ir", "bad-.grandoptical.ir"):
+            with self.subTest(invalid_domain=domain):
+                state.write_text(state.read_text().replace(
+                    "SMITE_PANEL_DOMAIN=04.grandoptical.ir",
+                    "SMITE_PANEL_DOMAIN=" + domain))
+                (self.node / ".env").write_text(
+                    ENV + "PANEL_ADDRESS=" + domain + ":443\n")
+                prior = len(seen)
+                with self.assertRaisesRegex(
+                        control.Hold, "RC9_WSS_PANEL_DOMAIN_INVALID"):
+                    control._rc9_wss_compose_plan(
+                        self.node, "KH", state_path=state, run=fake_run)
+                self.assertEqual(len(seen), prior)
+                state.write_text(state.read_text().replace(
+                    "SMITE_PANEL_DOMAIN=" + domain,
+                    "SMITE_PANEL_DOMAIN=04.grandoptical.ir"))
+        (self.node / ".env").write_text(
+            ENV + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+
         tamper["extra"] = True
         with self.assertRaisesRegex(
                 control.Hold, "EFFECTIVE_COMPOSE_DRIFT"):
