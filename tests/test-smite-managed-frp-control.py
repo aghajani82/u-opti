@@ -451,6 +451,10 @@ class FrpOperator(unittest.TestCase):
             self.node, "KH", state_path=state, run=fake_run)
         self.assertEqual(result["RC9_WSS_COMPOSE_CANDIDATE"],
                          "EXACT_ONE_ENV_ONLY")
+        # A validated Compose candidate and passing Nginx syntax do not
+        # prove the IR stream map, WSS edge, signed FRP or rollback.
+        self.assertEqual(result["RC9_WSS_NGINX_EDGE"], "NOT_VERIFIED")
+        self.assertEqual(result["RC9_WSS_SIGNED_FRP"], "NOT_ENROLLED")
         self.assertEqual(result["RC9_WSS_RUNTIME_APPLY"],
                          "HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED")
         self.assertFalse(any("up" in cmd or "restart" in cmd

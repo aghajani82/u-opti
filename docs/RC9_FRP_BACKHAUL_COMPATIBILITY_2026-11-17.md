@@ -109,3 +109,40 @@ b95dee2bf29a021c562565cdf2116376b9fa7590361bd36ef57041a04d0e6654  /usr/local/bin
 4. فقط پس از وجود مدارک ریشهٔ واقعیِ دو سرور، دریافت مجوز نصب و تکمیل checks، بازبینی نهایی PR #202 و merge؛ `main` فعلاً تغییر نمی‌کند.
 
 **وضعیت امنیتی نهایی این بازبینی: `FRP_INSTALL=HOLD`، `BACKHAUL_INSTALL=HOLD`، `LIVE_CHANGES=NONE`.**
+
+## 7) RC9 Nginx/443 listener evidence — 2026-11-17
+
+Operator-provided **read-only** output on fresh trial hosts `iran` and `kharej`:
+
+| Evidence | Iran | Foreign |
+| --- | --- | --- |
+| `nginx -t` | syntax OK; test successful | syntax OK; test successful |
+| Public TCP 443 owner | Nginx on `0.0.0.0:443` and `[::]:443` | Nginx on `0.0.0.0:443` and `[::]:443` |
+| Configuration warnings | None in excerpt | non-fatal deprecated `listen ... http2` at `/etc/nginx/sites-enabled/3xui-kharej.grandoptical.ir:13` |
+| FRP WSS `/~!frp` route | NOT_OBSERVED | NOT_OBSERVED |
+| IR stream SNI/source-IP map | NOT_QUERIED | N/A |
+| IR loopback `8443/8444` backends and `7000` owner | NOT_QUERIED | N/A |
+| FRP/Backhaul host activation approval | NO | NO |
+
+**Interpretation:** Nginx accepts the current configuration and owns the socket; this does not establish FRP WSS path, SNI allowlist, certificate-valid request routing, connected tunnel, Node replay or rollback. The existing `3xui-` site warning is syntactic compatibility feedback, not a failed Nginx test. Do not edit live Sanaei/3xUI site solely to silence the warning.
+
+**Important legacy boundary:** `modules/smite-rc2-frp-wss-edge-plan.py` is restricted to the legacy `ir` hostname and RC2-specific edge topology (and uses a legacy default domain); the current Iran host reports `iran`. `modules/smite-rc7-wss-preflight.py` and `modules/smite-rc7-wss-edge.py` are RC7-only, with explicit pinned RC7 role/version and signed runtime admission. Reusing their *guarded read-only primitives* from the RC9 reviewer is legitimate where separately checked; running their old RC7 mutating CLI against RC9 is **not** authorized. The current RC9 `review --rc9-wss-plan` correctly reports `RC9_WSS_NGINX_EDGE=NOT_VERIFIED`, `RC9_WSS_SIGNED_FRP=NOT_ENROLLED` and `RC9_WSS_RUNTIME_APPLY=HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED` despite a valid one-key Compose proposal. This safety distinction is asserted in the existing tests.
+
+### Next redacted, safe local topology inspection (no writes)
+
+Run separately as root on Iran and Foreign; keep the output limited to **directive names** and bound sockets rather than sharing full `nginx -T` configuration, credentials or certificates:
+
+```bash
+echo '=== TLS/SNI and WSS routing declarations (redacted) ==='
+nginx -T 2>/dev/null |
+  grep -E '^[[:space:]]*(listen[[:space:]]+.*(443|8443|8444)|server_name[[:space:]]+|location[[:space:]]+.*(/~!frp|/smite-node)|ssl_preread[[:space:]]+on;)' |
+  head -n 80
+echo '=== Loopback/FRP control listeners ==='
+ss -lnt '( sport = :7000 or sport = :8443 or sport = :8444 )'
+```
+
+This is route discovery only; `nginx -T` itself **prints the full configuration**, so never share its unfiltered output. No `nginx reload`, `docker compose up`, old RC7 `apply`, FRPS start or any new port opening.
+
+**CI:** On preceding commit `2cececa5`, all nine workflows completed `success` (repository/fixture evidence). All later commits require fresh CI on their own exact SHA. This does not grant any deployment approval.
+
+**Next gate:** matched RC9 HTTPS/443 edge topology and no-proxy WSS plan with strict role/owner/rollback, then FRP owner/child, then independent Backhaul; no changes to `main` until witnessed two-host recovery and permission.
