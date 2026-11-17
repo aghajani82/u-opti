@@ -189,3 +189,20 @@ On commit `2dba696b`, CI job `signed-stage28-ingress-identity-recovery` failed i
 Fix on the same branch replaces separate `bind(0)+close` selections with `distinct_ports(7)`, which keeps all seven loopback sockets reserved until the set of ports is unique, then releases them to the preexisting disposable Nginx/HTTP upstream fixture. No host port, backend path, tunnel, Nginx production file, PR or workflow definition changed. The real isolated HTTPS/WSS/FRP/Backhaul coexistence test still runs fully; nothing was skipped or weakened.
 
 **Rerun result:** pending new exact-head CI. Do not classify shared 443 fixture as PASS until `signed-stage28-ingress-identity-recovery` and the full nine workflows complete `success`.
+
+## 12) First real FRP-install phase: peer-scoped read-only WSS edge proposal (2026-11-17)
+
+The current [owner-approved RC9 manifest](../modules/smite-rc9-owner-approved-manifest.json) sets `release_approved=true` and `activation_allowed=true` for the exact signed RC9 Panel/Node pair. This is a newer owner-approved source than the 2026-11-15 closeout text, which still describes the earlier candidate flags as `false`. **Important:** approval of the signed RC9 image *pair* is NOT approval of the separately disabled real-host FRP WSS executor; `smite-managed-frp-control.py install/rollback` remain explicit HOLD. No release-manifest flags were modified.
+
+The existing `review --rc9-wss-plan` now accepts optional IR-only `--rc9-peer-ip <operator-verified-KH-egress-IPv4>`. It reuses the original Nginx/Stream/SNI map renderer's strict globally-routable IPv4 test and computes a SHA256 of the **in-memory** candidate map scoped to exact `SMITE_PANEL_DOMAIN` on Iran. The current Nginx map remains byte-for-byte unchanged. No peer address is assumed. Bad/private/loopback IPs, or specifying peer IP on Foreign, HOLD; a public IPv4 gets `RC9_WSS_PEER_IP_OWNERSHIP=OPERATOR_VERIFICATION_REQUIRED`, never a false source ownership PASS.
+
+Read-only result fields when supplied on IR:
+- `RC9_WSS_KH_PEER_IP_FORMAT=PASS_GLOBAL_IPV4`
+- `RC9_WSS_IR_PEER_MAP_CANDIDATE_SHA256=<digest>`
+- `RC9_WSS_PEER_IP_OWNERSHIP=OPERATOR_VERIFICATION_REQUIRED`
+- `RC9_WSS_KH_PEER_IP_ACL=NOT_VERIFIED`
+- `RC9_WSS_NGINX_EDGE=NOT_VERIFIED`, `RC9_WSS_RUNTIME_APPLY=HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED`, `INSTALL_ALLOWED=NO`
+
+This is **installation preflight**, not a new engine or user-facing tunnel feature. It reuses the original RC2 renderer functions, not the old RC2 CLI, static domain, hostname or mutating transaction. Do not invent KH IP, change Nginx, publicly expose TCP 7000, bypass signed pairing/inventory, recreate the paired Node, or merge `main` on these local-only results.
+
+Next live-host checkpoint: run the exact pinned trial-branch read-only review on disposable `iran` and `kharej`. Independently confirm KH egress IP before proposing an IR peer map. Host copies may still contain old U-OPTI code; do not assume installed modules are at the current trial SHA. Require provider snapshots, console/restore proof and exact signed RC9 engine enrollment plus reversible WSS stages before any `apply`.

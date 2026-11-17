@@ -435,8 +435,8 @@ def rc9_readiness(node: Path, *, state_path: Path = RC9_STATE,
     }
 
 
-def _rc9_wss_ir_nginx_baseline(panel: str, *, renderer=None,
-                                run=None) -> dict[str, str]:
+def _rc9_wss_ir_nginx_baseline(panel: str, *, peer_ip=None,
+                                renderer=None, run=None) -> dict[str, str]:
     """Review the EXISTING IR 443 stream/TLS layout, with no Nginx mutation.
 
     The original RC2 renderer is used only for read-only parsing and for
@@ -452,6 +452,7 @@ def _rc9_wss_ir_nginx_baseline(panel: str, *, renderer=None,
             raise Hold("RC9_WSS_NGINX_RENDERER_UNAVAILABLE")
         renderer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(renderer)
+    candidate_fields = {}
     try:
         # The caller has already validated the signed Panel DNS label
         # using the original WSS validator. The renderer's old hardcoded
@@ -470,6 +471,20 @@ def _rc9_wss_ir_nginx_baseline(panel: str, *, renderer=None,
         alternate = renderer.render_alt(tls)
         if alternate == tls:
             raise Hold("RC9_WSS_NGINX_CANDIDATE_IDENTICAL")
+        if peer_ip is not None:
+            # Reuse the ORIGINAL peer-IP and map renderer. The operator must
+            # independently verify ownership of the KH egress address;
+            # a globally routable IPv4 is not proof of remote identity.
+            peer = renderer.kh_ip(peer_ip)
+            mapped = renderer.render_map(mapping, peer)
+            if mapped == mapping:
+                raise Hold("RC9_WSS_PEER_MAP_CANDIDATE_IDENTICAL")
+            candidate_fields = {
+                "RC9_WSS_KH_PEER_IP_FORMAT": "PASS_GLOBAL_IPV4",
+                "RC9_WSS_IR_PEER_MAP_CANDIDATE_SHA256":
+                    hashlib.sha256(mapped.encode()).hexdigest(),
+                "RC9_WSS_PEER_IP_OWNERSHIP": "OPERATOR_VERIFICATION_REQUIRED",
+            }
         # Before enrollment neither the alternate TLS frontend nor the
         # FRPS loopback listener may be owned by an unrelated process.
         renderer.loopback_port_free(renderer.ALT_PORT)
@@ -491,11 +506,12 @@ def _rc9_wss_ir_nginx_baseline(panel: str, *, renderer=None,
         "RC9_WSS_IR_NGINX_BASE": "PASS_READ_ONLY",
         "RC9_WSS_IR_ALT_TLS_CANDIDATE": "IN_MEMORY_ONLY",
         "RC9_WSS_KH_PEER_IP_ACL": "NOT_VERIFIED",
+        **candidate_fields,
     }
 
 
 def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
-                          run=None) -> dict[str, str]:
+                          peer_ip=None, run=None) -> dict[str, str]:
     """Reuse the ORIGINAL WSS single-key diff gate; no host mutation.
 
     A successful plan proves only the candidate's effective Compose diff.
@@ -534,6 +550,8 @@ def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
             or original.DOMAIN.fullmatch(panel) is None
             or role not in ("IR", "KH")):
         raise Hold("RC9_WSS_PANEL_DOMAIN_INVALID")
+    if peer_ip is not None and role != "IR":
+        raise Hold("RC9_WSS_PEER_IP_IR_ONLY")
     node_env = _unique_env(
         frp.shared._file(node / ".env", max_size=16384).decode(),
         invalid="RC9_NODE_ENV_INVALID")
@@ -602,7 +620,8 @@ def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
     # 8443 Panel backend. Review only that exact baseline before a future
     # peer-bound FRP WSS edge; never claim that merely listening on 443 is
     # proof of the /~!frp route or FRPS owner.
-    nginx_base = (_rc9_wss_ir_nginx_baseline(panel) if role == "IR" else {})
+    nginx_base = (_rc9_wss_ir_nginx_baseline(
+        panel, peer_ip=peer_ip) if role == "IR" else {})
     return {
         "RC9_WSS_COMPOSE_CANDIDATE": "EXACT_ONE_ENV_ONLY",
         "RC9_WSS_SERVICES": "PANEL_AND_NODE" if role == "IR" else "NODE_ONLY",
@@ -624,6 +643,8 @@ def main() -> int:
                         help="Existing RC9 pinned Node/FRP local review; never install")
     parser.add_argument("--rc9-wss-plan", action="store_true",
                         help="Review exact one-key WSS Compose diff only; no apply")
+    parser.add_argument("--rc9-peer-ip",
+                        help="Operator-verified KH egress IPv4 for IR in-memory WSS edge review only")
     parser.add_argument("--state-path", type=Path, default=RC9_STATE)
     args = parser.parse_args()
     if args.action in ("install", "rollback"):
@@ -632,6 +653,9 @@ def main() -> int:
     try:
         if (args.rc9_baseline or args.rc9_wss_plan) and args.action != "review":
             raise Hold("RC9_BASELINE_REVIEW_ONLY")
+        if args.rc9_peer_ip and (args.action != "review"
+                                 or not args.rc9_wss_plan):
+            raise Hold("RC9_WSS_PEER_REVIEW_ONLY")
         if args.rc9_baseline or args.rc9_wss_plan:
             result = rc9_readiness(args.node_dir, state_path=args.state_path)
             for key, val in result.items():
@@ -639,7 +663,8 @@ def main() -> int:
             if args.rc9_wss_plan:
                 for key, val in _rc9_wss_compose_plan(
                         args.node_dir, result["ROLE"],
-                        state_path=args.state_path).items():
+                        state_path=args.state_path,
+                        peer_ip=args.rc9_peer_ip).items():
                     print(f"{key}={val}")
             print("INSTALL_ALLOWED=NO")
             print("BACKHAUL_DEPENDENCY=NONE")

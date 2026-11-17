@@ -587,6 +587,31 @@ class FrpOperator(unittest.TestCase):
         self.assertEqual([x for x in queried if x[0] == "ss"],
                          [("ss", 8444), ("ss", 7000)] * 3)
         self.assertEqual(queried.count(("nginx", "-t")), 3)
+        # Peer-scoped RC9 plan uses the existing read-only renderer and
+        # never registers an SNI map rule or touches a host Nginx file.
+        queried.clear()
+        files[renderer.TLS_SOURCE] = tls
+        review = control._rc9_wss_ir_nginx_baseline(
+            domain, peer_ip="8.8.8.8", renderer=renderer, run=nginx_test)
+        self.assertEqual(review["RC9_WSS_KH_PEER_IP_FORMAT"],
+                         "PASS_GLOBAL_IPV4")
+        self.assertEqual(review["RC9_WSS_KH_PEER_IP_ACL"], "NOT_VERIFIED")
+        self.assertEqual(review["RC9_WSS_PEER_IP_OWNERSHIP"],
+                         "OPERATOR_VERIFICATION_REQUIRED")
+        self.assertRegex(review["RC9_WSS_IR_PEER_MAP_CANDIDATE_SHA256"],
+                         r"^[a-f0-9]{64}$")
+        self.assertEqual(queried, [("ss", 8444), ("ss", 7000),
+                                  ("nginx", "-t")])
+        self.assertEqual(files[renderer.FRP_MAP], renderer.MAP_HEADER)
+        queried.clear()
+        for bad_ip in ("127.0.0.1", "10.0.0.1", "not-an-ip"):
+            with self.subTest(peer_ip=bad_ip):
+                with self.assertRaisesRegex(
+                        control.Hold, "VALID_KH_PUBLIC_IPV4_REQUIRED"):
+                    control._rc9_wss_ir_nginx_baseline(
+                        domain, peer_ip=bad_ip, renderer=renderer,
+                        run=nginx_test)
+                self.assertEqual(queried, [])
         self.assertFalse(renderer.ALT_CANDIDATE.exists())
         self.assertFalse((self.node / "config/engine-state").exists())
 
@@ -615,6 +640,25 @@ class FrpOperator(unittest.TestCase):
             control._rc9_wss_ir_nginx_baseline(
                 domain, renderer=renderer, run=nginx_test)
         self.assertEqual(queried, [])
+
+    def test_rc9_peer_map_is_ir_only_before_docker_or_nginx(self):
+        state = self.root / "state.env"
+        state.write_text(
+            "SMITE_ROLE=foreign\nSMITE_MANAGED_VERSION=2.0.0-rc.9\n"
+            "SMITE_PANEL_DOMAIN=04.grandoptical.ir\n")
+        state.chmod(0o600)
+        (self.node / ".env").write_text(
+            ENV + "PANEL_ADDRESS=04.grandoptical.ir:443\n")
+        called = []
+        def forbidden(argv, *, input=None):
+            called.append(argv)
+            raise AssertionError("peer plan on KH must fail before Docker")
+        with self.assertRaisesRegex(
+                control.Hold, "RC9_WSS_PEER_IP_IR_ONLY"):
+            control._rc9_wss_compose_plan(
+                self.node, "KH", state_path=state,
+                peer_ip="8.8.8.8", run=forbidden)
+        self.assertEqual(called, [])
 
     def test_rc9_wss_plan_requires_review_and_never_enables_host_install(self):
         self.assertIn('args.rc9_baseline or args.rc9_wss_plan',
