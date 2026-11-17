@@ -26,6 +26,9 @@ for required in \
     done
 done
 echo 'FOREIGN_RC9_INSTALL_AND_UPDATE_MODULE_CLOSURE=PASS'
+# A disconnected input stream must not loop forever printing Invalid selection.
+grep -Fq 'if ! IFS= read -r -p "Please enter your selection [0-9]: " smite_install_choice; then' "$ROOT/modules/smite-install.sh"
+echo 'SMITE_LIFECYCLE_MENU_EOF=BREAK'
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Replace only the fixed lock path in a temporary copy; production path guard

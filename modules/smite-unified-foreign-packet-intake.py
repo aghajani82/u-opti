@@ -57,6 +57,13 @@ def read_multiline(reader):
     chunks = []
     size = 0
     finished = False
+    # Terminal paste tools may prepend a newline before the opening brace.
+    # Do not treat that as end-of-packet: it previously left the complete
+    # secret JSON queued for the U-OPTI menu and caused repeated invalid
+    # selections. Only a bounded empty preamble is ignored. The packet
+    # itself remains strictly parsed and requires its own blank terminator.
+    preamble_blanks = 0
+    started = False
     for _ in range(40):
         line = reader.readline(8194)
         if not isinstance(line, str) or not line or "\x00" in line:
@@ -65,8 +72,14 @@ def read_multiline(reader):
         if size > 8192:
             deny()
         if line.rstrip("\r\n") == "":
+            if not started:
+                preamble_blanks += 1
+                if preamble_blanks > 2:
+                    deny()
+                continue
             finished = True
             break
+        started = True
         chunks.append(line)
     if not finished:
         deny()
@@ -690,20 +703,31 @@ def main(argv=None):
             _selected_root_target(target, allow_existing=True)
         else:
             _private_fixture(target, allow_existing=True)
-        print("Paste Iran Panel's complete Foreign installation JSON and"
-              " finish with an empty line. Input is hidden.",
-              file=sys.stderr, flush=True)
         with open("/dev/tty", "r", encoding="utf-8", newline="") as tty:
             capture_selected_hidden_tty(
                 tty, target=target, now=int(time.time()),
                 selected_host=selected_host,
                 installer_pid=args.installer_pid if selected_host else None,
+                # Show the prompt only AFTER ECHO is actually disabled.
+                # This is also the ready point used by the isolated PTY tests.
+                ready=lambda: print(
+                    "Paste Iran Panel's complete Foreign installation JSON and"
+                    " finish with an empty line. Input is hidden.",
+                    file=sys.stderr, flush=True),
                 confirm_scope=lambda scope: _confirm_selected_scope(tty, scope))
         print("FOREIGN_PACKET=STAGED_PRIVATE")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
     except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError,
             RuntimeError):
+        # Discard any queued remainder of a failed terminal paste before
+        # restoring control to the Bash menu; never echo or log credentials.
+        try:
+            with open("/dev/tty", "r", encoding="utf-8") as tty:
+                if os.isatty(tty.fileno()):
+                    termios.tcflush(tty.fileno(), termios.TCIFLUSH)
+        except (OSError, ValueError, termios.error):
+            pass
         print("HOLD: Foreign Panel installation information not admitted",
               file=sys.stderr)
         return 2

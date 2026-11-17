@@ -3933,7 +3933,10 @@ show_smite_install_menu() {
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-9]: " smite_install_choice
+        if ! IFS= read -r -p "Please enter your selection [0-9]: " smite_install_choice; then
+            echo 'Menu input closed; returning to parent menu.'
+            break
+        fi
         smite_install_choice="${smite_install_choice#"${smite_install_choice%%[![:space:]]*}"}"
         smite_install_choice="${smite_install_choice%"${smite_install_choice##*[![:space:]]}"}"
         case "$smite_install_choice" in

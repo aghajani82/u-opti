@@ -72,6 +72,33 @@ class OperatorPacketIntake(unittest.TestCase):
         self.assertNotIn(self.grant["installation_code"], repr(out))
         self.assertFalse((self.fixture/"node-identity.json").exists())
 
+    def test_leading_newlines_from_terminal_paste_are_not_a_packet_terminator(self):
+        # Exact field failure: one blank line before pasted JSON previously
+        # stopped capture immediately and fed the remaining lines to Bash.
+        raw = "\\n" + json.dumps(self.grant, indent=2) + "\\n\\n"
+        for prefix in ("\\n", "\\r\\n", "\\n\\n"):
+            with self.subTest(prefix=repr(prefix)):
+                if self.file.exists():
+                    self.file.unlink()
+                source = prefix + json.dumps(self.grant, indent=2) + "\\n\\n"
+                result = module.capture_disposable(
+                    io.StringIO(source), target=self.file,
+                    expected_panel="https://panel.example.com",
+                    expected_domain="https://kh.example.com:443",
+                    expected_node="node-kh", now=self.now,
+                    disposable_capability=True)
+                self.assertEqual(result["status"], "STAGED_PRIVATE")
+                self.assertEqual(json.loads(self.file.read_text()), self.grant)
+        self.file.unlink()
+        # Never allow unlimited empty input or empty-only pseudo-packets.
+        for source in ("\\n\\n\\n" + json.dumps(self.grant) + "\\n\\n", "\\n\\n"):
+            with self.assertRaises(module.Hold):
+                module.capture_disposable(io.StringIO(source),
+                    target=self.file, expected_panel="https://panel.example.com",
+                    expected_domain="https://kh.example.com:443",
+                    expected_node="node-kh", now=self.now, disposable_capability=True)
+            self.assertFalse(self.file.exists())
+
     def test_second_paste_never_replaces_private_packet(self):
         self.operator_paste()
         original = self.file.read_bytes()
@@ -470,6 +497,35 @@ class OperatorPacketIntake(unittest.TestCase):
             return result, scopes
         finally:
             self.assertEqual(termios.tcgetattr(slave), original)
+            os.close(master)
+            os.close(slave)
+
+    def test_real_pty_leading_blank_paste_only_after_echo_off(self):
+        master, slave = pty.openpty()
+        saved = termios.tcgetattr(slave)
+        scopes = []
+        try:
+            with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as tty:
+                def send():
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master, ("\\n" + json.dumps(self.grant, indent=2)
+                                      + "\\n\\n").encode("utf-8"))
+                result = module.capture_disposable_hidden_tty(
+                    tty, target=self.file, now=self.now,
+                    expected_panel="https://panel.example.com",
+                    expected_domain="https://kh.example.com:443",
+                    expected_node="node-kh", disposable_capability=True,
+                    confirm_scope=lambda scope: scopes.append(scope) or True,
+                    ready=send)
+            self.assertEqual(result["status"], "STAGED_PRIVATE")
+            self.assertEqual(len(scopes), 1)
+            self.assertEqual(json.loads(self.file.read_text()), self.grant)
+            self.assertEqual(termios.tcgetattr(slave), saved)
+            readable, _, _ = select.select([master], [], [], 0.05)
+            if readable:
+                self.assertNotIn(self.grant["installation_code"].encode(),
+                                 os.read(master, 8192))
+        finally:
             os.close(master)
             os.close(slave)
 
