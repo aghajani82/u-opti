@@ -24,6 +24,7 @@ def load(name):
 
 
 rt = load("smite-rc7-wss-runtime")
+rt.select_rc9()
 panel = load("smite-rc9-retained-panel")
 original = load("smite-managed-frp-control").RC9_PANEL_IMAGE
 
@@ -87,7 +88,16 @@ def exercise(work, baseline_source):
                 "phase": "COMMITTED", "image_id": active["Image"], "wss_sha": "fixture"
             }), patch.object(panel, "wss_sha", return_value="fixture"):
                 panel.original_identity(rt, active, doc, original)
-                rt.check_runtime_signature(active, baseline)
+                try:
+                    rt.check_runtime_signature(active, baseline)
+                except rt.Hold:
+                    for section in ("Config", "HostConfig", "Mounts"):
+                        if active[section] != before[section]:
+                            print("Different fixture section:", section)
+                            if section != "Mounts":
+                                print("Different keys:", sorted(key for key in active[section]
+                                      if active[section][key] != before[section].get(key)))
+                    raise
             assert rt.inspect_container("smite-node")["Id"] == node
             panel.recreate(rt, command)
             rt.check_runtime_signature(await_panel(original), baseline)
@@ -99,5 +109,5 @@ def exercise(work, baseline_source):
 
 for image in (original, panel.IMAGE):
     rt.run(["docker", "pull", image], timeout=300)
-with tempfile.TemporaryDirectory(prefix="retained-panel-docker-") as temp:
+with tempfile.TemporaryDirectory(prefix="retained-panel-docker-", dir="/opt") as temp:
     exercise(Path(temp), Path(sys.argv[1]))

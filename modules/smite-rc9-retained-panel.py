@@ -191,6 +191,25 @@ def recreate(rt, command):
             "--force-recreate", "smite-panel"], timeout=180)
 
 
+def check_published_routes(rt, ingress, worker, route, domain):
+    route._safe_directory(route.ROUTE_DIR)
+    found = False
+    for path in sorted(route.ROUTE_DIR.glob(".*.transaction.json")):
+        rec = json.loads(ingress.read_trusted(rt, path, 0o600))
+        if rec.get("kind") != "backhaul" or rec.get("state") != "COMMITTED":
+            continue
+        port, xhttp = rec["port"], rec["path"]
+        worker.validate_port(port, ingress.CONTROL_RESERVED_PORTS)
+        rt.need(path.name == f".{port}.transaction.json" and isinstance(xhttp, str)
+                and worker.XHTTP_PATH.fullmatch(xhttp), "RETAINED_PANEL_ROUTE_JOURNAL_INVALID")
+        config = route.ROUTE_DIR / f"{port}.conf"
+        rt.need(ingress.read_trusted(rt, config, 0o644).decode() == rec["snippet"]
+                and worker.probe(rt, domain, port, xhttp, public=True),
+                "RETAINED_PANEL_ROUTE_UNVERIFIED")
+        found = True
+    rt.need(found, "RETAINED_PANEL_EXPECTED_TUNNELS_NOT_RUNNING")
+
+
 def prove_health(edge, ingress, worker, *, candidate):
     rt = edge.rt
     for attempt in range(30):
@@ -211,7 +230,6 @@ def recover(edge, ingress, worker, route, doc, rec):
     rt.check_protected(doc)
     rt.ensure_service("smite-node", doc, enabled=True)
     live = continuity(rt, route)
-    worker.disable_panel_queue(ingress, rt)
     if os.path.lexists(overlay(rt)):
         check_overlay(rt)
     old, _ = compose_commands(rt, doc, installed=os.path.lexists(overlay(rt)))
@@ -236,11 +254,13 @@ def recover(edge, ingress, worker, route, doc, rec):
         if actual == old_image and panel["State"].get("Health", {}).get("Status") == "healthy":
             rt.ensure_service("smite-panel", doc, enabled=True)
             old_healthy = True
+    worker.disable_panel_queue(ingress, rt)
     rec["phase"] = "ROLLING_BACK"
     save(rt, ingress, rec)
     if not old_healthy:
         recreate(rt, old)
     prove_health(edge, ingress, worker, candidate=False)
+    check_published_routes(rt, ingress, worker, route, doc["domain"])
     rt.need(continuity(rt, route) == live, "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
     overlay(rt).unlink(missing_ok=True)
     rt.fsync_dir(overlay(rt).parent)
@@ -260,6 +280,7 @@ def apply(edge, ingress, worker, route, doc):
     else:
         rec = None
     ingress.run_operation(edge, "ir", "verify")
+    check_published_routes(rt, ingress, worker, route, doc["domain"])
     rt.need(not os.path.lexists(overlay(rt)), "RETAINED_PANEL_BASELINE_CHANGED")
     compose_commands(rt, doc, installed=False)
     signed_release(rt)
@@ -283,6 +304,7 @@ def apply(edge, ingress, worker, route, doc):
         _, candidate = compose_commands(rt, doc, installed=True)
         recreate(rt, candidate)
         prove_health(edge, ingress, worker, candidate=True)
+        check_published_routes(rt, ingress, worker, route, doc["domain"])
         rt.need(continuity(rt, route) == rec["services"], "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
         rec["phase"] = "COMMITTED"
         save(rt, ingress, rec)
@@ -322,6 +344,7 @@ def main():
                     recover(edge, ingress, worker, route, doc, rec)
             else:
                 ingress.run_operation(edge, "ir", "verify")
+                check_published_routes(rt, ingress, worker, route, doc["domain"])
                 continuity(rt, route)
                 compose_commands(rt, doc, installed=os.path.lexists(overlay(rt)))
                 signed_release(rt)
