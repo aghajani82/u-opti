@@ -939,7 +939,7 @@ smite_tw_stage_help() {
 }
 
 smite_tw_guided_frp() {
-    local role="$1" step=0 choice i
+    local role="$1" step=0 choice i owner_state
     local -a names
     smite_tw_validate_host "$role" || return 2
     mapfile -t names < <(smite_tw_stage_names "$role")
@@ -964,7 +964,8 @@ smite_tw_guided_frp() {
                 # A proposal reviewer must not be mistaken for the RC9 FRP
                 # installer. Without an observed FRPS owner it cannot
                 # perform the missing engine/WSS activation.
-                if [ "$(smite_tw_stage_status "$role" 2)" !=                      "PASS: frps process present; keep it running, do not reapply" ]; then
+                owner_state="$(smite_tw_stage_status "$role" 2)"
+                if [ "$owner_state" != "PASS: frps process present; keep it running, do not reapply" ]; then
                     echo 'HOLD: FRPS owner not observed. G is approval only; it does not install FRP.'
                     continue
                 fi
