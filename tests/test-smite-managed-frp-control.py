@@ -660,6 +660,23 @@ class FrpOperator(unittest.TestCase):
                 peer_ip="8.8.8.8", run=forbidden)
         self.assertEqual(called, [])
 
+    def test_rc9_peer_ip_cli_empty_and_wrong_action_hold(self):
+        # An explicitly empty peer IP must NOT be treated as absence of
+        # the option, and a peer cannot be supplied outside RC9 WSS review.
+        for action, extra in (
+                ("status", ["--rc9-peer-ip", ""]),
+                ("review", ["--rc9-peer-ip", ""]),
+                ("review", ["--rc9-baseline", "--rc9-peer-ip", "8.8.8.8"]),
+                ("review", ["--rc9-wss-plan", "--rc9-peer-ip", ""])):
+            with self.subTest(action=action, extra=extra):
+                process = subprocess.run(
+                    [sys.executable, "-B", str(SOURCE), action,
+                     "--node-dir", str(self.node), *extra],
+                    capture_output=True, text=True, timeout=15)
+                self.assertEqual(process.returncode, 2)
+                self.assertIn("HOLD:", process.stderr)
+                self.assertNotIn("INSTALL_ALLOWED=YES", process.stdout)
+
     def test_rc9_wss_plan_requires_review_and_never_enables_host_install(self):
         self.assertIn('args.rc9_baseline or args.rc9_wss_plan',
                       SOURCE.read_text())

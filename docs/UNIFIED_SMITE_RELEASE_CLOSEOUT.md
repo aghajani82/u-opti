@@ -7,6 +7,13 @@
 HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 **No new features, menu entries, UI or network listeners.**
 
+**Status update (2026-11-18):** IR/KH operator-provided exact RC9 FRP WSS
+read-only checks passed source/runtime/Compose gates. The IR managed
+stream/SNI/8443 baseline passed; FRPS/FRPC are not enrolled, the WSS edge
+is not active, and the independently gated real-host FRP executor remains
+HOLD. Nine of nine workflows passed on `d7a2cd13`. Details and next
+read-only egress-IP checkpoint: [RC9 compatibility audit](RC9_FRP_BACKHAUL_COMPATIBILITY_2026-11-17.md).
+
 ## Current objectively verified state
 
 | Item | Evidence / status |
@@ -16,7 +23,7 @@ HTTPS/443 pairing, retained FRP/Backhaul/Sanaei and stage-owned rollback.
 | Signed RC9 Node | `ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2` |
 | RC9 manifest SHA256 | `f242e24710d87cef2a48a562d0fd3f16c37d553fb1cb9a8888d3de3cb4fc8e60` |
 | RC9 evidence | [Publisher](https://github.com/aghajani82/Smite/actions/runs/43631138363), [independent Cosign](https://github.com/aghajani82/Smite/actions/runs/43631412672), [U-OPTI signatures](https://github.com/aghajani82/u-opti/actions/runs/43632177646), [U-OPTI rehearsal](https://github.com/aghajani82/u-opti/actions/runs/43632177665) |
-| RC9 candidate policy | `release_approved=false`, `activation_allowed=false` |
+| RC9 owner-approved signed image-pair policy (2026-11-16) | `release_approved=true`, `activation_allowed=true` in [exact owner-approved manifest](../modules/smite-rc9-owner-approved-manifest.json); **not** authorization for the separately disabled RC9 FRP/Backhaul host installer, and not a live Foreign Connected witness |
 | Iran option 1 | **Live disposable RC9 installed on `03.grandoptical.ir`** using U-OPTI `6946540`; operator SSH read-only audit confirms journal `COMMITTED/COMPLETE`, pinned Panel/Node images both `healthy`, signed Pairing/replay and DB identity PASS, loopback Panel/Node and HTTPS/443 HTTP 200, Nginx syntax PASS; provided UI screenshot displays `node-ir` Connected. **Not tested:** power-loss resume/restart continuity. **main:** still RC7; no in-place adoption of RC7 journal |
 | Iran retained Node | Private stage binds Docker container ID, image ID, project, Created and StartedAt; stage/status and rollback fail on change |
 | Iran Panel transaction | Signed sealed stage, additive schema, durable per-step cutover and owned config-only rollback; exact, restricted Docker/Compose/Nginx command driver **fixture-only** |
@@ -1040,9 +1047,15 @@ stage journals and rollback observation.
 
 An internal test, matching SHA256, healthy Docker container, signed **trial**
 image, or GitHub Actions success is **not** production approval or a
-two-host `Connected` witness. Until the above evidence exists, leave
-`activation_allowed=false`, `release_approved=false` and
-`FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` unchanged.
+two-host `Connected` witness. The owner-approved RC9 **image-pair** manifest was updated to
+`activation_allowed=true`, `release_approved=true` on 2026-11-16;
+those flags must **not** be rolled back to the obsolete Nov 15 values merely
+because host FRP/Backhaul transactions are not approved. Maintain the
+separate real-host `smite-managed-frp-control.py install/rollback` HOLD and
+existing `FOREIGN_ONE_CHOICE_INSTALL=HOLD_BEFORE_HOST_CHANGES` until their
+independent signed owner, protected rollback and verified live connection
+gates pass. The older `false` references elsewhere in this historical
+report describe earlier stages, not the current approved manifest.
 
 **Resume from:** the RC9 tag and the U-OPTI trial head and
 `docs/UNIFIED_SMITE_INSTALL_TRIAL.md` for detailed archived test evidence;

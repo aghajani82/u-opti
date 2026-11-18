@@ -653,7 +653,7 @@ def main() -> int:
     try:
         if (args.rc9_baseline or args.rc9_wss_plan) and args.action != "review":
             raise Hold("RC9_BASELINE_REVIEW_ONLY")
-        if args.rc9_peer_ip and (args.action != "review"
+        if args.rc9_peer_ip is not None and (args.action != "review"
                                  or not args.rc9_wss_plan):
             raise Hold("RC9_WSS_PEER_REVIEW_ONLY")
         if args.rc9_baseline or args.rc9_wss_plan:

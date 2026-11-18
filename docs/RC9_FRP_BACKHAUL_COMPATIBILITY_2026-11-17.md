@@ -206,3 +206,41 @@ Read-only result fields when supplied on IR:
 This is **installation preflight**, not a new engine or user-facing tunnel feature. It reuses the original RC2 renderer functions, not the old RC2 CLI, static domain, hostname or mutating transaction. Do not invent KH IP, change Nginx, publicly expose TCP 7000, bypass signed pairing/inventory, recreate the paired Node, or merge `main` on these local-only results.
 
 Next live-host checkpoint: run the exact pinned trial-branch read-only review on disposable `iran` and `kharej`. Independently confirm KH egress IP before proposing an IR peer map. Host copies may still contain old U-OPTI code; do not assume installed modules are at the current trial SHA. Require provider snapshots, console/restore proof and exact signed RC9 engine enrollment plus reversible WSS stages before any `apply`.
+
+## 13) Confirmed live IR/KH RC9 preflight — 2026-11-18
+
+Operator performed the **exact SHA-locked trial review** from `d7a2cd1335c556c17539615d842fc9dee34855ef` on disposable `iran` and `kharej`, with no service mutation. Both hosts reported:
+
+- `RC9_SIGNED_SOURCE=EXACT_LOCAL_STATE`
+- `RC9_IMAGE=PINNED_REFERENCE_AND_LOCAL_IMAGE_ID`
+- `RC9_NODE_RUNTIME=HEALTHY_SIGNED_POLICY_LOCAL_ONLY`
+- `FRP_BINARIES=BUNDLED_0_71_0`
+- `RC9_WSS_COMPOSE_CANDIDATE=EXACT_ONE_ENV_ONLY`
+- `FRP_ENGINE_ENROLLED=NO`, `FRPS_OWNER=NOT_VERIFIED`, `WSS_ACTIVATION=NOT_ENABLED`
+- `RC9_WSS_NGINX_EDGE=NOT_VERIFIED`, `RC9_WSS_SIGNED_FRP=NOT_ENROLLED`
+- `RC9_WSS_RUNTIME_APPLY=HOLD_RECREATE_AND_ROLLBACK_NOT_APPROVED`
+- `NODE_RECREATED=NO`, `LIVE_CHANGES=NONE`, `INSTALL_ALLOWED=NO`, `BACKHAUL_DEPENDENCY=NONE`
+
+Role-sensitive outputs: IR `RC9_WSS_SERVICES=PANEL_AND_NODE`, `RC9_WSS_IR_NGINX_BASE=PASS_READ_ONLY`, `RC9_WSS_IR_ALT_TLS_CANDIDATE=IN_MEMORY_ONLY`, `RC9_WSS_KH_PEER_IP_ACL=NOT_VERIFIED`; KH `RC9_WSS_SERVICES=NODE_ONLY`. No assumption was made that an existing KH `/smite-node` HTTPS route or healthy Nginx listener implies FRP WSS installation.
+
+**Exact-head CI:** all nine PR workflows for `d7a2cd13` completed success. This supports the tested source, not actual host engine enrollment. See original CI run for official FRP binary and shared-443 independent fixture proof.
+
+**Narrow CLI correctness repair:** using `--rc9-peer-ip ''` on the wrong command previously bypassed the `if args.rc9_peer_ip` guard because an empty string was false. It now checks explicit option presence with `is not None`; tests assert wrong-action/empty-IP HOLD without an install path. No new functionality or live service change.
+
+### Next operator-owned read-only step, before FRP install
+
+On **KH only**, compare external IPv4 discovery and the routing-source address; a NAT or alternate egress may make the two differ:
+
+```bash
+echo "===== KH EGRESS IPV4 ====="
+curl --noproxy '*' -4fsS --connect-timeout 4 --max-time 12 https://api.ipify.org || echo EGRESS_LOOKUP_FAILED
+echo
+echo "===== KH ROUTE SOURCE ====="
+ip -4 route get 1.1.1.1
+```
+
+Do **not** assume the DNS A-record of the KH control host is its outbound IPv4. Verify the actual address and that it belongs to this trial KH server before putting it in an IR SNI + source-IP map.
+
+On **IR only**, after confirming the KH egress IP, run `smite-managed-frp-control.py review --rc9-wss-plan --rc9-peer-ip <confirmed-public-KH-egress-IPv4>` from the reviewed exact source. Expected additional output is only `RC9_WSS_KH_PEER_IP_FORMAT=PASS_GLOBAL_IPV4`, a proposed in-memory SHA256 and `RC9_WSS_PEER_IP_OWNERSHIP=OPERATOR_VERIFICATION_REQUIRED`. Final `RC9_WSS_NGINX_EDGE`, `RC9_WSS_SIGNED_FRP` and `INSTALL_ALLOWED` must remain NOT_VERIFIED/NOT_ENROLLED/NO.
+
+Before ANY signed RC9 host apply: preserve test-provider restore + independent console proof, current Nginx backend/stream/map SHA256, running Panel+Node immutable IDs, journal/rollback owner, Node identity and private DB continuity; then implement existing transaction's RC9-specific app/replay gates. Never use the RC2/RC7 mutating CLI directly or expose 7000 publicly.
