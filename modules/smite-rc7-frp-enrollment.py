@@ -455,6 +455,27 @@ def signed_inventory(expected):
                  SIGNED_INVENTORY,expected],timeout=30)=='SIGNED_FRP_INVENTORY=PASS',
          'SIGNED_ENGINE_INVENTORY_FAILED')
 
+
+def no_frp_tunnels(role, *, restore_before=None):
+    if rt.VERSION=='RC9':
+        backhaul=rt.load('smite-managed-backhaul-control.py')
+        path=backhaul.RC9_INDEPENDENT_RECEIPT
+        if os.path.lexists(path):
+            rt.trusted_path(path)
+            receipt=json_private(path)
+            need(receipt.get('role')==role,'RC9_BACKHAUL_ROLE_MISMATCH')
+            if receipt.get('state')!='ROLLED_BACK':
+                if restore_before is None:
+                    backhaul._rc9_independent_operation(role,already_locked=True)
+                else:
+                    need(receipt.get('state')=='COMMITTED'
+                         and receipt.get('new')==sha(restore_before),
+                         'RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT')
+                rt.no_tunnels(allow_backhaul=True)
+                return
+    rt.no_tunnels()
+
+
 def proposal():
     if os.path.lexists(JOURNAL):
         need(rt.VERSION=='RC9' and state()['state']=='ROLLED_BACK'
@@ -470,7 +491,7 @@ def proposal():
             edge.validate_committed(edge.journal())
         rt.signed_probe()
         signed_inventory('not-installed')
-    rt.no_tunnels()
+    no_frp_tunnels(doc['role'])
     prior,engines=manifest_before()
     hashes=binaries()
     contents=(json.dumps({'schema':1,'engines':{
@@ -606,11 +627,11 @@ def restore(entry):
         need(restored,'BACKHAUL_TRANSACTION_REQUIRES_OWN_RECOVERY')
     doc=node_details()
     need(doc['role']==entry['role'],'WSS_ROLE_MISMATCH')
-    rt.no_tunnels()
     before=None
     if entry['old'] is not None:
         before=read_private(JOURNAL/'manifest.before')
         need(sha(before)==entry['old'],'MANIFEST_BACKUP_TAMPERED')
+    no_frp_tunnels(doc['role'],restore_before=before)
     current=read_private(MANIFEST) if MANIFEST.exists() or MANIFEST.is_symlink() else None
     need(current is None and entry['old'] is None or
          current is not None and sha(current) in {entry['old'],entry['new']},

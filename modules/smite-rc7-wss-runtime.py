@@ -31,6 +31,7 @@ OVERLAY='docker-compose.wss-rc7.yml'
 EDGE=Path('/var/lib/u-opti/smite-rc7-wss-edge/record.json')
 RC9_EDGE=Path('/var/lib/u-opti/smite-rc9-wss-edge/record.json')
 RC9_ENROLLMENT=Path('/var/lib/u-opti/smite-rc9-frp-enrollment/record.json')
+RC9_BACKHAUL_ENROLLMENT=Path('/var/lib/u-opti/smite-rc9-backhaul-enrollment.json')
 VERSION='RC7'
 SIGNED_PROBE=r'''
 import json, secrets, urllib.error, urllib.request
@@ -449,7 +450,7 @@ def check_rc9_compose(name,doc):
     candidate=json.loads(run(compose(name,doc,True)+['config','--format','json']))
     p.only_wss_change(effective,candidate,name)
 
-def no_tunnels():
+def no_tunnels(*, allow_backhaul=False):
     # A retained FRPC may still be forwarding even when no local FRPS binds.
     # Never disrupt an active forwarding process during activation/rollback.
     probe=subprocess.run(['pgrep','-x','frpc'],capture_output=True,text=True,
@@ -458,12 +459,42 @@ def no_tunnels():
     for root in (p.PANEL,p.NODE):
         item=root/'config/tunnels.json'
         if item.is_file() or item.is_symlink():
-            need(not item.is_symlink() and json.loads(item.read_text())=={},
-                 'TUNNELS_MUST_BE_REMOVED_FIRST')
+            need(not item.is_symlink(),'TUNNELS_MUST_BE_REMOVED_FIRST')
+            saved=json.loads(item.read_text())
+            need(saved=={} or (allow_backhaul and type(saved) is dict
+                 and all(type(tunnel) is dict and tunnel.get('core')=='backhaul'
+                         for tunnel in saved.values())), 'TUNNELS_MUST_BE_REMOVED_FIRST')
     need(not p.run(['ss','-H','-lnt','( sport = :7000 )']).strip(),
          'FRPS_OWNER_RUNNING')
     need(not re.search(r'(?<![A-Za-z0-9_])frps(?![A-Za-z0-9_])',
                        p.run(['ss','-H','-lntp'])),'FRPS_OWNER_RUNNING')
+    if allow_backhaul:
+        saved_tunnels_only('backhaul')
+
+
+def saved_tunnels_only(*cores):
+    source=r"""
+import json
+from pathlib import Path
+import sys
+p=Path('/var/lib/smite-node/tunnels.json')
+assert not p.is_symlink()
+if p.exists():
+    assert p.is_file() and 0 < p.stat().st_size <= 1048576
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            assert key not in result
+            result[key]=value
+        return result
+    saved=json.loads(p.read_bytes(),object_pairs_hook=unique)
+    assert type(saved) is dict
+    assert all(type(tunnel) is dict and tunnel.get('core') in sys.argv[1:]
+               for tunnel in saved.values())
+print('SAVED_TUNNELS_VERIFIED')
+"""
+    need(run(['docker','exec','smite-node','python3','-B','-c',source,*cores],timeout=15)
+         =='SAVED_TUNNELS_VERIFIED','RC9_UNEXPECTED_SAVED_TUNNELS')
 
 def signed_probe():
     need(run(['docker','exec','smite-node','python3','-c',SIGNED_PROBE],
@@ -648,6 +679,11 @@ def restore(doc):
         trusted_path(RC9_ENROLLMENT)
         need(json.loads(RC9_ENROLLMENT.read_text()).get('state')=='ROLLED_BACK',
              'ROLLBACK_FRP_ENROLLMENT_FIRST')
+    if VERSION=='RC9' and os.path.lexists(RC9_BACKHAUL_ENROLLMENT):
+        trusted_path(RC9_BACKHAUL_ENROLLMENT)
+        receipt=json.loads(RC9_BACKHAUL_ENROLLMENT.read_text())
+        need(receipt.get('role')==doc['role'] and receipt.get('state')=='ROLLED_BACK',
+             'ROLLBACK_BACKHAUL_ENROLLMENT_FIRST')
     no_tunnels()
     if VERSION=='RC9' and doc['role']=='ir':
         need(not os.path.lexists(p.PANEL/'docker-compose.retained-panel-rc9.yml'),

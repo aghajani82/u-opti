@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "modules/smite-managed-backhaul-control.py"
@@ -1242,6 +1242,89 @@ class OperatorControl(unittest.TestCase):
         self.assertIn('2) 443 Gateway (auto-detect Panel / Foreign)', parent)
         self.assertIn('show_smite_gateway_menu', parent)
         self.assertIn('6) docker_smite_advanced_menu', parent)
+
+
+class RC9IndependentEnrollment(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        self.manifest = root / "engine-state" / "engines.json"
+        self.receipt = root / "backhaul.json"
+        self.inventory = {engine: "not-installed" for engine in control.ENGINES}
+        self.digest = control.package.OFFICIAL_BINARY_SHA256["amd64"]
+        self.rt = SimpleNamespace(locked=contextlib.nullcontext, inspect_container=Mock(return_value={
+            "Id": "1" * 64, "Image": "sha256:" + "2" * 64, "Mounts": [],
+            "State": {"Running": True, "StartedAt": "unchanged"},
+        }), rc9_state=Mock(), signed_probe=Mock(), rc9_signed_release=Mock(),
+            no_tunnels=Mock(), saved_tunnels_only=Mock(), fsync_dir=Mock(),
+            trusted_path=Mock(), run=self.run_node, Hold=RuntimeError)
+        self.frp = SimpleNamespace(rt=self.rt, select_rc9=Mock(), MANIFEST=self.manifest,
+            JOURNAL=root / "frp", node_details=Mock(return_value={"role": "ir"}),
+            read_private=lambda path: path.read_bytes(),
+            manifest_before=self.manifest_before, safe_dir=Mock(),
+            sha=lambda raw: hashlib.sha256(raw).hexdigest(), state=Mock(),
+            verify_file=Mock(), Hold=RuntimeError)
+        ingress = SimpleNamespace(STATE=root / "ingress", replace_bytes=self.replace, Hold=RuntimeError)
+        for fixture in (
+            patch.object(control, "RC9_INDEPENDENT_RECEIPT", self.receipt),
+            patch.object(control, "RC7_RETAINED_JOURNAL", root / "legacy-backhaul"),
+            patch.object(control.os, "geteuid", return_value=0),
+            patch.object(control, "_load", side_effect=lambda _, module: self.frp
+                         if module == "smite-rc7-frp-enrollment.py" else ingress),
+        ):
+            fixture.start()
+            self.addCleanup(fixture.stop)
+
+    def replace(self, rt, path, contents, mode, *, create=False):
+        if create:
+            self.assertFalse(path.exists())
+        path.write_bytes(contents)
+
+    def manifest_before(self):
+        if not self.manifest.exists():
+            return None, {}
+        raw = self.manifest.read_bytes()
+        return raw, json.loads(raw)["engines"]
+
+    def run_node(self, command, **kwargs):
+        if command[-1] == control.RC7_BUNDLED_BACKHAUL_AUDIT:
+            return json.dumps({"sha256": self.digest, "architecture": "amd64"})
+        if command[-1] == control.RC7_BUNDLED_SIGNED_INVENTORY:
+            _, engines = self.manifest_before()
+            return json.dumps({"mode": "managed", "engines": {
+                **self.inventory, **{key: "ready" for key in engines},
+            }})
+        if command[:2] == ["docker", "top"]:
+            return "COMMAND\npython3"
+        self.fail(f"Unexpected command {command[:3]}")
+
+    def test_enrolls_only_backhaul_and_restores_original_manifest(self):
+        self.manifest.parent.mkdir()
+        prior = b'{"engines": {}, "schema": 1}\n'
+        self.manifest.write_bytes(prior)
+        control._rc9_independent_operation("ir", apply=True)
+        raw, engines = self.manifest_before()
+        self.assertEqual(engines, {"backhaul": {"sha256": self.digest}})
+        self.assertEqual(json.loads(self.receipt.read_bytes())["state"], "COMMITTED")
+        control._rc9_independent_operation("ir")
+        control._rc9_independent_operation("ir", apply=True)
+        self.assertEqual(self.manifest.read_bytes(), raw)
+        control._rc9_independent_operation("ir", rollback=True)
+        self.assertEqual(self.manifest.read_bytes(), prior)
+        self.assertEqual(json.loads(self.receipt.read_bytes())["state"], "ROLLED_BACK")
+
+    def test_later_frp_requires_its_committed_receipt(self):
+        control._rc9_independent_operation("ir", apply=True)
+        doc = json.loads(self.manifest.read_bytes())
+        doc["engines"]["frp"] = {"sha256": "1" * 64, "server_sha256": "2" * 64}
+        self.manifest.write_text(json.dumps(doc))
+        self.frp.state.return_value = {"state": "PREPARED"}
+        with self.assertRaisesRegex(control.Hold, "RC9_BACKHAUL_FRP_RECEIPT_NOT_COMMITTED"):
+            control._rc9_independent_operation("ir")
+        self.frp.state.return_value = {"state": "COMMITTED"}
+        control._rc9_independent_operation("ir")
+        self.frp.verify_file.assert_called_once_with({"state": "COMMITTED"})
 
 
 if __name__ == "__main__":

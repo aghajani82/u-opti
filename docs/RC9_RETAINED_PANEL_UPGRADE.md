@@ -1,15 +1,21 @@
 # RC9 retained Iran Panel upgrade
 
 This trial upgrade adds Backhaul publishing from the existing Smite Panel.
-It applies to an enrolled Iran RC9 installation with a working paired Node,
-signed WSS and active FRP. Setup prepares Backhaul HTTPS ingress before opening
-the publishing workflow. It checks any existing Backhaul routes.
+It applies to an enrolled Iran RC9 installation with a working paired Node.
+Setup prepares the signed runtime and HTTPS ingress before enabling publishing.
+It verifies any existing Backhaul routes and checks any running FRPS listeners.
 
 After updating U-OPTI to the approved trial revision, select **Tunnel Wizard →
 1) Backhaul → 1) Set up signed Backhaul, HTTPS/443 and Smite publishing** on Iran.
 The wizard verifies or prepares the engine and ingress, then offers to enable
 publishing. Run **1) Backhaul** on the Foreign host to prepare its engine and
 ingress. An already active publisher is verified without recreating the Panel.
+
+For a first Backhaul on fresh RC9 hosts, use option 1 on Iran and then on
+Foreign. On Iran, enter the verified public egress IPv4 of the Foreign host
+when setting up the signed edge. Create the first Backhaul in Smite with the
+dedicated Foreign inbound. After confirming traffic, you can run option 2 on
+both hosts to enroll FRP beside the running Backhaul.
 
 For standalone diagnostics, run the following preflight in a root terminal.
 When Cosign is absent, the helper verifies a temporary copy of the pinned binary.

@@ -204,8 +204,9 @@ def continuity(rt, route):
         if command in ("frps", "backhaul"):
             ticks = Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19]
             tracked.append([int(pid), ticks, command])
-    owner, ports = route._frps_socket_inventory()
-    rt.need(any(item[0] == owner and item[2] == "frps" for item in tracked),
+    owner, ports = route._frps_socket_inventory(allow_absent=True)
+    owners = {item[0] for item in tracked if item[2] == "frps"}
+    rt.need(owners == (set() if owner is None else {owner}),
             "RETAINED_PANEL_EXPECTED_TUNNELS_NOT_RUNNING")
     return [node["Id"], node["State"]["StartedAt"], sorted(tracked), sorted(ports)]
 

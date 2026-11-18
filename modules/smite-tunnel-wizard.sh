@@ -997,7 +997,7 @@ smite_tw_rc9_frp_stage() {
 }
 
 smite_tw_rc9_frp_setup() (
-    local role="$1" runtime_role peer="" approval workdir="" verifier
+    local role="$1" runtime_only="${2:-}" runtime_role peer="" approval workdir="" verifier
     smite_tw_validate_host "$role" || return 2
     [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
     runtime_role=foreign
@@ -1037,6 +1037,7 @@ smite_tw_rc9_frp_setup() (
             python3 -B "$SMITE_TW_DIR/smite-stage15-xhttp-bridge.py" apply || return 2
         fi
     fi
+    [ "$runtime_only" != runtime-only ] || return 0
     smite_tw_rc9_frp_stage 'Enroll bundled FRP' \
         /var/lib/u-opti/smite-rc9-frp-enrollment smite-rc7-frp-enrollment.py \
         "${scope[@]}" || return 2
@@ -1060,7 +1061,18 @@ smite_tw_rc9_backhaul_setup() (
         echo 'The signed Backhaul engine is already enrolled.'
     else
         echo 'Signed Backhaul engine readiness has not been verified.'
-        smite_managed_bh_rc9_retained "$mode" || return 2
+        local frp_record=/var/lib/u-opti/smite-rc9-frp-enrollment/record.json
+        local backhaul_record=/var/lib/u-opti/smite-rc9-backhaul-enrollment.json
+        if { [ -e "$frp_record" ] || [ -L "$frp_record" ]; } &&
+            [ ! -e "$backhaul_record" ] && [ ! -L "$backhaul_record" ]; then
+            smite_managed_bh_rc9_retained "$mode" || return 2
+        else
+            if ! python3 -B "$SMITE_TW_DIR/smite-rc7-wss-runtime.py" verify --rc9 --role "$runtime_role" ||
+                { [ "$role" = ir ] && ! python3 -B "$SMITE_TW_DIR/smite-stage15-xhttp-bridge.py" verify; }; then
+                smite_tw_rc9_frp_setup "$role" runtime-only || return 2
+            fi
+            smite_managed_bh_rc9_retained "$mode" independent || return 2
+        fi
     fi
     echo "===== Step 2/$steps · Verify or set up Backhaul control on HTTPS/443 ====="
     if ! python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-ingress.py" verify --role "$runtime_role"; then

@@ -11,7 +11,7 @@ import urllib.error
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[1]
 PATH=ROOT/'modules/smite-rc7-frp-enrollment.py'
@@ -56,6 +56,24 @@ class EnrollmentTests(unittest.TestCase):
             with patch.object(ctl,'JOURNAL',folder):
                 with self.assertRaises(ctl.Hold):
                     ctl.proposal()
+
+    def test_later_frp_accepts_only_verified_independent_backhaul(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'backhaul.json'
+            path.touch()
+            prior=b'backhaul-only manifest fixture'
+            receipt={'role':'foreign','state':'COMMITTED','new':ctl.sha(prior)}
+            control=types.SimpleNamespace(RC9_INDEPENDENT_RECEIPT=path,
+                                           _rc9_independent_operation=Mock())
+            with patch.object(ctl.rt,'VERSION','RC9'), patch.object(ctl.rt,'load',return_value=control), \
+                    patch.object(ctl.rt,'trusted_path'), patch.object(ctl,'json_private',return_value=receipt), \
+                    patch.object(ctl.rt,'no_tunnels') as verify:
+                ctl.no_frp_tunnels('foreign')
+                control._rc9_independent_operation.assert_called_once_with('foreign',already_locked=True)
+                verify.assert_called_once_with(allow_backhaul=True)
+                ctl.no_frp_tunnels('foreign',restore_before=prior)
+                with self.assertRaisesRegex(ctl.Hold,'RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT'):
+                    ctl.no_frp_tunnels('foreign',restore_before=b'wrong')
 
     def test_retained_backhaul_journal_blocks_standalone_frp_rollback(self):
         with tempfile.TemporaryDirectory() as tmp:

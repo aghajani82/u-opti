@@ -163,6 +163,14 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.assertEqual(self.panel.call_count, 1)
         self.assertFalse(self.target.exists())
 
+    def test_first_backhaul_publication_without_frps(self):
+        self.route._frps_socket_inventory.return_value = (None, frozenset())
+        self.assertEqual(self.invoke("apply"), ("APPLIED", INBOUND["path"]))
+        self.assertIn('"COMMITTED"', self.journal.read_text())
+        self.panel.assert_called_with(self.rt, "activate", 56053, 3080, pair=("", ""), name="")
+        self.assertTrue(all(call.kwargs == {"allow_absent": True}
+                            for call in self.route._frps_socket_inventory.call_args_list))
+
 
 if __name__ == "__main__":
     unittest.main()

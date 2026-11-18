@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Independent Backhaul operator control. Live host actions deliberately OFF.
-
-The public status/review/verify paths are READ ONLY. install/rollback invoke
-ONLY the already gated disposable GitHub PR filesystem transaction. There
-is NO production activation, Docker/FRP/Nginx operation, network request,
-tunnel configuration or remote server operation in this module.
-"""
+"""Managed Backhaul review and journaled enrollment on the exact signed RC9 Node."""
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
@@ -875,10 +869,173 @@ def _rc7_operator_review_role(node_dir: Path) -> str:
     return "ir" if role == "IR" else "foreign"
 
 
+RC9_INDEPENDENT_RECEIPT = Path("/var/lib/u-opti/smite-rc9-backhaul-enrollment.json")
+
+
+def _rc9_independent_inventory(frp):
+    raw = frp.rt.run(["docker", "exec", "smite-node", "python3", "-B", "-c",
+                       RC7_BUNDLED_SIGNED_INVENTORY], timeout=30)
+    return _strict_rc7_response(raw, kind="inventory")["engines"]
+
+
+def _rc9_independent_operation(role, *, apply=False, rollback=False, already_locked=False):
+    frp = _load("uopti_rc9_independent_runtime", "smite-rc7-frp-enrollment.py")
+    ingress = _load("uopti_rc9_enrollment_files", "smite-rc9-backhaul-ingress.py")
+    frp.select_rc9()
+    rt = frp.rt
+    if os.geteuid() != 0:
+        raise Hold("RC9_BACKHAUL_ROOT_REQUIRED")
+    try:
+        with nullcontext() if already_locked else rt.locked():
+            _rc9_independent_locked(frp, ingress, role, apply=apply, rollback=rollback)
+    except (frp.Hold, rt.Hold, ingress.Hold, KeyError, TypeError) as exc:
+        reason = str(exc)
+        raise Hold(reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason)
+                   else "RC9_BACKHAUL_INDEPENDENT_UNVERIFIED") from exc
+
+
+def _rc9_independent_locked(frp, ingress, role, *, apply, rollback):
+    rt = frp.rt
+    rt.rc9_state(role)
+    if frp.node_details()["role"] != role:
+        raise Hold("RC9_BACKHAUL_ROLE_MISMATCH")
+    node = rt.inspect_container("smite-node")
+    identity = _rc7_node_runtime_fingerprint(node)
+    for mount in node["Mounts"]:
+        target = mount["Destination"]
+        if (target in ("/", "/usr", "/usr/local", "/usr/local/bin",
+                       "/usr/local/bin/backhaul")
+                or target.startswith("/usr/local/bin/backhaul/")):
+            raise Hold("RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT")
+    binary = _strict_rc7_response(rt.run(
+        ["docker", "exec", "smite-node", "python3", "-B", "-c",
+         RC7_BUNDLED_BACKHAUL_AUDIT], timeout=30), kind="binary")
+    if binary["architecture"] != "amd64" or binary["sha256"] != package.OFFICIAL_BINARY_SHA256["amd64"]:
+        raise Hold("RC7_BUNDLED_BINARY_DIGEST_MISMATCH")
+    rt.signed_probe()
+    inventory = _rc9_independent_inventory(frp)
+    manifest = frp.MANIFEST
+    path = RC9_INDEPENDENT_RECEIPT
+    after = {"schema": 1, "engines": {"backhaul": {"sha256": binary["sha256"]}}}
+    candidate = (json.dumps(after, sort_keys=True) + "\n").encode()
+    record = None
+
+    def save(*, create=False):
+        ingress.replace_bytes(rt, path, (json.dumps(record, sort_keys=True) + "\n").encode(),
+                              0o600, create=create)
+
+    if os.path.lexists(path):
+        rt.trusted_path(path)
+        record = json.loads(frp.read_private(path))
+        if (type(record) is not dict
+                or record.keys() != {"schema", "role", "state", "old", "new"}
+                or type(record["schema"]) is not int or record["schema"] != 1
+                or record["role"] != role
+                or record["state"] not in ("PREPARED", "COMMITTED", "ROLLED_BACK")
+                or record["new"] != frp.sha(candidate)
+                or record["old"] is not None and (type(record["old"]) is not str
+                    or re.fullmatch(r"(?:[a-f0-9]{2}){1,1024}", record["old"]) is None)):
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED")
+        if record["state"] == "COMMITTED" and not rollback:
+            rt.trusted_path(manifest)
+            raw = frp.read_private(manifest)
+            if inventory["backhaul"] != "ready":
+                raise Hold("RC9_BACKHAUL_INDEPENDENT_INVENTORY_DRIFT")
+            if inventory["frp"] == "ready":
+                frp_receipt = frp.state()
+                if frp_receipt["state"] != "COMMITTED":
+                    raise Hold("RC9_BACKHAUL_FRP_RECEIPT_NOT_COMMITTED")
+                frp.verify_file(frp_receipt)
+                declared = _parse_rc7_manifest_snapshot(raw)["engines"]
+                if set(declared) != {"frp", "backhaul"} or declared["backhaul"] != after["engines"]["backhaul"]:
+                    raise Hold("RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT")
+            elif inventory["frp"] != "not-installed" or raw != candidate:
+                raise Hold("RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT")
+            return
+    if not apply and not rollback:
+        raise Hold("RC9_BACKHAUL_INDEPENDENT_NOT_COMMITTED")
+
+    if apply:
+        rt.rc9_signed_release()
+    if (os.path.lexists(frp.JOURNAL) and frp.state()["state"] != "ROLLED_BACK"
+            or os.path.lexists(RC7_RETAINED_JOURNAL)):
+        raise Hold("RC9_BACKHAUL_REQUIRES_INDEPENDENT_BASELINE")
+    rt.no_tunnels()
+    if any(row.split(maxsplit=1)[-1] == "backhaul" for row in
+           rt.run(["docker", "top", "smite-node", "-eo", "comm"]).splitlines()[1:]):
+        raise Hold("RC9_BACKHAUL_TUNNEL_STILL_RUNNING")
+    rt.saved_tunnels_only()
+    prior, engines = frp.manifest_before()
+    if inventory["frp"] != "not-installed":
+        raise Hold("RC9_BACKHAUL_REQUIRES_INDEPENDENT_BASELINE")
+    if rollback:
+        if record is None:
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_REQUIRED")
+        if os.path.lexists(ingress.STATE):
+            raise Hold("RC9_BACKHAUL_INGRESS_ROLLBACK_REQUIRED")
+        original = None if record["old"] is None else bytes.fromhex(record["old"])
+        if original is not None and _parse_rc7_manifest_snapshot(original)["engines"]:
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED")
+        if prior == candidate:
+            if original is None:
+                manifest.unlink()
+                rt.fsync_dir(manifest.parent)
+            else:
+                ingress.replace_bytes(rt, manifest, original, 0o600)
+        elif prior != original:
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT")
+        if _rc9_independent_inventory(frp)["backhaul"] != "not-installed":
+            raise Hold("RC9_BACKHAUL_ROLLBACK_INVENTORY_UNVERIFIED")
+        record["state"] = "ROLLED_BACK"
+        save()
+        return
+    if (prior == candidate and record is not None and record["state"] == "PREPARED"
+            and inventory["backhaul"] == "ready"):
+        # Recover an interrupted write after a fresh signed read of the exact bytes.
+        record["state"] = "COMMITTED"
+        save()
+        return
+    if engines or inventory["backhaul"] != "not-installed" or (prior and len(prior) > 1024):
+        raise Hold("RC9_BACKHAUL_REQUIRES_INDEPENDENT_BASELINE")
+    old = None if prior is None else prior.hex()
+    if prior is not None:
+        _parse_rc7_manifest_snapshot(prior)
+    if record is None:
+        record = {"schema": 1, "role": role, "state": "PREPARED",
+                  "old": old, "new": frp.sha(candidate)}
+        save(create=True)
+    elif record["old"] != old:
+        raise Hold("RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT")
+    elif record["state"] == "ROLLED_BACK":
+        record["state"] = "PREPARED"
+        save()
+    if not os.path.lexists(manifest.parent):
+        manifest.parent.mkdir(mode=0o700)
+        rt.fsync_dir(manifest.parent.parent)
+    frp.safe_dir(manifest.parent)
+    ingress.replace_bytes(rt, manifest, candidate, 0o600, create=prior is None)
+    try:
+        if (_rc9_independent_inventory(frp) != {**inventory, "backhaul": "ready"}
+                or _rc7_node_runtime_fingerprint(rt.inspect_container("smite-node")) != identity
+                or frp.read_private(manifest) != candidate):
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_POSTCOMMIT_DRIFT")
+    except Exception:
+        if frp.read_private(manifest) == candidate:
+            if prior is None:
+                manifest.unlink()
+                rt.fsync_dir(manifest.parent)
+            else:
+                ingress.replace_bytes(rt, manifest, prior, 0o600)
+        raise
+    record["state"] = "COMMITTED"
+    save()
+
+
 def main() -> int:
-    arg = argparse.ArgumentParser(description="Managed Backhaul: safe review, CI-only activation")
+    arg = argparse.ArgumentParser(description=__doc__)
     arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback",
-                                        "verify-rc7-bundle", "verify-rc9-bundle"))
+                                        "verify-rc7-bundle", "verify-rc9-bundle",
+                                        "install-rc9-independent", "rollback-rc9-independent"))
     arg.add_argument("--node-dir", type=Path, default=NODE_DEFAULT)
     arg.add_argument("--role", choices=("ir", "foreign"))
     arg.add_argument("--auto-role", action="store_true",
@@ -887,11 +1044,25 @@ def main() -> int:
                      help="Verify already committed retained Backhaul, read-only; never install")
     arg.add_argument("--stage", type=Path)
     arg.add_argument("--lab-root", type=Path)
+    arg.add_argument("--confirm-snapshot-and-console", default="")
     args = arg.parse_args()
     try:
         if args.expect_backhaul_ready and args.action not in ("verify-rc7-bundle", "verify-rc9-bundle"):
             raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
-        if args.action in ("verify-rc7-bundle", "verify-rc9-bundle"):
+        if args.action in ("install-rc9-independent", "rollback-rc9-independent"):
+            if (args.role is None or args.auto_role or args.node_dir != NODE_DEFAULT
+                    or args.stage is not None or args.lab_root is not None):
+                raise Hold("RC9_BACKHAUL_INDEPENDENT_SCOPE_UNTRUSTED")
+            apply = args.action == "install-rc9-independent"
+            operation = "INSTALL" if apply else "ROLLBACK"
+            challenge = operation + "-RC9-BACKHAUL-" + args.role.upper()
+            if (args.confirm_snapshot_and_console != "SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED"
+                    or not sys.stdin.isatty()
+                    or input(f"Type {challenge}: ").strip() != challenge):
+                raise Hold("RC9_BACKHAUL_APPROVAL_REQUIRED")
+            _rc9_independent_operation(args.role, apply=apply, rollback=not apply)
+            print(f"RC9_BACKHAUL_{operation}=PASS_SIGNED_INDEPENDENT")
+        elif args.action in ("verify-rc7-bundle", "verify-rc9-bundle"):
             rc9 = args.action == "verify-rc9-bundle"
             if rc9 and (args.node_dir != NODE_DEFAULT or args.stage is not None
                         or args.lab_root is not None):
@@ -902,7 +1073,10 @@ def main() -> int:
                     if args.auto_role else args.role)
             if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
-            if rc9:
+            if rc9 and args.expect_backhaul_ready and os.path.lexists(RC9_INDEPENDENT_RECEIPT):
+                _rc9_independent_operation(role)
+                print("RC9_BACKHAUL_ENGINE=READY_SIGNED_INVENTORY")
+            elif rc9:
                 _format(_verify_bundled_backhaul(role, rc9=True, expected_backhaul_state=(
                     "ready" if args.expect_backhaul_ready else "not-installed")))
             else:
