@@ -63,7 +63,7 @@ else
 fi
 """)
    if version == 0:
-    self.assertIn('1) Backhaul — Install signed engine and set up HTTPS/443 (RC9)',out)
+    self.assertIn('1) Backhaul — Set up signed engine, HTTPS/443 and Smite publishing (RC9)',out)
     self.assertNotIn('7) Backhaul',out)
     self.assertIn('ENGINE ir',out)
     self.assertIn('Invalid choice',out)
@@ -79,6 +79,29 @@ smite_tw_rc9_backhaul_tunnel() { echo "TUNNEL $1"; }
 smite_tw_rc9_backhaul_menu kh
 """)
   self.assertEqual(out.strip(),'ENGINE kh')
+ def test_backhaul_publisher_runs_only_after_iran_ingress(self):
+  fixture=SOURCE.replace('[ "$EUID" = 0 ] && [ -t 0 ]', 'true')
+  for role, status, enter in [('ir', 0, ''), ('kh', 0, ''), ('ir', 2, 'n\n')]:
+   script=r'''
+SMITE_TW_DIR="$PWD/modules"
+smite_tw_validate_host() { :; }
+python3() {
+    case "$2" in
+        *backhaul-ingress.py) echo INGRESS; return "$ingress_status" ;;
+        *retained-panel.py) echo "PANEL $3" ;;
+    esac
+}
+'''
+   command=f'ingress_status={status}\nprintf %s {shlex.quote(enter)} | smite_tw_rc9_backhaul_setup {role}\n'
+   result=subprocess.run(['bash','-c',fixture+'\n'+script+command],
+                         cwd=ROOT,stderr=subprocess.STDOUT,stdout=subprocess.PIPE,text=True)
+   out=result.stdout
+   self.assertEqual(result.returncode,0,out)
+   self.assertIn('INGRESS',out)
+   self.assertEqual('PANEL setup' in out,role=='ir' and status==0)
+   if 'PANEL setup' in out:
+    self.assertLess(out.index('INGRESS'),out.index('PANEL setup'))
+    self.assertIn('Tunnels → Create Tunnel → Backhaul',out)
  def test_next_back_status_no_apply_and_all_role_steps(self):
   for role,words in [('ir',['Panel','Gateway','FRPS Owner','Child','XHTTP']),('kh',['Smite Node','Sanaei','Inbound','FRPC','Signed KH Inventory'])]:
    out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_pause(){ :; }; smite_tw_stage_status(){ echo PASS:mock-observation; }; docker(){ echo BUG; }; python3(){ echo BUG; }; printf 's\\nn\\nn\\nn\\nn\\nb\\nn\\n0\\n' | smite_tw_guided_frp "+role)

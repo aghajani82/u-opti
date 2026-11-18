@@ -1044,17 +1044,17 @@ smite_tw_rc9_frp_setup() (
 )
 
 smite_tw_rc9_backhaul_setup() (
-    local role="$1" runtime_role=foreign mode=F response
+    local role="$1" runtime_role=foreign mode=F response steps=2
     smite_tw_validate_host "$role" || return 2
     [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
-    if [ "$role" = ir ]; then runtime_role=ir; mode=I; fi
+    if [ "$role" = ir ]; then runtime_role=ir; mode=I; steps=3; fi
     if [ ! -s "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh" ] ||
        [ -L "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh" ]; then
         echo 'HOLD: Managed Backhaul menu helper missing.'
         return 2
     fi
     source "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh"
-    echo '===== Step 1/2 · Install signed Backhaul engine ====='
+    echo "===== Step 1/$steps · Install signed Backhaul engine ====="
     if python3 -B "$SMITE_MANAGED_BACKHAUL_CONTROL" verify-rc9-bundle \
         --role "$runtime_role" --expect-backhaul-ready >/dev/null 2>&1; then
         echo 'The signed Backhaul engine is already enrolled.'
@@ -1062,7 +1062,7 @@ smite_tw_rc9_backhaul_setup() (
         echo 'Signed Backhaul engine readiness has not been verified.'
         smite_managed_bh_rc9_retained "$mode" || return 2
     fi
-    echo '===== Step 2/2 · Verify or set up Backhaul control on HTTPS/443 ====='
+    echo "===== Step 2/$steps · Verify or set up Backhaul control on HTTPS/443 ====="
     if ! python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-ingress.py" verify --role "$runtime_role"; then
         if [ "$role" = kh ]; then
             echo 'Complete this Backhaul setup on Iran first.'
@@ -1072,6 +1072,11 @@ smite_tw_rc9_backhaul_setup() (
         python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-ingress.py" apply --role "$runtime_role" || return 2
     fi
     echo 'Backhaul engine and HTTPS/443 control verified on this host.'
+    if [ "$role" = ir ]; then
+        echo '===== Step 3/3 · Enable Backhaul publishing in Smite ====='
+        python3 -B "$SMITE_TW_DIR/smite-rc9-retained-panel.py" setup || return 2
+        echo 'Once both hosts are ready, open Smite → Tunnels → Create Tunnel → Backhaul.'
+    fi
 )
 
 smite_tw_rc9_backhaul_tunnel() {
@@ -1100,7 +1105,7 @@ smite_tw_rc9_backhaul_menu() {
         smite_tw_rc9_backhaul_setup "$role"
         return
     fi
-    echo '1) Install / verify signed Backhaul engine and HTTPS/443'
+    echo '1) Set up signed Backhaul, HTTPS/443 and Smite publishing'
     echo '2) Preview / publish / recover an XHTTP tunnel'
     echo '0) Back'
     read -rp 'Choose [0-2] (default 1): ' choice || return
@@ -1125,7 +1130,10 @@ smite_tw_menu() {
         advanced_option="Advanced FRP — original setup and recovery"
         if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
             rc9=yes
-            backhaul_option="Backhaul — Install signed engine and set up HTTPS/443 (RC9)"
+            backhaul_option="Backhaul — Set up signed engine and HTTPS/443 (RC9)"
+            if [ "$role" = ir ]; then
+                backhaul_option="Backhaul — Set up signed engine, HTTPS/443 and Smite publishing (RC9)"
+            fi
             frp_option="FRP — Install signed FRP engine (RC9)"
             advanced_option="FRP — Check status / approve XHTTP routes"
         fi

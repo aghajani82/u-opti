@@ -205,8 +205,7 @@ def continuity(rt, route):
             ticks = Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19]
             tracked.append([int(pid), ticks, command])
     owner, ports = route._frps_socket_inventory()
-    rt.need(any(item[2] == "backhaul" for item in tracked)
-            and any(item[0] == owner and item[2] == "frps" for item in tracked),
+    rt.need(any(item[0] == owner and item[2] == "frps" for item in tracked),
             "RETAINED_PANEL_EXPECTED_TUNNELS_NOT_RUNNING")
     return [node["Id"], node["State"]["StartedAt"], sorted(tracked), sorted(ports)]
 
@@ -247,7 +246,15 @@ def check_published_routes(rt, ingress, worker, route, domain):
                 and worker.probe(rt, domain, port, xhttp, public=True),
                 "RETAINED_PANEL_ROUTE_UNVERIFIED")
         found = True
-    rt.need(found, "RETAINED_PANEL_EXPECTED_TUNNELS_NOT_RUNNING")
+    return found
+
+
+def verified_continuity(rt, ingress, worker, route, domain):
+    published = check_published_routes(rt, ingress, worker, route, domain)
+    live = continuity(rt, route)
+    rt.need(published == any(item[2] == "backhaul" for item in live[2]),
+            "RETAINED_PANEL_BACKHAUL_RUNTIME_MISMATCH")
+    return live
 
 
 def prove_health(edge, ingress, worker, *, candidate):
@@ -300,8 +307,8 @@ def recover(edge, ingress, worker, route, doc, rec):
     if not old_healthy:
         recreate(rt, old)
     prove_health(edge, ingress, worker, candidate=False)
-    check_published_routes(rt, ingress, worker, route, doc["domain"])
-    rt.need(continuity(rt, route) == live, "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
+    rt.need(verified_continuity(rt, ingress, worker, route, doc["domain"]) == live,
+            "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
     overlay(rt).unlink(missing_ok=True)
     rt.fsync_dir(overlay(rt).parent)
     rec["phase"] = "ROLLED_BACK"
@@ -314,14 +321,13 @@ def apply(edge, ingress, worker, route, doc):
         rec = read_record(rt)
         if rec["phase"] == "COMMITTED":
             prove_health(edge, ingress, worker, candidate=True)
-            check_published_routes(rt, ingress, worker, route, doc["domain"])
+            verified_continuity(rt, ingress, worker, route, doc["domain"])
             worker.enable_panel_queue(edge, ingress)
             return
         rt.need(rec["phase"] == "ROLLED_BACK", "RETAINED_PANEL_RECOVER_REQUIRED")
     else:
         rec = None
     ingress.run_operation(edge, "ir", "verify")
-    check_published_routes(rt, ingress, worker, route, doc["domain"])
     rt.need(not os.path.lexists(overlay(rt)), "RETAINED_PANEL_BASELINE_CHANGED")
     compose_commands(rt, doc, installed=False)
     signed_release(rt)
@@ -331,7 +337,7 @@ def apply(edge, ingress, worker, route, doc):
     rt.need(revision == SOURCE, "RETAINED_PANEL_IMAGE_REVISION_CHANGED")
     image_id = rt.run(["docker", "image", "inspect", "-f", "{{.Id}}", IMAGE])
     rt.need(re.fullmatch("sha256:[a-f0-9]{64}", image_id), "RETAINED_PANEL_IMAGE_ID_INVALID")
-    live = continuity(rt, route)
+    live = verified_continuity(rt, ingress, worker, route, doc["domain"])
     if rec is not None:
         rt.archive_restored_journal(STATE)
     STATE.mkdir(mode=0o700)
@@ -345,8 +351,8 @@ def apply(edge, ingress, worker, route, doc):
         _, candidate = compose_commands(rt, doc, installed=True)
         recreate(rt, candidate)
         prove_health(edge, ingress, worker, candidate=True)
-        check_published_routes(rt, ingress, worker, route, doc["domain"])
-        rt.need(continuity(rt, route) == rec["services"], "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
+        rt.need(verified_continuity(rt, ingress, worker, route, doc["domain"]) == rec["services"],
+                "RETAINED_PANEL_TUNNEL_CONTINUITY_CHANGED")
         rec["phase"] = "COMMITTED"
         save(rt, ingress, rec)
         worker.enable_panel_queue(edge, ingress)
@@ -358,9 +364,38 @@ def apply(edge, ingress, worker, route, doc):
         raise rt.Hold("RETAINED_PANEL_APPLY_FAILED_RESTORED") from exc
 
 
+def confirm(rt, action):
+    challenge = action.upper() + "-RC9-PANEL-ONLY"
+    rt.need(sys.stdin.isatty() and input(f"Type {challenge}: ").strip() == challenge,
+            "OPERATOR_CANCELLED")
+
+
+def setup(edge, ingress, worker, route, doc):
+    rt = edge.rt
+    if os.path.lexists(STATE) and read_record(rt)["phase"] == "COMMITTED":
+        ingress.run_operation(edge, "ir", "verify")
+        worker.queue(rt, "check")
+        verified_continuity(rt, ingress, worker, route, doc["domain"])
+        timer, paths = worker.panel_queue_units(ingress, rt)
+        if all(path.is_file() for path in paths):
+            try:
+                rt.run(["systemctl", "is-enabled", "--quiet", timer], timeout=10)
+                rt.run(["systemctl", "is-active", "--quiet", timer], timeout=10)
+            except rt.Hold:
+                pass
+            else:
+                return "ALREADY_READY"
+        print("Enable Backhaul publishing in the installed Panel.")
+    else:
+        print("Upgrade the Iran Panel and enable Backhaul publishing. The Panel restarts briefly.")
+    confirm(rt, "apply")
+    apply(edge, ingress, worker, route, doc)
+    return "APPLIED"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "apply", "rollback"))
+    parser.add_argument("action", choices=("plan", "apply", "rollback", "setup"))
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location("retained_panel_worker", HERE / "smite-rc9-backhaul-xhttp.py")
     worker = importlib.util.module_from_spec(spec)
@@ -372,28 +407,30 @@ def main():
     rt = edge.rt
     try:
         rt.need(os.geteuid() == 0, "ROOT_REQUIRED")
-        if args.action != "plan":
-            challenge = args.action.upper() + "-RC9-PANEL-ONLY"
-            rt.need(sys.stdin.isatty() and input(f"Type {challenge}: ").strip() == challenge,
-                    "OPERATOR_CANCELLED")
+        if args.action in ("apply", "rollback"):
+            confirm(rt, args.action)
         with rt.locked(), worker.route_lock(route):
             doc = rt.record()
             rt.need(doc["role"] == "ir" and doc["state"] == "COMMITTED",
                     "RETAINED_PANEL_REQUIRES_COMMITTED_IR_RC9")
-            if args.action == "apply":
+            if args.action == "setup":
+                rt.load("smite-stage15-xhttp-bridge.py").verify()
+                outcome = setup(edge, ingress, worker, route, doc)
+            elif args.action == "apply":
                 apply(edge, ingress, worker, route, doc)
+                outcome = "APPLIED"
             elif args.action == "rollback":
                 rec = read_record(rt)
                 if rec["phase"] != "ROLLED_BACK":
                     recover(edge, ingress, worker, route, doc, rec)
+                outcome = "ROLLED_BACK"
             else:
                 ingress.run_operation(edge, "ir", "verify")
-                check_published_routes(rt, ingress, worker, route, doc["domain"])
-                continuity(rt, route)
+                verified_continuity(rt, ingress, worker, route, doc["domain"])
                 compose_commands(rt, doc, installed=os.path.lexists(overlay(rt)))
                 signed_release(rt)
-        print("RETAINED_RC9_PANEL=" + {"plan": "READY", "apply": "APPLIED",
-                                      "rollback": "ROLLED_BACK"}[args.action])
+                outcome = "READY"
+        print("RETAINED_RC9_PANEL=" + outcome)
         return 0
     except Exception as exc:
         reason = str(exc)

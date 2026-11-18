@@ -119,6 +119,38 @@ class RetainedPanel(unittest.TestCase):
             ["docker", "compose", "up", "-d", "--no-deps", "--no-build", "--pull", "never",
              "--force-recreate", "smite-panel"], timeout=180)
 
+    def test_first_tunnel_and_retained_routes_are_consistent_with_runtime(self):
+        for published, running in ((False, False), (True, True),
+                                   (False, True), (True, False)):
+            live = ["node", "start", [[1, "tick", "backhaul"]] if running else [], []]
+            with self.subTest(published=published, running=running), \
+                    patch.object(panel, "check_published_routes", return_value=published), \
+                    patch.object(panel, "continuity", return_value=live):
+                if published == running:
+                    self.assertEqual(panel.verified_continuity(self.rt, None, None, None, ""), live)
+                else:
+                    with self.assertRaisesRegex(runtime.Hold, "RETAINED_PANEL_BACKHAUL_RUNTIME_MISMATCH"):
+                        panel.verified_continuity(self.rt, None, None, None, "")
+
+    def test_setup_preserves_running_publisher_and_confirms_changes(self):
+        edge = SimpleNamespace(rt=self.rt)
+        ingress, worker = Mock(), Mock()
+        self.doc["domain"] = "panel.example.test"
+        self.rt.Hold = runtime.Hold
+        self.wss.touch()
+        worker.panel_queue_units.return_value = ("publisher.timer", [self.wss])
+        with patch.object(panel, "STATE", self.wss), \
+                patch.object(panel, "read_record", return_value=self.record), \
+                patch.object(panel, "verified_continuity"), \
+                patch.object(panel, "confirm") as confirm, patch.object(panel, "apply") as apply:
+            self.assertEqual(panel.setup(edge, ingress, worker, None, self.doc), "ALREADY_READY")
+            confirm.assert_not_called()
+            apply.assert_not_called()
+            self.rt.run.side_effect = runtime.Hold("EXECUTION_FAILED")
+            self.assertEqual(panel.setup(edge, ingress, worker, None, self.doc), "APPLIED")
+            confirm.assert_called_once_with(self.rt, "apply")
+            apply.assert_called_once_with(edge, ingress, worker, None, self.doc)
+
 
 if __name__ == "__main__":
     unittest.main()
