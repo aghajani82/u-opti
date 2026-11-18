@@ -109,5 +109,7 @@ def exercise(work, baseline_source):
 
 for image in (original, panel.IMAGE):
     rt.run(["docker", "pull", image], timeout=300)
-with tempfile.TemporaryDirectory(prefix="retained-panel-docker-", dir="/opt") as temp:
+trusted_lab = Path("/root")
+rt.trusted_path(trusted_lab, directory=True)
+with tempfile.TemporaryDirectory(prefix="retained-panel-docker-", dir=trusted_lab) as temp:
     exercise(Path(temp), Path(sys.argv[1]))
