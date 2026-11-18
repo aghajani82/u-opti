@@ -410,7 +410,7 @@ def main():
         edge.select_rc9()
         if args.action == "apply":
             control = edge.rt.load("smite-managed-backhaul-control.py")
-            control._verify_bundled_backhaul(args.role, rc9=True, expected_backhaul_state="ready")
+            control.verify_rc9_backhaul_ready(args.role)
         with edge.rt.locked():
             result = run_operation(edge, args.role, args.action)
         print("RC9_BACKHAUL_CONTROL_" + args.role.upper() + "=" + result)

@@ -1035,6 +1035,14 @@ def _rc9_independent_locked(frp, ingress, role, *, apply, rollback):
     save()
 
 
+def verify_rc9_backhaul_ready(role):
+    """Verify the receipt used to enroll the signed RC9 engine on this host."""
+    if os.path.lexists(RC9_INDEPENDENT_RECEIPT):
+        _rc9_independent_operation(role)
+        return {"RC9_BACKHAUL_ENGINE": "READY_SIGNED_INVENTORY"}
+    return _verify_bundled_backhaul(role, rc9=True, expected_backhaul_state="ready")
+
+
 def main() -> int:
     arg = argparse.ArgumentParser(description=__doc__)
     arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback",
@@ -1077,12 +1085,10 @@ def main() -> int:
                     if args.auto_role else args.role)
             if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
-            if rc9 and args.expect_backhaul_ready and os.path.lexists(RC9_INDEPENDENT_RECEIPT):
-                _rc9_independent_operation(role)
-                print("RC9_BACKHAUL_ENGINE=READY_SIGNED_INVENTORY")
+            if rc9 and args.expect_backhaul_ready:
+                _format(verify_rc9_backhaul_ready(role))
             elif rc9:
-                _format(_verify_bundled_backhaul(role, rc9=True, expected_backhaul_state=(
-                    "ready" if args.expect_backhaul_ready else "not-installed")))
+                _format(_verify_bundled_backhaul(role, rc9=True))
             else:
                 _format(verify_rc7_bundled_backhaul(
                     role, expected_backhaul_state=(

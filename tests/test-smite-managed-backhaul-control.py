@@ -1335,6 +1335,19 @@ class RC9IndependentEnrollment(unittest.TestCase):
         self.assertFalse(self.receipt.exists())
         self.assertFalse(self.manifest.exists())
 
+    def test_shared_readiness_uses_independent_receipt_before_legacy_probe(self):
+        with patch.object(control, "_verify_bundled_backhaul") as legacy:
+            control.verify_rc9_backhaul_ready("ir")
+            legacy.assert_called_once_with("ir", rc9=True, expected_backhaul_state="ready")
+            legacy.reset_mock()
+            control._rc9_independent_operation("ir", apply=True)
+            self.assertEqual(control.verify_rc9_backhaul_ready("ir"),
+                             {"RC9_BACKHAUL_ENGINE": "READY_SIGNED_INVENTORY"})
+            self.receipt.write_text("{}")
+            with self.assertRaisesRegex(control.Hold, "RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED"):
+                control.verify_rc9_backhaul_ready("ir")
+            legacy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2,6 +2,7 @@
 """RC9 Backhaul ingress tests with disposable files and stubbed host commands."""
 
 import importlib.util
+from contextlib import nullcontext
 from pathlib import Path
 import re
 import tempfile
@@ -45,6 +46,25 @@ class IngressTest(unittest.TestCase):
             patcher = patch.object(ingress, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def test_apply_command_uses_shared_readiness_to_admit_either_role(self):
+        control = SimpleNamespace(verify_rc9_backhaul_ready=Mock())
+        self.rt.load = Mock(return_value=control)
+        self.rt.locked = nullcontext
+        self.edge.select_rc9 = Mock()
+        for role in ("ir", "foreign"):
+            with self.subTest(role=role), \
+                    patch.object(ingress.sys, "argv", ["ingress", "apply", "--role", role]), \
+                    patch.object(ingress.sys.stdin, "isatty", return_value=True), \
+                    patch("builtins.input", return_value=f"APPLY-RC9-BACKHAUL-INGRESS-{role.upper()}"), \
+                    patch.object(ingress.os, "geteuid", return_value=0), \
+                    patch.object(ingress.importlib.util, "spec_from_file_location",
+                                 return_value=SimpleNamespace(loader=Mock())), \
+                    patch.object(ingress.importlib.util, "module_from_spec", return_value=self.edge), \
+                    patch.object(ingress, "run_operation", return_value="APPLIED") as operation:
+                self.assertEqual(ingress.main(), 0)
+                control.verify_rc9_backhaul_ready.assert_called_with(role)
+                operation.assert_called_once_with(self.edge, role, "apply")
 
     def test_ir_apply_replay_and_rollback(self):
         self.assertEqual(ingress.run_operation(self.edge, "ir", "plan"), "PLAN_READ_ONLY")
