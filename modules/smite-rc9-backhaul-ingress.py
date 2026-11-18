@@ -24,6 +24,9 @@ MARKER = HEADER + b": peer-edge"
 LOCATION = re.compile(rb"(?m)^\s*location\b[^\n{]*(?:/channel\b|/tunnel\b)")
 ANCHOR = b"    location / {\n"
 CONTROL_PATHS = ("/channel", "/tunnel/")
+CONTROL_SLOT = re.compile(r"[0-9a-f]{32}")
+CONTROL_RESERVED_PORTS = {3080, 7000, 8000, 8443, 8444, 8888, 13080, 18476}
+CONTROL_VARIABLE = "$uopti_backhaul_control_port"
 
 
 class Hold(Exception):
@@ -57,7 +60,7 @@ def render_fragment(*args):
     return result.stdout
 
 
-def render_ir(before):
+def render_ir(before, slots=None):
     need(before.count(ANCHOR) == 1 and LOCATION.search(before) is None
          and HEADER.lower() not in before.lower(), "BACKHAUL_CONTROL_LOCATION_CONFLICT")
     control = render_fragment("--render-ir-control", "3080")
@@ -68,7 +71,25 @@ def render_ir(before):
         + b"        proxy_hide_header " + HEADER + b";\n"
         + b"        add_header " + HEADER + b" peer-edge always;\n",
     )
-    return before.replace(ANCHOR, control + b"\n" + ANCHOR, 1)
+    if slots is None:
+        return before.replace(ANCHOR, control + b"\n" + ANCHOR, 1)
+
+    # Only the public slot identifier is admitted to Nginx configuration.
+    # Each Backhaul process still authenticates its complete random token.
+    need(type(slots) is dict and slots and all(
+        type(key) is str and CONTROL_SLOT.fullmatch(key)
+        and type(port) is int and 1024 <= port <= 65535
+        and port not in CONTROL_RESERVED_PORTS for key, port in slots.items()
+    ) and len(set(slots.values())) == len(slots), "BACKHAUL_CONTROL_SLOTS_INVALID")
+    need(CONTROL_VARIABLE.encode() not in before, "BACKHAUL_CONTROL_LOCATION_CONFLICT")
+    mapping = [f"map $http_authorization {CONTROL_VARIABLE} {{", "    default 3080;"]
+    for slot, port in sorted(slots.items()):
+        mapping.append(f'    "~^Bearer[ ]uopti-bh-{slot}[.][0-9a-f]{{64}}$" {port};')
+    mapping.extend(['    "~^Bearer[ ]uopti-bh-" 0;', '}', ''])
+    dispatch = (f"        if ({CONTROL_VARIABLE} = 0) {{ return 403; }}\n"
+                f"        proxy_pass http://127.0.0.1:{CONTROL_VARIABLE};\n").encode()
+    control = control.replace(upstream, dispatch)
+    return "\n".join(mapping).encode() + before.replace(ANCHOR, control + b"\n" + ANCHOR, 1)
 
 
 def render_foreign(domain, upstream):
@@ -97,9 +118,10 @@ def read_trusted(rt, path, mode):
 def validate_record(rt):
     try:
         doc = json.loads(read_trusted(rt, STATE, 0o600))
-        need(isinstance(doc, dict) and doc.keys() == {
-            "schema", "phase", "role", "domain", "binding", "before", "after", "upstream",
-        }, "BACKHAUL_INGRESS_JOURNAL_INVALID")
+        fields = {"schema", "phase", "role", "domain", "binding", "before", "after", "upstream"}
+        need(isinstance(doc, dict) and (doc.keys() == fields
+             or (doc.keys() == fields | {"slots"} and doc.get("role") == "ir"
+                 and type(doc["slots"]) is dict)), "BACKHAUL_INGRESS_JOURNAL_INVALID")
         need(type(doc["schema"]) is int and doc["schema"] == 1
              and doc["phase"] in ("PREPARED", "COMMITTED")
              and doc["role"] in ("ir", "foreign")
@@ -116,7 +138,7 @@ def validate_record(rt):
 def check_ir_overlay(rt, target, edge_doc, before):
     """Called by the FRP/Stage15 verifier. Bind the exact alternate and journal."""
     journal = validate_record(rt)
-    after = render_ir(before)
+    after = render_ir(before, journal.get("slots"))
     require_record(journal, "ir", edge_doc["domain"], edge_doc["alternate"], before, after)
     need(journal["phase"] == "COMMITTED", "BACKHAUL_INGRESS_RECOVERY_REQUIRED")
     need(read_trusted(rt, target, 0o644) == after,
@@ -241,7 +263,7 @@ def run_operation(edge, role, action):
     domain, binding, target, before = runtime_context(edge, role)
     journal = validate_record(rt) if os.path.lexists(STATE) else None
     if role == "ir":
-        after = render_ir(before)
+        after = render_ir(before, journal.get("slots") if journal else None)
         upstream = None
     else:
         upstream = valid_ipv4(journal["upstream"]) if journal else resolve_panel(rt, domain)
@@ -251,6 +273,7 @@ def run_operation(edge, role, action):
     if journal:
         require_record(journal, role, domain, binding, before, after)
         if action == "rollback":
+            need(not journal.get("slots"), "BACKHAUL_SHARED_CONTROL_SLOTS_ACTIVE")
             restore(edge, role, domain, target, before, after, journal)
             return "RESTORED"
         need(journal["phase"] == "COMMITTED", "BACKHAUL_INGRESS_RECOVERY_REQUIRED")

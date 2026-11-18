@@ -82,9 +82,12 @@ def spawn_nginx(stack: ExitStack, root: Path, config: Path) -> None:
         raise AssertionError("isolated Nginx exited unexpectedly")
 
 
-def mock_upstream(stack: ExitStack, label: str, local_port: int):
+def mock_upstream(stack: ExitStack, label: str, local_port: int, *, authorization=None):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if authorization and self.headers.get("Authorization") != authorization:
+                self.send_error(401)
+                return
             body = f'{label}|{self.path}|{self.headers.get("Upgrade", "")}'.encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
@@ -102,7 +105,7 @@ def mock_upstream(stack: ExitStack, label: str, local_port: int):
 
 
 def request(tls: bool, port_number: int, path: str, *, upgrade: bool = False,
-            trusted_ca: Path | None = None, marked: bool = False):
+            trusted_ca: Path | None = None, marked: bool = False, authorization=None):
     if tls:
         assert trusted_ca is not None
         context = ssl.create_default_context(cafile=str(trusted_ca))
@@ -118,6 +121,8 @@ def request(tls: bool, port_number: int, path: str, *, upgrade: bool = False,
         conn = HTTPConnection("127.0.0.1", port_number, timeout=3)
     try:
         headers = {"Host": "ir.example.test"}
+        if authorization is not None:
+            headers["Authorization"] = authorization
         if upgrade:
             headers.update({"Upgrade": "websocket", "Connection": "Upgrade"})
         conn.request("GET", path, headers=headers)
@@ -159,7 +164,9 @@ class Shared443Regression(unittest.TestCase):
                             "-keyout", str(base / "wrong-ca.key"), "-out", str(other)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             (ir_https, ir_default, kh_bridge, kh_bad, frp_port,
-             bh_port, child_port, panel_port, data_port) = distinct_ports(9)
+             bh_port, child_port, panel_port, data_port, second_port) = distinct_ports(10)
+            slot = "0" * 32
+            second_token = f"Bearer uopti-bh-{slot}." + "a" * 64
             # Test-only rewrite of the canonical loopback ports. Never export
             # or apply this configuration to a host or to a live namespace.
             frp = frp.replace("127.0.0.1:7000", f"127.0.0.1:{frp_port}")
@@ -179,8 +186,8 @@ class Shared443Regression(unittest.TestCase):
         proxy_pass http://127.0.0.1:{panel_port};
     }}
             }}"""
-            ir = INGRESS["render_ir"](ir.encode()).decode().replace(
-                "127.0.0.1:3080", f"127.0.0.1:{bh_port}")
+            ir = INGRESS["render_ir"](ir.encode(), {slot: second_port}).decode().replace(
+                "default 3080;", f"default {bh_port};")
             data_route = INGRESS["render_fragment"](
                 "--render-ir-xhttp", "56053", "/56053/web", "ir.example.test",
             ).decode().replace("127.0.0.1:56053", f"127.0.0.1:{data_port}")
@@ -210,6 +217,7 @@ server {{
             kh_dir.mkdir()
             with ExitStack() as stack:
                 backhaul = mock_upstream(stack, "backhaul", bh_port)
+                second = mock_upstream(stack, "second-backhaul", second_port, authorization=second_token)
                 for name, p in (("frp", frp_port), ("child20182", child_port),
                                 ("panel", panel_port), ("backhaul-data", data_port)):
                     mock_upstream(stack, name, p)
@@ -244,6 +252,27 @@ server {{
                 for path in ("/56053/web", "/56053/web/"):
                     status, body = request(True, ir_default, path, trusted_ca=cert)
                     self.assertEqual((status, body), (200, "backhaul-data|/56053/web/|"))
+                # Both control paths use the same Foreign bridge and split
+                # by slot. Wrong secret suffixes reach only the selected
+                # backend and are still rejected by its authentication.
+                for path in ("/channel", "/tunnel/alpha"):
+                    status, body = request(False, kh_bridge, path, upgrade=True, marked=True,
+                                           authorization=second_token)
+                    self.assertEqual((status, body), (200, f"second-backhaul|{path}|websocket"))
+                    status, _ = request(False, kh_bridge, path, marked=True,
+                                        authorization=second_token[:-1] + "b")
+                    self.assertEqual(status, 401)
+                    status, _ = request(False, kh_bridge, path, marked=True,
+                                        authorization=second_token.replace(slot, "1" * 32))
+                    self.assertEqual(status, 403)
+
+                second.shutdown()
+                second.server_close()
+                status, _ = request(False, kh_bridge, "/channel", marked=True,
+                                    authorization=second_token)
+                self.assertEqual(status, 502)
+                status, body = request(False, kh_bridge, "/channel", upgrade=True, marked=True)
+                self.assertEqual((status, body), (200, "backhaul|/channel|websocket"))
                 # An idle Backhaul listener is expected during ingress setup.
                 # The IR marker still traverses the verified TLS bridge.
                 backhaul.shutdown()

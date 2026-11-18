@@ -61,6 +61,33 @@ class IngressTest(unittest.TestCase):
         self.assertFalse(self.state.exists())
         self.assertEqual(self.alt.read_bytes(), self.before)
 
+    def test_ir_verifies_only_exact_committed_slot_map(self):
+        self.assertEqual(ingress.run_operation(self.edge, "ir", "apply"), "APPLIED")
+        legacy = self.alt.read_bytes()
+        journal = ingress.validate_record(self.rt)
+        slots = {"a" * 32: 3081, "b" * 32: 3082}
+        after = ingress.render_ir(self.before, slots)
+        self.assertIn(b"default 3080;", after)
+        self.assertIn(b"proxy_pass http://127.0.0.1:7000;", legacy)
+        self.assertIn(b"proxy_pass http://127.0.0.1:7000;", after)
+        self.assertIn(b"uopti-bh-" + b"a" * 32, after)
+        with self.assertRaisesRegex(ingress.Hold, "SLOTS_INVALID"):
+            ingress.render_ir(self.before, {"a" * 32: 3080})
+        with self.assertRaisesRegex(ingress.Hold, "SLOTS_INVALID"):
+            ingress.render_ir(self.before, {"a" * 32: 3081, "b" * 32: 3081})
+
+        self.alt.write_bytes(after)
+        journal.update(slots=slots, after=ingress.digest(after))
+        ingress.save(self.rt, journal)
+        edge_doc = {"domain": self.domain, "alternate": self.binding}
+        ingress.check_ir_overlay(self.rt, self.alt, edge_doc, self.before)
+        self.assertEqual(ingress.run_operation(self.edge, "ir", "verify"), "VERIFIED")
+        with self.assertRaisesRegex(ingress.Hold, "SHARED_CONTROL_SLOTS_ACTIVE"):
+            ingress.run_operation(self.edge, "ir", "rollback")
+        self.alt.write_bytes(after.replace(b" 3081;", b" 3083;"))
+        with self.assertRaisesRegex(ingress.Hold, "CONFIGURATION_DRIFT"):
+            ingress.check_ir_overlay(self.rt, self.alt, edge_doc, self.before)
+
     def test_apply_failure_compensates_without_leaving_journal(self):
         self.live.side_effect = ingress.Hold("BACKHAUL_CONTROL_ROUTE_NOT_PROVEN")
         with self.assertRaisesRegex(ingress.Hold, "APPLY_FAILED_RESTORED"):
