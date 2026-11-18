@@ -246,6 +246,42 @@ class OperatorControl(unittest.TestCase):
         )
         return fake,calls
 
+    def test_rc9_preflight_reuses_signed_probes_without_committing_inventory(self):
+        manifest, receipt = self.rc7_manifest_pair_fixture()
+        for role in ("ir", "foreign"):
+            with self.subTest(role=role):
+                fake, calls = self._rc7_bundle_fake(
+                    role=role, pair_after=(manifest, dict(receipt, version="RC9")))
+                fake.select_rc9 = lambda: calls.append("select-rc9")
+                fake.rt.rc9_state = lambda actual: self.assertEqual(actual, role)
+                bridge = SimpleNamespace(verify=lambda: calls.append("signed-bridge"))
+                with patch.object(control.os, "geteuid", return_value=0), \
+                     patch.object(control, "_load", side_effect=lambda _, name:
+                                  bridge if name == "smite-stage15-xhttp-bridge.py" else fake):
+                    result = control._verify_bundled_backhaul(role, rc9=True)
+                self.assertEqual(calls[0], "select-rc9")
+                self.assertEqual(calls.count("signed-bridge"), int(role == "ir"))
+                self.assertEqual(calls.count("signed-owner" if role == "ir" else "signed-child"), 2)
+                self.assertEqual(result["RC9_BACKHAUL_RECEIPT_PLAN"], "CANDIDATE_ONLY_NO_WRITE")
+                self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
+
+    def test_rc9_transition_preserves_receipt_version_and_frp_inventory(self):
+        manifest, receipt = self.rc7_manifest_pair_fixture()
+        receipt["version"] = "RC9"
+        raw = json.dumps(receipt).encode()
+        pin = control.package.OFFICIAL_BINARY_SHA256["amd64"]
+        role = receipt["role"]
+        after_manifest, after_receipt = control.transaction._pair_expected_transition(
+            manifest, raw, pin, role=role, rc9=True)
+        after = json.loads(after_manifest)["engines"]
+        self.assertEqual(after.pop("backhaul"), {"sha256": pin})
+        self.assertEqual(after, json.loads(manifest)["engines"])
+        self.assertEqual(json.loads(after_receipt), dict(
+            receipt, new=hashlib.sha256(after_manifest).hexdigest()))
+        for candidate, rc9 in [(raw, False), (json.dumps(dict(receipt, version="RC7")).encode(), True)]:
+            with self.assertRaisesRegex(control.transaction.Hold, "PAIR_BASELINE_UNTRUSTED"):
+                control.transaction._pair_expected_transition(manifest, candidate, pin, role=role, rc9=rc9)
+
     def test_foreign_wss_dns_legacy_recovery_unblocks_only_signed_bundle_review(self):
         # Reproduce the precise Foreign RC7 incident with the *real*
         # strict WSS runtime signature predicate (not a mocked PASS).

@@ -386,6 +386,30 @@ class TransactionLab(unittest.TestCase):
         self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
         self.assertEqual(before_compose, self.compose.read_bytes())
 
+    def test_rc9_pair_recovers_original_inventory_and_receipt_after_interruption(self):
+        manifest, receipt, before, raw_receipt = self._rc7_pair_lab_fixture()
+        compose = self.compose.read_bytes()
+        pin = "a" * 64
+        for role in ("ir", "foreign"):
+            original = (json.dumps(dict(json.loads(raw_receipt), version="RC9", role=role),
+                                   sort_keys=True) + "\n").encode()
+            receipt.write_bytes(original)
+            for cut in ("after-journal", "after-manifest", "after-receipt"):
+                with self.subTest(role=role, cut=cut):
+                    with self.assertRaisesRegex(lab.Hold, "RECOVER_REQUIRED"):
+                        lab.rc7_pair_apply_lab(self.root, pin, role=role, inject=cut, rc9=True)
+                    with self.assertRaisesRegex(lab.Hold, "RECOVERY_SEMANTIC_DRIFT"):
+                        lab.rc7_pair_recover_lab(self.root)
+                    with self.assertRaisesRegex(lab.Hold, "CLEANUP_CRASH_RESUME_REQUIRED"):
+                        lab.rc7_pair_recover_lab(self.root, inject="after-cleanup-1", rc9=True)
+                    self.assertEqual(lab.rc7_pair_recover_lab(self.root, rc9=True),
+                                     "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION")
+                    self.assertEqual(manifest.read_bytes(), before)
+                    self.assertEqual(receipt.read_bytes(), original)
+                    self.assertEqual(self.compose.read_bytes(), compose)
+                    self.assertFalse((self.root / lab.PAIR_JOURNAL).exists())
+                    self.assertFalse((self.root / lab.PAIR_CLEANUP_SEAL).exists())
+
     def test_rc7_pair_recovery_all_crash_boundaries_and_idempotent_resume(self):
         manifest, receipt, old_manifest, old_receipt = self._rc7_pair_lab_fixture()
         for cut in ("after-journal", "after-manifest", "after-receipt"):

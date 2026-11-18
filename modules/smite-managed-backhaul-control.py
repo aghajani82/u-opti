@@ -390,7 +390,13 @@ def _review_rc7_retained_committed_pair(
 
 def verify_rc7_bundled_backhaul(
         role: str, *, expected_backhaul_state: str = "not-installed") -> dict[str, str]:
-    """Reviewed RC7 runtime and signed engine-inventory *preflight only*.
+    return _verify_bundled_backhaul(role, expected_backhaul_state=expected_backhaul_state)
+
+
+def _verify_bundled_backhaul(
+        role: str, *, expected_backhaul_state: str = "not-installed",
+        rc9: bool = False) -> dict[str, str]:
+    """Reviewed runtime and signed engine-inventory preflight.
 
     No install, no manifest/FRP receipt write or output of hashes/Node
     identities. Verify exact official architecture-bound Backhaul binary
@@ -407,7 +413,21 @@ def verify_rc7_bundled_backhaul(
         raise Hold("RC7_BUNDLED_ROOT_REQUIRED")
     frp = _load("uopti_bh_rc7_runtime_probe", "smite-rc7-frp-enrollment.py")
     try:
+        if rc9:
+            frp.select_rc9()
         with frp.rt.locked():
+            if rc9:
+                frp.rt.rc9_state(role)
+                if expected_backhaul_state != "not-installed":
+                    raise Hold("RC9_BACKHAUL_COMMITTED_REVIEW_NOT_AVAILABLE")
+                for pending in (
+                        RC7_RETAINED_JOURNAL,
+                        RC7_RETAINED_JOURNAL.with_name("retained-rc7-cleanup.json"),
+                        frp.JOURNAL / "record.next",
+                        frp.MANIFEST.with_name("engines.json.rc7-next"),
+                        frp.MANIFEST.with_name("engines.json.rc7-rollback-next")):
+                    if os.path.lexists(pending):
+                        raise Hold("RC9_BACKHAUL_COMPETING_RECOVERY")
             doc = frp.node_details()
             if doc.get("role") != role:
                 raise Hold("RC7_BUNDLED_RUNTIME_ROLE_MISMATCH")
@@ -422,7 +442,7 @@ def verify_rc7_bundled_backhaul(
                 destination = mount.get("Destination")
                 if not isinstance(destination, str):
                     raise Hold("RC7_BUNDLED_MOUNT_INVENTORY_UNTRUSTED")
-                if (destination in ("/usr", "/usr/local",
+                if (destination in ("/", "/usr", "/usr/local",
                                     "/usr/local/bin", "/usr/local/bin/backhaul")
                         or destination.startswith("/usr/local/bin/backhaul/")):
                     raise Hold("RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT")
@@ -458,7 +478,7 @@ def verify_rc7_bundled_backhaul(
                 raise Hold("RC7_BUNDLED_RECEIPT_UNTRUSTED") from exc
             if receipt != frp.state() or receipt.get("state") != "COMMITTED":
                 raise Hold("RC7_BUNDLED_RECEIPT_UNTRUSTED")
-            frp.verify_file(receipt)  # Exact RC7 digest and FRP binary pins.
+            frp.verify_file(receipt)
             # On IR, the existing signed Agent /api/agent/frp/owners endpoint
             # independently inspects the active single FRPS Owner and loopback
             # listener. Preserve its hashed identity across this whole
@@ -468,6 +488,9 @@ def verify_rc7_bundled_backhaul(
             foreign_child_ids_before = None
             foreign_instances_before = None
             if role == "ir":
+                if rc9:
+                    bridge = _load("uopti_bh_rc9_bridge", "smite-stage15-xhttp-bridge.py")
+                    bridge.verify()
                 owner_before = frp.signed_owner_inventory()
                 if (type(owner_before) is not str
                         or RC7_SHA256.fullmatch(owner_before) is None):
@@ -505,13 +528,17 @@ def verify_rc7_bundled_backhaul(
                     old_manifest, old_receipt, retained_journal,
                     binary["sha256"], role=role)
                 required_binding = "EXACT_COMMITTED_REBIND_REVIEWED"
+            elif rc9:
+                transaction._pair_expected_transition(
+                    old_manifest, old_receipt, binary["sha256"], role=role, rc9=True)
             else:
                 candidate, review = plan_rc7_backhaul_manifest_pair(
                     old_manifest, receipt, binary["sha256"], role=role)
                 required_binding = "EXACT_PRIOR_MANIFEST_MATCH"
                 if not candidate:
                     raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
-            if (review.get("RC7_FRP_RECEIPT_BINDING") != required_binding
+            if not rc9 and (
+                    review.get("RC7_FRP_RECEIPT_BINDING") != required_binding
                     or review.get("INSTALL_ALLOWED") != "NO"
                     or review.get("ACTIVATION_GATE") != "HOLD"):
                 raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
@@ -563,7 +590,7 @@ def verify_rc7_bundled_backhaul(
             raise
         # Never leak Docker stdout, secrets, process IDs or image metadata.
         raise Hold("RC7_BUNDLED_READONLY_PROBE_FAILED") from exc
-    return {
+    report = {
         "RC7_BACKHAUL_BINARY_PIN": "OFFICIAL_V0_7_2_ARCH_EXACT_MATCH",
         "RC7_FRP_RECEIPT_BINDING": "COMMITTED_EXACT_MANIFEST_REVIEWED",
         "RC7_BACKHAUL_MANIFEST_PLAN": (
@@ -590,6 +617,12 @@ def verify_rc7_bundled_backhaul(
         "INSTALL_ALLOWED": "NO",
         "ACTIVATION_GATE": "HOLD",
     }
+    if rc9:
+        report["RC7_BACKHAUL_RECEIPT_PLAN"] = "CANDIDATE_ONLY_NO_WRITE"
+        report["RC7_IR_XHTTP_BRIDGE"] = "VERIFIED" if role == "ir" else "NOT_APPLICABLE_FOREIGN"
+        return {key.replace("RC7_", "RC9_", 1) if key.startswith("RC7_") else key:
+                value for key, value in report.items()}
+    return report
 
 
 # A committed RC7 FRP enrollment receipt pins the SHA256 of the *whole*
@@ -634,6 +667,13 @@ def _parse_rc7_manifest_snapshot(raw: bytes) -> dict:
 def plan_rc7_backhaul_manifest_pair(
         existing_manifest: bytes, frp_journal: object,
         bundled_backhaul_sha256: str, *, role: str) -> tuple[bytes, dict[str, str]]:
+    return _plan_backhaul_manifest_pair(
+        existing_manifest, frp_journal, bundled_backhaul_sha256, role=role)
+
+
+def _plan_backhaul_manifest_pair(
+        existing_manifest: bytes, frp_journal: object, bundled_backhaul_sha256: str,
+        *, role: str, rc9: bool = False) -> tuple[bytes, dict[str, str]]:
     """Pure, non-installing plan for an atomic FRP+Backhaul manifest change.
 
     The FRP journal's COMMITTED 'new' digest binds the exact initial manifest
@@ -653,9 +693,12 @@ def plan_rc7_backhaul_manifest_pair(
         raise Hold("RC7_BACKHAUL_ENROLLED_OR_UNREVIEWED")
     if "frp" not in existing:
         raise Hold("RC7_FRP_ENROLLMENT_REQUIRED")
+    receipt_fields = {"schema", "role", "state", "old", "new", "binaries"}
+    if rc9:
+        receipt_fields.add("version")
     if (not isinstance(frp_journal, dict)
-            or set(frp_journal) != {
-                "schema", "role", "state", "old", "new", "binaries"}
+            or set(frp_journal) != receipt_fields
+            or (rc9 and frp_journal["version"] != "RC9")
             or type(frp_journal["schema"]) is not int
             or frp_journal["schema"] != 1
             or frp_journal["state"] != "COMMITTED"
@@ -804,7 +847,8 @@ def _rc7_operator_review_role(node_dir: Path) -> str:
 
 def main() -> int:
     arg = argparse.ArgumentParser(description="Managed Backhaul: safe review, CI-only activation")
-    arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback", "verify-rc7-bundle"))
+    arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback",
+                                        "verify-rc7-bundle", "verify-rc9-bundle"))
     arg.add_argument("--node-dir", type=Path, default=NODE_DEFAULT)
     arg.add_argument("--role", choices=("ir", "foreign"))
     arg.add_argument("--auto-role", action="store_true",
@@ -817,16 +861,23 @@ def main() -> int:
     try:
         if args.expect_backhaul_ready and args.action != "verify-rc7-bundle":
             raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
-        if args.action == "verify-rc7-bundle":
+        if args.action in ("verify-rc7-bundle", "verify-rc9-bundle"):
+            rc9 = args.action == "verify-rc9-bundle"
+            if rc9 and (args.node_dir != NODE_DEFAULT or args.stage is not None
+                        or args.lab_root is not None):
+                raise Hold("RC9_BUNDLED_PRODUCTION_NODE_PATH_REQUIRED")
             if args.auto_role and args.role:
                 raise Hold("RC7_BUNDLED_CONFLICTING_ROLE_SELECTION")
             role = (_rc7_operator_review_role(args.node_dir)
                     if args.auto_role else args.role)
             if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
-            _format(verify_rc7_bundled_backhaul(
-                role, expected_backhaul_state=(
-                    "ready" if args.expect_backhaul_ready else "not-installed")))
+            if rc9:
+                _format(_verify_bundled_backhaul(role, rc9=True))
+            else:
+                _format(verify_rc7_bundled_backhaul(
+                    role, expected_backhaul_state=(
+                        "ready" if args.expect_backhaul_ready else "not-installed")))
         elif args.action in ("install", "rollback"):
             if args.lab_root is None:
                 raise Hold("Real host engine activation is NOT enabled; no server changed")

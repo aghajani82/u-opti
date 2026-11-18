@@ -483,8 +483,9 @@ def _pair_atomic(path: Path, raw: bytes) -> None:
 
 
 def _pair_expected_transition(old_manifest: bytes, old_receipt: bytes,
-                              backhaul_sha256: str, *, role: str) -> tuple[bytes, bytes]:
-    """Recompute the ONLY permitted RC7 lab transition from original bytes.
+                              backhaul_sha256: str, *, role: str,
+                              rc9: bool = False) -> tuple[bytes, bytes]:
+    """Recompute the permitted paired transition from original bytes.
 
     Matching SHA256 values alone do not establish that a receipt belongs to
     its Manifest. The same pure planner validates pre-change FRP binding and
@@ -498,8 +499,8 @@ def _pair_expected_transition(old_manifest: bytes, old_receipt: bytes,
     control = importlib.util.module_from_spec(control_spec)
     control_spec.loader.exec_module(control)
     try:
-        next_manifest, review = control.plan_rc7_backhaul_manifest_pair(
-            old_manifest, old_doc, backhaul_sha256, role=role)
+        next_manifest, review = control._plan_backhaul_manifest_pair(
+            old_manifest, old_doc, backhaul_sha256, role=role, rc9=rc9)
     except control.Hold as exc:
         raise Hold("RC7_PAIR_BASELINE_UNTRUSTED") from exc
     if review.get("INSTALL_ALLOWED") != "NO" or review.get("ACTIVATION_GATE") != "HOLD":
@@ -513,15 +514,15 @@ def _pair_expected_transition(old_manifest: bytes, old_receipt: bytes,
 
 
 def rc7_pair_apply_lab(root: Path, backhaul_sha256: str, *,
-                       role: str, inject: str = "") -> str:
+                       role: str, inject: str = "", rc9: bool = False) -> str:
     """Serialize this internal rehearsal against the existing engine lab."""
     with _rc7_pair_shared_lock(root):
         return _rc7_pair_apply_locked(root, backhaul_sha256,
-                                      role=role, inject=inject)
+                                      role=role, inject=inject, rc9=rc9)
 
 
 def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
-                           role: str, inject: str = "") -> str:
+                           role: str, inject: str = "", rc9: bool = False) -> str:
     """Rehearse *only* a byte-for-byte, two-receipt CI transaction.
 
     No signed runtime attestation and NO live server activation are possible.
@@ -536,7 +537,7 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
     old_receipt = _pair_read_private(frp_receipt)
     # Keep exactly the same pure contract for apply and future recovery.
     next_manifest, next_receipt = _pair_expected_transition(
-        old_manifest, old_receipt, backhaul_sha256, role=role)
+        old_manifest, old_receipt, backhaul_sha256, role=role, rc9=rc9)
 
     # Journal ALL exact old/new bytes and checksums, and sync the directory
     # BEFORE touching either reviewed engine source file.
@@ -577,19 +578,19 @@ def _rc7_pair_apply_locked(root: Path, backhaul_sha256: str, *,
     return "LAB_PAIR_BYTES_APPLIED_UNATTESTED_RECOVERY_REQUIRED"
 
 
-def rc7_pair_recover_lab(root: Path, *, inject: str = "") -> str:
+def rc7_pair_recover_lab(root: Path, *, inject: str = "", rc9: bool = False) -> str:
     """Hold the same lock during BOTH restoration and resumable lab recovery.
 
     `inject` is internal to this PR-only Python rehearsal: it is never a
     public CLI action and never enables real-host enrollment/recovery.
     """
     with _rc7_pair_shared_lock(root):
-        return _rc7_pair_recover_locked(root, inject=inject)
+        return _rc7_pair_recover_locked(root, inject=inject, rc9=rc9)
 
 
 def _rc7_pair_finish_cleanup_locked(root: Path, manifest: Path,
                                    frp_receipt: Path, journal: Path, *,
-                                   inject: str = "") -> str:
+                                   inject: str = "", rc9: bool = False) -> str:
     """Resume destructive cleanup only from the fsynced RESTORED seal.
 
     The full journal was validated semantically before this seal was written.
@@ -618,7 +619,7 @@ def _rc7_pair_finish_cleanup_locked(root: Path, manifest: Path,
     try:
         candidate, new_receipt = _pair_expected_transition(
             old_manifest, old_receipt, seal["backhaul_sha256"],
-            role=seal["role"])
+            role=seal["role"], rc9=rc9)
     except Hold as exc:
         raise Hold("RC7_PAIR_CLEANUP_SEMANTIC_DRIFT") from exc
     if (digest(candidate) != seal["manifest_next"]
@@ -665,14 +666,14 @@ def _rc7_pair_finish_cleanup_locked(root: Path, manifest: Path,
     return "LAB_PAIR_EXACT_BYTES_RESTORED_NO_LIVE_ATTESTATION"
 
 
-def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
+def _rc7_pair_recover_locked(root: Path, *, inject: str = "", rc9: bool = False) -> str:
     """Fail-closed exact dual-file rollback after any rehearsed crash point."""
     manifest, frp_receipt, journal = _pair_paths(root)
     _reject_competing_recovery(root, pair_operation=True)
     seal = root / PAIR_CLEANUP_SEAL
     if seal.exists() or seal.is_symlink():
         return _rc7_pair_finish_cleanup_locked(
-            root, manifest, frp_receipt, journal, inject=inject)
+            root, manifest, frp_receipt, journal, inject=inject, rc9=rc9)
     private_dir(journal)
     raw_record = _pair_read_private(journal / "record.json", limit=4096)
     record = _pair_load_json(raw_record)
@@ -716,7 +717,7 @@ def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
             raise Hold("RC7_PAIR_RECOVERY_SEMANTIC_DRIFT")
         expected_manifest, expected_receipt = _pair_expected_transition(
             pieces["manifest.before"], pieces["frp.before"],
-            backhaul["sha256"], role=record["role"])
+            backhaul["sha256"], role=record["role"], rc9=rc9)
     except Hold as exc:
         raise Hold("RC7_PAIR_RECOVERY_SEMANTIC_DRIFT") from exc
     if (pieces["manifest.next"] != expected_manifest
@@ -762,7 +763,7 @@ def _rc7_pair_recover_locked(root: Path, *, inject: str = "") -> str:
     if inject == "after-completion-seal":
         raise Hold("RC7_PAIR_INJECTED_CLEANUP_CRASH_RESUME_REQUIRED")
     return _rc7_pair_finish_cleanup_locked(
-        root, manifest, frp_receipt, journal, inject=inject)
+        root, manifest, frp_receipt, journal, inject=inject, rc9=rc9)
 
 
 
