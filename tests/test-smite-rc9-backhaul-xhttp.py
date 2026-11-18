@@ -56,6 +56,8 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.ingress = SimpleNamespace(
             runtime_context=Mock(return_value=("panel.example.test", None, None, None)),
             run_operation=Mock(), render_fragment=Mock(return_value=b"tested snippet"),
+            recover_control_slot=Mock(), validate_record=Mock(return_value={}),
+            ensure_control_slot=Mock(), CONTROL_RESERVED_PORTS={3080, 13080},
             read_trusted=lambda rt, path, mode: path.read_bytes(), reload_nginx=Mock(),
             replace_bytes=lambda rt, path, data, mode, **kwargs: path.write_bytes(data))
         self.route = SimpleNamespace(
@@ -63,9 +65,9 @@ class BackhaulXhttpTests(unittest.TestCase):
             _run=Mock(return_value=""),
             _frps_socket_inventory=Mock(return_value=(1234, {7000, 32868})),
             check_locations=Mock())
-        self.panel = Mock(side_effect=lambda rt, phase, port: {
+        self.panel = Mock(side_effect=lambda rt, phase, port, control=0: {
             "active": phase == "activate", "id": TUNNEL_ID if phase == "activate" else None,
-            "inbound": INBOUND})
+            "inbound": INBOUND, "slot": None, "control_port": 3080, "reserved_ports": []})
         self.listener = Mock()
         self.probe = Mock(return_value=True)
         fixture = patch.dict(configure.__globals__, {
@@ -102,6 +104,19 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.assertEqual(self.ingress.reload_nginx.call_count, 1)
         self.assertTrue(self.target.is_file())
         self.assertIn('"COMMITTED"', self.journal.read_text())
+
+    def test_second_port_uses_reserved_independent_control(self):
+        slot = "b" * 32
+        self.ingress.validate_record.return_value = {"slots": {slot: 41001}}
+        self.panel.side_effect = lambda rt, phase, port, control=0: {
+            "active": phase == "activate", "id": TUNNEL_ID if phase == "activate" else None,
+            "inbound": INBOUND, "slot": slot, "control_port": control or None,
+            "reserved_ports": [3080, 38463],
+        }
+        self.assertEqual(self.invoke("apply")[0], "APPLIED")
+        self.ingress.ensure_control_slot.assert_called_once_with(self.edge, slot, 41001)
+        self.panel.assert_called_with(self.rt, "activate", 56053, 41001)
+        self.listener.assert_any_call(self.rt, 41001, TUNNEL_ID)
 
     def test_failed_https_probe_rolls_back_route(self):
         # The direct TLS backend responds, but the public socket never does.

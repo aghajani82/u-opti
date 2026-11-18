@@ -314,6 +314,82 @@ def run_operation(edge, role, action):
     return "APPLIED"
 
 
+def control_slot_state(edge, slot, port):
+    rt = edge.rt
+    domain, binding, target, before = runtime_context(edge, "ir")
+    journal = validate_record(rt)
+    old = render_ir(before, journal.get("slots"))
+    require_record(journal, "ir", domain, binding, before, old)
+    need(journal["phase"] == "COMMITTED", "BACKHAUL_INGRESS_RECOVERY_REQUIRED")
+    slots = journal.get("slots", {})
+    need(slot not in slots or slots[slot] == port, "BACKHAUL_CONTROL_SLOT_PORT_CHANGED")
+    new = render_ir(before, {**slots, slot: port})
+    return domain, target, journal, old, new
+
+
+def recover_control_slot(edge):
+    """Undo an interrupted slot write before the Panel can start its pair."""
+    rt = edge.rt
+    pending = STATE.with_name(STATE.name + ".slot-pending")
+    if not os.path.lexists(pending):
+        return
+    record = json.loads(read_trusted(rt, pending, 0o600))
+    need(type(record) is dict and record.keys() == {"slot", "port", "old", "new"}
+         and type(record["slot"]) is str and CONTROL_SLOT.fullmatch(record["slot"])
+         and type(record["port"]) is int
+         and type(record["old"]) is dict and type(record["new"]) is dict,
+         "BACKHAUL_CONTROL_SLOT_RECOVERY_INVALID")
+    domain, binding, target, before = runtime_context(edge, "ir")
+    old_doc, new_doc = record["old"], record["new"]
+    old = render_ir(before, old_doc.get("slots"))
+    new = render_ir(before, new_doc.get("slots"))
+    require_record(old_doc, "ir", domain, binding, before, old)
+    require_record(new_doc, "ir", domain, binding, before, new)
+    old_slots = old_doc.get("slots", {})
+    need(record["slot"] not in old_slots and new_doc == {
+         **old_doc, "slots": {**old_slots, record["slot"]: record["port"]}, "after": digest(new),
+    } and old_doc["phase"] == "COMMITTED" and validate_record(rt) in (old_doc, new_doc)
+        and current_content(rt, target) in (old, new), "BACKHAUL_CONTROL_SLOT_RECOVERY_DRIFT")
+    if current_content(rt, target) == new:
+        replace_bytes(rt, target, old, 0o644)
+    reload_nginx(rt)
+    verify_live(edge, "ir", domain)
+    save(rt, old_doc)
+    pending.unlink()
+    rt.fsync_dir(pending.parent)
+
+
+def ensure_control_slot(edge, slot, port):
+    """Add one IR control destination under the existing host-engine lock."""
+    rt = edge.rt
+    pending = STATE.with_name(STATE.name + ".slot-pending")
+    need(not os.path.lexists(pending), "BACKHAUL_CONTROL_SLOT_RECOVERY_REQUIRED")
+    domain, target, journal, old, new = control_slot_state(edge, slot, port)
+    need(current_content(rt, target) == old, "BACKHAUL_INGRESS_CONFIGURATION_DRIFT")
+    if old == new:
+        return
+    need(not rt.run(["ss", "-H", "-lnt", f"( sport = :{port} )"], timeout=10),
+         "BACKHAUL_CONTROL_SLOT_PORT_IN_USE")
+    candidate = {**journal, "slots": {**journal.get("slots", {}), slot: port}, "after": digest(new)}
+    transaction = {"slot": slot, "port": port, "old": journal, "new": candidate}
+    replace_bytes(rt, pending, (json.dumps(transaction, sort_keys=True) + "\n").encode(),
+                  0o600, create=True)
+    try:
+        replace_bytes(rt, target, new, 0o644)
+        reload_nginx(rt)
+        verify_live(edge, "ir", domain)
+        need(current_content(rt, target) == new, "BACKHAUL_INGRESS_CONFIGURATION_DRIFT")
+        save(rt, candidate)
+    except Exception as exc:
+        try:
+            recover_control_slot(edge)
+        except Exception as recovery:
+            raise Hold("BACKHAUL_CONTROL_SLOT_RECOVERY_REQUIRED") from recovery
+        raise Hold("BACKHAUL_CONTROL_SLOT_FAILED_RESTORED") from exc
+    pending.unlink()
+    rt.fsync_dir(pending.parent)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("plan", "apply", "verify", "rollback"))

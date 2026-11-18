@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure one signed RC9 Backhaul pair and publish its verified XHTTP inbound."""
+"""Configure a signed RC9 Backhaul pair and publish its verified XHTTP inbound."""
 
 from contextlib import contextmanager
 import fcntl
@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import stat
 import sys
 import time
@@ -22,8 +23,10 @@ HERE = Path(__file__).resolve().parent
 PANEL_JOB = r'''
 import asyncio
 import json
+import re
 import secrets
 import sys
+import uuid
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -34,7 +37,7 @@ from app.node_client import NodeClient
 from app.routers.tunnels import TunnelCreate, apply_tunnel, create_tunnel
 from app.uopti_backhaul_standard import compile_standard_specs
 
-async def run(phase, port):
+async def run(phase, port, requested_control):
     if (settings.smite_panel_agent_auth_mode != "signed"
             or settings.smite_engine_management_mode != "managed"):
         raise RuntimeError("SIGNED_MANAGED_PANEL_REQUIRED")
@@ -58,26 +61,50 @@ async def run(phase, port):
                 or inbound.get("network") != "xhttp" or inbound.get("listen") != "127.0.0.1"):
             raise RuntimeError("SIGNED_FOREIGN_INBOUND_NOT_ELIGIBLE")
         rows = (await db.execute(select(Tunnel).where(Tunnel.core == "backhaul"))).scalars().all()
-        if len(rows) > 1:
-            raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
-        tunnel = rows[0] if rows else None
-        if tunnel:
-            if (tunnel.iran_node_id != ir or tunnel.foreign_node_id != kh
-                    or tunnel.status not in ("pending", "active")
-                    or not isinstance(tunnel.spec, dict)
-                    or tunnel.spec.get("uopti_standard_backhaul") is not True
-                    or tunnel.spec.get("data_port") != port
-                    or tunnel.spec.get("control_port", 3080) != 3080
-                    or tunnel.spec.get("bridge_port", 13080) != 13080):
+        def slot_id(data_port):
+            return uuid.uuid5(uuid.NAMESPACE_URL,
+                              f"uopti-backhaul:{ir}:{kh}:{data_port}").hex
+
+        data_ports, controls = set(), set()
+        tunnel = None
+        for row in rows:
+            spec = row.spec
+            if (row.iran_node_id != ir or row.foreign_node_id != kh
+                    or not isinstance(spec, dict) or spec.get("uopti_standard_backhaul") is not True
+                    or spec.get("bridge_port", 13080) != 13080):
                 raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
-            compile_standard_specs(tunnel.spec, data_port=port)
+            data, control = spec.get("data_port"), spec.get("control_port", 3080)
+            compile_standard_specs(spec, data_port=data, control_port=control)
+            if control != 3080 and not re.fullmatch(f"uopti-bh-{slot_id(data)}[.][0-9a-f]{{64}}", spec["token"]):
+                raise RuntimeError("BACKHAUL_CONTROL_SLOT_TOKEN_INVALID")
+            if data in data_ports or control in controls:
+                raise RuntimeError("BACKHAUL_TUNNEL_PORT_COLLISION")
+            data_ports.add(data)
+            controls.add(control)
+            if data == port:
+                tunnel = row
+        if data_ports & controls or port in controls:
+            raise RuntimeError("BACKHAUL_TUNNEL_PORT_COLLISION")
+        if tunnel and tunnel.status not in ("pending", "active"):
+            raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
+        control = tunnel.spec.get("control_port", 3080) if tunnel else (None if rows else 3080)
+        slot = slot_id(port) if control != 3080 else None
+        if phase == "activate" and control is None:
+            if (not 1024 <= requested_control <= 65535 or requested_control in
+                    data_ports | controls | {port, 3080, 7000, 8000, 8443, 8444, 8888, 13080, 18476}):
+                raise RuntimeError("BACKHAUL_CONTROL_SLOT_PORT_INVALID")
+            control = requested_control
+        if phase == "activate" and requested_control != control:
+            raise RuntimeError("BACKHAUL_CONTROL_SLOT_PORT_CHANGED")
         if phase == "activate" and (tunnel is None or tunnel.status == "pending"):
             request = SimpleNamespace()
             if tunnel is None:
+                token = secrets.token_hex(32)
+                if slot is not None:
+                    token = f"uopti-bh-{slot}.{token}"
                 spec = {"uopti_standard_backhaul": True, "transport": "ws",
-                        "token": secrets.token_hex(32), "data_port": port,
-                        "control_port": 3080, "bridge_port": 13080,
-                        "ports": [f"127.0.0.1:{port}=127.0.0.1:{port}"]}
+                        "token": token, "data_port": port, "control_port": control,
+                        "bridge_port": 13080, "ports": [f"127.0.0.1:{port}=127.0.0.1:{port}"]}
                 tunnel = await create_tunnel(TunnelCreate(
                     name=f"Backhaul XHTTP {port}", core="backhaul", type="ws",
                     node_id=ir, iran_node_id=ir, foreign_node_id=kh, spec=spec,
@@ -101,10 +128,12 @@ async def run(phase, port):
                         or data.get("type") != "backhaul"):
                     raise RuntimeError("SIGNED_BACKHAUL_PAIR_NOT_ACTIVE")
         return {"inbound": inbound, "id": tunnel.id if tunnel else None,
-                "active": tunnel is not None and tunnel.status == "active"}
+                "active": tunnel is not None and tunnel.status == "active",
+                "slot": slot, "control_port": control,
+                "reserved_ports": sorted(data_ports | controls)}
 
 try:
-    print("ROUTE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1], int(sys.argv[2])))))
+    print("ROUTE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1], int(sys.argv[2]), int(sys.argv[3])))))
 except Exception as exc:
     import re
     reason = getattr(exc, "detail", None) or str(exc)
@@ -141,9 +170,9 @@ def route_lock(route):
         os.close(fd)
 
 
-def panel(rt, phase, port):
+def panel(rt, phase, port, control=0):
     response = rt.run(["docker", "exec", "-i", "smite-panel", "python3", "-B", "-",
-                       phase, str(port)], input=PANEL_JOB, timeout=75)
+                       phase, str(port), str(control)], input=PANEL_JOB, timeout=75)
     matches = [line for line in response.splitlines()
                if line.startswith(("ROUTE_RESULT ", "ROUTE_HOLD "))]
     need(len(matches) == 1, "SIGNED_PANEL_OPERATION_UNVERIFIED")
@@ -151,7 +180,11 @@ def panel(rt, phase, port):
     need(status == "ROUTE_RESULT", payload)
     result = json.loads(payload)
     need(result["inbound"].get("port") == port and type(result["active"]) is bool
-         and (result["id"] is None or re.fullmatch(r"[0-9a-f-]{36}", result["id"])),
+         and (result["id"] is None or re.fullmatch(r"[0-9a-f-]{36}", result["id"]))
+         and (result["slot"] is None or re.fullmatch(r"[0-9a-f]{32}", result["slot"]))
+         and (result["control_port"] is None or type(result["control_port"]) is int)
+         and type(result["reserved_ports"]) is list
+         and all(type(value) is int for value in result["reserved_ports"]),
          "SIGNED_PANEL_EVIDENCE_INVALID")
     return result
 
@@ -208,6 +241,8 @@ def probe(rt, domain, port, path, public=False, *, report=False, backend=False):
 def configure(edge, ingress, route, port, action):
     rt = edge.rt
     domain, _, _, _ = ingress.runtime_context(edge, "ir")
+    if action == "apply":
+        ingress.recover_control_slot(edge)
     if action != "rollback":
         ingress.run_operation(edge, "ir", "verify")
     bridge = rt.load("smite-stage15-xhttp-bridge.py")
@@ -221,6 +256,8 @@ def configure(edge, ingress, route, port, action):
         inbound = {"path": saved.get("path")}
     else:
         result = panel(rt, "inspect", port)
+        slots = ingress.validate_record(rt).get("slots", {})
+        need(port not in slots.values(), "BACKHAUL_TUNNEL_PORT_COLLISION")
         inbound = result["inbound"]
     # The signed inventory has already validated the transport and its
     # reserved application namespaces. Recheck path syntax locally before
@@ -262,9 +299,31 @@ def configure(edge, ingress, route, port, action):
     listener(rt, port, result["id"] if result["active"] else None)
     if action == "plan":
         return "PLAN_READ_ONLY", path
-    applied = panel(rt, "activate", port)
-    need(applied["active"] and applied["inbound"] == result["inbound"], "SIGNED_BACKHAUL_APPLY_UNVERIFIED")
+    control = result["control_port"]
+    slot = result["slot"]
+    if slot is not None:
+        if control is None:
+            control = slots.get(slot)
+        if control is None:
+            reserved = (set(result["reserved_ports"]) | set(slots.values())
+                        | ingress.CONTROL_RESERVED_PORTS | {port})
+            for _ in range(8):
+                with socket.socket() as candidate:
+                    candidate.bind(("127.0.0.1", 0))
+                    selected = candidate.getsockname()[1]
+                if selected not in reserved:
+                    control = selected
+                    break
+        need(type(control) is int and control != port, "BACKHAUL_CONTROL_SLOT_PORT_INVALID")
+        ingress.ensure_control_slot(edge, slot, control)
+        listener(rt, control, result["id"] if result["active"] else None)
+    applied = panel(rt, "activate", port, control)
+    need(applied["active"] and applied["inbound"] == result["inbound"]
+         and applied["slot"] == slot and applied["control_port"] == control,
+         "SIGNED_BACKHAUL_APPLY_UNVERIFIED")
     listener(rt, port, applied["id"])
+    if slot is not None:
+        listener(rt, control, applied["id"])
     for attempt in range(4):
         if probe(rt, domain, port, path, report=(attempt == 3)):
             break

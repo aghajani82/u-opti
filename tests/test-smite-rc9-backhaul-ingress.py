@@ -88,6 +88,30 @@ class IngressTest(unittest.TestCase):
         with self.assertRaisesRegex(ingress.Hold, "CONFIGURATION_DRIFT"):
             ingress.check_ir_overlay(self.rt, self.alt, edge_doc, self.before)
 
+    def test_add_slot_replays_without_rewriting_and_recovers_interrupted_add(self):
+        self.assertEqual(ingress.run_operation(self.edge, "ir", "apply"), "APPLIED")
+        self.rt.run.return_value = ""
+        ingress.ensure_control_slot(self.edge, "a" * 32, 3081)
+        existing = self.alt.read_bytes()
+        self.live.reset_mock()
+        ingress.ensure_control_slot(self.edge, "a" * 32, 3081)
+        self.live.assert_not_called()
+
+        class Interrupted(BaseException):
+            pass
+
+        self.live.side_effect = Interrupted()
+        with self.assertRaises(Interrupted):
+            ingress.ensure_control_slot(self.edge, "b" * 32, 3082)
+        self.assertNotEqual(self.alt.read_bytes(), existing)
+        self.live.side_effect = None
+        ingress.recover_control_slot(self.edge)
+        self.assertEqual(self.alt.read_bytes(), existing)
+        self.assertEqual(ingress.validate_record(self.rt)["slots"], {"a" * 32: 3081})
+        self.assertFalse(self.state.with_name(self.state.name + ".slot-pending").exists())
+        ingress.ensure_control_slot(self.edge, "b" * 32, 3082)
+        self.assertEqual(ingress.validate_record(self.rt)["slots"], {"a" * 32: 3081, "b" * 32: 3082})
+
     def test_apply_failure_compensates_without_leaving_journal(self):
         self.live.side_effect = ingress.Hold("BACKHAUL_CONTROL_ROUTE_NOT_PROVEN")
         with self.assertRaisesRegex(ingress.Hold, "APPLY_FAILED_RESTORED"):
