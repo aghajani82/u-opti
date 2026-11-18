@@ -22,7 +22,8 @@ IMAGE = ("ghcr.io/aghajani82/smite-panel@sha256:"
 STATE = Path("/var/lib/u-opti/smite-rc9-retained-panel")
 OVERLAY_NAME = "docker-compose.retained-panel-rc9.yml"
 BUNDLE = HERE / "smite-rc9-retained-panel-approved.sigstore.json"
-APPROVAL_COMMIT = ""  # Filled only after the separately signed approval is produced.
+APPROVAL_COMMIT = "91f32aa21ef0ebd1da421b746278371941fd9cb5"
+BUNDLE_SHA256 = "8196469ff6aa059e831732f0e4befdd6af9d5e73538934215e67b227c0963e8f"
 BRANCH = "refs/heads/trial/unified-smite-install"
 ISSUER = "https://token.actions.githubusercontent.com"
 
@@ -68,6 +69,8 @@ def signed_release(rt):
     rt.trusted_path(root)
     verifier._validated_trusted_root(root)
     rt.trusted_path(BUNDLE)
+    rt.need(hashlib.sha256(BUNDLE.read_bytes()).hexdigest() == BUNDLE_SHA256,
+            "RETAINED_PANEL_APPROVAL_BUNDLE_CHANGED")
     rt.run([binary, "verify-blob", "--trusted-root", str(root), "--bundle", str(BUNDLE),
             "--certificate-oidc-issuer=" + ISSUER,
             "--certificate-identity=https://github.com/aghajani82/u-opti/.github/workflows/"
@@ -274,6 +277,7 @@ def apply(edge, ingress, worker, route, doc):
         rec = read_record(rt)
         if rec["phase"] == "COMMITTED":
             prove_health(edge, ingress, worker, candidate=True)
+            check_published_routes(rt, ingress, worker, route, doc["domain"])
             worker.enable_panel_queue(edge, ingress)
             return
         rt.need(rec["phase"] == "ROLLED_BACK", "RETAINED_PANEL_RECOVER_REQUIRED")
@@ -298,8 +302,8 @@ def apply(edge, ingress, worker, route, doc):
     rec = {"phase": "PREPARED", "image_id": image_id, "wss_sha": wss_sha(rt),
            "services": live}
     save(rt, ingress, rec, create=True)
-    backup_database(rt)
     try:
+        backup_database(rt)
         rt.atomic_new(overlay(rt), overlay_bytes(), 0o644)
         _, candidate = compose_commands(rt, doc, installed=True)
         recreate(rt, candidate)
@@ -310,7 +314,10 @@ def apply(edge, ingress, worker, route, doc):
         save(rt, ingress, rec)
         worker.enable_panel_queue(edge, ingress)
     except Exception as exc:
-        recover(edge, ingress, worker, route, doc, rec)
+        try:
+            recover(edge, ingress, worker, route, doc, rec)
+        except Exception as recovery:
+            raise rt.Hold("RETAINED_PANEL_RECOVER_REQUIRED") from recovery
         raise rt.Hold("RETAINED_PANEL_APPLY_FAILED_RESTORED") from exc
 
 

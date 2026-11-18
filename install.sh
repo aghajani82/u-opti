@@ -154,6 +154,7 @@ MODULES=(
     "smite-rc9-backhaul-ingress.py"
     "smite-rc9-backhaul-xhttp.py"
     "smite-rc9-retained-panel.py"
+    "smite-rc9-retained-panel-approved.sigstore.json"
     "smite-rc7-frp-enrollment.py"
     "smite-stage15-active-runtime.py"
     "smite-stage15-kh-inventory.py"
