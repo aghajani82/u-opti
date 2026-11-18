@@ -43,6 +43,33 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse(workflow["probe"](rt, "panel.example.test", 56053, "/56053/web"))
 
 
+class WorkerTests(unittest.TestCase):
+    def test_worker_binds_the_selected_pair_and_reports_only_confirmed_publication(self):
+        run_queue = workflow["run_queue"]
+        edge = SimpleNamespace(rt=Mock())
+        ingress = SimpleNamespace(runtime_context=Mock(), CONTROL_RESERVED_PORTS={3080})
+        route = Mock()
+        job = dict(id=TUNNEL_ID, port=56053, iran_node_id="ir", foreign_node_id="kh", name="Mobile")
+        queue = Mock(side_effect=[job, None])
+        apply = Mock(return_value=("APPLIED", INBOUND["path"]))
+        compile(workflow["QUEUE_JOB"], "panel-queue-job", "exec")
+        with patch.dict(run_queue.__globals__, {"queue": queue, "configure": apply}):
+            run_queue(edge, ingress, route)
+        apply.assert_called_once_with(edge, ingress, route, 56053, "apply", pair=("ir", "kh"), name="Mobile")
+        queue.assert_called_with(edge.rt, "finish", TUNNEL_ID, "applied", INBOUND["path"], "")
+
+    def test_worker_does_not_mark_a_failed_or_unverified_tunnel_as_applied(self):
+        run_queue = workflow["run_queue"]
+        edge = SimpleNamespace(rt=Mock())
+        ingress = SimpleNamespace(runtime_context=Mock(), CONTROL_RESERVED_PORTS={3080})
+        job = dict(id=TUNNEL_ID, port=56053, iran_node_id="ir", foreign_node_id="kh", name="Mobile")
+        queue = Mock(side_effect=[job, None])
+        apply = Mock(side_effect=RuntimeError("PUBLIC_XHTTP_HANDLER_UNVERIFIED"))
+        with patch.dict(run_queue.__globals__, {"queue": queue, "configure": apply}):
+            run_queue(edge, ingress, Mock())
+        queue.assert_called_with(edge.rt, "finish", TUNNEL_ID, "hold", "", "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+
+
 class BackhaulXhttpTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -65,7 +92,7 @@ class BackhaulXhttpTests(unittest.TestCase):
             _run=Mock(return_value=""),
             _frps_socket_inventory=Mock(return_value=(1234, {7000, 32868})),
             check_locations=Mock())
-        self.panel = Mock(side_effect=lambda rt, phase, port, control=0: {
+        self.panel = Mock(side_effect=lambda rt, phase, port, control=0, **kwargs: {
             "active": phase == "activate", "id": TUNNEL_ID if phase == "activate" else None,
             "inbound": INBOUND, "slot": None, "control_port": 3080, "reserved_ports": []})
         self.listener = Mock()
@@ -108,14 +135,14 @@ class BackhaulXhttpTests(unittest.TestCase):
     def test_second_port_uses_reserved_independent_control(self):
         slot = "b" * 32
         self.ingress.validate_record.return_value = {"slots": {slot: 41001}}
-        self.panel.side_effect = lambda rt, phase, port, control=0: {
+        self.panel.side_effect = lambda rt, phase, port, control=0, **kwargs: {
             "active": phase == "activate", "id": TUNNEL_ID if phase == "activate" else None,
             "inbound": INBOUND, "slot": slot, "control_port": control or None,
             "reserved_ports": [3080, 38463],
         }
         self.assertEqual(self.invoke("apply")[0], "APPLIED")
         self.ingress.ensure_control_slot.assert_called_once_with(self.edge, slot, 41001)
-        self.panel.assert_called_with(self.rt, "activate", 56053, 41001)
+        self.panel.assert_called_with(self.rt, "activate", 56053, 41001, pair=("", ""), name="")
         self.listener.assert_any_call(self.rt, 41001, TUNNEL_ID)
 
     def test_failed_https_probe_rolls_back_route(self):

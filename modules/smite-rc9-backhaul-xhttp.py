@@ -37,7 +37,7 @@ from app.node_client import NodeClient
 from app.routers.tunnels import TunnelCreate, apply_tunnel, create_tunnel
 from app.uopti_backhaul_standard import compile_standard_specs
 
-async def run(phase, port, requested_control):
+async def run(phase, port, requested_control, expected_ir, expected_kh, name):
     if (settings.smite_panel_agent_auth_mode != "signed"
             or settings.smite_engine_management_mode != "managed"):
         raise RuntimeError("SIGNED_MANAGED_PANEL_REQUIRED")
@@ -50,6 +50,8 @@ async def run(phase, port, requested_control):
         if any(len(ids) != 1 for ids in pair.values()):
             raise RuntimeError("ONE_IR_AND_ONE_FOREIGN_NODE_REQUIRED")
         ir, kh = pair["iran"][0], pair["foreign"][0]
+        if (expected_ir or expected_kh) and (ir, kh) != (expected_ir, expected_kh):
+            raise RuntimeError("BACKHAUL_PUBLISH_PAIR_MISMATCH")
         inv = await client.get_signed_sanaei_xhttp_inbounds(kh)
         if inv.get("status") != "success" or inv.get("schema_version") != 1:
             raise RuntimeError("SIGNED_FOREIGN_XHTTP_INVENTORY_UNAVAILABLE")
@@ -106,7 +108,7 @@ async def run(phase, port, requested_control):
                         "token": token, "data_port": port, "control_port": control,
                         "bridge_port": 13080, "ports": [f"127.0.0.1:{port}=127.0.0.1:{port}"]}
                 tunnel = await create_tunnel(TunnelCreate(
-                    name=f"Backhaul XHTTP {port}", core="backhaul", type="ws",
+                    name=name or f"Backhaul XHTTP {port}", core="backhaul", type="ws",
                     node_id=ir, iran_node_id=ir, foreign_node_id=kh, spec=spec,
                 ), request, db)
                 if tunnel.status != "pending":
@@ -133,12 +135,71 @@ async def run(phase, port, requested_control):
                 "reserved_ports": sorted(data_ports | controls)}
 
 try:
-    print("ROUTE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1], int(sys.argv[2]), int(sys.argv[3])))))
+    print("ROUTE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]))))
 except Exception as exc:
     import re
     reason = getattr(exc, "detail", None) or str(exc)
     print("ROUTE_HOLD " + (reason if isinstance(reason, str)
           and re.fullmatch(r"[A-Z0-9_]{1,100}", reason) else "SIGNED_PANEL_OPERATION_FAILED"))
+'''
+
+
+QUEUE_JOB = r'''
+import asyncio
+import json
+import sys
+from time import time
+
+from sqlalchemy import select, update
+from sqlalchemy.dialects.sqlite import insert
+from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models import BackhaulPublishRequest as Job, Settings
+from app.uopti_backhaul_publish import HEARTBEAT_KEY
+
+async def run(args):
+    if (settings.smite_panel_agent_auth_mode != "signed"
+            or settings.smite_engine_management_mode != "managed"):
+        raise RuntimeError("SIGNED_MANAGED_PANEL_REQUIRED")
+    async with AsyncSessionLocal() as db:
+        if args == ["check"]:
+            await db.scalar(select(Job.id).limit(1))
+            return None
+        if args == ["claim"]:
+            beat = int(time())
+            stmt = insert(Settings).values(key=HEARTBEAT_KEY, value=beat)
+            await db.execute(stmt.on_conflict_do_update(
+                index_elements=["key"], set_={"value": beat}))
+            # Host locks span claim, apply and finish. Any applying request
+            # visible at the next claim belongs to an interrupted worker.
+            await db.execute(update(Job).where(Job.status == "applying").values(
+                status="hold", detail="BACKHAUL_PUBLISH_INTERRUPTED"))
+            row = await db.scalar(select(Job).where(Job.status == "queued")
+                                  .order_by(Job.created_at, Job.id).limit(1))
+            if row is None:
+                await db.commit()
+                return None
+            claim = await db.execute(update(Job).where(Job.id == row.id, Job.status == "queued")
+                                     .values(status="applying"))
+            if claim.rowcount != 1:
+                await db.rollback()
+                return None
+            result = {"id": row.id, "port": row.port, "iran_node_id": row.iran_node_id,
+                      "foreign_node_id": row.foreign_node_id, "name": row.name}
+            await db.commit()
+            return result
+        action, job_id, status, path, detail = args
+        if action != "finish" or status not in ("applied", "hold"):
+            raise RuntimeError("INVALID_BACKHAUL_WORKER_RESULT")
+        updated = await db.execute(update(Job).where(Job.id == job_id, Job.status == "applying")
+                                   .values(status=status, path=path or None, detail=detail or None))
+        if updated.rowcount != 1:
+            await db.rollback()
+            raise RuntimeError("BACKHAUL_WORKER_RESULT_UNCERTAIN")
+        await db.commit()
+        return None
+
+print("QUEUE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1:]))))
 '''
 
 
@@ -170,9 +231,9 @@ def route_lock(route):
         os.close(fd)
 
 
-def panel(rt, phase, port, control=0):
+def panel(rt, phase, port, control=0, *, pair=("", ""), name=""):
     response = rt.run(["docker", "exec", "-i", "smite-panel", "python3", "-B", "-",
-                       phase, str(port), str(control)], input=PANEL_JOB, timeout=75)
+                       phase, str(port), str(control), *pair, name], input=PANEL_JOB, timeout=75)
     matches = [line for line in response.splitlines()
                if line.startswith(("ROUTE_RESULT ", "ROUTE_HOLD "))]
     need(len(matches) == 1, "SIGNED_PANEL_OPERATION_UNVERIFIED")
@@ -238,7 +299,7 @@ def probe(rt, domain, port, path, public=False, *, report=False, backend=False):
     return passed
 
 
-def configure(edge, ingress, route, port, action):
+def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
     rt = edge.rt
     domain, _, _, _ = ingress.runtime_context(edge, "ir")
     if action == "apply":
@@ -255,7 +316,7 @@ def configure(edge, ingress, route, port, action):
         need(isinstance(saved, dict) and saved.get("kind") == "backhaul", "BACKHAUL_ROUTE_JOURNAL_MISSING")
         inbound = {"path": saved.get("path")}
     else:
-        result = panel(rt, "inspect", port)
+        result = panel(rt, "inspect", port, pair=pair)
         slots = ingress.validate_record(rt).get("slots", {})
         need(port not in slots.values(), "BACKHAUL_TUNNEL_PORT_COLLISION")
         inbound = result["inbound"]
@@ -317,7 +378,7 @@ def configure(edge, ingress, route, port, action):
         need(type(control) is int and control != port, "BACKHAUL_CONTROL_SLOT_PORT_INVALID")
         ingress.ensure_control_slot(edge, slot, control)
         listener(rt, control, result["id"] if result["active"] else None)
-    applied = panel(rt, "activate", port, control)
+    applied = panel(rt, "activate", port, control, pair=pair, name=name)
     need(applied["active"] and applied["inbound"] == result["inbound"]
          and applied["slot"] == slot and applied["control_port"] == control,
          "SIGNED_BACKHAUL_APPLY_UNVERIFIED")
@@ -363,18 +424,93 @@ def configure(edge, ingress, route, port, action):
     return "APPLIED", path
 
 
+def queue(rt, *args):
+    response = rt.run(["docker", "exec", "-i", "smite-panel", "python3", "-B", "-", *args],
+                      input=QUEUE_JOB, timeout=20)
+    matches = [line for line in response.splitlines() if line.startswith("QUEUE_RESULT ")]
+    need(len(matches) == 1, "BACKHAUL_PANEL_QUEUE_UNAVAILABLE")
+    return json.loads(matches[0].removeprefix("QUEUE_RESULT "))
+
+
+def run_queue(edge, ingress, route):
+    """Consume at most one web request under the same locks as the console."""
+    rt = edge.rt
+    # Prove the pinned owning Panel and local IR identity before trusting
+    # any fields returned by the queue in that container.
+    ingress.runtime_context(edge, "ir")
+    job = queue(rt, "claim")
+    if job is None:
+        return
+    need(type(job) is dict and job.keys() == {"id", "port", "iran_node_id", "foreign_node_id", "name"}
+         and type(job["id"]) is str and re.fullmatch(r"[0-9a-f-]{36}", job["id"])
+         and all(type(job[key]) is str and 0 < len(job[key]) <= 128
+                 for key in ("iran_node_id", "foreign_node_id"))
+         and type(job["name"]) is str and 1 <= len(job["name"]) <= 100 and job["name"].isprintable(),
+         "BACKHAUL_PANEL_QUEUE_REQUEST_INVALID")
+    try:
+        validate_port(job["port"], ingress.CONTROL_RESERVED_PORTS)
+        _, path = configure(edge, ingress, route, job["port"], "apply",
+                            pair=(job["iran_node_id"], job["foreign_node_id"]), name=job["name"])
+    except Exception as exc:
+        reason = str(exc)
+        reason = reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason) else "BACKHAUL_XHTTP_UNVERIFIED"
+        queue(rt, "finish", job["id"], "hold", "", reason)
+        print("BACKHAUL_PANEL_PUBLISH=HOLD")
+    else:
+        queue(rt, "finish", job["id"], "applied", path, "")
+        print("BACKHAUL_PANEL_PUBLISH=APPLIED")
+
+
+def enable_panel_queue(edge, ingress):
+    rt = edge.rt
+    ingress.run_operation(edge, "ir", "verify")
+    queue(rt, "check")
+    directory = Path("/etc/systemd/system")
+    service = "u-opti-smite-backhaul-panel.service"
+    timer = "u-opti-smite-backhaul-panel.timer"
+    installed = Path("/usr/local/lib/u-opti/modules") / Path(__file__).name
+    need(Path(__file__).resolve() == installed, "INSTALLED_BACKHAUL_WORKER_REQUIRED")
+    units = {
+        service: ("[Unit]\nDescription=U-OPTI Smite Backhaul publication\nAfter=docker.service nginx.service\n"
+                  "[Service]\nType=oneshot\nTimeoutStartSec=240\n"
+                  f"ExecStart=/usr/bin/python3 -B {installed} sync-panel\n").encode(),
+        timer: ("[Unit]\nDescription=Process Smite Backhaul publication requests\n"
+                "[Timer]\nOnActiveSec=2s\nOnUnitInactiveSec=10s\nAccuracySec=2s\n"
+                f"Unit={service}\n[Install]\nWantedBy=timers.target\n").encode(),
+    }
+    for unit, contents in units.items():
+        target = directory / unit
+        if os.path.lexists(target):
+            need(ingress.read_trusted(rt, target, 0o644) == contents,
+                 "BACKHAUL_PANEL_WORKER_UNIT_DRIFT")
+    for unit, contents in units.items():
+        target = directory / unit
+        if not os.path.lexists(target):
+            ingress.replace_bytes(rt, target, contents, 0o644, create=True)
+    rt.run(["systemctl", "daemon-reload"], timeout=15)
+    rt.run(["systemctl", "enable", "--now", timer], timeout=20)
+    print("BACKHAUL_PANEL_PUBLISHER=ENABLED")
+
+
+def validate_port(port, reserved):
+    need(type(port) is int and 1024 <= port <= 65535 and port not in reserved,
+         "DEDICATED_XHTTP_PORT_REQUIRED")
+
+
 def main():
     import argparse
 
     arg = argparse.ArgumentParser(description=__doc__)
-    arg.add_argument("action", choices=("plan", "apply", "rollback"))
-    arg.add_argument("--port", type=int, required=True)
+    arg.add_argument("action", choices=("plan", "apply", "rollback", "sync-panel", "enable-panel"))
+    arg.add_argument("--port", type=int)
     args = arg.parse_args()
     try:
         need(os.geteuid() == 0, "ROOT_REQUIRED")
-        need(1024 <= args.port <= 65535 and args.port not in (3080, 7000, 8000, 8443, 8444, 8888, 13080, 18476),
-             "DEDICATED_XHTTP_PORT_REQUIRED")
-        if args.action != "plan":
+        if args.action in ("sync-panel", "enable-panel"):
+            need(args.port is None, "BACKHAUL_PANEL_SYNC_HAS_NO_PORT_ARGUMENT")
+        else:
+            validate_port(args.port, {3080, 7000, 8000, 8443, 8444, 8888, 13080, 18476})
+        if args.action in ("apply", "rollback", "enable-panel"):
             challenge = args.action.upper() + "-RC9-BACKHAUL-XHTTP"
             need(sys.stdin.isatty() and input(f"Type {challenge}: ").strip() == challenge,
                  "OPERATOR_CANCELLED")
@@ -383,6 +519,12 @@ def main():
         route = load("backhaul_xhttp_route", "smite-xhttp-nginx-route", executable=True)
         edge.select_rc9()
         with edge.rt.locked(), route_lock(route):
+            if args.action == "sync-panel":
+                run_queue(edge, ingress, route)
+                return 0
+            if args.action == "enable-panel":
+                enable_panel_queue(edge, ingress)
+                return 0
             result, path = configure(edge, ingress, route, args.port, args.action)
         print("RC9_BACKHAUL_XHTTP=" + result)
         print("XHTTP_PATH=" + path)
