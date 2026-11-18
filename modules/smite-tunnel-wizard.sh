@@ -924,10 +924,10 @@ smite_tw_stage_help() {
     case "$1:$2" in
         ir:0) echo 'Open the existing Panel. Check every existing active lease before adding a new tunnel.' ;;
         ir:1) echo 'Keep current HTTPS/WSS Gateway. Use Stage15 V to verify XHTTP bridge; do not reconfigure it.' ;;
-        ir:2) echo 'Keep the current shared FRPS Owner. Select that owner in Panel; never create/reapply a replacement.' ;;
-        ir:3) echo 'Panel > Tunnels: create only the new Child using the existing owner and a fresh signed KH inbound.' ;;
-        ir:4) echo 'Panel > XHTTP: select exact node, port and path, prepare request; G here approves via existing reviewer.'
-              echo 'After ROOT_GRANT_APPROVED return to Panel and create a FRESH publish request, then Verify.'
+        ir:2) echo 'Check the signed FRPS Owner first. A healthy RC9 Node is NOT an installed FRPS; do not run legacy Stage15/RC7 installers on RC9.' ;;
+        ir:3) echo 'After signed FRPS Owner enrollment/activation, Panel > Tunnels: create a Child bound to that owner and a fresh signed KH inbound.' ;;
+        ir:4) echo 'G only reviews an existing signed XHTTP proposal; it NEVER installs FRPS/FRPC. Enroll and verify FRPS Owner and KH inbound first.'
+              echo 'After a prepared Panel request and ROOT_GRANT_APPROVED, submit a FRESH publish request, then Verify.'
               echo 'Expired/changed/replayed requests remain denied. Check real VLESS/XHTTP and all existing tunnels.' ;;
         kh:0) echo 'Keep current Smite Node and Signed Pairing. Check node status in Panel; do not reinstall.' ;;
         kh:1) echo 'Use existing Sanaei management to check service status. Do not reset existing inbounds.' ;;
@@ -951,6 +951,7 @@ smite_tw_guided_frp() {
         echo 'N) Next   B) Back   S) Status   0) Exit'
         if [ "$role:$step" = ir:4 ]; then echo 'G) Approve tunnel port and path (existing signed root review)'; fi
         echo 'Next/Back navigate only; HOLD is not approval. No stage is automatically applied.'
+        echo 'This is a status/approval GUIDE, not an FRP engine installer.'
         read -rp 'Choose: ' choice || return 0
         # Recheck role on every selection, including a role change while the menu is open.
         smite_tw_validate_host "$role" || return 2
@@ -960,6 +961,13 @@ smite_tw_guided_frp() {
             s|S) for i in 0 1 2 3 4; do printf '%s: ' "${names[$i]}"; smite_tw_stage_status "$role" "$i"; done; smite_tw_pause ;;
             g|G)
                 if [ "$role:$step" != ir:4 ]; then echo 'HOLD: G is an IR publication step'; continue; fi
+                # A proposal reviewer must not be mistaken for the RC9 FRP
+                # installer. Without an observed FRPS owner it cannot
+                # perform the missing engine/WSS activation.
+                if [ "$(smite_tw_stage_status "$role" 2)" !=                      "PASS: frps process present; keep it running, do not reapply" ]; then
+                    echo 'HOLD: FRPS owner not observed. G is approval only; it does not install FRP.'
+                    continue
+                fi
                 if [ -f "$SMITE_TW_DIR/smite-stage15-root-review.py" ] && [ ! -L "$SMITE_TW_DIR/smite-stage15-root-review.py" ]; then
                     python3 -B "$SMITE_TW_DIR/smite-stage15-root-review.py" || :
                 else echo 'HOLD: root reviewer missing'; fi ;;
@@ -977,7 +985,7 @@ smite_tw_menu() {
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
         echo "1) Backhaul — guided Sidecar START HERE"
-        echo "2) FRP — step-by-step (existing runtime preserved)"
+        echo "2) FRP — guided status/approval (NO engine installation)"
         echo "6) Advanced FRP — original setup and recovery"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"

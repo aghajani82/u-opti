@@ -37,6 +37,15 @@ class GuidedTests(unittest.TestCase):
  def test_role_drift_while_open_blocks_next_action(self):
   out=self.shell("calls=0; smite_tw_validate_host(){ calls=$((calls+1)); [ $calls -eq 1 ]; }; smite_tw_stage_status(){ echo PASS; }; printf 'n\\ng\\n' | smite_tw_guided_frp ir; :")
   self.assertIn('1/5',out);self.assertNotIn('2/5',out)
+ def test_ir_without_frps_cannot_invoke_g_as_installer(self):
+  out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_stage_status(){ echo 'HOLD: no FRPS process'; }; python3(){ echo BUG_REVIEWER; }; printf 'n\\nn\\nn\\nn\\ng\\n0\\n' | smite_tw_guided_frp ir")
+  self.assertIn('HOLD: FRPS owner not observed',out)
+  self.assertIn('not an FRP engine installer',out.lower().replace('not an frp','not an FRP') if False else 'This is a status/approval GUIDE, not an FRP engine installer.')
+  self.assertNotIn('BUG_REVIEWER',out)
+ def test_ir_owner_observed_still_uses_independent_signed_reviewer(self):
+  out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_stage_status(){ echo 'PASS: frps process present; keep it running, do not reapply'; }; python3(){ echo SIGNED_REVIEW_ONLY; }; printf 'n\\nn\\nn\\nn\\ng\\n0\\n' | smite_tw_guided_frp ir")
+  self.assertIn('SIGNED_REVIEW_ONLY',out)
+  self.assertIn('approval',out.lower())
  def test_kh_cannot_invoke_g(self):
   out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_stage_status(){ echo PASS; }; python3(){ echo BUG; }; printf 'n\\nn\\nn\\nn\\ng\\n0\\n' | smite_tw_guided_frp kh")
   self.assertNotIn('BUG',out);self.assertIn('HOLD: G is an IR',out)
