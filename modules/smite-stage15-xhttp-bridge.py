@@ -198,9 +198,9 @@ def invariants(doc, old):
              and base.digest(stream) == e['stream']
              and base.digest(alt) == e['alternate']
              and base.digest(mapping) == e['map_after']
-             and base.trusted_file(edge.q.ALT_CANDIDATE, mode=0o644) == alt
              and base.trusted_file(edge.q.FRP_MAP, mode=e['map_mode']) == mapping,
              'WSS_PROTECTED_CONTENT_CHANGED')
+        edge.verify_alternate(e, alt)
         return
     need(e['state'] == 'COMMITTED' and e['domain'] == doc['domain']
          and e['backend'] == base.digest(old), 'WSS_BINDING_CHANGED')

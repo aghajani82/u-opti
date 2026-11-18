@@ -190,8 +190,8 @@ def committed_config(doc):
     need(file(q.FRP_MAP,doc['map_mode'])==new,'LIVE_EDGE_DRIFT')
     return alt
 
-def validate_committed(doc):
-    alt=committed_config(doc)
+def verify_alternate(doc, alt):
+    """Verify the exact peer TLS backend or its committed RC9 overlay."""
     if rt.VERSION=='RC9':
         ingress=load('rc9_edge_backhaul_ingress', 'smite-rc9-backhaul-ingress.py')
         if os.path.lexists(ingress.STATE):
@@ -203,6 +203,10 @@ def validate_committed(doc):
             need(file(q.ALT_CANDIDATE,0o644)==alt,'LIVE_EDGE_DRIFT')
     else:
         need(file(q.ALT_CANDIDATE,0o644)==alt,'LIVE_EDGE_DRIFT')
+
+
+def validate_committed(doc):
+    verify_alternate(doc, committed_config(doc))
     p.run(['nginx','-t'])
     rt.panel_probe(doc['domain'])
     alternate_probe(doc['domain'])

@@ -149,7 +149,7 @@ class RC7BridgeTests(BridgeTests):
         self.patch(e.rt, 'panel_probe', lambda *a: None)
         self.patch(e, 'alternate_probe', lambda *a: None)
 
-    def test_rc9_setup_resumes_from_committed_wss_edge(self):
+    def use_rc9_edge(self):
         record = b.RC7_EDGE
         doc = self.edge.journal()
         self.patch(b, 'RC7_EDGE', self.root/'absent-rc7'/'record.json')
@@ -163,6 +163,10 @@ class RC7BridgeTests(BridgeTests):
         doc['version'] = 'RC9'
         record.write_text(json.dumps(doc))
 
+        return record, doc
+
+    def test_rc9_setup_resumes_from_committed_wss_edge(self):
+        record, doc = self.use_rc9_edge()
         b.base.BACKEND.chmod(0o600)
         self.assertFalse(b.STATE.exists())
         proposed = b.plan()[0]
@@ -182,6 +186,42 @@ class RC7BridgeTests(BridgeTests):
         self.assertEqual(b.base.BACKEND.read_bytes(), self.old)
         self.assertEqual(b.base.BACKEND.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(record.read_text()), doc)
+
+    def test_rc9_bridge_reuses_exact_committed_backhaul_overlay_proof(self):
+        _, edge_doc = self.use_rc9_edge()
+        b.apply()
+        edge = self.edge
+        ingress = edge.load('rc9_overlay_fixture', 'smite-rc9-backhaul-ingress.py')
+        self.patch(ingress, 'STATE', self.root/'backhaul.json')
+        original_load = edge.load
+        self.patch(edge, 'load', lambda alias, filename:
+                   ingress if filename == 'smite-rc9-backhaul-ingress.py'
+                   else original_load(alias, filename))
+        alternate = edge.q.ALT_CANDIDATE
+        before = alternate.read_bytes()
+        after = ingress.render_ir(before)
+        journal = dict(schema=1, phase='COMMITTED', role='ir',
+                       domain=edge_doc['domain'], binding=edge_doc['alternate'],
+                       before=edge.sha(before), after=edge.sha(after), upstream=None)
+        def write_journal():
+            ingress.STATE.write_text(json.dumps(journal))
+            ingress.STATE.chmod(0o600)
+
+        alternate.write_bytes(after)
+        with self.assertRaisesRegex(edge.Hold, 'LIVE_EDGE_DRIFT'):
+            b.verify()
+        journal['phase'] = 'PREPARED'
+        write_journal()
+        with self.assertRaisesRegex(edge.Hold, 'BACKHAUL_INGRESS_EDGE_UNVERIFIED'):
+            b.verify()
+        journal['phase'] = 'COMMITTED'
+        write_journal()
+        b.verify()
+        alternate.write_bytes(after + b'# unexpected change\n')
+        with self.assertRaisesRegex(edge.Hold, 'BACKHAUL_INGRESS_EDGE_UNVERIFIED'):
+            b.verify()
+        alternate.write_bytes(after)
+        b.verify()
 
     def test_apply_verify_and_rollback_preserve_wss(self):
         b.plan(); b.apply(); b.verify(); self.edge.validate_committed(self.edge.journal())
