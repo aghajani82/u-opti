@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """RC7 WSS runtime and edge isolation, zero-live-mutation regression tests."""
 import importlib.util
+import contextlib
 import json
 from pathlib import Path
 import tempfile
@@ -21,6 +22,67 @@ edge=load('rc7_edge_test','smite-rc7-wss-edge.py')
 p=rt.p
 
 class WssControllerTests(unittest.TestCase):
+    def test_rc9_partial_apply_rolls_back_only_the_changed_service(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root=Path(tmp)
+            services=['smite-panel','smite-node']
+            base={'services':{name:{'environment':{}} for name in services}}
+            journal={'schema':1,'version':'RC9','role':'ir','state':'PREPARED',
+                     'domain':'ir.test.example','project':'uopti_rc6_'+'a'*32,
+                     'services':services,'protected':{},
+                     'baseline':{name:{'files':[], 'compose_digest':rt.compose_digest(base)}
+                                 for name in services}}
+            active=dict.fromkeys(services,False)
+            changes=[]
+            probes=[]
+            def run(argv, **_):
+                enabled=any(arg.endswith('wss-rc9.yml') for arg in argv)
+                if 'config' in argv:
+                    result=json.loads(json.dumps(base))
+                    if enabled:
+                        name=next(name for name in services if 'f-'+name in ' '.join(argv))
+                        result['services'][name]['environment']['SMITE_FRP_STANDARD_WSS']='1'
+                    return json.dumps(result)
+                name=argv[-1]
+                changes.append((name,enabled))
+                if name=='smite-node' and enabled:
+                    raise p.Hold('FIXTURE_INTERRUPTED_BEFORE_NODE_RECREATE')
+                active[name]=enabled
+                return ''
+            def ensure(name,doc,*,enabled,healthy=True):
+                self.assertEqual(active[name],enabled)
+            def overlay(name):
+                return root/('f-'+name+'-wss-rc9.yml')
+            def inspect(name):
+                env=['SMITE_FRP_STANDARD_WSS=1'] if active[name] else []
+                return {'Config':{'Env':env},'State':{'Running':True}}
+            patches={
+                'VERSION':'RC9','STATE':root/'rc9','rc9_signed_release':lambda:None,
+                'planned':lambda *_:journal,'locked':contextlib.nullcontext,
+                'ensure_service':ensure,'run':run,'overlay_path':overlay,
+                'inspect_container':inspect,'edge_absent':lambda:None,
+                'no_tunnels':lambda:None,'backup_panel':lambda:None,
+                'panel_probe':lambda *_:probes.append('panel'),
+                'signed_probe':lambda:probes.append('signed'),
+            }
+            for key,value in patches.items():
+                stack.enter_context(patch.object(rt,key,value))
+            with self.assertRaisesRegex(p.Hold,'RC9_WSS_APPLY_FAILED_STAGE_ROLLED_BACK'):
+                rt.apply('ir','8.8.8.8')
+            self.assertEqual(changes,[('smite-panel',True),('smite-node',True),('smite-panel',False)])
+            self.assertEqual(active,dict.fromkeys(services,False))
+            self.assertEqual(probes,['signed','panel'])
+            self.assertEqual(json.loads((rt.STATE/'record.json').read_text())['state'],'ROLLED_BACK')
+            self.assertFalse(any(overlay(name).exists() for name in services))
+
+    def test_rc9_release_rejected_before_runtime_plan_or_writes(self):
+        with patch.object(rt,'VERSION','RC9'), patch.object(rt,'locked',contextlib.nullcontext), \
+             patch.object(rt,'rc9_signed_release',side_effect=p.Hold('RC9_SIGNED_RELEASE_REQUIRED')), \
+             patch.object(rt,'planned') as plan:
+            with self.assertRaisesRegex(p.Hold,'RC9_SIGNED_RELEASE_REQUIRED'):
+                rt.apply('foreign',None)
+            plan.assert_not_called()
+
     def test_cli_requires_verified_snapshot_and_tty_for_mutations(self):
         for module in (rt,edge):
             source=Path(module.__file__).read_text()

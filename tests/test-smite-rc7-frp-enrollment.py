@@ -20,6 +20,17 @@ ctl=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ctl)
 
 class EnrollmentTests(unittest.TestCase):
+    def test_rc9_version_alone_never_admits_altered_bundled_binaries(self):
+        expected=ctl.RC9_AMD64_FRP_SHA256
+        for hashes in (expected,dict(expected,frps='b'*64)):
+            def read(argv):
+                return json.dumps(hashes) if argv[-2]=='-c' else '0.71.0'
+            with patch.object(ctl.rt,'VERSION','RC9'), patch.object(ctl.p,'run',side_effect=read):
+                if hashes==expected:
+                    self.assertEqual(ctl.binaries(),expected)
+                else:
+                    with self.assertRaisesRegex(ctl.Hold,'OFFICIAL_FRP_BINARY_DIGEST_MISMATCH'):
+                        ctl.binaries()
     def test_pinned_binary_pair_proposal_keeps_unrelated_engines(self):
         with tempfile.TemporaryDirectory() as temporary:
             state=Path(temporary)/'journal'

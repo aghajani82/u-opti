@@ -213,6 +213,7 @@ def _verify_bridge() -> None:
     try:
         modern = not host.base.absent(host.STATE)
         rc7 = not host.base.absent(host.RC7_EDGE.parent)
+        rc9 = not host.base.absent(host.RC9_EDGE.parent)
         if modern:
             if not host.base.absent(host.base.TX_DIR):
                 raise BrokerHold("AMBIGUOUS_BRIDGE_GENERATION")
@@ -220,6 +221,8 @@ def _verify_bridge() -> None:
             return
         if rc7:
             raise BrokerHold("RC7_XHTTP_BRIDGE_REQUIRED")
+        if rc9:
+            raise BrokerHold("RC9_XHTTP_BRIDGE_REQUIRED")
         legacy = _load_module("uopti_broker_bridge_install", HERE / "smite-rc5-xhttp-bridge-install.py")
         if host.base.absent(legacy.TX_DIR):
             raise BrokerHold("XHTTP_BRIDGE_REQUIRED")

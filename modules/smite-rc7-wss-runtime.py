@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transactional RC7 WSS *runtime* opt-in; no Nginx edge, FRPS or tunnel Apply.
+"""Transactional RC7/RC9 WSS runtime opt-in for signed test hosts.
 
 This separately gated field-trial helper must never be used to modify Sanaei.
 Grandoptical requires verified provider snapshots and independent console access.
@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -27,6 +28,9 @@ STATE=Path('/var/lib/u-opti/smite-rc7-wss-runtime')
 LOCK=Path('/run/lock/u-opti-smite-engine.lock')
 OVERLAY='docker-compose.wss-rc7.yml'
 EDGE=Path('/var/lib/u-opti/smite-rc7-wss-edge/record.json')
+RC9_EDGE=Path('/var/lib/u-opti/smite-rc9-wss-edge/record.json')
+RC9_ENROLLMENT=Path('/var/lib/u-opti/smite-rc9-frp-enrollment/record.json')
+VERSION='RC7'
 SIGNED_PROBE=r'''
 import json, secrets, urllib.error, urllib.request
 from app.agent_auth import read_identity
@@ -51,20 +55,104 @@ print("RC7_SIGNED_HMAC_REPLAY=PASS")
 '''
 
 def load(name):
-    spec=importlib.util.spec_from_file_location('rc7_wss_admission',HERE/name)
+    spec=importlib.util.spec_from_file_location(Path(name).stem.replace('-', '_'),HERE/name)
     if spec is None or spec.loader is None:
         raise RuntimeError('REVIEWED_HELPER_UNAVAILABLE')
     module=importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[spec.name]=module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name,None)
     return module
 p=load('smite-rc7-wss-preflight.py')
 Hold=p.Hold
 need=p.need
 
+def select_rc9():
+    global VERSION, STATE, OVERLAY
+    VERSION='RC9'
+    STATE=Path('/var/lib/u-opti/smite-rc9-wss-runtime')
+    OVERLAY='docker-compose.wss-rc9.yml'
+
+def trusted_path(path, *, directory=False):
+    for parent in reversed(path.parents):
+        st=parent.lstat()
+        need(stat.S_ISDIR(st.st_mode) and st.st_uid==0
+             and not st.st_mode&0o022,'RC9_UNTRUSTED_PATH_PARENT')
+    st=path.lstat()
+    kind=stat.S_ISDIR if directory else stat.S_ISREG
+    need(kind(st.st_mode) and st.st_uid==0 and not st.st_mode&0o022
+         and (directory or st.st_nlink==1),'RC9_UNTRUSTED_PATH')
+    return st
+
+def rc9_signed_release():
+    executable=shutil.which('cosign')
+    need(executable is not None,'RC9_COSIGN_REQUIRED')
+    path=Path(executable)
+    trusted_path(path)
+    with path.open('rb') as stream:
+        digest=hashlib.file_digest(stream,'sha256').hexdigest()
+    need(digest=='c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74',
+         'RC9_COSIGN_DIGEST_MISMATCH')
+    pairing=load('smite-node-pairing.py')
+    try:
+        pairing._require_unified_foreign_release()
+    except pairing.WizardHold as exc:
+        raise Hold('RC9_SIGNED_RELEASE_REQUIRED') from exc
+
+def rc9_state(role):
+    trusted_path(p.STATE)
+    values=p.state(p.STATE)
+    need(values.get('SMITE_ROLE')==('panel-iran' if role=='ir' else 'foreign')
+         and values.get('SMITE_MANAGED_VERSION')=='2.0.0-rc.9'
+         and values.get('SMITE_UPSTREAM_REF')=='e7f76185e9a7da51d7069d5d0a829dc192cc1e06'
+         and values.get('SMITE_CONNECTION_MODE')=='standard',
+         'RC9_RUNTIME_STATE_MISMATCH')
+    return values
+
+def rc9_service_gate(name,obj,doc):
+    control=load('smite-managed-frp-control.py')
+    image=control.RC9_PANEL_IMAGE if name=='smite-panel' else control.RC9_NODE_IMAGE
+    config,host,state=obj['Config'],obj['HostConfig'],obj['State']
+    image_id=obj.get('Image','')
+    need(config.get('Image')==image and re.fullmatch(r'sha256:[0-9a-f]{64}',image_id)
+         and image_id==doc['baseline'][name]['image_id']
+         and image_id==p.run(['docker','image','inspect','-f','{{.Id}}',image]),
+         'RC9_WSS_IMAGE_ID_DRIFT')
+    need(state.get('Running') is True and state.get('Health',{}).get('Status')=='healthy',
+         'SERVICE_NOT_HEALTHY')
+    need(host.get('NetworkMode')=='host' and not host.get('PortBindings')
+         and host.get('Privileged') is False,'NETWORK_PRIVILEGE_DRIFT')
+    env=p.runtime_env(obj)
+    domain=doc['domain']
+    if name=='smite-panel':
+        expected={'PANEL_DOMAIN':domain,'PANEL_HOST':'127.0.0.1',
+                  'SMITE_PANEL_AGENT_AUTH_MODE':'signed',
+                  'SMITE_ENGINE_MANAGEMENT_MODE':'managed'}
+    else:
+        expected={'PANEL_ADDRESS':domain+':443','SMITE_AGENT_AUTH_MODE':'strict',
+                  'SMITE_NODE_PANEL_AUTH_MODE':'signed',
+                  'SMITE_ENGINE_INVENTORY_MODE':'managed'}
+        need(config.get('Cmd') in control.SAFE_NODE_COMMANDS,'NODE_API_NOT_LOOPBACK')
+        required={'/etc/smite-node':(p.NODE/'config',True),
+                  '/run/smite-node-identity':(Path('/etc/u-opti/smite/identities'),False),
+                  '/var/lib/smite-node/auth':(Path('/var/lib/u-opti/smite-node-security/replay'),True)}
+        if doc['role']=='foreign':
+            expected.update(NODE_ROLE='foreign',SMITE_SANAEI_INVENTORY_ENABLED='true')
+            required['/run/smite-sanaei-ro']=(Path('/opt/3x-ui/instances/01/db'),False)
+        for target,(source,writable) in required.items():
+            mounts=[item for item in obj.get('Mounts',[]) if item.get('Destination')==target]
+            need(len(mounts)==1 and mounts[0].get('Type')=='bind'
+                 and mounts[0].get('Source')==str(source)
+                 and mounts[0].get('RW') is writable,'RC9_SIGNED_MOUNT_DRIFT')
+    need(all(env.get(key)==value for key,value in expected.items()),
+         'RC9_WSS_SIGNED_POLICY_DRIFT')
+
 def run(args,timeout=150,input=None):
     need(not any(os.environ.get(key) for key in (
         'DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','DOCKER_TLS_VERIFY',
-        'DOCKER_CERT_PATH','COMPOSE_FILE','COMPOSE_PROFILES',
+        'DOCKER_CERT_PATH','COMPOSE_FILE','COMPOSE_PROFILES','COMPOSE_ENV_FILES',
     )),'AMBIENT_DOCKER_OVERRIDE')
     try:
         x=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
@@ -91,6 +179,12 @@ def fsync_dir(directory):
     try: os.fsync(fd)
     finally: os.close(fd)
 
+def archive_restored_journal(path):
+    holding=Path(tempfile.mkdtemp(prefix=path.name+'-previous-',dir=path.parent))
+    os.rename(path,holding/'journal')
+    fsync_dir(holding)
+    fsync_dir(path.parent)
+
 def atomic_record(doc):
     # Persist every mutation boundary; an unknown partial record HOLDS.
     raw=(json.dumps(doc,sort_keys=True,separators=(',',':'))+'\n').encode()
@@ -102,6 +196,10 @@ def atomic_record(doc):
 
 def record():
     path=STATE/'record.json'
+    if VERSION=='RC9':
+        need(stat.S_IMODE(trusted_path(STATE,directory=True).st_mode)==0o700,
+             'UNTRUSTED_WSS_JOURNAL_DIRECTORY')
+        trusted_path(path)
     need(path.is_file() and not path.is_symlink(),'WSS_JOURNAL_UNAVAILABLE')
     st=path.stat()
     need(stat.S_ISREG(st.st_mode) and st.st_uid==0 and
@@ -114,6 +212,9 @@ def record():
          and doc.get('services')==(['smite-panel','smite-node'] if doc['role']=='ir'
                                    else ['smite-node']),
          'INVALID_WSS_JOURNAL')
+    if VERSION=='RC9':
+        need(doc.get('version')==VERSION and rc9_state(doc['role']).get(
+             'SMITE_PANEL_DOMAIN')==doc.get('domain'),'RC9_WSS_JOURNAL_SCOPE_DRIFT')
     return doc
 
 @contextlib.contextmanager
@@ -150,12 +251,18 @@ def protected_paths(role):
         paths.add(str(root/'.env'))
     paths.add('/etc/u-opti/smite/identities/node-identity.json')
     paths.add('/var/lib/u-opti/smite-node-security/replay/agent-replay.sqlite3')
+    if VERSION=='RC9':
+        paths.add(str(p.STATE))
+        if role=='ir':
+            paths.add(str(p.PANEL/'panel/data/smite.db'))
     return sorted(paths)
 
 def protected_receipt(paths):
     result={}
     for name in paths:
         path=Path(name)
+        if VERSION=='RC9':
+            trusted_path(path)
         need(path.is_file() and not path.is_symlink(),'PROTECTED_FILE_MISSING')
         st=path.stat()
         need(stat.S_ISREG(st.st_mode),'PROTECTED_FILE_UNSAFE')
@@ -164,6 +271,8 @@ def protected_receipt(paths):
         proof={'dev':st.st_dev,'inode':st.st_ino}
         if path.name=='agent-replay.sqlite3':
             proof['kind']='replay'
+        elif VERSION=='RC9' and path.name=='smite.db':
+            proof['kind']='sqlite'
         else:
             proof['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
         result[name]=proof
@@ -293,8 +402,11 @@ def ensure_service(name,doc,*,enabled,healthy=True):
     if not healthy:
         safe['State']['Running']=True
         safe['State']['Health']={'Status':'healthy'}
-    p.service_gate(name,safe,role=('panel-iran' if doc['role']=='ir' else 'foreign'),
-                   domain=doc['domain'])
+    if VERSION=='RC9':
+        rc9_service_gate(name,safe,doc)
+    else:
+        p.service_gate(name,safe,role=('panel-iran' if doc['role']=='ir' else 'foreign'),
+                       domain=doc['domain'])
     project,files=p.compose_files(name,safe)
     need(project==doc['project'] and files==doc['baseline'][name]['files'],
          'WSS_COMPOSE_BASELINE_DRIFT')
@@ -314,6 +426,21 @@ def compose(name,doc,enabled):
              'WSS_OVERLAY_CONTENT_DRIFT')
         args+=['-f',str(path)]
     return args
+
+def compose_digest(config):
+    return hashlib.sha256(json.dumps(config,sort_keys=True).encode()).hexdigest()
+
+def check_rc9_baseline_config(name,doc,effective):
+    need(compose_digest(effective)==doc['baseline'][name]['compose_digest'],
+         'RC9_EFFECTIVE_COMPOSE_DRIFT')
+
+def check_rc9_compose(name,doc):
+    check_protected(doc)
+    base=compose(name,doc,False)
+    effective=json.loads(run(base+['config','--format','json']))
+    check_rc9_baseline_config(name,doc,effective)
+    candidate=json.loads(run(compose(name,doc,True)+['config','--format','json']))
+    p.only_wss_change(effective,candidate,name)
 
 def no_tunnels():
     # A retained FRPC may still be forwarding even when no local FRPS binds.
@@ -351,7 +478,7 @@ def verify(doc):
     signed_probe()
     if doc['role']=='ir':
         panel_probe(doc['domain'])
-    print('RC7_WSS_RUNTIME_VERIFY=PASS_SIGNED_REPLAY')
+    print(VERSION+'_WSS_RUNTIME_VERIFY=PASS_SIGNED_REPLAY')
     print('LIVE_CONFIG_CHANGES=NONE')
 
 def backup_panel():
@@ -367,11 +494,35 @@ def backup_panel():
     fsync_dir(STATE)
 
 def planned(role,peer_ip):
-    p.inspect(role,peer_ip)  # all existing real-host checks, read-only
+    if VERSION=='RC9':
+        control=load('smite-managed-frp-control.py')
+        values=rc9_state(role)
+        if role=='ir':
+            need(peer_ip is not None,'PEER_IPV4_REQUIRED')
+        try:
+            readiness=control.rc9_readiness(p.NODE,state_path=p.STATE,run=run)
+            control._rc9_wss_compose_plan(p.NODE,readiness['ROLE'],state_path=p.STATE,
+                                          peer_ip=peer_ip,run=run)
+        except (control.Hold,control.frp.shared.Hold) as exc:
+            raise Hold('RC9_WSS_BASELINE_REVIEW_FAILED') from exc
+        signed_probe()
+        if role=='ir':
+            panel_probe(values['SMITE_PANEL_DOMAIN'])
+    else:
+        p.inspect(role,peer_ip)  # all existing real-host checks, read-only
+        values=p.state()
     no_tunnels()
-    need(not STATE.exists() and not STATE.is_symlink(),'WSS_RUNTIME_JOURNAL_EXISTS')
+    if VERSION=='RC9':
+        trusted_path(STATE.parent,directory=True)
+        if os.path.lexists(STATE):
+            prior=record()
+            need(prior['state']=='ROLLED_BACK' and prior['role']==role,
+                 'WSS_RUNTIME_JOURNAL_EXISTS')
+            need(not os.path.lexists(STATE/'record.next'),'PARTIAL_RECORD_NEEDS_REVIEW')
+    else:
+        need(not os.path.lexists(STATE),'WSS_RUNTIME_JOURNAL_EXISTS')
     names=['smite-panel','smite-node'] if role=='ir' else ['smite-node']
-    domain=p.state()['SMITE_PANEL_DOMAIN']
+    domain=values['SMITE_PANEL_DOMAIN']
     baseline={}
     owner=None
     for name in names:
@@ -384,14 +535,37 @@ def planned(role,peer_ip):
         baseline[name]={'files':files,
                         'signature':runtime_signature(obj,canonical_dns=True),
                         'signature_policy':DNS_EMPTY_POLICY}
-    return {'schema':1,'role':role,'state':'PREPARED','domain':domain,
+        if VERSION=='RC9':
+            args=['docker','compose','--project-name',project]
+            for path in files:
+                args+=['-f',path]
+            before=json.loads(run(args+['config','--format','json']))
+            after=json.loads(run(args+['-f','-','config','--format','json'],
+                                 input=p.overlay_bytes(name)))
+            p.only_wss_change(before,after,name)
+            service=before['services'][name]
+            need(service.get('image')==obj['Config']['Image']
+                 and service.get('network_mode')=='host'
+                 and not service.get('build') and not service.get('ports'),
+                 'RC9_EFFECTIVE_COMPOSE_SERVICE_DRIFT')
+            baseline[name].update(image_id=obj['Image'],compose_digest=compose_digest(before))
+    doc={'schema':1,'role':role,'state':'PREPARED','domain':domain,
             'peer':peer_ip if role=='ir' else None,'project':owner,
             'services':names,'baseline':baseline,
             'protected':protected_receipt(protected_paths(role))}
+    if VERSION=='RC9':
+        doc.update(version=VERSION)
+        for name in names:
+            ensure_service(name,doc,enabled=False)
+    return doc
 
 def apply(role,peer):
     with locked():
+        if VERSION=='RC9':
+            rc9_signed_release()
         doc=planned(role,peer)
+        if VERSION=='RC9' and os.path.lexists(STATE):
+            archive_restored_journal(STATE)
         need(not STATE.exists(),'WSS_RUNTIME_JOURNAL_EXISTS')
         STATE.mkdir(mode=0o700)
         fsync_dir(STATE.parent)
@@ -403,6 +577,8 @@ def apply(role,peer):
             doc['state']='APPLYING';atomic_record(doc)
             for name in doc['services']:
                 ensure_service(name,doc,enabled=False)
+                if VERSION=='RC9':
+                    check_rc9_compose(name,doc)
                 run(compose(name,doc,True)+[
                     'up','-d','--no-build','--no-deps','--pull','never',
                     '--force-recreate',name],timeout=180)
@@ -427,7 +603,7 @@ def apply(role,peer):
             check_protected(doc)
             if role=='ir':panel_probe(doc['domain'])
             doc['state']='COMMITTED';atomic_record(doc)
-            print('RC7_WSS_RUNTIME_APPLY=PASS_SIGNED')
+            print(VERSION+'_WSS_RUNTIME_APPLY=PASS_SIGNED')
             print('FRPS_STARTED=NO')
             print('SANAEI_CONTAINER_CHANGED=NO')
         except Exception:
@@ -435,6 +611,12 @@ def apply(role,peer):
             # operator-gated and must preserve the protected files.
             doc['state']='HOLD'
             atomic_record(doc)
+            if VERSION=='RC9':
+                try:
+                    restore(doc)
+                except Exception as exc:
+                    raise Hold('WSS_APPLY_HOLD_REVIEW_BEFORE_RECOVER') from exc
+                raise Hold('RC9_WSS_APPLY_FAILED_STAGE_ROLLED_BACK')
             raise Hold('WSS_APPLY_HOLD_REVIEW_BEFORE_RECOVER')
 
 def edge_absent():
@@ -443,15 +625,24 @@ def edge_absent():
     alternate=Path('/etc/nginx/conf.d/u-opti-smite-panel-kh-wss.conf')
     need(not alternate.exists() and not alternate.is_symlink(),
          'ROLLBACK_EDGE_FIRST')
-    if EDGE.exists():
-        data=json.loads(EDGE.read_text())
-        need(data.get('state')=='ROLLED_BACK','ROLLBACK_EDGE_FIRST')
+    paths=(EDGE,RC9_EDGE) if VERSION=='RC9' else (EDGE,)
+    for path in paths:
+        if os.path.lexists(path):
+            if VERSION=='RC9':
+                trusted_path(path)
+            data=json.loads(path.read_text())
+            need(data.get('state')=='ROLLED_BACK','ROLLBACK_EDGE_FIRST')
 
 def restore(doc):
     edge_absent()
+    if VERSION=='RC9' and os.path.lexists(RC9_ENROLLMENT):
+        trusted_path(RC9_ENROLLMENT)
+        need(json.loads(RC9_ENROLLMENT.read_text()).get('state')=='ROLLED_BACK',
+             'ROLLBACK_FRP_ENROLLMENT_FIRST')
     no_tunnels()
     check_protected(doc)
     # Check every container and overlay before any mutation.
+    recreate=[]
     for name in doc['services']:
         env=p.runtime_env(inspect_container(name))
         active=env.get('SMITE_FRP_STANDARD_WSS')=='1'
@@ -461,8 +652,21 @@ def restore(doc):
             need(path.is_file() and not path.is_symlink()
                  and path.read_bytes()==p.overlay_bytes(name).encode(),
                  'WSS_OVERLAY_CONTENT_DRIFT')
+        if VERSION=='RC9':
+            if active or inspect_container(name)['State'].get('Running') is not True:
+                recreate.append(name)
+            base=compose(name,doc,False)
+            effective=json.loads(run(base+['config','--format','json']))
+            check_rc9_baseline_config(name,doc,effective)
+        else:
+            recreate.append(name)
     doc['state']='ROLLING_BACK';atomic_record(doc)
-    for name in reversed(doc['services']):
+    for name in reversed(recreate):
+        if VERSION=='RC9':
+            check_protected(doc)
+            base=compose(name,doc,False)
+            effective=json.loads(run(base+['config','--format','json']))
+            check_rc9_baseline_config(name,doc,effective)
         run(compose(name,doc,False)+[
             'up','-d','--no-build','--no-deps','--pull','never',
             '--force-recreate',name],timeout=180)
@@ -475,6 +679,10 @@ def restore(doc):
                 if attempt==24:raise
                 time.sleep(2)
     check_protected(doc)
+    if VERSION=='RC9':
+        for name in doc['services']:
+            ensure_service(name,doc,enabled=False)
+        signed_probe()
     if doc['role']=='ir':panel_probe(doc['domain'])
     for name in doc['services']:
         path=overlay_path(name)
@@ -482,7 +690,7 @@ def restore(doc):
             path.unlink()
             fsync_dir(path.parent)
     doc['state']='ROLLED_BACK';atomic_record(doc)
-    print('RC7_WSS_RUNTIME_ROLLBACK=PASS')
+    print(VERSION+'_WSS_RUNTIME_ROLLBACK=PASS')
     print('IDENTITY_REPLAY_RETAINED=YES')
 
 def recovery_console():
@@ -574,6 +782,7 @@ def main():
                                           'signature-check','signature-recover',
                                           'signature-rollback'))
     ap.add_argument('--role',choices=('ir','foreign'),required=True)
+    ap.add_argument('--rc9',action='store_true',help='Select the exact RC9 runtime and journal')
     ap.add_argument('--peer-ip')
     ap.add_argument('--snapshot-confirm',default='')
     ap.add_argument('--recovery-backup',help='Original WSS journal restored from independent backup')
@@ -581,6 +790,11 @@ def main():
     args=ap.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
+        if args.rc9:
+            need(not args.action.startswith('signature-'),'RC9_SIGNATURE_REPAIR_UNSUPPORTED')
+            need(args.peer_ip is None or (args.role=='ir' and
+                 args.action in ('plan','apply','verify')),'PEER_IP_ONLY_FOR_IR_WSS')
+            select_rc9()
         backup_mode=args.recovery_backup is not None or args.backup_sha256 is not None
         if backup_mode:
             need(args.action in ('signature-recover','signature-rollback'),
@@ -591,12 +805,12 @@ def main():
         if not backup_mode and args.action not in ('verify','plan','signature-check'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'PROVIDER_SNAPSHOT_AND_CONSOLE_REQUIRED')
-            challenge=args.action.upper()+'-RC7-WSS-'+args.role.upper()
+            challenge=args.action.upper()+'-'+VERSION+'-WSS-'+args.role.upper()
             need(input('Type '+challenge+': ').strip()==challenge,'OPERATOR_CANCELLED')
         if args.action=='plan':
             with locked():
                 planned(args.role,args.peer_ip)
-            print('RC7_WSS_RUNTIME_PLAN=PASS_READ_ONLY')
+            print(VERSION+'_WSS_RUNTIME_PLAN=PASS_READ_ONLY')
             print('LIVE_CHANGES=NONE')
         elif args.action=='apply':
             apply(args.role,args.peer_ip)
@@ -604,6 +818,8 @@ def main():
             with locked():
                 doc=record()
                 need(doc['role']==args.role,'WSS_ROLE_MISMATCH')
+                if args.rc9 and args.peer_ip is not None:
+                    need(args.peer_ip==doc['peer'],'PEER_MISMATCH')
                 if backup_mode:
                     backup_recovery_proof(args.recovery_backup,args.backup_sha256,doc)
                     # Prove the entire runtime before requesting final consent.
@@ -631,7 +847,8 @@ def main():
                          'RECOVERY_STATE_NOT_ALLOWED')
                     restore(doc)
         return 0
-    except (Hold,OSError,ValueError,KeyError,TypeError,sqlite3.Error,EOFError) as exc:
+    except (Hold,OSError,ValueError,KeyError,TypeError,AttributeError,
+            sqlite3.Error,EOFError,subprocess.SubprocessError) as exc:
         msg=str(exc)
         print('HOLD: '+(msg if re.fullmatch('[A-Z0-9_]{1,100}',msg)
                          else 'UNTRUSTED_WSS_RUNTIME_STATE'),file=sys.stderr)

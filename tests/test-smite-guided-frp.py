@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Hermetic role and navigation tests; never contact Docker or a live host."""
-import pathlib,subprocess,tempfile,unittest
+import pathlib,shlex,subprocess,tempfile,unittest
 from unittest.mock import patch
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SOURCE=(ROOT/'modules/smite-tunnel-wizard.sh').read_text()
@@ -49,4 +49,15 @@ class GuidedTests(unittest.TestCase):
  def test_kh_cannot_invoke_g(self):
   out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_stage_status(){ echo PASS; }; python3(){ echo BUG; }; printf 'n\\nn\\nn\\nn\\ng\\n0\\n' | smite_tw_guided_frp kh")
   self.assertNotIn('BUG',out);self.assertIn('HOLD: G is an IR',out)
+ def test_rc9_stage_verifies_completed_operation_and_applies_only_with_consent(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   journal=shlex.quote(tmp)
+   out=self.shell("python3(){ printf '%s\n' \"$*\"; }; "
+                  f"smite_tw_rc9_frp_stage WSS {journal} helper --rc9; "
+                  f"printf 'n\\n' | smite_tw_rc9_frp_stage FRP {journal}/missing helper --rc9; "
+                  f"printf 'y\\n' | smite_tw_rc9_frp_stage Edge {journal}/missing helper --rc9")
+   actions=[line for line in out.splitlines() if line.startswith('-B ')]
+   self.assertEqual(len(actions),2)
+   self.assertTrue(actions[0].endswith('helper verify --rc9'))
+   self.assertTrue(actions[1].endswith('helper apply --rc9 --snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED'))
 if __name__=='__main__':unittest.main()

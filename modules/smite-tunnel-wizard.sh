@@ -923,8 +923,8 @@ smite_tw_stage_status() {
 smite_tw_stage_help() {
     case "$1:$2" in
         ir:0) echo 'Open the existing Panel. Check every existing active lease before adding a new tunnel.' ;;
-        ir:1) echo 'Keep current HTTPS/WSS Gateway. Use Stage15 V to verify XHTTP bridge; do not reconfigure it.' ;;
-        ir:2) echo 'Check the signed FRPS Owner first. A healthy RC9 Node is NOT an installed FRPS; do not run legacy Stage15/RC7 installers on RC9.' ;;
+        ir:1) echo 'For an RC9 host without FRP, use Tunnel Wizard option 6 to set up signed WSS/443 and the XHTTP bridge.' ;;
+        ir:2) echo 'After FRP setup on both hosts, create the first FRP TCP tunnel in Panel with IR as server and KH as client. For additional tunnels, select the existing signed FRPS Owner.' ;;
         ir:3) echo 'After signed FRPS Owner enrollment/activation, Panel > Tunnels: create a Child bound to that owner and a fresh signed KH inbound.' ;;
         ir:4) echo 'G only reviews an existing signed XHTTP proposal; it NEVER installs FRPS/FRPC. Enroll and verify FRPS Owner and KH inbound first.'
               echo 'After a prepared Panel request and ROOT_GRANT_APPROVED, submit a FRESH publish request, then Verify.'
@@ -978,6 +978,71 @@ smite_tw_guided_frp() {
     done
 }
 
+smite_tw_rc9_frp_stage() {
+    local label="$1" journal="$2" helper="$3"
+    shift 3
+    local answer
+    echo "===== $label ====="
+    if [ -e "$journal" ] || [ -L "$journal" ]; then
+        if python3 -B "$SMITE_TW_DIR/$helper" verify "$@"; then
+            return 0
+        fi
+        echo "If this stage already rolled back, Apply starts it again."
+        echo "An interrupted stage requires its own Recover action."
+    fi
+    read -rp "Apply this stage on this host? [y/N]: " answer || return 2
+    case "$answer" in y|Y) ;; *) return 2 ;; esac
+    python3 -B "$SMITE_TW_DIR/$helper" apply "$@" \
+        --snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED
+}
+
+smite_tw_rc9_frp_setup() (
+    local role="$1" runtime_role peer="" approval workdir="" verifier
+    smite_tw_validate_host "$role" || return 2
+    [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
+    runtime_role=foreign
+    if [ "$role" = ir ]; then runtime_role=ir; fi
+    local -a scope=(--rc9 --role "$runtime_role") peer_input=()
+    if [ "$role" = ir ]; then
+        read -rp 'Verified public egress IPv4 of the Foreign host: ' peer || return 2
+        [ -n "$peer" ] || return 2
+        peer_input=(--peer-ip "$peer")
+    fi
+    echo 'WSS activation recreates the owned Smite services on this host.'
+    echo 'Confirm provider snapshot/restore and independent console access first.'
+    read -rp 'Type SNAPSHOTS-CONSOLES-VERIFIED: ' approval || return 2
+    [ "$approval" = SNAPSHOTS-CONSOLES-VERIFIED ] || return 2
+    verifier="$(command -v cosign || true)"
+    if [ ! -f "$verifier" ] || [ -L "$verifier" ] ||
+       [ "$(sha256sum -- "$verifier" | awk '{print $1}')" != c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 ]; then
+        declare -F smite_install_rc7_verified_cosign >/dev/null || {
+            echo 'HOLD: verified Cosign bootstrap unavailable.'; return 2;
+        }
+        workdir="$(mktemp -d -p /var/lib/u-opti smite-frp-cosign.XXXXXXXX)" || return 2
+        trap 'rm -rf -- "$workdir"' EXIT
+        smite_install_rc7_verified_cosign "$workdir/cosign" \
+            c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 || return 2
+        chmod 0700 "$workdir/cosign" || return 2
+        export PATH="$workdir:$PATH"
+    fi
+    smite_tw_rc9_frp_stage 'Signed WSS runtime' \
+        /var/lib/u-opti/smite-rc9-wss-runtime smite-rc7-wss-runtime.py \
+        "${scope[@]}" "${peer_input[@]}" || return 2
+    if [ "$role" = ir ]; then
+        smite_tw_rc9_frp_stage 'Iran WSS/443 edge' \
+            /var/lib/u-opti/smite-rc9-wss-edge smite-rc7-wss-edge.py \
+            --rc9 "${peer_input[@]}" || return 2
+        echo '===== XHTTP bridge ====='
+        if ! python3 -B "$SMITE_TW_DIR/smite-stage15-xhttp-bridge.py" verify; then
+            python3 -B "$SMITE_TW_DIR/smite-stage15-xhttp-bridge.py" apply || return 2
+        fi
+    fi
+    smite_tw_rc9_frp_stage 'Enroll bundled FRP' \
+        /var/lib/u-opti/smite-rc9-frp-enrollment smite-rc7-frp-enrollment.py \
+        "${scope[@]}" || return 2
+    echo 'RC9 FRP setup verified on this host. Complete setup on both hosts before creating a tunnel in Smite Panel.'
+)
+
 smite_tw_menu() {
     local role="" choice
     role="$(smite_tw_choose_role always)" || return
@@ -987,7 +1052,11 @@ smite_tw_menu() {
         printf 'Detected/selected host role: %s\n\n' "$role"
         echo "1) Backhaul — guided Sidecar START HERE"
         echo "2) FRP — guided status/approval (NO engine installation)"
-        echo "6) Advanced FRP — original setup and recovery"
+        if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
+            echo "6) Set up signed FRP on this RC9 host"
+        else
+            echo "6) Advanced FRP — original setup and recovery"
+        fi
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
@@ -1000,7 +1069,10 @@ smite_tw_menu() {
             1) smite_tw_backhaul_menu "$role" ;;
             2) smite_tw_guided_frp "$role" ;;
             6)
-                if declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
+                if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
+                    smite_tw_rc9_frp_setup "$role" || :
+                    smite_tw_pause
+                elif declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
                     smite_frp_wizard_menu "$role"
                 else
                     echo "FRP wizard missing; update U-OPTI from main first."

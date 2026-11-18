@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit RC7 enrollment of official FRP 0.71.0 already in pinned Node image.
+"""Enroll official FRP 0.71.0 already in the pinned RC7 or RC9 Node image.
 
 This is NOT a generic host FRP installer: verified image-bundled frpc+frps
 are enrolled into the Node's strict root-owned engine inventory, preserving
@@ -28,6 +28,10 @@ RETAINED_BACKHAUL_CLEANUP=Path('/var/lib/u-opti/smite-engine-host/backhaul/retai
 BIN_LIMIT=48*1024*1024
 ENGINES={'backhaul','frp','gost','rathole','chisel'}
 DIGEST=re.compile('[0-9a-f]{64}\\Z')
+RC9_AMD64_FRP_SHA256={
+    'frpc':'f79fff8de3089ec711ff8bdd4b73e00dfe491a1c3d754983c8b0f8d58c21b068',
+    'frps':'b95dee2bf29a021c562565cdf2116376b9fa7590361bd36ef57041a04d0e6654',
+}
 
 def module(alias,name):
     s=importlib.util.spec_from_file_location(alias,HERE/name)
@@ -38,6 +42,11 @@ p=module('rc7_frp_readonly','smite-rc7-wss-preflight.py')
 rt=module('rc7_frp_runtime','smite-rc7-wss-runtime.py')
 need=p.need
 Hold=p.Hold
+
+def select_rc9():
+    global JOURNAL
+    rt.select_rc9()
+    JOURNAL=rt.RC9_ENROLLMENT.parent
 
 def sha(data):return hashlib.sha256(data).hexdigest()
 
@@ -102,6 +111,12 @@ def node_details():
          str(m.get('Destination','')).startswith('/usr/local/bin/frp/')
          for m in runtime.get('Mounts',[])),
          'FRP_BINARY_EXTERNAL_MOUNT')
+    if rt.VERSION=='RC9':
+        need(os.uname().machine=='x86_64','RC9_UNSUPPORTED_ARCHITECTURE')
+        for mount in runtime.get('Mounts',[]):
+            target=mount.get('Destination')
+            need(isinstance(target,str) and target not in ('/','/usr','/usr/local'),
+                 'FRP_BINARY_EXTERNAL_MOUNT')
     return doc
 
 BINARY_AUDIT=r"""
@@ -416,6 +431,8 @@ def binaries():
     need(isinstance(digests,dict) and set(digests)=={'frpc','frps'}
          and all(isinstance(v,str) and DIGEST.fullmatch(v) for v in digests.values()),
          'BINARY_AUDIT_INVALID')
+    if rt.VERSION=='RC9':
+        need(digests==RC9_AMD64_FRP_SHA256,'OFFICIAL_FRP_BINARY_DIGEST_MISMATCH')
     for name in ('frpc','frps'):
         need(p.run(['docker','exec','smite-node',name,'--version'])=='0.71.0',
              'OFFICIAL_FRP_VERSION_MISMATCH')
@@ -427,9 +444,20 @@ def signed_inventory(expected):
          'SIGNED_ENGINE_INVENTORY_FAILED')
 
 def proposal():
-    need(not JOURNAL.exists() and not JOURNAL.is_symlink(),
-         'FRP_ENROLLMENT_JOURNAL_EXISTS')
+    if os.path.lexists(JOURNAL):
+        need(rt.VERSION=='RC9' and state()['state']=='ROLLED_BACK'
+             and not os.path.lexists(JOURNAL/'record.next'),'FRP_ENROLLMENT_JOURNAL_EXISTS')
     doc=node_details()
+    if rt.VERSION=='RC9':
+        rt.trusted_path(JOURNAL.parent,directory=True)
+        if os.path.lexists(JOURNAL):
+            need(state()['role']==doc['role'],'RC9_FRP_JOURNAL_SCOPE_MISMATCH')
+        if doc['role']=='ir':
+            edge=module('rc9_frp_edge','smite-rc7-wss-edge.py')
+            edge.select_rc9()
+            edge.validate_committed(edge.journal())
+        rt.signed_probe()
+        signed_inventory('not-installed')
     rt.no_tunnels()
     prior,engines=manifest_before()
     hashes=binaries()
@@ -461,6 +489,9 @@ def state():
          and all(isinstance(v,str) and DIGEST.fullmatch(v)
                  for v in record['binaries'].values()),
          'INVALID_FRP_JOURNAL')
+    if rt.VERSION=='RC9':
+        need(record.get('version')==rt.VERSION and record['binaries']==RC9_AMD64_FRP_SHA256,
+             'RC9_FRP_JOURNAL_SCOPE_MISMATCH')
     return record
 
 def verify_file(record):
@@ -495,6 +526,8 @@ def enrolled_status():
 def apply():
     with rt.locked():
         doc,prior,contents,hashes=proposal()
+        if rt.VERSION=='RC9' and os.path.lexists(JOURNAL):
+            rt.archive_restored_journal(JOURNAL)
         JOURNAL.mkdir(mode=0o700)
         rt.fsync_dir(JOURNAL.parent)
         if prior is not None:
@@ -502,6 +535,8 @@ def apply():
         entry={'schema':1,'role':doc['role'],'state':'PREPARED',
                'old':sha(prior) if prior is not None else None,
                'new':sha(contents),'binaries':hashes}
+        if rt.VERSION=='RC9':
+            entry.update(version=rt.VERSION)
         make_record(entry)
         try:
             if not MANIFEST.parent.exists():
@@ -521,12 +556,18 @@ def apply():
             rt.signed_probe()
             enrolled_status()
             entry['state']='COMMITTED';make_record(entry)
-            print('RC7_FRP_ENROLLMENT=PASS_SIGNED')
+            print(rt.VERSION+'_FRP_ENROLLMENT=PASS_SIGNED')
             print('FRPS_STARTED=NO')
             print('NODE_RESTARTED=NO')
             print('SANAEI_CHANGED=NO')
         except Exception:
             entry['state']='HOLD';make_record(entry)
+            if rt.VERSION=='RC9':
+                try:
+                    restore(entry)
+                except Exception as exc:
+                    raise Hold('FRP_ENROLLMENT_HOLD_REVIEW_RECOVERY') from exc
+                raise Hold('RC9_FRP_ENROLLMENT_FAILED_STAGE_ROLLED_BACK')
             raise Hold('FRP_ENROLLMENT_HOLD_REVIEW_RECOVERY')
 
 def restore(entry):
@@ -576,31 +617,35 @@ def restore(entry):
     rt.signed_probe()
     signed_inventory('not-installed')
     entry['state']='ROLLED_BACK';make_record(entry)
-    print('RC7_FRP_ENROLLMENT_ROLLBACK=PASS')
+    print(rt.VERSION+'_FRP_ENROLLMENT_ROLLBACK=PASS')
     print('NODE_RESTARTED=NO')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=('plan','apply','verify','verify-owner','verify-child','rollback','recover'))
     parser.add_argument('--role',choices=('ir','foreign'),required=True)
+    parser.add_argument('--rc9',action='store_true',help='Use the exact RC9 image and enrollment journal')
     parser.add_argument('--snapshot-confirm',default='')
     parser.add_argument('--tunnel-id',help='Exact existing Foreign managed FRPC tunnel ID')
     args=parser.parse_args()
     try:
         need(os.geteuid()==0,'ROOT_REQUIRED')
+        if args.rc9:
+            select_rc9()
+            rt.rc9_state(args.role)
         need(args.tunnel_id is None or args.action=='verify-child',
              'FOREIGN_FRPC_CHILD_ID_UNEXPECTED')
         if args.action not in ('plan','verify','verify-owner','verify-child'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'SNAPSHOT_AND_CONSOLE_REQUIRED')
-            challenge=args.action.upper()+'-RC7-FRP-'+args.role.upper()
+            challenge=args.action.upper()+'-'+rt.VERSION+'-FRP-'+args.role.upper()
             need(input('Type '+challenge+': ').strip()==challenge,'OPERATOR_CANCELLED')
         if args.action=='plan':
             with rt.locked():
                 doc,_,_,_=proposal()
                 need(doc['role']==args.role,'ROLE_MISMATCH')
-            print('RC7_FRP_ENROLLMENT_PLAN=PASS_READ_ONLY')
-            print('BINARIES=PINNED_RC7_IMAGE_FRP_0.71.0')
+            print(rt.VERSION+'_FRP_ENROLLMENT_PLAN=PASS_READ_ONLY')
+            print('BINARIES=PINNED_'+rt.VERSION+'_IMAGE_FRP_0.71.0')
             print('NODE_RESTARTED=NO')
             print('LIVE_CHANGES=NONE')
         elif args.action=='apply':
@@ -623,16 +668,16 @@ def main():
                     verify_file(entry);rt.signed_probe();enrolled_status()
                     if args.action=='verify-owner':
                         signed_owner_inventory()
-                        print('RC7_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER')
+                        print(rt.VERSION+'_SIGNED_FRPS_OWNER_VERIFY=PASS_SIGNED_LISTENER')
                         print('FRPS_CHILD_FORWARDING=NOT_PROVEN')
                     elif args.action=='verify-child':
                         identity=signed_child_inventory(args.tunnel_id)
-                        print('RC7_SIGNED_FOREIGN_FRPC_CHILD_VERIFY=PASS_LOCAL_TLS443')
+                        print(rt.VERSION+'_SIGNED_FOREIGN_FRPC_CHILD_VERIFY=PASS_LOCAL_TLS443')
                         print('FRPC_CHILD_INSTANCE_SHA256='+identity)
                         print('SIGNED_OWNER_CHILD_CONTINUITY=NOT_PROVEN')
                         print('FRP_DATA_PLANE=NOT_PROVEN')
                     else:
-                        print('RC7_FRP_ENROLLMENT_VERIFY=PASS_SIGNED')
+                        print(rt.VERSION+'_FRP_ENROLLMENT_VERIFY=PASS_SIGNED')
                     print('LIVE_CONFIG_CHANGES=NONE')
                 else:
                     need(args.action=='recover' or entry['state']=='COMMITTED',

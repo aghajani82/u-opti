@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RC7 IR-only journaled source-IP/SNI-scoped FRP WSS/443 edge.
+"""IR-only journaled source-IP/SNI-scoped FRP WSS/443 edge for RC7 or RC9.
 
 Does not start FRPS or publish an XHTTP route. Restricted to the pinned
 Foreign peer and the existing IR TLS backend, with explicit rollback.
@@ -36,6 +36,11 @@ rt=load('rc7_wss_runtime_controller','smite-rc7-wss-runtime.py')
 Hold=p.Hold
 need=p.need
 
+def select_rc9():
+    global STATE
+    rt.select_rc9()
+    STATE=rt.RC9_EDGE.parent
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -66,12 +71,17 @@ def save(doc):
     rt.fsync_dir(STATE)
 
 def journal():
+    if rt.VERSION=='RC9':
+        need(stat.S_IMODE(rt.trusted_path(STATE,directory=True).st_mode)==0o700,
+             'UNTRUSTED_EDGE_JOURNAL_DIRECTORY')
     doc=json.loads(file(STATE/'record.json',0o600))
     need(doc.get('schema')==1 and doc.get('state') in (
         'PREPARED','APPLYING','COMMITTED','HOLD','ROLLING_BACK','ROLLED_BACK'
     ) and re.fullmatch(r'[a-z0-9.-]{1,253}',doc.get('domain',''))
        and re.fullmatch(r'[0-9.]{7,15}',doc.get('peer','')),
        'INVALID_EDGE_JOURNAL')
+    if rt.VERSION=='RC9':
+        need(doc.get('version')==rt.VERSION,'EDGE_JOURNAL_VERSION_MISMATCH')
     return doc
 
 def expected_runtime(domain,peer):
@@ -113,16 +123,23 @@ def alternate_probe(domain):
 
 def no_owner_or_data_port():
     rt.no_tunnels()
-    need(not p.run(['ss','-H','-lnt','( sport = :20182 )']).strip(),
-         'IR_DATA_PORT_IN_USE')
+    if rt.VERSION=='RC7':
+        need(not p.run(['ss','-H','-lnt','( sport = :20182 )']).strip(),
+             'IR_DATA_PORT_IN_USE')
 
 def preview(peer):
     need(os.geteuid()==0,'ROOT_REQUIRED')
-    need(not STATE.exists() and not STATE.is_symlink(),'EDGE_JOURNAL_EXISTS')
-    values=p.state()
-    need(values.get('SMITE_ROLE')=='panel-iran'
-         and values.get('SMITE_MANAGED_VERSION')=='2.0.0-rc.7',
-         'IR_RC7_STATE_INVALID')
+    if os.path.lexists(STATE):
+        need(rt.VERSION=='RC9' and journal()['state']=='ROLLED_BACK'
+             and not os.path.lexists(STATE/'record.next'),'EDGE_JOURNAL_EXISTS')
+    if rt.VERSION=='RC9':
+        values=rt.rc9_state('ir')
+        rt.trusted_path(STATE.parent,directory=True)
+    else:
+        values=p.state()
+        need(values.get('SMITE_ROLE')=='panel-iran'
+             and values.get('SMITE_MANAGED_VERSION')=='2.0.0-rc.7',
+             'IR_RC7_STATE_INVALID')
     domain=values['SMITE_PANEL_DOMAIN']
     expected_runtime(domain,peer)
     no_owner_or_data_port()
@@ -137,10 +154,13 @@ def preview(peer):
     p.run(['nginx','-t'])
     mode=stat.S_IMODE(q.FRP_MAP.stat().st_mode)
     need(mode in (0o600,0o640,0o644),'FRP_MAP_MODE_UNSAFE')
-    return {'schema':1,'state':'PREPARED','domain':domain,'peer':peer,
+    doc={'schema':1,'state':'PREPARED','domain':domain,'peer':peer,
             'tls_before':sha(before),'stream':sha(stream),
             'map_before':sha(original),'map_after':sha(new),
-            'alternate':sha(alt),'map_mode':mode},original,alt,new
+            'alternate':sha(alt),'map_mode':mode}
+    if rt.VERSION=='RC9':
+        doc.update(version=rt.VERSION)
+    return doc,original,alt,new
 
 def bridge_source(current):
     # Admit only the exact reversible include recorded by the existing bridge.
@@ -172,19 +192,26 @@ def validate_committed(doc):
     p.run(['nginx','-t'])
     rt.panel_probe(doc['domain'])
     alternate_probe(doc['domain'])
-    print('RC7_WSS_EDGE_VERIFY=PASS_READ_ONLY')
+    print(rt.VERSION+'_WSS_EDGE_VERIFY=PASS_READ_ONLY')
     print('PEER_ONLY='+doc['peer'])
     print('FRPS_TOUCHED=NO')
 
 def apply(peer):
     with rt.locked():
         doc,original,alt,new=preview(peer)
+        if rt.VERSION=='RC9' and os.path.lexists(STATE):
+            rt.archive_restored_journal(STATE)
         STATE.mkdir(mode=0o700)
         rt.fsync_dir(STATE.parent)
         write_new(STATE/'map.before',original,0o600)
         save(doc)
         try:
             doc['state']='APPLYING';save(doc)
+            if rt.VERSION=='RC9':
+                need(sha(file(q.TLS_SOURCE))==doc['tls_before']
+                     and sha(file(q.STREAM_SOURCE))==doc['stream']
+                     and file(q.FRP_MAP,doc['map_mode'])==original,
+                     'EXISTING_PANEL_GATEWAY_DRIFT')
             write_new(q.ALT_CANDIDATE,alt,0o644)
             atomic_replace(q.FRP_MAP,new,doc['map_mode'])
             p.run(['nginx','-t'])
@@ -195,11 +222,17 @@ def apply(peer):
             need(file(q.FRP_MAP,doc['map_mode'])==new
                  and file(q.ALT_CANDIDATE,0o644)==alt,'EDGE_POSTCONDITION_FAILED')
             doc['state']='COMMITTED';save(doc)
-            print('RC7_WSS_EDGE_APPLY=PASS')
+            print(rt.VERSION+'_WSS_EDGE_APPLY=PASS')
             print('FRPS_TOUCHED=NO')
             print('XHTTP_ROUTE_PUBLISHED=NO')
         except Exception:
             doc['state']='HOLD';save(doc)
+            if rt.VERSION=='RC9':
+                try:
+                    restore(doc)
+                except Exception as exc:
+                    raise Hold('EDGE_APPLY_HOLD_REVIEW_BEFORE_RECOVER') from exc
+                raise Hold('RC9_WSS_EDGE_FAILED_STAGE_ROLLED_BACK')
             raise Hold('EDGE_APPLY_HOLD_REVIEW_BEFORE_RECOVER')
 
 def restore(doc):
@@ -233,27 +266,32 @@ def restore(doc):
     rt.panel_probe(doc['domain'])
     need(file(q.FRP_MAP,doc['map_mode'])==before,'MAP_RESTORE_FAILED')
     doc['state']='ROLLED_BACK';save(doc)
-    print('RC7_WSS_EDGE_ROLLBACK=PASS')
+    print(rt.VERSION+'_WSS_EDGE_ROLLBACK=PASS')
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action',choices=('plan','apply','verify','rollback','recover'))
     ap.add_argument('--peer-ip',default='')
+    ap.add_argument('--rc9',action='store_true',help='Use the exact RC9 runtime and edge journal')
     ap.add_argument('--snapshot-confirm',default='')
     args=ap.parse_args()
     try:
-        need(os.geteuid()==0 and os.uname().nodename.split('.')[0].lower()=='ir',
-             'IR_ROOT_ONLY')
+        need(os.geteuid()==0,'IR_ROOT_ONLY')
+        if args.rc9:
+            select_rc9()
+            rt.rc9_state('ir')
+        else:
+            need(os.uname().nodename.split('.')[0].lower()=='ir','IR_ROOT_ONLY')
         if args.action in ('apply','rollback','recover'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'PROVIDER_SNAPSHOT_AND_CONSOLE_REQUIRED')
-            expected=args.action.upper()+'-RC7-WSS-EDGE'
+            expected=args.action.upper()+'-'+rt.VERSION+'-WSS-EDGE'
             need(input('Type '+expected+': ').strip()==expected,
                  'OPERATOR_CANCELLED')
         if args.action=='plan':
             with rt.locked():
                 preview(args.peer_ip)
-            print('RC7_WSS_EDGE_PLAN=PASS_READ_ONLY')
+            print(rt.VERSION+'_WSS_EDGE_PLAN=PASS_READ_ONLY')
             print('LIVE_CHANGES=NONE')
         elif args.action=='apply':
             apply(args.peer_ip)

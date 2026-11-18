@@ -24,8 +24,8 @@ def load(name, file):
 def review():
     b=load('stage15_review_broker','smite-rc5-xhttp-root-broker.py')
     p=load('stage15_review_provision','smite-rc5-xhttp-broker-provision.py')
-    if (os.geteuid()!=0 or os.uname().nodename.split('.')[0].lower()!='ir'
-            or not sys.stdin.isatty() or sys.argv[1:]):
+    b._require_ir_root_role()
+    if not sys.stdin.isatty() or sys.argv[1:]:
         raise b.BrokerHold('IR_ROOT_TTY_ONLY')
     with b._lock():
         config=b._configuration(); b._verify_helper(config); b._verify_bridge()

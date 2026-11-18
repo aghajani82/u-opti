@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage15/RC7 bridge transaction. Never edits WSS journal, 8444 or FRPS.
+"""Stage15/RC7/RC9 bridge transaction. Never edits WSS journal, 8444 or FRPS.
 
 The immutable WSS backend hash is checked against a durable before-image.
 Only the exact derived include insertion may extend that backend. A prepared
@@ -27,18 +27,40 @@ need = base.require
 STATE = Path('/var/lib/u-opti/smite-stage15-xhttp-bridge')
 EDGE = Path('/var/lib/u-opti/smite-stage15-wss-edge/record.json')
 RC7_EDGE = Path('/var/lib/u-opti/smite-rc7-wss-edge/record.json')
+RC9_EDGE = Path('/var/lib/u-opti/smite-rc9-wss-edge/record.json')
 
 def edge_path():
     # A partial/symlinked generation is evidence too: never silently fall back.
-    rc7 = not base.absent(RC7_EDGE.parent)
-    need(not (rc7 and not base.absent(EDGE.parent)), 'AMBIGUOUS_WSS_GENERATION')
-    if rc7:
-        base.trusted_dir(RC7_EDGE.parent, mode=0o700)
-        base.trusted_file(RC7_EDGE, mode=0o600)
-    return RC7_EDGE if rc7 else EDGE
+    present = [path for path in (EDGE, RC7_EDGE, RC9_EDGE) if not base.absent(path.parent)]
+    need(len(present) <= 1, 'AMBIGUOUS_WSS_GENERATION')
+    selected = present[0] if present else EDGE
+    if selected in (RC7_EDGE, RC9_EDGE):
+        base.trusted_dir(selected.parent, mode=0o700)
+        base.trusted_file(selected, mode=0o600)
+    return selected
+
+def schema():
+    return {EDGE: 1, RC7_EDGE: 2, RC9_EDGE: 3}[edge_path()]
+
+def host_gate():
+    if edge_path() != RC9_EDGE:
+        base.host_gate()
+        return
+    need(os.geteuid() == 0, 'IR_ROOT_ONLY')
+    edge = edge_module()
+    edge.rt.rc9_state('ir')
+    base.trusted_dir(base.BACKEND.parent)
+    base.trusted_dir(base.BRIDGE.parent)
+    base.trusted_lock_directory(base.LOCK.parent)
+    base.trusted_dir(base.TX_ROOT.parent)
 
 def edge_state(edge):
-    if edge_path() == RC7_EDGE:
+    if edge_path() == RC9_EDGE:
+        values = edge.rt.rc9_state('ir')
+        doc = edge.journal()
+        need(values.get('SMITE_PANEL_DOMAIN') == doc['domain'], 'RC9_DOMAIN_MISMATCH')
+        return doc
+    if edge_path() in (RC7_EDGE, RC9_EDGE):
         values = edge.p.state()
         need(values.get('SMITE_ROLE') == 'panel-iran'
              and values.get('SMITE_MANAGED_VERSION') == '2.0.0-rc.7', 'IR_RC7_STATE_INVALID')
@@ -66,11 +88,10 @@ def record():
     base.trusted_dir(STATE, mode=0o700)
     doc = json.loads(base.trusted_file(STATE / 'journal.json', mode=0o600))
     need(set(doc) == {'schema', 'state', 'before', 'after', 'edge', 'domain'}
-         and type(doc['schema']) is int and doc['schema'] in (1, 2)
+         and type(doc['schema']) is int and doc['schema'] in (1, 2, 3)
          and doc['state'] in ('PREPARED', 'COMMITTED', 'RECOVERING', 'ROLLED_BACK'),
          'INVALID_STAGE15_BRIDGE_JOURNAL')
-    selected = edge_path()
-    need(doc['schema'] == (2 if selected == RC7_EDGE else 1), 'BRIDGE_GENERATION_MISMATCH')
+    need(doc['schema'] == schema(), 'BRIDGE_GENERATION_MISMATCH')
     need(isinstance(doc['domain'], str) and base.admission.DOMAIN.fullmatch(doc['domain']),
          'INVALID_BRIDGE_DOMAIN')
     old = base.trusted_file(STATE / 'backend.before', mode=0o600)
@@ -98,6 +119,10 @@ def original_backend(current, *, committed=False):
 
 
 def edge_module():
+    if edge_path() == RC9_EDGE:
+        edge = load('rc9_bridge_edge', 'smite-rc7-wss-edge.py')
+        edge.select_rc9()
+        return edge
     if edge_path() == RC7_EDGE:
         return load('rc7_bridge_edge', 'smite-rc7-wss-edge.py')
     return load('stage15_bridge_edge', 'smite-stage15-wss-edge.py')
@@ -114,8 +139,11 @@ def effective():
 
 
 def plan():
-    base.host_gate()
-    need(base.absent(STATE) and base.absent(base.TX_DIR), 'EXISTING_BRIDGE_JOURNAL')
+    host_gate()
+    need(base.absent(base.TX_DIR), 'EXISTING_BRIDGE_JOURNAL')
+    if not base.absent(STATE):
+        need(edge_path() == RC9_EDGE and record()[0]['state'] == 'ROLLED_BACK',
+             'EXISTING_BRIDGE_JOURNAL')
     need(base.absent(base.BRIDGE) and base.absent(base.admission.LEGACY), 'NOT_CLEAN_STAGE15')
     need(base.admission.checked_empty_route_directory(base.ROUTE_DIR), 'PREPARED_ROUTE_DIRECTORY_REQUIRED')
     need(not base.admission._timer_is_unsafe(), 'COMPETING_ROUTE_PUBLISHER')
@@ -127,7 +155,7 @@ def plan():
     new = candidate(old)
     need(base.admission.OLD_INCLUDE not in old, 'LEGACY_INCLUDE_FORBIDDEN')
     base.probe_panel(doc['domain'])
-    return {'schema': 2 if edge_path() == RC7_EDGE else 1, 'state': 'PREPARED', 'before': base.digest(old),
+    return {'schema': schema(), 'state': 'PREPARED', 'before': base.digest(old),
             'after': base.digest(new), 'edge': base.digest(base.trusted_file(edge_path(), mode=0o600)),
             'domain': doc['domain']}, old, new
 
@@ -140,7 +168,7 @@ def invariants(doc, old):
     need(base.digest(base.trusted_file(edge_path(), mode=0o600)) == doc['edge'], 'WSS_JOURNAL_CHANGED')
     edge = edge_module()
     e = edge_state(edge)
-    if doc['schema'] == 2:
+    if doc['schema'] in (2, 3):
         need(e['state'] == 'COMMITTED' and e['domain'] == doc['domain']
              and e['tls_before'] == base.digest(old), 'WSS_BINDING_CHANGED')
         original = base.trusted_file(edge.STATE / 'map.before', mode=0o600)
@@ -173,7 +201,8 @@ def restore():
         need(base.absent(base.BRIDGE), 'PARTIAL_BRIDGE_ALREADY_PRESENT')
         current = base.trusted_file(base.BACKEND, mode=0o644)
         edge_doc = json.loads(base.trusted_file(edge_path(), mode=0o600))
-        need(edge_doc.get('state') == 'COMMITTED' and edge_doc.get('tls_before' if edge_path() == RC7_EDGE else 'backend') == base.digest(current),
+        backend_key = 'tls_before' if edge_path() in (RC7_EDGE, RC9_EDGE) else 'backend'
+        need(edge_doc.get('state') == 'COMMITTED' and edge_doc.get(backend_key) == base.digest(current),
              'PARTIAL_BACKEND_DRIFT')
         if not base.absent(STATE / 'backend.before'):
             need(base.trusted_file(STATE / 'backend.before', mode=0o600) == current, 'PARTIAL_BACKUP_DRIFT')
@@ -200,6 +229,8 @@ def restore():
 
 def apply():
     doc, old, new = plan()
+    if not base.absent(STATE):
+        edge_module().rt.archive_restored_journal(STATE)
     STATE.mkdir(mode=0o700); base.sync_dir(STATE.parent)
     base.new_file(STATE / 'backend.before', old, 0o600)
     base.new_file(STATE / 'journal.json', (json.dumps(doc, sort_keys=True) + '\n').encode(), 0o600)
@@ -218,7 +249,7 @@ def apply():
 
 
 def verify():
-    base.host_gate()
+    host_gate()
     doc, old, new = record()
     original_backend(base.trusted_file(base.BACKEND, mode=0o644), committed=True)
     need(doc['state'] == 'COMMITTED', 'STAGE15_BRIDGE_NOT_COMMITTED')
@@ -234,10 +265,11 @@ def main():
     args = p.parse_args()
     fd = None
     try:
-        base.host_gate()
+        host_gate()
         if args.action in ('apply', 'rollback', 'recover'):
             need(sys.stdin.isatty(), 'ROOT_INTERACTIVE_APPROVAL_REQUIRED')
-            challenge = args.action.upper() + '-IR-STAGE15-BRIDGE-SNAPSHOT'
+            generation = 'RC9' if edge_path() == RC9_EDGE else 'STAGE15'
+            challenge = args.action.upper() + '-IR-' + generation + '-BRIDGE-SNAPSHOT'
             need(input('Type ' + challenge + ': ') == challenge, 'OPERATOR_CANCELLED')
         fd = base.lock_host()
         if args.action == 'plan': plan()

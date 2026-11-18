@@ -33,18 +33,25 @@ class Hold(ValueError):
 # That lane deliberately has NO host binary mounts. Never treat a missing
 # mount as evidence of a broken live FRP tunnel or permission to recreate Node.
 RC7_ENROLLMENT_RECORD = Path("/var/lib/u-opti/smite-rc7-frp-enrollment/record.json")
+RC9_ENROLLMENT_RECORD = Path("/var/lib/u-opti/smite-rc9-frp-enrollment/record.json")
 
 
 def _rc7_bundled_local_review(node: Path, role: str,
                               record: dict) -> dict[str, str] | None:
-    """Read RC7's own root-owned committed journal; never probe live Docker.
+    """Read the release-specific bundled enrollment journal without Docker.
 
     This is strictly LOCAL enrollment evidence. It does not attest image
     bytes, a running FRP owner/child, signed status, pairing, or replay.
     Return None if no RC7 journal exists so legacy mount errors remain clear.
     """
-    if not RC7_ENROLLMENT_RECORD.exists() and not RC7_ENROLLMENT_RECORD.is_symlink():
+    journals = [(version, path) for version, path in (
+        ("RC7", RC7_ENROLLMENT_RECORD), ("RC9", RC9_ENROLLMENT_RECORD))
+        if os.path.lexists(path)]
+    if not journals:
         return None
+    if len(journals) != 1:
+        return {"state": "UNAVAILABLE", "reason": "AMBIGUOUS_FRP_ENROLLMENT"}
+    version, path = journals[0]
     try:
         spec = importlib.util.spec_from_file_location(
             "managed_frp_rc7_local_review",
@@ -54,27 +61,30 @@ def _rc7_bundled_local_review(node: Path, role: str,
             raise Hold("RC7_REVIEW_HELPER_MISSING")
         reviewed = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(reviewed)
+        if version == "RC9":
+            reviewed.select_rc9()
+            reviewed.JOURNAL = path.parent
         # state() checks the root-owned 0700 enrollment journal directory,
         # private 0600 record, schema, role and both binary digests.
         journal = reviewed.state()
         if journal.get("state") != "COMMITTED":
-            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_NOT_COMMITTED"}
+            return {"state": "UNAVAILABLE", "reason": version + "_ENROLLMENT_NOT_COMMITTED"}
         if journal.get("role") != ("foreign" if role == "KH" else "ir"):
-            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_ROLE_MISMATCH"}
+            return {"state": "UNAVAILABLE", "reason": version + "_ENROLLMENT_ROLE_MISMATCH"}
         raw = reviewed.read_private(node / "config" / "engine-state" / "engines.json")
         if (reviewed.sha(raw) != journal["new"]
                 or journal["binaries"] != {
                     "frpc": record["sha256"], "frps": record["server_sha256"],
                 }):
-            return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_MANIFEST_DRIFT"}
+            return {"state": "UNAVAILABLE", "reason": version + "_ENROLLMENT_MANIFEST_DRIFT"}
         return {
             "state": "ENROLLED_UNVERIFIED",
-            "reason": "RC7_BUNDLED_FRP_SIGNED_STATUS_REQUIRED",
+            "reason": version + "_BUNDLED_FRP_SIGNED_STATUS_REQUIRED",
         }
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, Hold,
             ImportError, AttributeError):
         # Never echo arbitrary paths, exceptions, identities or secret data.
-        return {"state": "UNAVAILABLE", "reason": "RC7_ENROLLMENT_LOCAL_PROOF_INVALID"}
+        return {"state": "UNAVAILABLE", "reason": version + "_ENROLLMENT_LOCAL_PROOF_INVALID"}
 
 
 def inspect(node: Path, *, binaries: dict[str, Path] | None = None) -> dict[str, str]:
@@ -275,6 +285,10 @@ def stage15_readiness(node: Path, *, run=None) -> dict[str, str]:
 # admission, WSS enrollment, FRPS activation, or an install authorisation.
 # RC7 and Stage15 paths deliberately keep their original independent pins.
 RC9_UPSTREAM = "e7f76185e9a7da51d7069d5d0a829dc192cc1e06"
+RC9_PANEL_IMAGE = (
+    "ghcr.io/aghajani82/smite-panel@sha256:"
+    "f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"
+)
 RC9_NODE_IMAGE = (
     "ghcr.io/aghajani82/smite-node@sha256:"
     "3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"
@@ -576,10 +590,7 @@ def _rc9_wss_compose_plan(node: Path, role: str, *, state_path: Path,
             labels = runtime["Config"]["Labels"]
             project = labels.get("com.docker.compose.project", "")
             active = labels.get("com.docker.compose.project.config_files", "")
-            expected_image = (
-                "ghcr.io/aghajani82/smite-panel@sha256:"
-                "f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e"
-                if name == "smite-panel" else RC9_NODE_IMAGE)
+            expected_image = RC9_PANEL_IMAGE if name == "smite-panel" else RC9_NODE_IMAGE
             if (not re.fullmatch(r"uopti_rc6_[a-f0-9]{32}", project)
                     or labels.get("com.docker.compose.service") != name
                     or active != str(base) + "," + str(overlay)
