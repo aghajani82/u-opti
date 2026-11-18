@@ -64,7 +64,8 @@ def exercise(work, baseline_source):
     for path in ("panel/data", "panel/certs"):
         (work / path).mkdir(parents=True)
     doc = {"role": "ir", "state": "COMMITTED", "project": "uopti_rc6_" + "0" * 32,
-           "baseline": {"smite-panel": {"files": [str(base), str(config)]}}}
+           "baseline": {"smite-panel": {"files": [str(base), str(config)]}},
+           "protected": rt.protected_receipt(map(str, (base, config, work / ".env")))}
     baseline = doc["baseline"]["smite-panel"]
     with patch.object(rt.p, "PANEL", work), patch.object(panel, "STATE", work / "receipt"):
         wss = rt.overlay_path("smite-panel")
