@@ -961,8 +961,12 @@ def _rc9_independent_locked(frp, ingress, role, *, apply, rollback):
             or os.path.lexists(RC7_RETAINED_JOURNAL)):
         raise Hold("RC9_BACKHAUL_REQUIRES_INDEPENDENT_BASELINE")
     rt.no_tunnels()
-    if any(row.split(maxsplit=1)[-1] == "backhaul" for row in
-           rt.run(["docker", "top", "smite-node", "-eo", "comm"]).splitlines()[1:]):
+    # Docker uses the PID column to scope ps results to the container.
+    try:
+        processes = rt.run(["docker", "top", "smite-node", "-eo", "pid,comm"])
+    except rt.Hold as exc:
+        raise Hold("RC9_BACKHAUL_NODE_PROCESS_LIST_UNAVAILABLE") from exc
+    if any(row.split(maxsplit=1)[-1] == "backhaul" for row in processes.splitlines()[1:]):
         raise Hold("RC9_BACKHAUL_TUNNEL_STILL_RUNNING")
     rt.saved_tunnels_only()
     prior, engines = frp.manifest_before()

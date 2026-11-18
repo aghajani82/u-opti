@@ -1251,6 +1251,7 @@ class RC9IndependentEnrollment(unittest.TestCase):
         root = Path(temp.name)
         self.manifest = root / "engine-state" / "engines.json"
         self.receipt = root / "backhaul.json"
+        self.processes = "PID COMMAND\n123 python3"
         self.inventory = {engine: "not-installed" for engine in control.ENGINES}
         self.digest = control.package.OFFICIAL_BINARY_SHA256["amd64"]
         self.rt = SimpleNamespace(locked=contextlib.nullcontext, inspect_container=Mock(return_value={
@@ -1296,7 +1297,8 @@ class RC9IndependentEnrollment(unittest.TestCase):
                 **self.inventory, **{key: "ready" for key in engines},
             }})
         if command[:2] == ["docker", "top"]:
-            return "COMMAND\npython3"
+            self.assertEqual(command, ["docker", "top", "smite-node", "-eo", "pid,comm"])
+            return self.processes
         self.fail(f"Unexpected command {command[:3]}")
 
     def test_enrolls_only_backhaul_and_restores_original_manifest(self):
@@ -1325,6 +1327,13 @@ class RC9IndependentEnrollment(unittest.TestCase):
         self.frp.state.return_value = {"state": "COMMITTED"}
         control._rc9_independent_operation("ir")
         self.frp.verify_file.assert_called_once_with({"state": "COMMITTED"})
+
+    def test_process_list_still_rejects_running_backhaul_before_writing(self):
+        self.processes += "\n456 backhaul"
+        with self.assertRaisesRegex(control.Hold, "RC9_BACKHAUL_TUNNEL_STILL_RUNNING"):
+            control._rc9_independent_operation("ir", apply=True)
+        self.assertFalse(self.receipt.exists())
+        self.assertFalse(self.manifest.exists())
 
 
 if __name__ == "__main__":
