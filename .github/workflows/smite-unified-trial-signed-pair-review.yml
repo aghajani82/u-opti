@@ -11,6 +11,9 @@ on:
       - 'tests/test-smite-unified-trial-pair-admission.py'
       - '.github/workflows/smite-unified-trial-signed-pair-review.yml'
       - 'docs/RC9_OWNER_RELEASE_APPROVAL_REQUEST.json'
+      - 'docs/RC9_RETAINED_PANEL_APPROVAL.json'
+      - 'modules/smite-rc9-retained-panel.py'
+      - 'tests/test-smite-rc9-retained-panel-docker.py'
 
 permissions:
   contents: read
@@ -204,3 +207,119 @@ jobs:
           path: ${{ runner.temp }}/rc9-owner-release/
           retention-days: 7
           if-no-files-found: error
+
+  owner-approved-retained-panel:
+    if: >-
+      github.repository == 'aghajani82/u-opti' &&
+      github.actor == 'aghajani82' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/trial/unified-smite-install' &&
+      github.event.head_commit.message == 'release(rc9): authorize retained Iran Panel upgrade'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Verify the exact owner decision and signed Panel digest
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$BEFORE"
+          request=docs/RC9_RETAINED_PANEL_APPROVAL.json
+          test "$(git diff --name-status "$BEFORE" "$GITHUB_SHA")" = "$(printf 'A\t%s' "$request")"
+          mkdir -p "$RUNNER_TEMP/retained-panel-release"
+          cp "$request" "$RUNNER_TEMP/retained-panel-release/approved.json"
+          python3 -B - "$request" <<'PY_APPROVAL'
+          import json
+          from pathlib import Path
+          import sys
+          module = Path("modules/smite-rc9-retained-panel.py")
+          sys.path.insert(0, str(module.parent))
+          import runpy
+          helper = runpy.run_path(str(module))
+          data = Path(sys.argv[1]).read_bytes()
+          assert data == helper["release_bytes"]()
+          assert json.loads(data) == {
+              "activation_allowed": True,
+              "image": "ghcr.io/aghajani82/smite-panel@sha256:02538fece887a82fd49815514722aceb472d18956d05f49e5561d3ebdc206567",
+              "scope": "retained_rc9_iran_panel_only",
+              "schema": 1,
+              "source_sha": "159174eb523a91e82292effd4930341b9b72e384",
+          }
+          PY_APPROVAL
+          cosign verify --trusted-root modules/smite-rc7-sigstore-trusted-root.json \
+            --certificate-identity=https://github.com/aghajani82/Smite/.github/workflows/unified-install-signed-trial.yml@refs/heads/trial/unified-smite-install \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-repository=aghajani82/Smite \
+            --certificate-github-workflow-trigger=push \
+            --certificate-github-workflow-sha=159174eb523a91e82292effd4930341b9b72e384 \
+            -a smite_role=panel -a smite_trial=unified-install \
+            -a smite_source_sha=159174eb523a91e82292effd4930341b9b72e384 \
+            ghcr.io/aghajani82/smite-panel@sha256:02538fece887a82fd49815514722aceb472d18956d05f49e5561d3ebdc206567 >/dev/null
+      - name: Sign and independently verify the retained Panel host authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/retained-panel-release"
+          cosign sign-blob --yes --bundle "$dir/approved.sigstore.json" "$dir/approved.json" >/dev/null
+          cosign verify-blob --trusted-root modules/smite-rc7-sigstore-trusted-root.json \
+            --bundle "$dir/approved.sigstore.json" \
+            --certificate-identity=https://github.com/aghajani82/u-opti/.github/workflows/smite-unified-trial-signed-pair-review.yml@refs/heads/trial/unified-smite-install \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-repository=aghajani82/u-opti \
+            --certificate-github-workflow-trigger=push \
+            --certificate-github-workflow-sha="$GITHUB_SHA" - <"$dir/approved.json" >/dev/null
+          sha256sum "$dir/approved.sigstore.json"
+          # Public Sigstore bundle so it can be reviewed and packaged independently.
+          printf 'RETAINED_PANEL_BUNDLE_BASE64=%s\n' "$(base64 -w0 "$dir/approved.sigstore.json")"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smite-rc9-retained-panel-release-${{ github.sha }}
+          path: ${{ runner.temp }}/retained-panel-release/
+          if-no-files-found: error
+
+  retained-panel-rehearsal:
+    if: github.repository == 'aghajani82/u-opti' && github.ref == 'refs/heads/trial/unified-smite-install' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: e7f76185e9a7da51d7069d5d0a829dc192cc1e06
+          path: rc9-baseline
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recreate only the fixture Panel and compare the retained runtime
+        env:
+          UOPTI_DISPOSABLE_DOCKER_LAB: 'YES'
+        run: sudo --preserve-env=UOPTI_DISPOSABLE_DOCKER_LAB,HOME python3 -B tests/test-smite-rc9-retained-panel-docker.py rc9-baseline/docker-compose.yml

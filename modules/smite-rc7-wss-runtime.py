@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 import tempfile
+from types import SimpleNamespace
 
 HERE=Path(__file__).resolve().parent
 STATE=Path('/var/lib/u-opti/smite-rc7-wss-runtime')
@@ -380,6 +381,12 @@ def signature_recovery(doc, *, commit=False, rollback=False):
 
 def ensure_service(name,doc,*,enabled,healthy=True):
     obj=inspect_container(name)
+    if VERSION=='RC9' and name=='smite-panel':
+        old_image=load('smite-managed-frp-control.py').RC9_PANEL_IMAGE
+        if obj['Config'].get('Image')!=old_image:
+            checks=SimpleNamespace(need=need,trusted_path=trusted_path,STATE=STATE,
+                                   p=p,run=run,overlay_path=overlay_path)
+            load('smite-rc9-retained-panel.py').original_identity(checks,obj,doc,old_image)
     # Validate all security parameters against the exact reviewed baseline
     # with the one permitted WSS flag stripped solely for admission.
     safe=json.loads(json.dumps(obj))
@@ -642,6 +649,9 @@ def restore(doc):
         need(json.loads(RC9_ENROLLMENT.read_text()).get('state')=='ROLLED_BACK',
              'ROLLBACK_FRP_ENROLLMENT_FIRST')
     no_tunnels()
+    if VERSION=='RC9' and doc['role']=='ir':
+        need(not os.path.lexists(p.PANEL/'docker-compose.retained-panel-rc9.yml'),
+             'ROLLBACK_RETAINED_PANEL_FIRST')
     check_protected(doc)
     # Check every container and overlay before any mutation.
     recreate=[]

@@ -461,11 +461,7 @@ def run_queue(edge, ingress, route):
         print("BACKHAUL_PANEL_PUBLISH=APPLIED")
 
 
-def enable_panel_queue(edge, ingress):
-    rt = edge.rt
-    ingress.run_operation(edge, "ir", "verify")
-    queue(rt, "check")
-    directory = Path("/etc/systemd/system")
+def panel_queue_units(ingress, rt):
     service = "u-opti-smite-backhaul-panel.service"
     timer = "u-opti-smite-backhaul-panel.timer"
     installed = Path("/usr/local/lib/u-opti/modules") / Path(__file__).name
@@ -478,18 +474,32 @@ def enable_panel_queue(edge, ingress):
                 "[Timer]\nOnActiveSec=2s\nOnUnitInactiveSec=10s\nAccuracySec=2s\n"
                 f"Unit={service}\n[Install]\nWantedBy=timers.target\n").encode(),
     }
-    for unit, contents in units.items():
-        target = directory / unit
+    directory = Path("/etc/systemd/system")
+    paths = {directory / unit: contents for unit, contents in units.items()}
+    for target, contents in paths.items():
         if os.path.lexists(target):
             need(ingress.read_trusted(rt, target, 0o644) == contents,
                  "BACKHAUL_PANEL_WORKER_UNIT_DRIFT")
-    for unit, contents in units.items():
-        target = directory / unit
+    return timer, paths
+
+
+def enable_panel_queue(edge, ingress):
+    rt = edge.rt
+    ingress.run_operation(edge, "ir", "verify")
+    queue(rt, "check")
+    timer, paths = panel_queue_units(ingress, rt)
+    for target, contents in paths.items():
         if not os.path.lexists(target):
             ingress.replace_bytes(rt, target, contents, 0o644, create=True)
     rt.run(["systemctl", "daemon-reload"], timeout=15)
     rt.run(["systemctl", "enable", "--now", timer], timeout=20)
     print("BACKHAUL_PANEL_PUBLISHER=ENABLED")
+
+
+def disable_panel_queue(ingress, rt):
+    timer, paths = panel_queue_units(ingress, rt)
+    if any(path.name == timer and path.is_file() for path in paths):
+        rt.run(["systemctl", "disable", "--now", timer], timeout=20)
 
 
 def validate_port(port, reserved):
