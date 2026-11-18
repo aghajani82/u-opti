@@ -163,15 +163,24 @@ class RC7BridgeTests(BridgeTests):
         doc['version'] = 'RC9'
         record.write_text(json.dumps(doc))
 
+        b.base.BACKEND.chmod(0o600)
         self.assertFalse(b.STATE.exists())
-        self.assertEqual(b.plan()[0]['schema'], 3)
+        proposed = b.plan()[0]
+        self.assertEqual(proposed['schema'], 3)
+        self.assertEqual(proposed['backend_mode'], 0o600)
         self.assertFalse(b.STATE.exists())
         b.apply()
         b.verify()
         self.assertEqual(b.record()[0]['state'], 'COMMITTED')
+        self.assertEqual(b.base.BACKEND.stat().st_mode & 0o777, 0o600)
+        b.base.BACKEND.chmod(0o644)
+        with self.assertRaisesRegex(b.base.Hold, 'UNTRUSTED_FILE_MODE'):
+            b.restore()
+        b.base.BACKEND.chmod(0o600)
         self.assertEqual(json.loads(record.read_text()), doc)
         b.restore()
         self.assertEqual(b.base.BACKEND.read_bytes(), self.old)
+        self.assertEqual(b.base.BACKEND.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(record.read_text()), doc)
 
     def test_apply_verify_and_rollback_preserve_wss(self):

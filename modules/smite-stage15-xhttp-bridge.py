@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import sys
 
@@ -41,6 +42,12 @@ def edge_path():
 
 def schema():
     return {EDGE: 1, RC7_EDGE: 2, RC9_EDGE: 3}[edge_path()]
+
+def backend_mode(doc=None):
+    if doc is None:
+        return (stat.S_IMODE(base.BACKEND.lstat().st_mode)
+                if edge_path() == RC9_EDGE else 0o644)
+    return doc.get('backend_mode', 0o644)
 
 def host_gate():
     if edge_path() != RC9_EDGE:
@@ -87,8 +94,12 @@ def candidate(original):
 def record():
     base.trusted_dir(STATE, mode=0o700)
     doc = json.loads(base.trusted_file(STATE / 'journal.json', mode=0o600))
-    need(set(doc) == {'schema', 'state', 'before', 'after', 'edge', 'domain'}
+    fields = {'schema', 'state', 'before', 'after', 'edge', 'domain'}
+    if doc.get('schema') == 3 and 'backend_mode' in doc:
+        fields.add('backend_mode')
+    need(set(doc) == fields
          and type(doc['schema']) is int and doc['schema'] in (1, 2, 3)
+         and type(backend_mode(doc)) is int and backend_mode(doc) in (0o600, 0o640, 0o644)
          and doc['state'] in ('PREPARED', 'COMMITTED', 'RECOVERING', 'ROLLED_BACK'),
          'INVALID_STAGE15_BRIDGE_JOURNAL')
     need(doc['schema'] == schema(), 'BRIDGE_GENERATION_MISMATCH')
@@ -107,6 +118,9 @@ def record():
 def original_backend(current, *, committed=False):
     """Called by WSS validation; no recursive WSS invocation."""
     doc, old, new = record()
+    if doc['schema'] == 3:
+        need(stat.S_IMODE(base.BACKEND.lstat().st_mode) == backend_mode(doc),
+             'BACKEND_MODE_DRIFT')
     if doc['state'] == 'ROLLED_BACK':
         need(current == old and base.absent(base.BRIDGE), 'ROLLED_BACK_BRIDGE_DRIFT')
     else:
@@ -151,13 +165,18 @@ def plan():
     doc = edge_state(edge)
     need(doc['state'] == 'COMMITTED', 'WSS_EDGE_NOT_COMMITTED')
     verify_edge(edge, doc)
-    old = base.trusted_file(base.BACKEND, mode=0o644)
+    mode = backend_mode()
+    need(mode in (0o600, 0o640, 0o644), 'UNTRUSTED_BACKEND_MODE')
+    old = base.trusted_file(base.BACKEND, mode=mode)
     new = candidate(old)
     need(base.admission.OLD_INCLUDE not in old, 'LEGACY_INCLUDE_FORBIDDEN')
     base.probe_panel(doc['domain'])
-    return {'schema': schema(), 'state': 'PREPARED', 'before': base.digest(old),
+    doc = {'schema': schema(), 'state': 'PREPARED', 'before': base.digest(old),
             'after': base.digest(new), 'edge': base.digest(base.trusted_file(edge_path(), mode=0o600)),
-            'domain': doc['domain']}, old, new
+            'domain': doc['domain']}
+    if doc['schema'] == 3:
+        doc['backend_mode'] = mode
+    return doc, old, new
 
 
 def save(doc):
@@ -199,7 +218,9 @@ def restore():
         base.trusted_dir(STATE, mode=0o700)
         need({p.name for p in STATE.iterdir()} <= {'backend.before'}, 'UNKNOWN_PARTIAL_BRIDGE_STATE')
         need(base.absent(base.BRIDGE), 'PARTIAL_BRIDGE_ALREADY_PRESENT')
-        current = base.trusted_file(base.BACKEND, mode=0o644)
+        mode = backend_mode()
+        need(mode in (0o600, 0o640, 0o644), 'UNTRUSTED_BACKEND_MODE')
+        current = base.trusted_file(base.BACKEND, mode=mode)
         edge_doc = json.loads(base.trusted_file(edge_path(), mode=0o600))
         backend_key = 'tls_before' if edge_path() in (RC7_EDGE, RC9_EDGE) else 'backend'
         need(edge_doc.get('state') == 'COMMITTED' and edge_doc.get(backend_key) == base.digest(current),
@@ -211,7 +232,8 @@ def restore():
         return
     doc, old, new = record()
     invariants(doc, old)
-    need(base.trusted_file(base.BACKEND, mode=0o644) in (old, new), 'BACKEND_EXTERNAL_DRIFT')
+    mode = backend_mode(doc)
+    need(base.trusted_file(base.BACKEND, mode=mode) in (old, new), 'BACKEND_EXTERNAL_DRIFT')
     base.trusted_dir(base.ROUTE_DIR, mode=0o755)
     for entry in base.ROUTE_DIR.iterdir():
         need(entry.name.startswith('.') and entry.name.endswith('.transaction.json'), 'ROUTES_REQUIRE_SEPARATE_ROLLBACK')
@@ -220,7 +242,7 @@ def restore():
     if not base.absent(base.BRIDGE):
         need(base.trusted_file(base.BRIDGE, mode=0o644) == base.BRIDGE_BYTES, 'BRIDGE_EXTERNAL_DRIFT')
     doc['state'] = 'RECOVERING'; save(doc)
-    base.replace_file(base.BACKEND, old, 0o644)
+    base.replace_file(base.BACKEND, old, mode)
     if not base.absent(base.BRIDGE):
         base.BRIDGE.unlink(); base.sync_dir(base.BRIDGE.parent)
     base.nginx_test(); base.nginx_reload(); base.probe_panel(doc['domain'])
@@ -236,9 +258,10 @@ def apply():
     base.new_file(STATE / 'journal.json', (json.dumps(doc, sort_keys=True) + '\n').encode(), 0o600)
     try:
         invariants(doc, old)
-        need(base.trusted_file(base.BACKEND, mode=0o644) == old, 'BACKEND_CHANGED')
+        mode = backend_mode(doc)
+        need(base.trusted_file(base.BACKEND, mode=mode) == old, 'BACKEND_CHANGED')
         base.new_file(base.BRIDGE, base.BRIDGE_BYTES, 0o644)
-        base.replace_file(base.BACKEND, new, 0o644)
+        base.replace_file(base.BACKEND, new, mode)
         base.nginx_test(); effective(); base.nginx_reload(); base.probe_panel(doc['domain'])
         invariants(doc, old)
         doc['state'] = 'COMMITTED'; save(doc)
@@ -251,7 +274,7 @@ def apply():
 def verify():
     host_gate()
     doc, old, new = record()
-    original_backend(base.trusted_file(base.BACKEND, mode=0o644), committed=True)
+    original_backend(base.trusted_file(base.BACKEND, mode=backend_mode(doc)), committed=True)
     need(doc['state'] == 'COMMITTED', 'STAGE15_BRIDGE_NOT_COMMITTED')
     invariants(doc, old)
     edge = edge_module(); verify_edge(edge, edge_state(edge))
