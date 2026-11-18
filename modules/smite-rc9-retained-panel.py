@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -12,7 +13,9 @@ import re
 import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
+import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
@@ -55,22 +58,41 @@ def verify_signed_image(rt, cosign, trusted_root):
             "-a", "smite_trial=unified-install", IMAGE])
 
 
-def signed_release(rt):
-    rt.need(re.fullmatch("[a-f0-9]{40}", APPROVAL_COMMIT) and BUNDLE.is_file(),
-            "RETAINED_PANEL_SIGNED_APPROVAL_REQUIRED")
+@contextmanager
+def cosign_binary(rt, digest):
     binary = shutil.which("cosign")
-    rt.need(binary is not None, "RC9_COSIGN_REQUIRED")
+    if binary:
+        yield binary
+        return
+
+    parent = STATE.parent
+    rt.trusted_path(parent, directory=True)
+    helper = HERE / "smite-install.sh"
+    rt.trusted_path(helper)
+    rt.need(os.uname().machine == "x86_64", "RC9_COSIGN_UNSUPPORTED_ARCHITECTURE")
+    with tempfile.TemporaryDirectory(prefix="smite-panel-cosign-", dir=parent) as work:
+        target = Path(work) / "cosign"
+        env = {key: value for key, value in os.environ.items() if key != "BASH_ENV"}
+        try:
+            result = subprocess.run(
+                ["/bin/bash", "--noprofile", "--norc", "-c",
+                 'source "$1" && smite_install_rc7_verified_cosign "$2" "$3"',
+                 "retained-panel-cosign", str(helper), str(target), digest],
+                env=env, timeout=900, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise rt.Hold("RC9_COSIGN_BOOTSTRAP_FAILED") from exc
+        rt.need(result.returncode == 0, "RC9_COSIGN_BOOTSTRAP_FAILED")
+        rt.trusted_path(target)
+        target.chmod(0o700)
+        yield str(target)
+
+
+def verify_release(rt, binary, digest, root):
     rt.trusted_path(Path(binary))
-    verifier = rt.load("smite-registry-pair-admission.py")
     with open(binary, "rb") as stream:
-        rt.need(hashlib.file_digest(stream, "sha256").hexdigest() ==
-                verifier.COSIGN_RC7_AMD64_SHA256, "RC9_COSIGN_DIGEST_MISMATCH")
-    root = HERE / "smite-rc7-sigstore-trusted-root.json"
-    rt.trusted_path(root)
-    verifier._validated_trusted_root(root)
-    rt.trusted_path(BUNDLE)
-    rt.need(hashlib.sha256(BUNDLE.read_bytes()).hexdigest() == BUNDLE_SHA256,
-            "RETAINED_PANEL_APPROVAL_BUNDLE_CHANGED")
+        rt.need(hashlib.file_digest(stream, "sha256").hexdigest() == digest,
+                "RC9_COSIGN_DIGEST_MISMATCH")
     rt.run([binary, "verify-blob", "--trusted-root", str(root), "--bundle", str(BUNDLE),
             "--certificate-oidc-issuer=" + ISSUER,
             "--certificate-identity=https://github.com/aghajani82/u-opti/.github/workflows/"
@@ -80,6 +102,21 @@ def signed_release(rt):
             "--certificate-github-workflow-sha=" + APPROVAL_COMMIT, "-"],
            input=release_bytes().decode())
     verify_signed_image(rt, binary, root)
+
+
+def signed_release(rt):
+    rt.need(re.fullmatch("[a-f0-9]{40}", APPROVAL_COMMIT) and BUNDLE.is_file(),
+            "RETAINED_PANEL_SIGNED_APPROVAL_REQUIRED")
+    root = HERE / "smite-rc7-sigstore-trusted-root.json"
+    rt.trusted_path(root)
+    verifier = rt.load("smite-registry-pair-admission.py")
+    verifier._validated_trusted_root(root)
+    rt.trusted_path(BUNDLE)
+    rt.need(hashlib.sha256(BUNDLE.read_bytes()).hexdigest() == BUNDLE_SHA256,
+            "RETAINED_PANEL_APPROVAL_BUNDLE_CHANGED")
+    digest = verifier.COSIGN_RC7_AMD64_SHA256
+    with cosign_binary(rt, digest) as binary:
+        verify_release(rt, binary, digest, root)
 
 
 def read_record(rt):

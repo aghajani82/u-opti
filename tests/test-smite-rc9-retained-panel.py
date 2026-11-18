@@ -82,6 +82,25 @@ class RetainedPanel(unittest.TestCase):
                 panel.signed_release(self.rt)
         self.rt.run.assert_not_called()
 
+    def test_missing_cosign_uses_verified_bootstrap_and_cleans_up(self):
+        self.rt.trusted_path = Mock()
+
+        def bootstrap(command, **_):
+            self.assertIn("smite_install_rc7_verified_cosign", command[4])
+            self.assertEqual(command[-1], "test-digest")
+            Path(command[-2]).write_bytes(b"fixture")
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(panel, "STATE", self.new.parent / "state"), \
+                patch.object(panel.os, "uname", return_value=SimpleNamespace(machine="x86_64")), \
+                patch.object(panel.shutil, "which", return_value=None), \
+                patch.object(panel.subprocess, "run", side_effect=bootstrap):
+            with panel.cosign_binary(self.rt, "test-digest") as binary:
+                temporary = Path(binary)
+                self.assertTrue(temporary.is_file())
+                self.assertEqual(temporary.stat().st_mode & 0o777, 0o700)
+            self.assertFalse(temporary.parent.exists())
+
     def test_compose_only_accepts_exact_image_change(self):
         self.rt.trusted_path = Mock()
         self.rt.check_rc9_compose = Mock()

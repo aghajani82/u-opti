@@ -336,15 +336,22 @@ jobs:
           lab="$(sudo mktemp -d /root/retained-panel-verify.XXXXXX)"
           trap 'sudo rm -rf "$lab"' EXIT
           sudo install -m 0755 "$(command -v cosign)" "$lab/cosign"
-          sudo install -m 0644 modules/{smite-rc9-retained-panel*,smite-rc7-wss-runtime.py,smite-rc7-wss-preflight.py,smite-registry-pair-admission.py,smite-rc7-sigstore-trusted-root.json} "$lab/"
+          sudo install -m 0644 modules/{smite-rc9-retained-panel*,smite-rc7-wss-runtime.py,smite-rc7-wss-preflight.py,smite-registry-pair-admission.py,smite-rc7-sigstore-trusted-root.json,smite-install.sh} "$lab/"
           sudo env "PATH=$lab:/usr/bin:/bin" "HOME=$HOME" python3 -B - "$lab" <<'PY_VERIFY'
           from pathlib import Path
           import runpy
           import sys
           from types import SimpleNamespace
+          from unittest.mock import patch
 
           lab = Path(sys.argv[1])
           runtime = SimpleNamespace(**runpy.run_path(str(lab / "smite-rc7-wss-runtime.py")))
-          runpy.run_path(str(lab / "smite-rc9-retained-panel.py"))["signed_release"](runtime)
+          verify = runpy.run_path(str(lab / "smite-rc9-retained-panel.py"))["signed_release"]
+          verify(runtime)
           print("RC9_PACKAGED_PANEL_HOST_AUTHORIZATION=PASS")
+          verify.__globals__["STATE"] = lab / "fixture-state"
+          with patch("shutil.which", return_value=None):
+              verify(runtime)
+          assert not list(lab.glob("smite-panel-cosign-*"))
+          print("RC9_TEMPORARY_COSIGN_HOST_AUTHORIZATION=PASS")
           PY_VERIFY

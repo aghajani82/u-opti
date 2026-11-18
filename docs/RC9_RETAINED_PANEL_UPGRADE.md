@@ -2,8 +2,9 @@
 
 This trial upgrade adds Backhaul publishing from the existing Smite Panel. It applies to an enrolled Iran RC9 installation with a working paired Node, signed WSS and Backhaul HTTPS ingress, and active FRP and Backhaul routes.
 
-Install the U-OPTI trial revision that includes the approval bundle and the
-retained Panel helper on Iran. Run the read-only preflight in a root terminal.
+Use U-OPTI's **Update U-OPTI** menu on Iran with the approved trial revision.
+Run the preflight in a root terminal. When Cosign is absent, the helper uses
+the existing U-OPTI downloader to verify a temporary copy of the pinned binary.
 
 ```sh
 python3 -B /usr/local/lib/u-opti/modules/smite-rc9-retained-panel.py plan
