@@ -923,7 +923,7 @@ smite_tw_stage_status() {
 smite_tw_stage_help() {
     case "$1:$2" in
         ir:0) echo 'Open the existing Panel. Check every existing active lease before adding a new tunnel.' ;;
-        ir:1) echo 'For an RC9 host without FRP, use Tunnel Wizard option 6 to set up signed WSS/443 and the XHTTP bridge.' ;;
+        ir:1) echo 'For an RC9 host without FRP, use Tunnel Wizard option 2, Install signed FRP engine, to set up WSS/443 and the XHTTP bridge.' ;;
         ir:2) echo 'After FRP setup on both hosts, create the first FRP TCP tunnel in Panel with IR as server and KH as client. For additional tunnels, select the existing signed FRPS Owner.' ;;
         ir:3) echo 'After signed FRPS Owner enrollment/activation, Panel > Tunnels: create a Child bound to that owner and a fresh signed KH inbound.' ;;
         ir:4) echo 'G only reviews an existing signed XHTTP proposal; it NEVER installs FRPS/FRPC. Enroll and verify FRPS Owner and KH inbound first.'
@@ -1044,22 +1044,26 @@ smite_tw_rc9_frp_setup() (
 )
 
 smite_tw_menu() {
-    local role="" choice
+    local role="" choice rc9 frp_option advanced_option
     role="$(smite_tw_choose_role always)" || return
     smite_tw_validate_host "$role" || return 2
     while true; do
+        rc9=no
+        frp_option="FRP — guided status/approval (NO engine installation)"
+        advanced_option="Advanced FRP — original setup and recovery"
+        if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
+            rc9=yes
+            frp_option="FRP — Install signed FRP engine (RC9)"
+            advanced_option="FRP — Check status / approve XHTTP routes"
+        fi
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
         echo "1) Backhaul — guided Sidecar START HERE"
-        echo "2) FRP — guided status/approval (NO engine installation)"
+        echo "2) $frp_option"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
-        if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
-            echo "6) Set up signed FRP on this RC9 host"
-        else
-            echo "6) Advanced FRP — original setup and recovery"
-        fi
+        echo "6) $advanced_option"
         echo "0) Back"
         read -rp "Choose [0-6]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
@@ -1067,11 +1071,16 @@ smite_tw_menu() {
         smite_tw_validate_host "$role" || return 2
         case "$choice" in
             1) smite_tw_backhaul_menu "$role" ;;
-            2) smite_tw_guided_frp "$role" ;;
-            6)
-                if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
+            2)
+                if [ "$rc9" = yes ]; then
                     smite_tw_rc9_frp_setup "$role" || :
                     smite_tw_pause
+                else
+                    smite_tw_guided_frp "$role"
+                fi ;;
+            6)
+                if [ "$rc9" = yes ]; then
+                    smite_tw_guided_frp "$role"
                 elif declare -F smite_frp_wizard_menu >/dev/null 2>&1; then
                     smite_frp_wizard_menu "$role"
                 else

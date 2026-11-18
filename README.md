@@ -63,11 +63,11 @@ The IR broker preparation requires the hostname `ir`. Continue through the exist
 
 ### FRP on the RC9 trial pair
 
-On the two paired RC9 test hosts, open **Smite Management → Tunnel Management → 6) Set up signed FRP on this RC9 host**. Start on Iran and enter the verified public egress IPv4 of the Foreign host. Then run the same menu on Foreign. The menu verifies completed stages and offers the next stage. WSS activation recreates the owned Smite services on each host and requires verified provider restore and console access.
+On the two paired RC9 test hosts, open **Smite Management → Tunnel Management → 2) FRP — Install signed FRP engine (RC9)**. Start on Iran and enter the verified public egress IPv4 of the Foreign host. Then run the same menu on Foreign. The menu verifies completed stages and offers the next stage. WSS activation recreates the owned Smite services on each host and requires verified provider restore and console access.
 
 After the setup reports success on both hosts, open **Smite Panel → Tunnels → Create → FRP → TCP**. Select the Iran node as server and the Foreign node as client. Use the intended loopback inbound on Foreign and the reserved loopback FRPS control port `7000`. For additional tunnels, bind each new Child to the existing FRPS Owner. Use the XHTTP approval steps below when publishing a route.
 
-If a stage is interrupted, the exact RC9 helpers support `recover` from their own journals. Use `smite-rc7-wss-runtime.py recover --rc9 --role ir|foreign`, `smite-rc7-wss-edge.py recover --rc9` (Iran), `smite-stage15-xhttp-bridge.py recover` (Iran), or `smite-rc7-frp-enrollment.py recover --rc9 --role ir|foreign` as appropriate. Helpers are installed under `/usr/local/lib/u-opti/modules/`. Runtime, edge and enrollment recoveries also require `--snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED` at the root console. Continue from menu option 6 after recovery.
+If a stage is interrupted, the exact RC9 helpers support `recover` from their own journals. Use `smite-rc7-wss-runtime.py recover --rc9 --role ir|foreign`, `smite-rc7-wss-edge.py recover --rc9` (Iran), `smite-stage15-xhttp-bridge.py recover` (Iran), or `smite-rc7-frp-enrollment.py recover --rc9 --role ir|foreign` as appropriate. Helpers are installed under `/usr/local/lib/u-opti/modules/`. Runtime, edge and enrollment recoveries also require `--snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED` at the root console. Continue from Tunnel Management option 2 after recovery.
 
 ### Create and approve an XHTTP route
 

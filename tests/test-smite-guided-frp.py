@@ -29,6 +29,23 @@ class GuidedTests(unittest.TestCase):
  def test_role_is_always_first_and_invalid_role_never_delegates(self):
   out=self.shell("smite_bh_role(){ echo ir; }; smite_tw_validate_host(){ echo HOLD; return 2; }; smite_frp_wizard_menu(){ echo BUG; }; printf '2\\n6\\n' | smite_tw_menu; :")
   self.assertIn('STEP 0',out);self.assertNotIn('BUG',out)
+ def test_engine_install_and_route_approval_have_distinct_menu_entries(self):
+  for version, expected in [(0, ['INSTALL ir', 'STATUS ir']), (1, ['STATUS ir', 'LEGACY ir'])]:
+   out=self.shell(f"""
+smite_tw_choose_role() {{ echo ir; }}
+smite_tw_validate_host() {{ :; }}
+smite_tw_pause() {{ :; }}
+grep() {{ return {version}; }}
+smite_tw_rc9_frp_setup() {{ echo "INSTALL $1"; }}
+smite_tw_guided_frp() {{ echo "STATUS $1"; }}
+smite_frp_wizard_menu() {{ echo "LEGACY $1"; }}
+printf '2\\n6\\n0\\n' | smite_tw_menu
+""")
+   self.assertEqual([line for line in out.splitlines() if line.split(' ')[0] in
+                     ('INSTALL', 'STATUS', 'LEGACY')], expected)
+   if version == 0:
+    self.assertIn('2) FRP — Install signed FRP engine (RC9)', out)
+    self.assertIn('6) FRP — Check status / approve XHTTP routes', out)
  def test_next_back_status_no_apply_and_all_role_steps(self):
   for role,words in [('ir',['Panel','Gateway','FRPS Owner','Child','XHTTP']),('kh',['Smite Node','Sanaei','Inbound','FRPC','Signed KH Inventory'])]:
    out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_pause(){ :; }; smite_tw_stage_status(){ echo PASS:mock-observation; }; docker(){ echo BUG; }; python3(){ echo BUG; }; printf 's\\nn\\nn\\nn\\nn\\nb\\nn\\n0\\n' | smite_tw_guided_frp "+role)
