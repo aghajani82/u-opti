@@ -209,6 +209,7 @@ jobs:
           if-no-files-found: error
 
   owner-approved-retained-panel:
+    needs: retained-panel-rehearsal
     if: >-
       github.repository == 'aghajani82/u-opti' &&
       github.actor == 'aghajani82' &&
