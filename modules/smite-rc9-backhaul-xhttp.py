@@ -299,6 +299,16 @@ def probe(rt, domain, port, path, public=False, *, report=False, backend=False):
     return passed
 
 
+def frps_snapshot(route):
+    try:
+        return route._frps_socket_inventory()
+    except route.RouteTransactionHold as exc:
+        if (str(exc) != "FRPS_OWNER_7000_MISSING"
+                or route.BIND.search(route._run(["/usr/bin/ss", "-Hlntp"]))):
+            raise
+        return None, frozenset()
+
+
 def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
     rt = edge.rt
     domain, _, _, _ = ingress.runtime_context(edge, "ir")
@@ -330,7 +340,7 @@ def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
     snippet = ingress.render_fragment("--render-ir-xhttp", str(port), path, domain)
     record = {"state": "PREPARED", "kind": "backhaul", "port": port,
               "path": path, "snippet": snippet.decode()}
-    before = route._frps_socket_inventory(allow_absent=True)
+    before = frps_snapshot(route)
     need(port not in before[1], "FRP_DATA_PORT_IN_USE")
 
     if saved is not None:
@@ -349,7 +359,7 @@ def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
                 target.unlink()
                 rt.fsync_dir(target.parent)
             ingress.reload_nginx(rt)
-            need(route._frps_socket_inventory(allow_absent=True) == before, "FRPS_RUNTIME_CHANGED")
+            need(frps_snapshot(route) == before, "FRPS_RUNTIME_CHANGED")
             ingress.replace_bytes(rt, journal, (json.dumps({**record, "state": "ROLLED_BACK"}) + "\n").encode(), 0o600)
             return "ROLLED_BACK", path
         need(saved["state"] == "ROLLED_BACK", "BACKHAUL_XHTTP_ROLLBACK_REQUIRED")
@@ -392,7 +402,7 @@ def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
             time.sleep(2)
     else:
         raise RuntimeError("BACKHAUL_END_TO_END_HANDLER_UNVERIFIED")
-    need(route._frps_socket_inventory(allow_absent=True) == before, "FRPS_RUNTIME_CHANGED")
+    need(frps_snapshot(route) == before, "FRPS_RUNTIME_CHANGED")
     def save(phase):
         ingress.replace_bytes(
             rt, journal, (json.dumps({**record, "state": phase}) + "\n").encode(), 0o600)
@@ -411,7 +421,7 @@ def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
         else:
             probe(rt, domain, port, path, public=True, backend=True, report=True)
             raise RuntimeError("PUBLIC_XHTTP_HANDLER_UNVERIFIED")
-        need(route._frps_socket_inventory(allow_absent=True) == before, "FRPS_RUNTIME_CHANGED")
+        need(frps_snapshot(route) == before, "FRPS_RUNTIME_CHANGED")
         save("COMMITTED")
     except Exception:
         need(ingress.read_trusted(rt, target, 0o644) == snippet,

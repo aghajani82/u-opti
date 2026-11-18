@@ -2,6 +2,7 @@
 """Backhaul route admission and recovery without live hosts or Docker."""
 
 from pathlib import Path
+import re
 from runpy import run_path
 import sys
 import tempfile
@@ -168,8 +169,16 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.assertEqual(self.invoke("apply"), ("APPLIED", INBOUND["path"]))
         self.assertIn('"COMMITTED"', self.journal.read_text())
         self.panel.assert_called_with(self.rt, "activate", 56053, 3080, pair=("", ""), name="")
-        self.assertTrue(all(call.kwargs == {"allow_absent": True}
-                            for call in self.route._frps_socket_inventory.call_args_list))
+        self.route._frps_socket_inventory.assert_called_with()
+
+    def test_unexpected_frps_listener_is_not_treated_as_absent(self):
+        self.route.RouteTransactionHold = ValueError
+        self.route.BIND = re.compile(r'"frps",pid=([0-9]+)')
+        self.route._frps_socket_inventory.side_effect = ValueError("FRPS_OWNER_7000_MISSING")
+        self.assertEqual(workflow["frps_snapshot"](self.route), (None, frozenset()))
+        self.route._run.return_value = 'LISTEN 0 0 127.0.0.1:7001 0.0.0.0:* users:(("frps",pid=100))'
+        with self.assertRaisesRegex(ValueError, "FRPS_OWNER_7000_MISSING"):
+            workflow["frps_snapshot"](self.route)
 
 
 if __name__ == "__main__":

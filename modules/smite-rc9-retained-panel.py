@@ -195,7 +195,7 @@ def compose_commands(rt, doc, *, installed):
     return old, new
 
 
-def continuity(rt, route):
+def continuity(rt, worker, route):
     node = rt.inspect_container("smite-node")
     tracked = []
     processes = rt.run(["docker", "top", "smite-node", "-eo", "pid,comm"])
@@ -204,7 +204,7 @@ def continuity(rt, route):
         if command in ("frps", "backhaul"):
             ticks = Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19]
             tracked.append([int(pid), ticks, command])
-    owner, ports = route._frps_socket_inventory(allow_absent=True)
+    owner, ports = worker.frps_snapshot(route)
     owners = {item[0] for item in tracked if item[2] == "frps"}
     rt.need(owners == (set() if owner is None else {owner}),
             "RETAINED_PANEL_EXPECTED_TUNNELS_NOT_RUNNING")
@@ -252,7 +252,7 @@ def check_published_routes(rt, ingress, worker, route, domain):
 
 def verified_continuity(rt, ingress, worker, route, domain):
     published = check_published_routes(rt, ingress, worker, route, domain)
-    live = continuity(rt, route)
+    live = continuity(rt, worker, route)
     rt.need(published == any(item[2] == "backhaul" for item in live[2]),
             "RETAINED_PANEL_BACKHAUL_RUNTIME_MISMATCH")
     return live
@@ -277,7 +277,7 @@ def recover(edge, ingress, worker, route, doc, rec):
     rt.need(rec["wss_sha"] == wss_sha(rt), "RETAINED_PANEL_WSS_JOURNAL_CHANGED")
     rt.check_protected(doc)
     rt.ensure_service("smite-node", doc, enabled=True)
-    live = continuity(rt, route)
+    live = continuity(rt, worker, route)
     if os.path.lexists(overlay(rt)):
         check_overlay(rt)
     old, _ = compose_commands(rt, doc, installed=os.path.lexists(overlay(rt)))

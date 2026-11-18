@@ -76,7 +76,7 @@ def _run(command: list[str]) -> str:
     return result.stdout
 
 
-def _frps_socket_inventory(*, allow_absent=False) -> tuple[int | None, frozenset[int]]:
+def _frps_socket_inventory() -> tuple[int, frozenset[int]]:
     """Strictly require :7000 and all owned proxy sockets on loopback.
 
     No user-supplied PID, process name, or listen list is considered proof.
@@ -101,8 +101,6 @@ def _frps_socket_inventory(*, allow_absent=False) -> tuple[int | None, frozenset
         if port in observed:
             raise RouteTransactionHold("DUPLICATE_FRPS_LISTENER")
         observed[port] = process_pid
-    if allow_absent and not all_frps:
-        return None, frozenset()
     if 7000 not in observed:
         raise RouteTransactionHold("FRPS_OWNER_7000_MISSING")
     owner_pid = observed[7000]
