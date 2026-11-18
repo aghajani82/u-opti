@@ -544,9 +544,11 @@ def planned(role,peer_ip):
                                  input=p.overlay_bytes(name)))
             p.only_wss_change(before,after,name)
             service=before['services'][name]
+            # RC9 retains the upstream Compose build block alongside its
+            # pinned image. Lifecycle calls explicitly disable build/pull.
             need(service.get('image')==obj['Config']['Image']
                  and service.get('network_mode')=='host'
-                 and not service.get('build') and not service.get('ports'),
+                 and not service.get('ports'),
                  'RC9_EFFECTIVE_COMPOSE_SERVICE_DRIFT')
             baseline[name].update(image_id=obj['Image'],compose_digest=compose_digest(before))
     doc={'schema':1,'role':role,'state':'PREPARED','domain':domain,

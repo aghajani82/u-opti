@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -22,6 +23,34 @@ edge=load('rc7_edge_test','smite-rc7-wss-edge.py')
 p=rt.p
 
 class WssControllerTests(unittest.TestCase):
+    def test_rc9_plan_accepts_the_installed_pinned_compose_with_build_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            root=Path(tmp)
+            image='fixture@sha256:'+'a'*64
+            service={'image':image,'network_mode':'host','build':{'context':tmp},
+                     'environment':{}}
+            before={'services':{'smite-node':service}}
+            after=json.loads(json.dumps(before))
+            after['services']['smite-node']['environment']['SMITE_FRP_STANDARD_WSS']='1'
+            container={'Image':'sha256:'+'b'*64,'Config':{'Image':image,'Env':[],'Cmd':[]},
+                       'HostConfig':{},'Mounts':[]}
+            review=SimpleNamespace(rc9_readiness=lambda *a,**k:{'ROLE':'KH'},
+                                   _rc9_wss_compose_plan=lambda *a,**k:None)
+            patches={
+                'VERSION':'RC9','STATE':root/'journal','load':lambda _:review,
+                'rc9_state':lambda _:{'SMITE_PANEL_DOMAIN':'panel.test.example'},
+                'trusted_path':lambda *a,**k:None,'signed_probe':lambda:None,
+                'no_tunnels':lambda:None,'inspect_container':lambda _:container,
+                'overlay_path':lambda _:root/'overlay','ensure_service':lambda *a,**k:None,
+                'protected_paths':lambda _:[],
+                'run':lambda argv,**k:json.dumps(after if k.get('input') else before),
+            }
+            for key,value in patches.items():
+                stack.enter_context(patch.object(rt,key,value))
+            stack.enter_context(patch.object(p,'compose_files',return_value=('project',['base'])))
+            self.assertEqual(rt.planned('foreign',None)['baseline']['smite-node']['compose_digest'],
+                             rt.compose_digest(before))
+
     def test_rc9_partial_apply_rolls_back_only_the_changed_service(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             root=Path(tmp)
