@@ -173,21 +173,34 @@ def listener(rt, port, tunnel_id):
          "BACKHAUL_DATA_LISTENER_UNVERIFIED")
 
 
-def probe(rt, domain, port, path, public=False):
+def probe(rt, domain, port, path, public=False, *, report=False):
     url = f"http://127.0.0.1:{port}{path}/"
     pin = []
     if public:
         url = f"https://{domain}{path}/"
         pin = ["--resolve", f"{domain}:443:127.0.0.1"]
     try:
+        # Go's XHTTP handler distinguishes real CORS preflight from an
+        # OPTIONS uplink. Use the same upstream Host as the Nginx renderer.
         output = rt.run(["curl", "-q", "--noproxy", "*", "--http1.1",
                          "--connect-timeout", "3", "--max-time", "5",
-                         "-X", "OPTIONS", "-D", "-", "-o", "/dev/null", *pin, url], timeout=7)
+                         "-X", "OPTIONS", "-H", f"Host: {domain}",
+                         "-H", f"Origin: https://{domain}",
+                         "-H", "Access-Control-Request-Method: POST",
+                         "-D", "-", "-o", "/dev/null", *pin, url], timeout=7)
     except rt.Hold:
-        return False
+        output = ""
     lines = output.splitlines()
-    return bool(lines and re.match(r"HTTP/1\.[01] 200(?: |$)", lines[0])
-                and any(line.lower().startswith("x-padding:") for line in lines[1:]))
+    status = re.match(r"HTTP/1\.[01] ([1-5][0-9]{2})(?: |$)", lines[0]) if lines else None
+    code = status[1] if status else "000"
+    padding = any(line.lower().startswith("x-padding:") for line in lines[1:])
+    passed = code == "200" and padding
+    if report and not passed:
+        stage = "HTTPS" if public else "DATA"
+        print(f"BACKHAUL_{stage}_PROBE_HTTP={code}")
+        print(f"BACKHAUL_{stage}_PROBE_X_PADDING={'YES' if padding else 'NO'}")
+        print(f"XHTTP_PATH={path}")
+    return passed
 
 
 def configure(edge, ingress, route, port, action):
@@ -229,7 +242,7 @@ def configure(edge, ingress, route, port, action):
         if saved["state"] == "COMMITTED" and action != "rollback":
             need(result["active"] and target.is_file(), "BACKHAUL_ROUTE_UNVERIFIED")
             listener(rt, port, result["id"])
-            need(probe(rt, domain, port, path, public=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+            need(probe(rt, domain, port, path, public=True, report=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
             return "VERIFIED", path
         if action == "rollback":
             if target.exists():
@@ -250,10 +263,11 @@ def configure(edge, ingress, route, port, action):
     applied = panel(rt, "activate", port)
     need(applied["active"] and applied["inbound"] == result["inbound"], "SIGNED_BACKHAUL_APPLY_UNVERIFIED")
     listener(rt, port, applied["id"])
-    for _ in range(4):
-        if probe(rt, domain, port, path):
+    for attempt in range(4):
+        if probe(rt, domain, port, path, report=(attempt == 3)):
             break
-        time.sleep(2)
+        if attempt < 3:
+            time.sleep(2)
     else:
         raise RuntimeError("BACKHAUL_END_TO_END_HANDLER_UNVERIFIED")
     need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
@@ -264,7 +278,7 @@ def configure(edge, ingress, route, port, action):
     ingress.replace_bytes(rt, target, snippet, 0o644, create=True)
     try:
         ingress.reload_nginx(rt)
-        need(probe(rt, domain, port, path, public=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+        need(probe(rt, domain, port, path, public=True, report=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
         need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
         save("COMMITTED")
     except Exception:

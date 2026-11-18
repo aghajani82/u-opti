@@ -18,6 +18,28 @@ INBOUND = {"port": 56053, "path": "/56053/web", "enabled": True,
            "listen": "127.0.0.1", "network": "xhttp", "protocol": "vless"}
 
 
+class ProbeTests(unittest.TestCase):
+    def test_probe_uses_real_cors_and_matches_nginx_upstream_host(self):
+        def run(cmd, **kwargs):
+            have_cors = ("Access-Control-Request-Method: POST" in cmd
+                         and "Origin: https://panel.example.test" in cmd)
+            if not have_cors:
+                return "HTTP/1.1 400 Bad Request\r\nX-Padding: abc"
+            if "Host: panel.example.test" not in cmd:
+                return "HTTP/1.1 404 Not Found"
+            return "HTTP/1.1 200 OK\r\nX-Padding: abc"
+
+        rt = SimpleNamespace(run=Mock(side_effect=run), Hold=RuntimeError)
+        for public in (False, True):
+            self.assertTrue(workflow["probe"](rt, "panel.example.test", 56053, "/56053/web", public))
+        self.assertIn("http://127.0.0.1:56053/56053/web/", rt.run.call_args_list[0].args[0])
+        self.assertIn("panel.example.test:443:127.0.0.1", rt.run.call_args_list[1].args[0])
+
+    def test_http_200_without_padding_is_still_rejected(self):
+        rt = SimpleNamespace(run=Mock(return_value="HTTP/1.1 200 OK"), Hold=RuntimeError)
+        self.assertFalse(workflow["probe"](rt, "panel.example.test", 56053, "/56053/web"))
+
+
 class BackhaulXhttpTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
