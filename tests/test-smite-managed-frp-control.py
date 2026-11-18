@@ -604,7 +604,7 @@ class FrpOperator(unittest.TestCase):
                                   ("nginx", "-t")])
         self.assertEqual(files[renderer.FRP_MAP], renderer.MAP_HEADER)
         queried.clear()
-        for bad_ip in ("127.0.0.1", "10.0.0.1", "not-an-ip"):
+        for bad_ip in ("", "127.0.0.1", "10.0.0.1", "not-an-ip"):
             with self.subTest(peer_ip=bad_ip):
                 with self.assertRaisesRegex(
                         control.Hold, "VALID_KH_PUBLIC_IPV4_REQUIRED"):
@@ -666,15 +666,15 @@ class FrpOperator(unittest.TestCase):
         for action, extra in (
                 ("status", ["--rc9-peer-ip", ""]),
                 ("review", ["--rc9-peer-ip", ""]),
-                ("review", ["--rc9-baseline", "--rc9-peer-ip", "8.8.8.8"]),
-                ("review", ["--rc9-wss-plan", "--rc9-peer-ip", ""])):
+                ("review", ["--rc9-baseline", "--rc9-peer-ip", "8.8.8.8"])):
             with self.subTest(action=action, extra=extra):
                 process = subprocess.run(
                     [sys.executable, "-B", str(SOURCE), action,
                      "--node-dir", str(self.node), *extra],
                     capture_output=True, text=True, timeout=15)
                 self.assertEqual(process.returncode, 2)
-                self.assertIn("HOLD:", process.stderr)
+                self.assertIn("HOLD: RC9_WSS_PEER_REVIEW_ONLY",
+                              process.stderr)
                 self.assertNotIn("INSTALL_ALLOWED=YES", process.stdout)
 
     def test_rc9_wss_plan_requires_review_and_never_enables_host_install(self):
