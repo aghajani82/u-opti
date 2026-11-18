@@ -98,6 +98,7 @@ def mock_upstream(stack: ExitStack, label: str, local_port: int):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     stack.callback(lambda: (server.shutdown(), server.server_close(), thread.join(2)))
+    return server
 
 
 def request(tls: bool, port_number: int, path: str, *, upgrade: bool = False,
@@ -204,8 +205,9 @@ server {{
             ir_dir.mkdir()
             kh_dir.mkdir()
             with ExitStack() as stack:
-                for name, p in (("frp", frp_port), ("backhaul", bh_port),
-                                ("child20182", child_port), ("panel", panel_port)):
+                backhaul = mock_upstream(stack, "backhaul", bh_port)
+                for name, p in (("frp", frp_port), ("child20182", child_port),
+                                ("panel", panel_port)):
                     mock_upstream(stack, name, p)
                 spawn_nginx(stack, ir_dir, nginx_config(ir_dir, ir))
                 spawn_nginx(stack, kh_dir, nginx_config(kh_dir, foreign + "\n" + bad))
@@ -223,8 +225,9 @@ server {{
                         self.assertEqual(status, 200)
                         upgraded = "websocket" if label in ("frp", "backhaul") else ""
                         self.assertEqual(body, f"{label}|{path}|{upgraded}")
-                # /tunnel (without slash) is not the signed /tunnel/ID route.
-                status, _ = request(True, ir_https, "/tunnel", trusted_ca=cert)
+                # Nginx generates a trailing-slash redirect in the peer
+                # location itself, so "add_header ... always" still applies.
+                status, _ = request(True, ir_https, "/tunnel", trusted_ca=cert, marked=True)
                 self.assertEqual(status, 301)
                 for path in ("/channel", "/tunnel/alpha"):
                     status, _ = request(False, kh_bad, path, upgrade=True)
@@ -234,6 +237,13 @@ server {{
                     self.assertEqual(body, f"backhaul|{path}|websocket")
                 status, body = request(True, ir_default, "/channel", trusted_ca=cert)
                 self.assertEqual((status, body), (200, "panel|/channel|"))
+                # An idle Backhaul listener is expected during ingress setup.
+                # The IR marker still traverses the verified TLS bridge.
+                backhaul.shutdown()
+                backhaul.server_close()
+                for path in ("/channel", "/tunnel/"):
+                    status, _ = request(False, kh_bridge, path, marked=True)
+                    self.assertEqual(status, 502)
                 status, body = request(True, ir_https, "/~!frp", upgrade=True,
                                        trusted_ca=cert)
                 self.assertEqual((status, body), (200, "frp|/~!frp|websocket"))

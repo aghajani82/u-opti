@@ -189,8 +189,10 @@ def headers(rt, path, port, *, domain=None):
         cmd += [f"http://127.0.0.1:{port}{path}"]
     text = rt.run(cmd, timeout=12)
     lines = text.encode().splitlines()
-    need(lines and re.fullmatch(rb"HTTP/1\.[01] [1-5][0-9]{2}(?: .*)?", lines[0]),
-         "BACKHAUL_CONTROL_PROBE_INVALID")
+    response = re.fullmatch(rb"HTTP/1\.[01] ([1-5][0-9]{2})(?: .*)?", lines[0]) if lines else None
+    need(response is not None, "BACKHAUL_CONTROL_PROBE_INVALID")
+    if port != 8443:
+        need(not response[1].startswith(b"3"), "BACKHAUL_CONTROL_REDIRECT")
     return [line.lower() for line in lines if line.lower().startswith(HEADER.lower() + b":")]
 
 
