@@ -46,7 +46,7 @@ printf '2\\n6\\n0\\n' | smite_tw_menu
    if version == 0:
     self.assertIn('2) FRP — Install signed FRP engine (RC9)', out)
     self.assertIn('6) FRP — Check status / approve XHTTP routes', out)
- def test_backhaul_install_and_tunnel_are_distinct(self):
+ def test_backhaul_has_one_top_level_entry(self):
   for version in (0, 1):
    out=self.shell(f"""
 smite_tw_choose_role() {{ echo ir; }}
@@ -56,17 +56,29 @@ grep() {{ return {version}; }}
 smite_tw_backhaul_menu() {{ echo "SIDECAR $1"; }}
 smite_tw_rc9_backhaul_setup() {{ echo "ENGINE $1"; }}
 smite_tw_rc9_backhaul_tunnel() {{ echo "TUNNEL $1"; }}
-printf '1\n7\n0\n' | smite_tw_menu
+if [ {version} = 0 ]; then
+    printf '1\n1\n1\n2\n7\n0\n' | smite_tw_menu
+else
+    printf '1\n7\n0\n' | smite_tw_menu
+fi
 """)
    if version == 0:
-    self.assertIn('1) Backhaul — Install signed Backhaul engine (RC9)',out)
-    self.assertIn('7) Backhaul — Activate tunnel / publish XHTTP (Iran)',out)
+    self.assertIn('1) Backhaul — Install signed engine and set up HTTPS/443 (RC9)',out)
+    self.assertNotIn('7) Backhaul',out)
     self.assertIn('ENGINE ir',out)
-    self.assertIn('TUNNEL ir',out)
+    self.assertIn('Invalid choice',out)
+    self.assertEqual(out.splitlines().count('TUNNEL ir'),1)
     self.assertNotIn('SIDECAR ir',out)
    else:
     self.assertIn('SIDECAR ir',out)
     self.assertNotIn('TUNNEL ir',out)
+ def test_backhaul_foreign_has_engine_setup_only(self):
+  out=self.shell("""
+smite_tw_rc9_backhaul_setup() { echo "ENGINE $1"; }
+smite_tw_rc9_backhaul_tunnel() { echo "TUNNEL $1"; }
+smite_tw_rc9_backhaul_menu kh
+""")
+  self.assertEqual(out.strip(),'ENGINE kh')
  def test_next_back_status_no_apply_and_all_role_steps(self):
   for role,words in [('ir',['Panel','Gateway','FRPS Owner','Child','XHTTP']),('kh',['Smite Node','Sanaei','Inbound','FRPC','Signed KH Inventory'])]:
    out=self.shell("smite_tw_validate_host(){ :; }; smite_tw_pause(){ :; }; smite_tw_stage_status(){ echo PASS:mock-observation; }; docker(){ echo BUG; }; python3(){ echo BUG; }; printf 's\\nn\\nn\\nn\\nn\\nb\\nn\\n0\\n' | smite_tw_guided_frp "+role)
