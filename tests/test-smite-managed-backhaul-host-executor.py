@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Managed Backhaul disposable-host executor: real filesystem, fake Docker only."""
 from __future__ import annotations
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import hashlib
 import importlib.util
 import io
@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -680,6 +681,59 @@ class HostExecutor(unittest.TestCase):
             return exe._retained_step(paths, action=action, role="ir", arch="amd64",
                                       witness=witness)
         return step, manifest, receipt
+
+    def test_rc9_retained_write_and_signed_recovery_preserve_original_bytes(self):
+        from dataclasses import replace
+        _, manifest, receipt = self.retained_fixture()
+        paths = replace(self.paths, frp_state=receipt.parent)
+        self.lock.touch(mode=0o600)
+        original_manifest = manifest.read_bytes()
+        original_compose = (self.node / "docker-compose.yml").read_bytes()
+        fake_rt = SimpleNamespace(rc9_state=lambda role: None,
+                                  rc9_signed_release=lambda: None, Hold=exe.Hold)
+        frp = SimpleNamespace(select_rc9=lambda: None, rt=fake_rt, MANIFEST=manifest,
+                              Hold=exe.Hold)
+        def load(_, filename):
+            return {"smite-rc7-frp-enrollment.py": frp,
+                    "smite-managed-frp-control.py": SimpleNamespace(RC9_NODE_IMAGE=IMAGE),
+                    "smite-managed-backhaul-control.py": control}[filename]
+        for role, fail_postcheck in (("ir", False), ("foreign", False), ("foreign", True)):
+            with self.subTest(role=role, failed_postcommit=fail_postcheck), ExitStack() as stack:
+                original_receipt = json.dumps(dict(json.loads(receipt.read_bytes()),
+                                                  role=role, version="RC9")).encode()
+                receipt.write_bytes(original_receipt)
+                expected_states = []
+                def verify(actual, *, rc9, expected_backhaul_state="not-installed", restored_pair=None):
+                    self.assertEqual(actual, role)
+                    self.assertTrue(rc9)
+                    expected_states.append(expected_backhaul_state)
+                    engines = json.loads(manifest.read_bytes())["engines"]
+                    self.assertEqual("backhaul" in engines, expected_backhaul_state == "ready")
+                    if restored_pair is not None:
+                        self.assertEqual(restored_pair, (original_manifest, original_receipt))
+                    if fail_postcheck and expected_backhaul_state == "ready":
+                        raise exe.Hold("FIXTURE_SIGNED_POSTCHECK_FAILED")
+                control = SimpleNamespace(_verify_bundled_backhaul=verify)
+                for name, value in {
+                        "RC9_PATHS": paths, "_load": load,
+                        "_retained_live_root_required": lambda: True,
+                        "_retained_live_signed_witness": lambda **_: "d" * 64,
+                        "_mkdir_chain": lambda *_: None}.items():
+                    stack.enter_context(patch.object(exe, name, value))
+                if fail_postcheck:
+                    with self.assertRaisesRegex(exe.Hold, "RC9_BACKHAUL_FAILED_ROLLED_BACK"):
+                        exe._retained_rc9_operation("install", role)
+                else:
+                    self.assertEqual(exe._retained_rc9_operation("install", role)[
+                        "RC9_BACKHAUL_ENROLLMENT"], "PASS_SIGNED")
+                    self.assertEqual(json.loads(receipt.read_bytes())["version"], "RC9")
+                    self.assertEqual(exe._retained_rc9_operation("rollback", role)[
+                        "RC9_BACKHAUL_ROLLBACK"], "PASS_SIGNED_EXACT_RESTORED")
+                self.assertEqual(expected_states, ["not-installed", "ready", "not-installed"])
+                self.assertEqual(manifest.read_bytes(), original_manifest)
+                self.assertEqual(receipt.read_bytes(), original_receipt)
+                self.assertEqual((self.node / "docker-compose.yml").read_bytes(), original_compose)
+                self.assertFalse(list(paths.state.iterdir()))
 
     def test_retained_writer_cannot_bypass_ci_lab_admission_directly(self):
         # The coordinator used to enforce pair.admission, but an imported

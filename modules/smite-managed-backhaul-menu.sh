@@ -70,6 +70,44 @@ smite_managed_bh_retained_already_enrolled() {
     esac
 }
 
+smite_managed_bh_rc9_retained() (
+    local mode action role approval workdir="" verifier
+    local pinned_sha=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+    local image="ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"
+    echo "RC9 Backhaul engine enrollment / rollback beside active FRP"
+    read -rp "I=IR install, R=IR rollback, F=Foreign install, B=Foreign rollback, 0=cancel: " mode || return 2
+    case "$mode" in
+        I|i) action=install; role=ir ;;
+        R|r) action=rollback; role=ir ;;
+        F|f) action=install; role=foreign ;;
+        B|b) action=rollback; role=foreign ;;
+        0) return 0 ;;
+        *) return 2 ;;
+    esac
+    echo "Confirm provider snapshot restore and independent console access on this host."
+    read -rp "Type SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED: " approval || return 2
+    [ "$approval" = SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED ] || return 2
+    if [ "$action" = install ]; then
+        verifier="$(command -v cosign || true)"
+        if [ ! -f "$verifier" ] || [ -L "$verifier" ] ||
+           [ "$(sha256sum -- "$verifier" | awk '{print $1}')" != "$pinned_sha" ]; then
+            declare -F smite_install_rc7_verified_cosign >/dev/null || {
+                echo "HOLD: Verified Cosign bootstrap unavailable."
+                return 2
+            }
+            workdir="$(mktemp -d -p /var/lib/u-opti smite-backhaul-cosign.XXXXXXXX)" || return 2
+            trap 'rm -rf -- "$workdir"' EXIT
+            smite_install_rc7_verified_cosign "$workdir/cosign" "$pinned_sha" || return 2
+            chmod 0700 "$workdir/cosign" || return 2
+            export PATH="$workdir:$PATH"
+        fi
+    fi
+    python3 -B "$SMITE_MANAGED_BACKHAUL_HOST_EXECUTOR" \
+        "$action-retained-$role" --rc9 --arch amd64 --expected-node-image "$image" \
+        --confirm-role "${action^^}-RC9-BACKHAUL-${role^^}" \
+        --confirm-snapshot-and-console "$approval"
+)
+
 smite_managed_bh_ir_retained_canary() {
     # Existing option 3 only. No new menus, tunnel Apply, ports or Node
     # lifecycle operations. The Python executor rechecks signed role=IR,
@@ -79,6 +117,10 @@ smite_managed_bh_ir_retained_canary() {
        [ "$SMITE_MANAGED_NODE_DIR" != /opt/smite-node ]; then
         echo "HOLD: Reviewed canonical retained-node executor required."
         return 2
+    fi
+    if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
+        smite_managed_bh_rc9_retained
+        return
     fi
     local arch=""
     case "$(uname -m)" in

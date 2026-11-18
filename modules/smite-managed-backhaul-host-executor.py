@@ -59,6 +59,8 @@ class Paths:
     binary: Path = package.INSTALL_BINARY
     frp_state: Path = Path("/var/lib/u-opti/smite-rc7-frp-enrollment")
 
+RC9_PATHS = Paths(frp_state=Path("/var/lib/u-opti/smite-rc9-frp-enrollment"))
+
 class Hold(RuntimeError):
     pass
 
@@ -82,6 +84,7 @@ def _deny_live_recreating_trial_paths(paths: Paths) -> None:
     for name in ("node", "staging", "state", "lock", "binary", "frp_state"):
         fixed = getattr(live, name)
         protected.extend((fixed, fixed.resolve()))
+    protected.extend((RC9_PATHS.frp_state, RC9_PATHS.frp_state.resolve()))
     for name in ("node", "staging", "state", "lock", "binary"):
         path = getattr(paths, name)
         if not isinstance(path, Path) or not path.is_absolute():
@@ -280,7 +283,7 @@ def _retained_files(paths):
 
 
 def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
-                             witness, current):
+                             witness, current, rc9=False):
     """Resume terminal RESTORED cleanup, including after journal unlink.
 
     This helper is private to the isolated retained-node transaction. A
@@ -310,7 +313,7 @@ def _retained_finish_cleanup(*, seal, journal, role, binary, fingerprint,
         raise Hold("RETAINED_CLEANUP_BASELINE_DRIFT")
     # Hash equality alone is not the retained FRP receipt's semantic proof.
     try:
-        pair._pair_expected_transition(*before, binary, role=role)
+        pair._pair_expected_transition(*before, binary, role=role, rc9=rc9)
     except pair.Hold as exc:
         raise Hold("RETAINED_CLEANUP_SEMANTIC_DRIFT") from exc
     if os.path.lexists(journal):
@@ -376,6 +379,7 @@ def _retained_step(paths, *, action, role, arch, witness, expected_before=None,
     for name in fields:
         fixed = getattr(live, name)
         protected.extend((fixed, resolve_checked(fixed)))
+    protected.extend((RC9_PATHS.frp_state, resolve_checked(RC9_PATHS.frp_state)))
     for name in fields:
         resource = getattr(paths, name)
         if not isinstance(resource, Path) or not resource.is_absolute():
@@ -433,10 +437,11 @@ def _retained_step_core(paths, *, action, role, arch, witness,
     # running FRP/Node witness plus both exact bytes under its OWN lock.
     # The foreign production host remains closed while the IR canary is
     # evaluated, independently of this caller's permissions.
+    rc9 = paths == RC9_PATHS
     if isinstance(_admission, RetainedLivePrepared):
         approved = _admission
         if (not _retained_live_root_required()
-                or paths != Paths() or approved.paths != Paths()
+                or paths not in (Paths(), RC9_PATHS) or approved.paths != paths
                 or role not in ("ir", "foreign")
                 or approved.role != role
                 or approved.arch != arch
@@ -461,7 +466,7 @@ def _retained_step_core(paths, *, action, role, arch, witness,
         # The existing strict disposable GitHub PR admission still runs
         # before the shared lock and any filesystem mutation.
         root = paths.node.parent
-        if (paths == Paths() or not root.is_absolute()
+        if (paths in (Paths(), RC9_PATHS) or not root.is_absolute()
                 or paths.node != root / "node"):
             raise Hold("RETAINED_CORE_DISPOSABLE_ADMISSION_REQUIRED")
         try:
@@ -521,7 +526,7 @@ def _retained_step_core(paths, *, action, role, arch, witness,
                 raise Hold("RETAINED_CLEANUP_RECOVERY_REQUIRED")
             return _retained_finish_cleanup(
                 seal=seal, journal=journal, role=role, binary=binary,
-                fingerprint=fingerprint, witness=witness, current=current)
+                fingerprint=fingerprint, witness=witness, current=current, rc9=rc9)
 
         if os.path.lexists(journal):
             envelope = pair._pair_load_json(pair._pair_read_private(journal, limit=40000))
@@ -561,7 +566,9 @@ def _retained_step_core(paths, *, action, role, arch, witness,
             record = {"schema": 1, "role": role, "binary": binary, "witness": fingerprint,
                       "manifest": before[0].hex(), "receipt": before[1].hex(), "phase": "NEW"}
 
-        after = pair._pair_expected_transition(*before, binary, role=role)
+        if rc9 and before != _admission.old_pair:
+            raise Hold("RETAINED_PREFLIGHT_PAIR_CHANGED")
+        after = pair._pair_expected_transition(*before, binary, role=role, rc9=rc9)
         observed = current()
         mixed = (after[0], before[1])
         allowed = {"NEW": (before,), "PREPARED": (before, mixed, after),
@@ -590,7 +597,7 @@ def _retained_step_core(paths, *, action, role, arch, witness,
             _atomic(seal, (json.dumps(envelope, sort_keys=True) + "\n").encode(), 0o600)
             return _retained_finish_cleanup(
                 seal=seal, journal=journal, role=role, binary=binary,
-                fingerprint=fingerprint, witness=witness, current=current)
+                fingerprint=fingerprint, witness=witness, current=current, rc9=rc9)
         if action == "install":
             if phase == "COMMITTED":
                 return phase
@@ -1572,6 +1579,106 @@ def _retained_live_foreign_rollback(*, arch: str,
     }
 
 
+def _rc9_recovery_baseline(paths: Paths) -> tuple[bytes, bytes]:
+    manifest, receipt, journal = _retained_files(paths)
+    if not os.path.lexists(journal):
+        if not os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+            raise Hold("RETAINED_JOURNAL_MISSING")
+        return pair._pair_read_private(manifest), pair._pair_read_private(receipt)
+    # The shared writer validates the entire envelope, role, witness and
+    # transition again under its exclusive lock before any restoration.
+    record = pair._pair_load_json(pair._pair_read_private(journal, limit=40000)).get("record")
+    if not isinstance(record, dict):
+        raise Hold("RETAINED_JOURNAL_UNTRUSTED")
+    raws = (record.get("manifest"), record.get("receipt"))
+    if any(type(raw) is not str or len(raw) > 16384
+           or re.fullmatch(r"(?:[0-9a-f]{2})+", raw) is None for raw in raws):
+        raise Hold("RETAINED_JOURNAL_UNTRUSTED")
+    return tuple(bytes.fromhex(raw) for raw in raws)
+
+
+def _retained_rc9_operation(action: str, role: str) -> dict[str, str]:
+    if action not in ("install", "rollback") or role not in ("ir", "foreign"):
+        raise Hold("RC9_BACKHAUL_OPERATION_INVALID")
+    paths, arch = RC9_PATHS, "amd64"
+    control = _load("uopti_retained_rc9_control", "smite-managed-backhaul-control.py")
+    frp_control = _load("uopti_retained_rc9_pin", "smite-managed-frp-control.py")
+    frp = _load("uopti_retained_rc9_frp", "smite-rc7-frp-enrollment.py")
+    frp.select_rc9()
+    try:
+        frp.rt.rc9_state(role)
+        if action == "install":
+            frp.rt.rc9_signed_release()
+    except (frp.Hold, frp.rt.Hold) as exc:
+        reason = str(exc)
+        raise Hold(reason if re.fullmatch(r"RC9_[A-Z0-9_]+", reason)
+                   else "RC9_BACKHAUL_HOST_NOT_VERIFIED") from exc
+    image = frp_control.RC9_NODE_IMAGE
+
+    def witness():
+        return _retained_live_signed_witness(
+            role=role, expected_node_image=image, paths=paths)
+
+    def current_pair():
+        return (pair._pair_read_private(frp.MANIFEST),
+                pair._pair_read_private(paths.frp_state / "record.json"))
+
+    def node_policy():
+        return (_sha(_read(paths.node / ".env", 16384)),
+                _sha(_read(paths.node / "docker-compose.yml", 131072)))
+
+    with _read_only_engine_lock(paths.lock):
+        original = current_pair() if action == "install" else _rc9_recovery_baseline(paths)
+        pair._pair_expected_transition(
+            *original, package.OFFICIAL_BINARY_SHA256[arch], role=role, rc9=True)
+        baseline = witness()
+        policy = node_policy()
+    prepared = RetainedLivePrepared(paths, role, arch, image, original, baseline, *policy)
+
+    def step(operation, **kwargs):
+        return _retained_step_core(paths, action=operation, role=role, arch=arch,
+                                   witness=witness, _admission=prepared, **kwargs)
+
+    def restore():
+        if not os.path.lexists(paths.state / "retained-rc7-cleanup.json"):
+            if step("rollback") != "RESTORED":
+                raise Hold("RC9_BACKHAUL_ROLLBACK_UNVERIFIED")
+        control._verify_bundled_backhaul(role, rc9=True, restored_pair=original)
+        if step("cleanup") != "CLEANED":
+            raise Hold("RC9_BACKHAUL_ROLLBACK_UNVERIFIED")
+
+    if action == "rollback":
+        restore()
+        return {"RC9_BACKHAUL_ROLLBACK": "PASS_SIGNED_EXACT_RESTORED",
+                "RC9_FRP_ENGINE": "READY_SIGNED_INVENTORY", "NODE_RESTARTED": "NO"}
+
+    control._verify_bundled_backhaul(role, rc9=True)
+    _mkdir_chain(paths.state, Path("/var/lib/u-opti"))
+    journal = paths.state / "retained-rc7.json"
+    try:
+        if step("install", expected_before=original, expected_witness=baseline) != "COMMITTED":
+            raise Hold("RC9_BACKHAUL_COMMIT_UNVERIFIED")
+        control._verify_bundled_backhaul(role, rc9=True, expected_backhaul_state="ready")
+        with _read_only_engine_lock(paths.lock):
+            if (witness() != baseline or node_policy() != policy
+                    or current_pair() != pair._pair_expected_transition(
+                        *original, package.OFFICIAL_BINARY_SHA256[arch], role=role, rc9=True)):
+                raise Hold("RC9_BACKHAUL_POSTCOMMIT_DRIFT")
+    except Exception as exc:
+        if (str(exc) in ("RETAINED_PREFLIGHT_JOURNAL_APPEARED",
+                         "ANOTHER_ENGINE_TRANSACTION_ACTIVE")
+                or not os.path.lexists(journal)):
+            raise
+        try:
+            restore()
+        except Exception as restore_exc:
+            raise Hold("RC9_BACKHAUL_RECOVERY_REQUIRES_REVIEW") from restore_exc
+        raise Hold("RC9_BACKHAUL_FAILED_ROLLED_BACK") from exc
+    return {"RC9_BACKHAUL_ENROLLMENT": "PASS_SIGNED",
+            "RC9_FRP_ENGINE": "READY_SIGNED_INVENTORY", "NODE_RESTARTED": "NO",
+            "BACKHAUL_TUNNEL_ACTIVATED": "NO"}
+
+
 def _retained_live_root_required() -> bool:
     """Separate the root-only admission from filesystem ownership reads."""
     return os.geteuid() == 0
@@ -1653,13 +1760,16 @@ def _retained_live_signed_witness(*, role: str, expected_node_image: str,
     or authorize any real transaction. Signed local Agent GETs consume replay
     nonces; no Node, FRP, broker, routing or engine bytes are written here.
     """
-    if (paths != Paths() or not _retained_live_root_required()
+    if (paths not in (Paths(), RC9_PATHS) or not _retained_live_root_required()
             or role not in ("ir", "foreign")
             or IMAGE.fullmatch(expected_node_image) is None):
         raise Hold("RETAINED_LIVE_WITNESS_SCOPE_UNTRUSTED")
     try:
         frp = _load("uopti_retained_live_frp", "smite-rc7-frp-enrollment.py")
         control = _load("uopti_retained_live_bh", "smite-managed-backhaul-control.py")
+        if paths == RC9_PATHS:
+            frp.select_rc9()
+            frp.rt.rc9_state(role)
         doc = frp.node_details()
         if doc.get("role") != role or doc.get("state") != "COMMITTED":
             raise Hold("RETAINED_LIVE_ROLE_UNVERIFIED")
@@ -2286,11 +2396,26 @@ def main() -> int:
     p.add_argument("--expected-plan-sha256")
     p.add_argument("--confirm-snapshot-and-console")
     p.add_argument("--confirm-role", required=True)
+    p.add_argument("--rc9", action="store_true", help="Use the pinned RC9 retained enrollment")
     args = p.parse_args()
     try:
         if os.geteuid() != 0:
             raise Hold("ROOT_REQUIRED")
-        if args.action in ("install-retained-ir", "rollback-retained-ir"):
+        if args.rc9:
+            operation, separator, role = args.action.partition("-retained-")
+            if (not separator or operation not in ("install", "rollback")
+                    or role not in ("ir", "foreign")):
+                raise Hold("RC9_BACKHAUL_OPERATION_INVALID")
+            pin = _load("uopti_bh_rc9_cli_pin", "smite-managed-frp-control.py")
+            challenge = f"{operation.upper()}-RC9-BACKHAUL-{role.upper()}"
+            if (args.expected_node_image != pin.RC9_NODE_IMAGE or args.arch != "amd64"
+                    or args.confirm_role != challenge
+                    or args.confirm_snapshot_and_console != SNAPSHOT_CONFIRM
+                    or not sys.stdin.isatty()
+                    or input("Type " + challenge + ": ").strip() != challenge):
+                raise Hold("RC9_BACKHAUL_LOCAL_RECOVERY_AND_CONFIRMATION_REQUIRED")
+            result = _retained_rc9_operation(operation, role)
+        elif args.action in ("install-retained-ir", "rollback-retained-ir"):
             # These actions are explicitly IR-only. Never enroll the
             # live foreign production Node through this canary.
             challenge = ("INSTALL-RETAINED-BACKHAUL-IR"

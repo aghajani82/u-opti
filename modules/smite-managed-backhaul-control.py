@@ -337,7 +337,8 @@ RC9_CHILD_HOLD_CODES = frozenset({
 
 def _review_rc7_retained_committed_pair(
         current_manifest: bytes, current_receipt: bytes,
-        retained_journal: bytes, bundled_sha256: str, *, role: str) -> dict[str, str]:
+        retained_journal: bytes, bundled_sha256: str, *, role: str,
+        rc9: bool = False) -> dict[str, str]:
     """Prove an already-COMMITTED two-file retained transaction, read-only.
 
     The signed Node still independently authenticates its FRP Owner/Child and
@@ -381,7 +382,7 @@ def _review_rc7_retained_committed_pair(
         if any(not 0 < len(raw) <= 8192 for raw in originals):
             raise Hold("RC7_RETAINED_COMMIT_UNTRUSTED")
         after = transaction._pair_expected_transition(
-            *originals, bundled_sha256, role=role)
+            *originals, bundled_sha256, role=role, rc9=rc9)
         if (current_manifest, current_receipt) != after:
             raise Hold("RC7_RETAINED_COMMITTED_PAIR_DRIFT")
     except (transaction.Hold, KeyError, TypeError, ValueError,
@@ -404,7 +405,7 @@ def verify_rc7_bundled_backhaul(
 
 def _verify_bundled_backhaul(
         role: str, *, expected_backhaul_state: str = "not-installed",
-        rc9: bool = False) -> dict[str, str]:
+        rc9: bool = False, restored_pair: tuple[bytes, bytes] | None = None) -> dict[str, str]:
     """Reviewed runtime and signed engine-inventory preflight.
 
     No install, no manifest/FRP receipt write or output of hashes/Node
@@ -428,14 +429,14 @@ def _verify_bundled_backhaul(
         with frp.rt.locked():
             if rc9:
                 frp.rt.rc9_state(role)
-                if expected_backhaul_state != "not-installed":
-                    raise Hold("RC9_BACKHAUL_COMMITTED_REVIEW_NOT_AVAILABLE")
-                for pending in (
-                        RC7_RETAINED_JOURNAL,
-                        RC7_RETAINED_JOURNAL.with_name("retained-rc7-cleanup.json"),
+                pending_paths = [
                         frp.JOURNAL / "record.next",
                         frp.MANIFEST.with_name("engines.json.rc7-next"),
-                        frp.MANIFEST.with_name("engines.json.rc7-rollback-next")):
+                        frp.MANIFEST.with_name("engines.json.rc7-rollback-next")]
+                if expected_backhaul_state == "not-installed" and restored_pair is None:
+                    pending_paths.extend((RC7_RETAINED_JOURNAL,
+                        RC7_RETAINED_JOURNAL.with_name("retained-rc7-cleanup.json")))
+                for pending in pending_paths:
                     if os.path.lexists(pending):
                         raise Hold("RC9_BACKHAUL_COMPETING_RECOVERY")
             doc = frp.node_details()
@@ -486,6 +487,8 @@ def _verify_bundled_backhaul(
             phase = "FRP_RECEIPT"
             old_manifest = frp.read_private(frp.MANIFEST)
             old_receipt = frp.read_private(frp.JOURNAL / "record.json")
+            if restored_pair is not None and (old_manifest, old_receipt) != restored_pair:
+                raise Hold("RC9_BACKHAUL_RESTORED_PAIR_DRIFT")
             try:
                 receipt = transaction._pair_load_json(old_receipt)
             except transaction.Hold as exc:
@@ -545,7 +548,7 @@ def _verify_bundled_backhaul(
                     raise Hold("RC7_RETAINED_COMMIT_UNVERIFIED") from exc
                 review = _review_rc7_retained_committed_pair(
                     old_manifest, old_receipt, retained_journal,
-                    binary["sha256"], role=role)
+                    binary["sha256"], role=role, rc9=rc9)
                 required_binding = "EXACT_COMMITTED_REBIND_REVIEWED"
             elif rc9:
                 transaction._pair_expected_transition(
@@ -556,7 +559,7 @@ def _verify_bundled_backhaul(
                 required_binding = "EXACT_PRIOR_MANIFEST_MATCH"
                 if not candidate:
                     raise Hold("RC7_BUNDLED_PLAN_UNTRUSTED")
-            if not rc9 and (
+            if (not rc9 or expected_backhaul_state == "ready") and (
                     review.get("RC7_FRP_RECEIPT_BINDING") != required_binding
                     or review.get("INSTALL_ALLOWED") != "NO"
                     or review.get("ACTIVATION_GATE") != "HOLD"):
@@ -645,7 +648,7 @@ def _verify_bundled_backhaul(
         "ACTIVATION_GATE": "HOLD",
     }
     if rc9:
-        report["RC7_BACKHAUL_RECEIPT_PLAN"] = "CANDIDATE_ONLY_NO_WRITE"
+        report["RC7_BACKHAUL_RECEIPT_PLAN"] = report["RC7_BACKHAUL_MANIFEST_PLAN"]
         report["RC7_IR_XHTTP_BRIDGE"] = "VERIFIED" if role == "ir" else "NOT_APPLICABLE_FOREIGN"
         return {key.replace("RC7_", "RC9_", 1) if key.startswith("RC7_") else key:
                 value for key, value in report.items()}
@@ -886,7 +889,7 @@ def main() -> int:
     arg.add_argument("--lab-root", type=Path)
     args = arg.parse_args()
     try:
-        if args.expect_backhaul_ready and args.action != "verify-rc7-bundle":
+        if args.expect_backhaul_ready and args.action not in ("verify-rc7-bundle", "verify-rc9-bundle"):
             raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
         if args.action in ("verify-rc7-bundle", "verify-rc9-bundle"):
             rc9 = args.action == "verify-rc9-bundle"
@@ -900,7 +903,8 @@ def main() -> int:
             if not role:
                 raise Hold("RC7_BUNDLED_ROLE_REQUIRED")
             if rc9:
-                _format(_verify_bundled_backhaul(role, rc9=True))
+                _format(_verify_bundled_backhaul(role, rc9=True, expected_backhaul_state=(
+                    "ready" if args.expect_backhaul_ready else "not-installed")))
             else:
                 _format(verify_rc7_bundled_backhaul(
                     role, expected_backhaul_state=(

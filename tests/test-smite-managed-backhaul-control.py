@@ -391,16 +391,18 @@ class OperatorControl(unittest.TestCase):
         self.assertNotIn("a"*64,str(status))
         self.assertNotIn("Docker",str(status))
 
-    def _rc7_committed_pair_fixture(self, role):
+    def _rc7_committed_pair_fixture(self, role, *, rc9=False):
         original_manifest, original_receipt = self.rc7_manifest_pair_fixture(
             extra=True)
         original_receipt = dict(original_receipt, role=role)
+        if rc9:
+            original_receipt["version"] = "RC9"
         prior_receipt_bytes = (json.dumps(original_receipt, sort_keys=True)
                                + "\n").encode()
         digest = control.package.OFFICIAL_BINARY_SHA256["amd64"]
         next_manifest, next_receipt = (
             control.transaction._pair_expected_transition(
-                original_manifest, prior_receipt_bytes, digest, role=role))
+                original_manifest, prior_receipt_bytes, digest, role=role, rc9=rc9))
         record = {
             "schema": 1, "role": role, "binary": digest,
             "witness": "5" * 64, "phase": "COMMITTED",
@@ -414,6 +416,24 @@ class OperatorControl(unittest.TestCase):
         }
         journal = (json.dumps(envelope, sort_keys=True) + "\n").encode()
         return next_manifest, json.loads(next_receipt), journal
+
+    def test_rc9_retained_postcommit_reports_ready_only_with_exact_rebound_receipt(self):
+        role = "foreign"
+        manifest, receipt, journal = self._rc7_committed_pair_fixture(role, rc9=True)
+        engines = {name: "not-installed" for name in control.ENGINES}
+        engines.update(frp="ready", backhaul="ready")
+        fake, _ = self._rc7_bundle_fake(
+            role=role, pair_after=(manifest, receipt),
+            inventory={"mode": "managed", "engines": engines})
+        fake.select_rc9 = lambda: None
+        fake.rt.rc9_state = lambda actual: self.assertEqual(actual, role)
+        with patch.object(control.os, "geteuid", return_value=0), \
+             patch.object(control, "_load", return_value=fake), \
+             patch.object(control.transaction, "_pair_read_private", return_value=journal):
+            report = control._verify_bundled_backhaul(
+                role, rc9=True, expected_backhaul_state="ready")
+        self.assertEqual(report["RC9_BACKHAUL_ENGINE"], "READY_SIGNED_INVENTORY")
+        self.assertEqual(report["RC9_BACKHAUL_RECEIPT_PLAN"], "COMMITTED_PAIR_VERIFIED_READ_ONLY")
 
     def test_rc7_retained_postcommit_signed_inventory_and_exact_pair_both_roles(self):
         # Postcommit evidence must bind the full original and updated
