@@ -325,6 +325,15 @@ def _rc7_node_runtime_fingerprint(doc: object) -> tuple[str, str, str, str]:
 RC7_RETAINED_JOURNAL = Path(
     "/var/lib/u-opti/smite-engine-host/backhaul/retained-rc7.json")
 
+RC9_CHILD_HOLD_CODES = frozenset({
+    "SIGNED_FRPC_CHILD_INPUT_HOLD", "SIGNED_FRPC_CHILD_IDENTITY_HOLD",
+    "SIGNED_FRPC_CHILD_SIGNED_STATUS_HOLD", "SIGNED_FRPC_CHILD_SIGNED_PAYLOAD_HOLD",
+    "SIGNED_FRPC_CHILD_REPLAY_HOLD", "SIGNED_FRPC_CHILD_WSS_CONFIG_HOLD",
+    "SIGNED_FRPC_CHILD_PROCESS_HOLD", "SIGNED_FRPC_CHILD_TCP443_HOLD",
+    "SIGNED_FRPC_CHILD_OUTPUT_HOLD", "SIGNED_FRPC_CHILD_RESPONSE_INVALID",
+    "SIGNED_FRPC_CHILD_ID_MISMATCH",
+})
+
 
 def _review_rc7_retained_committed_pair(
         current_manifest: bytes, current_receipt: bytes,
@@ -412,6 +421,7 @@ def _verify_bundled_backhaul(
     if os.geteuid() != 0:
         raise Hold("RC7_BUNDLED_ROOT_REQUIRED")
     frp = _load("uopti_bh_rc7_runtime_probe", "smite-rc7-frp-enrollment.py")
+    phase = "RUNTIME"
     try:
         if rc9:
             frp.select_rc9()
@@ -446,11 +456,14 @@ def _verify_bundled_backhaul(
                                     "/usr/local/bin", "/usr/local/bin/backhaul")
                         or destination.startswith("/usr/local/bin/backhaul/")):
                     raise Hold("RC7_BUNDLED_BACKHAUL_EXTERNAL_MOUNT")
+            phase = "SIGNED_REPLAY"
             frp.rt.signed_probe()
+            phase = "BINARY"
             binary = _strict_rc7_response(
                 frp.rt.run(["docker","exec","smite-node","python3","-B","-c",
                             RC7_BUNDLED_BACKHAUL_AUDIT],timeout=30),
                 kind="binary")
+            phase = "SIGNED_INVENTORY"
             inventory = _strict_rc7_response(
                 frp.rt.run(["docker","exec","smite-node","python3","-B","-c",
                             RC7_BUNDLED_SIGNED_INVENTORY],timeout=30),
@@ -470,6 +483,7 @@ def _verify_bundled_backhaul(
             # binds the *whole* engines.json to the committed receipt.
             # The same shared runtime lock spans both reads and the pure
             # candidate plan; neither resource may drift during review.
+            phase = "FRP_RECEIPT"
             old_manifest = frp.read_private(frp.MANIFEST)
             old_receipt = frp.read_private(frp.JOURNAL / "record.json")
             try:
@@ -488,9 +502,11 @@ def _verify_bundled_backhaul(
             foreign_child_ids_before = None
             foreign_instances_before = None
             if role == "ir":
+                phase = "IR_BRIDGE"
                 if rc9:
                     bridge = _load("uopti_bh_rc9_bridge", "smite-stage15-xhttp-bridge.py")
                     bridge.verify()
+                phase = "FRPS_OWNER"
                 owner_before = frp.signed_owner_inventory()
                 if (type(owner_before) is not str
                         or RC7_SHA256.fullmatch(owner_before) is None):
@@ -499,9 +515,12 @@ def _verify_bundled_backhaul(
                 # Bind the exact set of persisted Foreign clients to the
                 # existing signed Agent + one-FRPC-PID/TCP443 verifier.
                 # Recheck them after pure planning under this same lock.
+                phase = "FRPC_SAVED_CHILDREN"
                 foreign_child_ids_before = _rc7_foreign_saved_child_ids(frp)
+                phase = "FRPC_SIGNED_CHILD"
                 foreign_instances_before = _rc7_foreign_signed_instances(
                     frp, foreign_child_ids_before)
+            phase = "RECEIPT_PLAN"
             retained_journal = None
             if expected_backhaul_state == "ready":
                 # Do not accept a COMMITTED journal when an independent
@@ -546,15 +565,18 @@ def _verify_bundled_backhaul(
                     or frp.read_private(frp.JOURNAL / "record.json") != old_receipt):
                 raise Hold("RC7_BUNDLED_REVIEW_CONCURRENT_DRIFT")
             if role == "ir":
+                phase = "FRPS_OWNER"
                 owner_after = frp.signed_owner_inventory()
                 if (type(owner_after) is not str
                         or RC7_SHA256.fullmatch(owner_after) is None
                         or owner_after != owner_before):
                     raise Hold("RC7_BUNDLED_SIGNED_OWNER_CHANGED_DURING_REVIEW")
             else:
+                phase = "FRPC_SAVED_CHILDREN"
                 foreign_child_ids_after = _rc7_foreign_saved_child_ids(frp)
                 if foreign_child_ids_after != foreign_child_ids_before:
                     raise Hold("RC7_BUNDLED_FOREIGN_CHILD_SET_CHANGED_DURING_REVIEW")
+                phase = "FRPC_SIGNED_CHILD"
                 foreign_instances_after = _rc7_foreign_signed_instances(
                     frp, foreign_child_ids_after)
                 if foreign_instances_after != foreign_instances_before:
@@ -564,6 +586,7 @@ def _verify_bundled_backhaul(
             # signed reads and the exact receipt plan, while holding the
             # original shared engine lock. Never report NODE_RECREATED=NO
             # based only on unchanged FRP process or HMAC inventory hashes.
+            phase = "RUNTIME_CONTINUITY"
             node_after = _rc7_node_runtime_fingerprint(
                 frp.rt.inspect_container("smite-node"))
             if node_after != node_before:
@@ -583,6 +606,10 @@ def _verify_bundled_backhaul(
     except (frp.Hold, frp.rt.Hold) as exc:
         # Independently imported WSS/FRP modules have distinct Hold classes.
         # Preserve only a fixed local HOLD, never a private verifier body.
+        if rc9:
+            if phase == "FRPC_SIGNED_CHILD" and str(exc) in RC9_CHILD_HOLD_CODES:
+                raise Hold("RC9_" + str(exc)) from exc
+            raise Hold("RC9_BACKHAUL_" + phase + "_UNVERIFIED") from exc
         raise Hold("RC7_BUNDLED_RUNTIME_UNVERIFIED") from exc
     except (OSError, RuntimeError, TypeError, KeyError, AttributeError,
             ValueError) as exc:

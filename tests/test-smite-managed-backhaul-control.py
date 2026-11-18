@@ -265,6 +265,21 @@ class OperatorControl(unittest.TestCase):
                 self.assertEqual(result["RC9_BACKHAUL_RECEIPT_PLAN"], "CANDIDATE_ONLY_NO_WRITE")
                 self.assertEqual(result["ACTIVATION_GATE"], "HOLD")
 
+    def test_rc9_foreign_reports_only_reviewed_child_diagnostics(self):
+        manifest, receipt = self.rc7_manifest_pair_fixture()
+        for error, expected in (
+                ("SIGNED_FRPC_CHILD_SIGNED_PAYLOAD_HOLD", "RC9_SIGNED_FRPC_CHILD_SIGNED_PAYLOAD_HOLD"),
+                ("PRIVATE_CHILD_RUNTIME_TOKEN", "RC9_BACKHAUL_FRPC_SIGNED_CHILD_UNVERIFIED")):
+            fake, _ = self._rc7_bundle_fake(
+                pair_after=(manifest, dict(receipt, version="RC9")), child_error=error)
+            fake.select_rc9 = lambda: None
+            fake.rt.rc9_state = lambda role: None
+            with patch.object(control.os, "geteuid", return_value=0), \
+                 patch.object(control, "_load", return_value=fake), \
+                 self.assertRaises(control.Hold) as held:
+                control._verify_bundled_backhaul("foreign", rc9=True)
+            self.assertEqual(str(held.exception), expected)
+
     def test_rc9_transition_preserves_receipt_version_and_frp_inventory(self):
         manifest, receipt = self.rc7_manifest_pair_fixture()
         receipt["version"] = "RC9"

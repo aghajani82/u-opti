@@ -268,8 +268,18 @@ try:
             result[key]=value
         return result
     body=json.loads(raw,object_pairs_hook=no_duplicates)
-    assert body=={"status":"success",
-                  "data":{"active":True,"type":"frp","process_running":True}}
+    assert isinstance(body,dict) and set(body)=={"status","data"} and body["status"]=="success"
+    payload=body["data"]
+    release=os.environ.get("UOPTI_FRP_CHILD_RELEASE","RC7")
+    assert release in ("RC7","RC9")
+    expected_keys={"active","type","process_running"}
+    if release=="RC9":
+        expected_keys.update(("record_present","record_core"))
+    assert (isinstance(payload,dict) and set(payload)==expected_keys
+            and payload["active"] is True and payload["type"]=="frp"
+            and payload["process_running"] is True)
+    if release=="RC9":
+        assert payload["record_present"] is True and payload["record_core"]=="frp"
     # Replaying identical signed request MUST be denied by durable Agent auth.
     _stage='REPLAY'
     try:
@@ -415,8 +425,10 @@ def signed_child_payload(raw):
 def signed_child_inventory(tunnel_id):
     need(type(tunnel_id) is str and OWNER_ID.fullmatch(tunnel_id) is not None,
          'FOREIGN_FRPC_CHILD_ID_REQUIRED')
-    raw=rt.run(['docker','exec','--env','UOPTI_FRP_CHILD_ID='+tunnel_id,
-                'smite-node','python3','-B','-c',
+    argv=['docker','exec','--env','UOPTI_FRP_CHILD_ID='+tunnel_id]
+    if rt.VERSION=='RC9':
+        argv+=['--env','UOPTI_FRP_CHILD_RELEASE=RC9']
+    raw=rt.run(argv+['smite-node','python3','-B','-c',
                 SIGNED_CHILD_REQUEST],timeout=30)
     doc=signed_child_payload(raw)
     need(doc['child_id_sha256']==sha(tunnel_id.encode('ascii')),

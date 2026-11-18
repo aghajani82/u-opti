@@ -306,6 +306,11 @@ class EnrollmentTests(unittest.TestCase):
             self.assertEqual(args[0][4:8],
                              ["smite-node","python3","-B","-c"])
             self.assertEqual(kwargs["timeout"],30)
+        with patch.object(ctl.rt,"VERSION","RC9"), \
+             patch.object(ctl.rt,"run",return_value=raw) as run:
+            self.assertEqual(ctl.signed_child_inventory(child),"a"*64)
+            self.assertEqual(run.call_args.args[0][4:6],
+                             ["--env","UOPTI_FRP_CHILD_RELEASE=RC9"])
         with patch.object(ctl.rt,"run") as run:
             for child in ("", "../etc", "semi;colon", "a"*129, "a/b", "\n"):
                 with self.subTest(child=repr(child)),self.assertRaises(ctl.Hold):
@@ -366,7 +371,7 @@ class EnrollmentTests(unittest.TestCase):
         # process table and local socket. No Docker, Node, network or files.
         # These cases were missing in the original only-static tests.
         child="existing-managed-child-20182"
-        def run_case(case):
+        def run_case(case, release="RC7"):
             fake_app=types.ModuleType("app")
             fake_app.__path__=[]
             agent=types.ModuleType("app.agent_auth")
@@ -396,6 +401,14 @@ class EnrollmentTests(unittest.TestCase):
                                                 else [fake_proc])
             result={"status":"success",
                     "data":{"active":True,"type":"frp","process_running":True}}
+            if release=="RC9" and case!="rc9_missing_record":
+                result["data"].update(record_present=True, record_core="frp")
+                if case=="rc9_wrong_record":
+                    result["data"]["record_core"]="backhaul"
+                elif case=="rc9_record_not_saved":
+                    result["data"]["record_present"]=False
+                elif case=="rc9_record_not_boolean":
+                    result["data"]["record_present"]=1
             if case=="payload": result["data"]["active"]=False
             calls=[]
             class Response:
@@ -480,7 +493,8 @@ class EnrollmentTests(unittest.TestCase):
                                  "app.node_auth":auth,
                                  "app.frp_gateway_config":gateway,
                                  "psutil":psutil}), \
-                     patch.dict(os.environ,{"UOPTI_FRP_CHILD_ID":child}), \
+                     patch.dict(os.environ,{"UOPTI_FRP_CHILD_ID":child,
+                                            "UOPTI_FRP_CHILD_RELEASE":release}), \
                      patch("urllib.request.build_opener",return_value=Opener()), \
                      patch("os.open",side_effect=fake_open), \
                      patch("os.lstat",side_effect=fake_lstat), \
@@ -494,6 +508,12 @@ class EnrollmentTests(unittest.TestCase):
         self.assertEqual(doc["child_id_sha256"],ctl.sha(child.encode()))
         self.assertEqual(doc["wss_443_socket"],"ESTABLISHED")
         self.assertNotIn("redacted",good)
+        self.assertEqual(ctl.signed_child_payload(run_case("pass","RC9")),doc)
+        for case in ("rc9_missing_record", "rc9_wrong_record",
+                     "rc9_record_not_saved", "rc9_record_not_boolean"):
+            with self.subTest(case=case):
+                self.assertEqual(json.loads(run_case(case,"RC9")),
+                                 {"schema":1,"hold_stage":"SIGNED_PAYLOAD"})
         for case,expected in (
                 ("identity","IDENTITY"),("signed_status","SIGNED_STATUS"),
                 ("payload","SIGNED_PAYLOAD"),("replay","REPLAY"),
