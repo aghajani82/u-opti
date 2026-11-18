@@ -1052,14 +1052,14 @@ smite_tw_menu() {
         printf 'Detected/selected host role: %s\n\n' "$role"
         echo "1) Backhaul — guided Sidecar START HERE"
         echo "2) FRP — guided status/approval (NO engine installation)"
+        echo "3) Rathole — safe plan only (no installer)"
+        echo "4) Tunnel Control Center — read-only status and routes"
+        echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
             echo "6) Set up signed FRP on this RC9 host"
         else
             echo "6) Advanced FRP — original setup and recovery"
         fi
-        echo "3) Rathole — safe plan only (no installer)"
-        echo "4) Tunnel Control Center — read-only status and routes"
-        echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "0) Back"
         read -rp "Choose [0-6]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
