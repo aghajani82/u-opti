@@ -57,7 +57,7 @@ smite_tw_backhaul_menu() {{ echo "SIDECAR $1"; }}
 smite_tw_rc9_backhaul_setup() {{ echo "ENGINE $1"; }}
 smite_tw_rc9_backhaul_tunnel() {{ echo "TUNNEL $1"; }}
 if [ {version} = 0 ]; then
-    printf '1\n1\n1\n2\n7\n0\n' | smite_tw_menu
+    printf '1\n 1 \r\n1\n 2 \r\n7\n0\n' | smite_tw_menu
 else
     printf '1\n7\n0\n' | smite_tw_menu
 fi

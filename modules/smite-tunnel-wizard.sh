@@ -1104,6 +1104,8 @@ smite_tw_rc9_backhaul_menu() {
     echo '2) Preview / publish / recover an XHTTP tunnel'
     echo '0) Back'
     read -rp 'Choose [0-2] (default 1): ' choice || return
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
     case "$choice" in
         ''|1) smite_tw_rc9_backhaul_setup "$role" ;;
         2) smite_tw_rc9_backhaul_tunnel "$role" ;;
