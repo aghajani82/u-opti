@@ -149,6 +149,31 @@ class RC7BridgeTests(BridgeTests):
         self.patch(e.rt, 'panel_probe', lambda *a: None)
         self.patch(e, 'alternate_probe', lambda *a: None)
 
+    def test_rc9_setup_resumes_from_committed_wss_edge(self):
+        record = b.RC7_EDGE
+        doc = self.edge.journal()
+        self.patch(b, 'RC7_EDGE', self.root/'absent-rc7'/'record.json')
+        self.patch(b, 'RC9_EDGE', record)
+        self.patch(self.edge.rt, 'VERSION', 'RC9')
+        self.patch(self.edge.rt, 'rc9_state',
+                   lambda role: {'SMITE_PANEL_DOMAIN': doc['domain']})
+        self.patch(self.edge.rt, 'trusted_path', lambda path, **kwargs: path.lstat())
+        self.patch(b.base, 'trusted_lock_directory', lambda path: None)
+        self.patch(b.base, 'TX_ROOT', self.root/'transactions')
+        doc['version'] = 'RC9'
+        record.write_text(json.dumps(doc))
+
+        self.assertFalse(b.STATE.exists())
+        self.assertEqual(b.plan()[0]['schema'], 3)
+        self.assertFalse(b.STATE.exists())
+        b.apply()
+        b.verify()
+        self.assertEqual(b.record()[0]['state'], 'COMMITTED')
+        self.assertEqual(json.loads(record.read_text()), doc)
+        b.restore()
+        self.assertEqual(b.base.BACKEND.read_bytes(), self.old)
+        self.assertEqual(json.loads(record.read_text()), doc)
+
     def test_apply_verify_and_rollback_preserve_wss(self):
         b.plan(); b.apply(); b.verify(); self.edge.validate_committed(self.edge.journal())
         self.assertEqual(b.record()[0]['schema'], 2)

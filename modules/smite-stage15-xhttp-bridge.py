@@ -60,7 +60,7 @@ def edge_state(edge):
         doc = edge.journal()
         need(values.get('SMITE_PANEL_DOMAIN') == doc['domain'], 'RC9_DOMAIN_MISMATCH')
         return doc
-    if edge_path() in (RC7_EDGE, RC9_EDGE):
+    if edge_path() == RC7_EDGE:
         values = edge.p.state()
         need(values.get('SMITE_ROLE') == 'panel-iran'
              and values.get('SMITE_MANAGED_VERSION') == '2.0.0-rc.7', 'IR_RC7_STATE_INVALID')
@@ -70,7 +70,7 @@ def edge_state(edge):
     return edge.state()
 
 def verify_edge(edge, doc):
-    if edge_path() == RC7_EDGE:
+    if edge_path() in (RC7_EDGE, RC9_EDGE):
         edge.validate_committed(doc)
     else:
         edge.verify(doc)
