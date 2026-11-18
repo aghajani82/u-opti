@@ -151,6 +151,7 @@ MODULES=(
     "smite-rc7-wss-preflight.py"
     "smite-rc7-wss-runtime.py"
     "smite-rc7-wss-edge.py"
+    "smite-rc9-backhaul-ingress.py"
     "smite-rc7-frp-enrollment.py"
     "smite-stage15-active-runtime.py"
     "smite-stage15-kh-inventory.py"

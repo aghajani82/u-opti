@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from http.client import HTTPConnection, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from runpy import run_path
 import re
 import shutil
 import socket
@@ -23,7 +24,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 GATEWAY = ROOT / "modules/smite-gateway.sh"
-RENDER = ROOT / "modules/smite-backhaul-standard.sh"
+INGRESS = run_path(str(ROOT / "modules/smite-rc9-backhaul-ingress.py"))
+CONTROL_HEADER = INGRESS["HEADER"].decode()
 
 
 def distinct_ports(count: int) -> tuple[int, ...]:
@@ -99,7 +101,7 @@ def mock_upstream(stack: ExitStack, label: str, local_port: int):
 
 
 def request(tls: bool, port_number: int, path: str, *, upgrade: bool = False,
-            trusted_ca: Path | None = None):
+            trusted_ca: Path | None = None, marked: bool = False):
     if tls:
         assert trusted_ca is not None
         context = ssl.create_default_context(cafile=str(trusted_ca))
@@ -119,6 +121,7 @@ def request(tls: bool, port_number: int, path: str, *, upgrade: bool = False,
             headers.update({"Upgrade": "websocket", "Connection": "Upgrade"})
         conn.request("GET", path, headers=headers)
         response = conn.getresponse()
+        assert response.headers.get_all(CONTROL_HEADER, []) == (["peer-edge"] if marked else [])
         return response.status, response.read().decode(errors="replace")
     finally:
         conn.close()
@@ -135,15 +138,10 @@ class Shared443Regression(unittest.TestCase):
         frp = match.group(1)
         self.assertIn("location = /~!frp {", frp)
         self.assertIn("proxy_pass http://127.0.0.1:7000;", frp)
-        bh = subprocess.check_output(["bash", str(RENDER), "--render-ir-control", "3080"],
-                                     text=True)
-        foreign = subprocess.check_output(
-            ["bash", str(RENDER), "--render-kh-bridge", "ir.example.test", "13080"],
-            text=True)
-        self.assertEqual(bh.count("proxy_pass http://127.0.0.1:3080;"), 2)
+        foreign = INGRESS["render_foreign"]("ir.example.test", "8.8.4.4").decode()
         self.assertEqual(foreign.count("proxy_ssl_verify on;"), 2)
-        self.assertIn("proxy_pass https://ir.example.test:443;", foreign)
-        self.assertNotIn("location = /~!frp", bh)
+        self.assertEqual(foreign.count("proxy_ssl_name ir.example.test;"), 2)
+        self.assertIn("proxy_pass https://8.8.4.4:443;", foreign)
 
         with tempfile.TemporaryDirectory(prefix="uopti-shared443-") as tmp:
             base = Path(tmp)
@@ -159,33 +157,41 @@ class Shared443Regression(unittest.TestCase):
                             "-days", "1", "-subj", "/CN=wrong.example.test",
                             "-keyout", str(base / "wrong-ca.key"), "-out", str(other)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            (ir_https, kh_bridge, kh_bad, frp_port,
-             bh_port, child_port, panel_port) = distinct_ports(7)
-            self.assertEqual(len({ir_https, kh_bridge, kh_bad, frp_port, bh_port,
-                                  child_port, panel_port}), 7)
+            (ir_https, ir_default, kh_bridge, kh_bad, frp_port,
+             bh_port, child_port, panel_port) = distinct_ports(8)
             # Test-only rewrite of the canonical loopback ports. Never export
             # or apply this configuration to a host or to a live namespace.
             frp = frp.replace("127.0.0.1:7000", f"127.0.0.1:{frp_port}")
-            bh = bh.replace("127.0.0.1:3080", f"127.0.0.1:{bh_port}")
             ir = f"""server {{
                 listen 127.0.0.1:{ir_https} ssl;
                 server_name ir.example.test;
                 ssl_certificate {cert};
                 ssl_certificate_key {key};
                 {frp}
-                {bh}
                 location = /20182/category-software-99 {{
                     proxy_pass http://127.0.0.1:{child_port};
                 }}
                 location ^~ /20182/category-software-99/ {{
                     proxy_pass http://127.0.0.1:{child_port};
                 }}
+    location / {{
+        proxy_pass http://127.0.0.1:{panel_port};
+    }}
+            }}"""
+            ir = INGRESS["render_ir"](ir.encode()).decode().replace(
+                "127.0.0.1:3080", f"127.0.0.1:{bh_port}")
+            ir += f"""
+server {{
+                listen 127.0.0.1:{ir_default} ssl;
+                server_name ir.example.test;
+                ssl_certificate {cert};
+                ssl_certificate_key {key};
                 location / {{ proxy_pass http://127.0.0.1:{panel_port}; }}
             }}"""
             # Strict upstream certificate/SNI verification survives the
             # disposable port rewrite; no production config is modified.
             foreign = (foreign.replace("127.0.0.1:13080", f"127.0.0.1:{kh_bridge}")
-                       .replace("https://ir.example.test:443",
+                       .replace("https://8.8.4.4:443",
                                 f"https://127.0.0.1:{ir_https}")
                        .replace("/etc/ssl/certs/ca-certificates.crt", str(cert)))
             bad = (foreign.replace(f"127.0.0.1:{kh_bridge}", f"127.0.0.1:{kh_bad}")
@@ -213,7 +219,7 @@ class Shared443Regression(unittest.TestCase):
                 ):
                     with self.subTest(path=path):
                         status, body = request(True, ir_https, path, upgrade=True,
-                                               trusted_ca=cert)
+                                               trusted_ca=cert, marked=(label == "backhaul"))
                         self.assertEqual(status, 200)
                         upgraded = "websocket" if label in ("frp", "backhaul") else ""
                         self.assertEqual(body, f"{label}|{path}|{upgraded}")
@@ -223,9 +229,11 @@ class Shared443Regression(unittest.TestCase):
                 for path in ("/channel", "/tunnel/alpha"):
                     status, _ = request(False, kh_bad, path, upgrade=True)
                     self.assertEqual(status, 502, "wrong TLS CA must fail closed")
-                    status, body = request(False, kh_bridge, path, upgrade=True)
+                    status, body = request(False, kh_bridge, path, upgrade=True, marked=True)
                     self.assertEqual(status, 200)
                     self.assertEqual(body, f"backhaul|{path}|websocket")
+                status, body = request(True, ir_default, "/channel", trusted_ca=cert)
+                self.assertEqual((status, body), (200, "panel|/channel|"))
                 status, body = request(True, ir_https, "/~!frp", upgrade=True,
                                        trusted_ca=cert)
                 self.assertEqual((status, body), (200, "frp|/~!frp|websocket"))

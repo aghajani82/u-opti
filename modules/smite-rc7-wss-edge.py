@@ -174,7 +174,7 @@ def bridge_source(current):
                        else 'UNTRUSTED_BRIDGE_STATE') from exc
     return current
 
-def validate_committed(doc):
+def committed_config(doc):
     need(doc['state']=='COMMITTED','EDGE_NOT_COMMITTED')
     expected_runtime(doc['domain'],doc['peer'])
     original=file(STATE/'map.before',0o600)
@@ -187,8 +187,22 @@ def validate_committed(doc):
                    mapping=original)
     need(sha(alt)==doc['alternate'] and sha(new)==doc['map_after'],
          'EDGE_JOURNAL_RENDER_DRIFT')
-    need(file(q.ALT_CANDIDATE,0o644)==alt and
-         file(q.FRP_MAP,doc['map_mode'])==new,'LIVE_EDGE_DRIFT')
+    need(file(q.FRP_MAP,doc['map_mode'])==new,'LIVE_EDGE_DRIFT')
+    return alt
+
+def validate_committed(doc):
+    alt=committed_config(doc)
+    if rt.VERSION=='RC9':
+        ingress=load('rc9_edge_backhaul_ingress', 'smite-rc9-backhaul-ingress.py')
+        if os.path.lexists(ingress.STATE):
+            try:
+                ingress.check_ir_overlay(rt, q.ALT_CANDIDATE, doc, alt)
+            except (ingress.Hold, OSError) as exc:
+                raise Hold('BACKHAUL_INGRESS_EDGE_UNVERIFIED') from exc
+        else:
+            need(file(q.ALT_CANDIDATE,0o644)==alt,'LIVE_EDGE_DRIFT')
+    else:
+        need(file(q.ALT_CANDIDATE,0o644)==alt,'LIVE_EDGE_DRIFT')
     p.run(['nginx','-t'])
     rt.panel_probe(doc['domain'])
     alternate_probe(doc['domain'])
@@ -236,6 +250,9 @@ def apply(peer):
             raise Hold('EDGE_APPLY_HOLD_REVIEW_BEFORE_RECOVER')
 
 def restore(doc):
+    if rt.VERSION=='RC9':
+        ingress=load('rc9_edge_backhaul_ingress', 'smite-rc9-backhaul-ingress.py')
+        need(not os.path.lexists(ingress.STATE),'ROLL_BACK_BACKHAUL_INGRESS_FIRST')
     need(doc['state'] in ('COMMITTED','PREPARED','APPLYING','HOLD','ROLLING_BACK'),
          'EDGE_ROLLBACK_STATE_INVALID')
     expected_runtime(doc['domain'],doc['peer'])
