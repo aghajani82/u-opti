@@ -173,12 +173,13 @@ def listener(rt, port, tunnel_id):
          "BACKHAUL_DATA_LISTENER_UNVERIFIED")
 
 
-def probe(rt, domain, port, path, public=False, *, report=False):
+def probe(rt, domain, port, path, public=False, *, report=False, backend=False):
     url = f"http://127.0.0.1:{port}{path}/"
     pin = []
     if public:
         url = f"https://{domain}{path}/"
-        pin = ["--resolve", f"{domain}:443:127.0.0.1"]
+        pin = (["--connect-to", f"{domain}:443:127.0.0.1:8443"] if backend
+               else ["--resolve", f"{domain}:443:127.0.0.1"])
     try:
         # Go's XHTTP handler distinguishes real CORS preflight from an
         # OPTIONS uplink. Use the same upstream Host as the Nginx renderer.
@@ -195,11 +196,12 @@ def probe(rt, domain, port, path, public=False, *, report=False):
     code = status[1] if status else "000"
     padding = any(line.lower().startswith("x-padding:") for line in lines[1:])
     passed = code == "200" and padding
-    if report and not passed:
-        stage = "HTTPS" if public else "DATA"
+    if report and (not passed or backend):
+        stage = "HTTPS_BACKEND" if backend else "HTTPS" if public else "DATA"
         print(f"BACKHAUL_{stage}_PROBE_HTTP={code}")
         print(f"BACKHAUL_{stage}_PROBE_X_PADDING={'YES' if padding else 'NO'}")
-        print(f"XHTTP_PATH={path}")
+        if not backend:
+            print(f"XHTTP_PATH={path}")
     return passed
 
 
@@ -278,7 +280,17 @@ def configure(edge, ingress, route, port, action):
     ingress.replace_bytes(rt, target, snippet, 0o644, create=True)
     try:
         ingress.reload_nginx(rt)
-        need(probe(rt, domain, port, path, public=True, report=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+        # Reload signals the master before new workers accept connections.
+        # The old Panel may answer CORS with 200 during the handover. Only
+        # commit after the public socket returns the real XHTTP marker.
+        for attempt in range(5):
+            if probe(rt, domain, port, path, public=True, report=(attempt == 4)):
+                break
+            if attempt < 4:
+                time.sleep(1)
+        else:
+            probe(rt, domain, port, path, public=True, backend=True, report=True)
+            raise RuntimeError("PUBLIC_XHTTP_HANDLER_UNVERIFIED")
         need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
         save("COMMITTED")
     except Exception:

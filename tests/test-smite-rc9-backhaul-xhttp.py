@@ -34,6 +34,9 @@ class ProbeTests(unittest.TestCase):
             self.assertTrue(workflow["probe"](rt, "panel.example.test", 56053, "/56053/web", public))
         self.assertIn("http://127.0.0.1:56053/56053/web/", rt.run.call_args_list[0].args[0])
         self.assertIn("panel.example.test:443:127.0.0.1", rt.run.call_args_list[1].args[0])
+        self.assertTrue(workflow["probe"](rt, "panel.example.test", 56053, "/56053/web",
+                                         public=True, backend=True))
+        self.assertIn("panel.example.test:443:127.0.0.1:8443", rt.run.call_args.args[0])
 
     def test_http_200_without_padding_is_still_rejected(self):
         rt = SimpleNamespace(run=Mock(return_value="HTTP/1.1 200 OK"), Hold=RuntimeError)
@@ -91,10 +94,22 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.assertFalse(self.target.exists())
         self.assertIn('"ROLLED_BACK"', self.journal.read_text())
 
+    def test_reload_waits_for_real_public_xhttp_response(self):
+        self.probe.side_effect = [True, False, False, True]
+        with patch.object(configure.__globals__["time"], "sleep") as sleep:
+            self.assertEqual(self.invoke("apply")[0], "APPLIED")
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(self.ingress.reload_nginx.call_count, 1)
+        self.assertTrue(self.target.is_file())
+        self.assertIn('"COMMITTED"', self.journal.read_text())
+
     def test_failed_https_probe_rolls_back_route(self):
-        self.probe.side_effect = [True, False]
-        with self.assertRaisesRegex(RuntimeError, "PUBLIC_XHTTP_HANDLER_UNVERIFIED"):
-            self.invoke("apply")
+        # The direct TLS backend responds, but the public socket never does.
+        self.probe.side_effect = [True] + [False] * 5 + [True]
+        with patch.object(configure.__globals__["time"], "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "PUBLIC_XHTTP_HANDLER_UNVERIFIED"):
+                self.invoke("apply")
+        self.assertTrue(self.probe.call_args.kwargs["backend"])
         self.assertFalse(self.target.exists())
         self.assertEqual(self.ingress.reload_nginx.call_count, 2)
         self.assertIn('"ROLLED_BACK"', self.journal.read_text())
