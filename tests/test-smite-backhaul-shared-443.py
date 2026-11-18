@@ -159,7 +159,7 @@ class Shared443Regression(unittest.TestCase):
                             "-keyout", str(base / "wrong-ca.key"), "-out", str(other)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             (ir_https, ir_default, kh_bridge, kh_bad, frp_port,
-             bh_port, child_port, panel_port) = distinct_ports(8)
+             bh_port, child_port, panel_port, data_port) = distinct_ports(9)
             # Test-only rewrite of the canonical loopback ports. Never export
             # or apply this configuration to a host or to a live namespace.
             frp = frp.replace("127.0.0.1:7000", f"127.0.0.1:{frp_port}")
@@ -181,12 +181,16 @@ class Shared443Regression(unittest.TestCase):
             }}"""
             ir = INGRESS["render_ir"](ir.encode()).decode().replace(
                 "127.0.0.1:3080", f"127.0.0.1:{bh_port}")
+            data_route = INGRESS["render_fragment"](
+                "--render-ir-xhttp", "56053", "/56053/web", "ir.example.test",
+            ).decode().replace("127.0.0.1:56053", f"127.0.0.1:{data_port}")
             ir += f"""
 server {{
                 listen 127.0.0.1:{ir_default} ssl;
                 server_name ir.example.test;
                 ssl_certificate {cert};
                 ssl_certificate_key {key};
+                {data_route}
                 location / {{ proxy_pass http://127.0.0.1:{panel_port}; }}
             }}"""
             # Strict upstream certificate/SNI verification survives the
@@ -207,7 +211,7 @@ server {{
             with ExitStack() as stack:
                 backhaul = mock_upstream(stack, "backhaul", bh_port)
                 for name, p in (("frp", frp_port), ("child20182", child_port),
-                                ("panel", panel_port)):
+                                ("panel", panel_port), ("backhaul-data", data_port)):
                     mock_upstream(stack, name, p)
                 spawn_nginx(stack, ir_dir, nginx_config(ir_dir, ir))
                 spawn_nginx(stack, kh_dir, nginx_config(kh_dir, foreign + "\n" + bad))
@@ -237,6 +241,9 @@ server {{
                     self.assertEqual(body, f"backhaul|{path}|websocket")
                 status, body = request(True, ir_default, "/channel", trusted_ca=cert)
                 self.assertEqual((status, body), (200, "panel|/channel|"))
+                for path in ("/56053/web", "/56053/web/"):
+                    status, body = request(True, ir_default, path, trusted_ca=cert)
+                    self.assertEqual((status, body), (200, "backhaul-data|/56053/web/|"))
                 # An idle Backhaul listener is expected during ingress setup.
                 # The IR marker still traverses the verified TLS bridge.
                 backhaul.shutdown()

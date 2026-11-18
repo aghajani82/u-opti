@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Configure one signed RC9 Backhaul pair and publish its verified XHTTP inbound."""
+
+from contextlib import contextmanager
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import time
+
+from smite_xhttp_nginx_plan import PATH as XHTTP_PATH
+
+HERE = Path(__file__).resolve().parent
+
+# Run inside the already pinned Panel image. Reuse its database, admissions,
+# signed NodeClient and compensated pair Apply. Return only public route facts.
+PANEL_JOB = r'''
+import asyncio
+import json
+import secrets
+import sys
+from types import SimpleNamespace
+
+from sqlalchemy import select
+from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models import Node, Tunnel
+from app.node_client import NodeClient
+from app.routers.tunnels import TunnelCreate, apply_tunnel, create_tunnel
+from app.uopti_backhaul_standard import compile_standard_specs
+
+async def run(phase, port):
+    if (settings.smite_panel_agent_auth_mode != "signed"
+            or settings.smite_engine_management_mode != "managed"):
+        raise RuntimeError("SIGNED_MANAGED_PANEL_REQUIRED")
+    client = NodeClient()
+    async with AsyncSessionLocal() as db:
+        nodes = (await db.execute(select(Node))).scalars().all()
+        pair = {role: [node.id for node in nodes
+                       if (node.node_metadata or {}).get("role") == role]
+                for role in ("iran", "foreign")}
+        if any(len(ids) != 1 for ids in pair.values()):
+            raise RuntimeError("ONE_IR_AND_ONE_FOREIGN_NODE_REQUIRED")
+        ir, kh = pair["iran"][0], pair["foreign"][0]
+        inv = await client.get_signed_sanaei_xhttp_inbounds(kh)
+        if inv.get("status") != "success" or inv.get("schema_version") != 1:
+            raise RuntimeError("SIGNED_FOREIGN_XHTTP_INVENTORY_UNAVAILABLE")
+        matches = [entry for entry in inv["inbounds"] if entry.get("port") == port]
+        if len(matches) != 1:
+            raise RuntimeError("INBOUND_PORT_NOT_IN_SIGNED_FOREIGN_INVENTORY")
+        inbound = matches[0]
+        if (inbound.get("enabled") is not True or inbound.get("protocol") != "vless"
+                or inbound.get("network") != "xhttp" or inbound.get("listen") != "127.0.0.1"):
+            raise RuntimeError("SIGNED_FOREIGN_INBOUND_NOT_ELIGIBLE")
+        rows = (await db.execute(select(Tunnel).where(Tunnel.core == "backhaul"))).scalars().all()
+        if len(rows) > 1:
+            raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
+        tunnel = rows[0] if rows else None
+        if tunnel:
+            if (tunnel.iran_node_id != ir or tunnel.foreign_node_id != kh
+                    or tunnel.status not in ("pending", "active")
+                    or not isinstance(tunnel.spec, dict)
+                    or tunnel.spec.get("uopti_standard_backhaul") is not True
+                    or tunnel.spec.get("data_port") != port
+                    or tunnel.spec.get("control_port", 3080) != 3080
+                    or tunnel.spec.get("bridge_port", 13080) != 13080):
+                raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
+            compile_standard_specs(tunnel.spec, data_port=port)
+        if phase == "activate" and (tunnel is None or tunnel.status == "pending"):
+            request = SimpleNamespace()
+            if tunnel is None:
+                spec = {"uopti_standard_backhaul": True, "transport": "ws",
+                        "token": secrets.token_hex(32), "data_port": port,
+                        "control_port": 3080, "bridge_port": 13080,
+                        "ports": [f"127.0.0.1:{port}=127.0.0.1:{port}"]}
+                tunnel = await create_tunnel(TunnelCreate(
+                    name=f"Backhaul XHTTP {port}", core="backhaul", type="ws",
+                    node_id=ir, iran_node_id=ir, foreign_node_id=kh, spec=spec,
+                ), request, db)
+                if tunnel.status != "pending":
+                    raise RuntimeError("MANAGED_BACKHAUL_DRAFT_REQUIRED")
+            result = await apply_tunnel(tunnel.id, request, db)
+            if result.get("status") != "applied":
+                raise RuntimeError("SIGNED_BACKHAUL_PAIR_APPLY_UNCONFIRMED")
+            await db.refresh(tunnel)
+        if tunnel and tunnel.status == "active":
+            from urllib.parse import quote
+            for node in (ir, kh):
+                response = await client._signed_agent_request(
+                    node, method="GET",
+                    target="/api/agent/tunnels/status?tunnel_id=" + quote(tunnel.id, safe=""),
+                    timeout=4.0)
+                data = response.get("data", {})
+                if (response.get("status") != "success" or data.get("active") is not True
+                        or data.get("record_present") is not True or data.get("record_core") != "backhaul"
+                        or data.get("type") != "backhaul"):
+                    raise RuntimeError("SIGNED_BACKHAUL_PAIR_NOT_ACTIVE")
+        return {"inbound": inbound, "id": tunnel.id if tunnel else None,
+                "active": tunnel is not None and tunnel.status == "active"}
+
+try:
+    print("ROUTE_RESULT " + json.dumps(asyncio.run(run(sys.argv[1], int(sys.argv[2])))))
+except Exception as exc:
+    import re
+    reason = getattr(exc, "detail", None) or str(exc)
+    print("ROUTE_HOLD " + (reason if isinstance(reason, str)
+          and re.fullmatch(r"[A-Z0-9_]{1,100}", reason) else "SIGNED_PANEL_OPERATION_FAILED"))
+'''
+
+
+def load(name, filename, *, executable=False):
+    path = str(HERE / filename)
+    loader = importlib.machinery.SourceFileLoader(name, path) if executable else None
+    spec = importlib.util.spec_from_file_location(name, path, loader=loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def need(condition, reason):
+    if not condition:
+        raise RuntimeError(reason)
+
+
+@contextmanager
+def route_lock(route):
+    fd = os.open(route.LOCK_FILE, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        meta = os.fstat(fd)
+        need(meta.st_uid == 0 and meta.st_nlink == 1 and stat.S_ISREG(meta.st_mode)
+             and stat.S_IMODE(meta.st_mode) == 0o600, "UNTRUSTED_ROUTE_LOCK")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)
+
+
+def panel(rt, phase, port):
+    response = rt.run(["docker", "exec", "-i", "smite-panel", "python3", "-B", "-",
+                       phase, str(port)], input=PANEL_JOB, timeout=75)
+    matches = [line for line in response.splitlines()
+               if line.startswith(("ROUTE_RESULT ", "ROUTE_HOLD "))]
+    need(len(matches) == 1, "SIGNED_PANEL_OPERATION_UNVERIFIED")
+    status, _, payload = matches[0].partition(" ")
+    need(status == "ROUTE_RESULT", payload)
+    result = json.loads(payload)
+    need(result["inbound"].get("port") == port and type(result["active"]) is bool
+         and (result["id"] is None or re.fullmatch(r"[0-9a-f-]{36}", result["id"])),
+         "SIGNED_PANEL_EVIDENCE_INVALID")
+    return result
+
+
+def listener(rt, port, tunnel_id):
+    rows = rt.run(["ss", "-H", "-lntp", f"( sport = :{port} )"], timeout=10).splitlines()
+    if tunnel_id is None:
+        need(not rows, "BACKHAUL_DATA_PORT_IN_USE")
+        return
+    need(len(rows) == 1, "BACKHAUL_DATA_LISTENER_UNVERIFIED")
+    row = rows[0].split(maxsplit=5)
+    need(len(row) == 6 and row[3] == f"127.0.0.1:{port}",
+         "BACKHAUL_DATA_LISTENER_UNVERIFIED")
+    matches = re.findall(r'"backhaul",pid=(\d+),', row[5])
+    need(len(matches) == 1, "BACKHAUL_DATA_LISTENER_UNVERIFIED")
+    cmdline = (Path("/proc") / matches[0] / "cmdline").read_bytes().split(b"\0")
+    need(cmdline == [b"/usr/local/bin/backhaul", b"-c",
+                    f"/etc/smite-node/backhaul/{tunnel_id}.toml".encode(), b""],
+         "BACKHAUL_DATA_LISTENER_UNVERIFIED")
+
+
+def probe(rt, domain, port, path, public=False):
+    url = f"http://127.0.0.1:{port}{path}/"
+    pin = []
+    if public:
+        url = f"https://{domain}{path}/"
+        pin = ["--resolve", f"{domain}:443:127.0.0.1"]
+    try:
+        output = rt.run(["curl", "-q", "--noproxy", "*", "--http1.1",
+                         "--connect-timeout", "3", "--max-time", "5",
+                         "-X", "OPTIONS", "-D", "-", "-o", "/dev/null", *pin, url], timeout=7)
+    except rt.Hold:
+        return False
+    lines = output.splitlines()
+    return bool(lines and re.match(r"HTTP/1\.[01] 200(?: |$)", lines[0])
+                and any(line.lower().startswith("x-padding:") for line in lines[1:]))
+
+
+def configure(edge, ingress, route, port, action):
+    rt = edge.rt
+    domain, _, _, _ = ingress.runtime_context(edge, "ir")
+    if action != "rollback":
+        ingress.run_operation(edge, "ir", "verify")
+    bridge = rt.load("smite-stage15-xhttp-bridge.py")
+    bridge.verify()
+    route._safe_directory(route.ROUTE_DIR)
+    target = route.ROUTE_DIR / f"{port}.conf"
+    journal = route.ROUTE_DIR / f".{port}.transaction.json"
+    saved = json.loads(ingress.read_trusted(rt, journal, 0o600)) if os.path.lexists(journal) else None
+    if action == "rollback":
+        need(isinstance(saved, dict) and saved.get("kind") == "backhaul", "BACKHAUL_ROUTE_JOURNAL_MISSING")
+        inbound = {"path": saved.get("path")}
+    else:
+        result = panel(rt, "inspect", port)
+        inbound = result["inbound"]
+    # The signed inventory has already validated the transport and its
+    # reserved application namespaces. Recheck path syntax locally before
+    # rendering; rollback only accepts its previously recorded exact bytes.
+    path = inbound.get("path")
+    need(isinstance(path, str) and len(path) <= 128 and XHTTP_PATH.fullmatch(path)
+         and path.split("/")[1].lower() not in {"channel", "tunnel"},
+         "BACKHAUL_ROUTE_RESERVED")
+    snippet = ingress.render_fragment("--render-ir-xhttp", str(port), path, domain)
+    record = {"state": "PREPARED", "kind": "backhaul", "port": port,
+              "path": path, "snippet": snippet.decode()}
+    before = route._frps_socket_inventory()
+    need(port not in before[1], "FRP_DATA_PORT_IN_USE")
+
+    if saved is not None:
+        need(saved == {**record, "state": "COMMITTED"} or saved == record
+             or saved == {**record, "state": "ROLLED_BACK"}, "BACKHAUL_ROUTE_JOURNAL_MISMATCH")
+        if os.path.lexists(target):
+            need(ingress.read_trusted(rt, target, 0o644) == snippet,
+                 "BACKHAUL_ROUTE_CONFIGURATION_DRIFT")
+        if saved["state"] == "COMMITTED" and action != "rollback":
+            need(result["active"] and target.is_file(), "BACKHAUL_ROUTE_UNVERIFIED")
+            listener(rt, port, result["id"])
+            need(probe(rt, domain, port, path, public=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+            return "VERIFIED", path
+        if action == "rollback":
+            if target.exists():
+                target.unlink()
+                rt.fsync_dir(target.parent)
+            ingress.reload_nginx(rt)
+            need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
+            ingress.replace_bytes(rt, journal, (json.dumps({**record, "state": "ROLLED_BACK"}) + "\n").encode(), 0o600)
+            return "ROLLED_BACK", path
+        need(saved["state"] == "ROLLED_BACK", "BACKHAUL_XHTTP_ROLLBACK_REQUIRED")
+    need(action != "rollback" and not os.path.lexists(target), "BACKHAUL_ROUTE_FILE_ALREADY_EXISTS")
+    active = route._run([route.BIN, "-T"])
+    route.check_locations(active, path)
+    need(not re.search(r"127\.0\.0\.1:" + str(port) + r"\b", active), "NGINX_DATA_PORT_IN_USE")
+    listener(rt, port, result["id"] if result["active"] else None)
+    if action == "plan":
+        return "PLAN_READ_ONLY", path
+    applied = panel(rt, "activate", port)
+    need(applied["active"] and applied["inbound"] == result["inbound"], "SIGNED_BACKHAUL_APPLY_UNVERIFIED")
+    listener(rt, port, applied["id"])
+    for _ in range(4):
+        if probe(rt, domain, port, path):
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError("BACKHAUL_END_TO_END_HANDLER_UNVERIFIED")
+    need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
+    def save(phase):
+        ingress.replace_bytes(
+            rt, journal, (json.dumps({**record, "state": phase}) + "\n").encode(), 0o600)
+    save("PREPARED")
+    ingress.replace_bytes(rt, target, snippet, 0o644, create=True)
+    try:
+        ingress.reload_nginx(rt)
+        need(probe(rt, domain, port, path, public=True), "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
+        need(route._frps_socket_inventory() == before, "FRPS_RUNTIME_CHANGED")
+        save("COMMITTED")
+    except Exception:
+        need(ingress.read_trusted(rt, target, 0o644) == snippet,
+             "BACKHAUL_ROUTE_CONFIGURATION_DRIFT")
+        target.unlink()
+        rt.fsync_dir(target.parent)
+        ingress.reload_nginx(rt)
+        save("ROLLED_BACK")
+        raise
+    return "APPLIED", path
+
+
+def main():
+    import argparse
+
+    arg = argparse.ArgumentParser(description=__doc__)
+    arg.add_argument("action", choices=("plan", "apply", "rollback"))
+    arg.add_argument("--port", type=int, required=True)
+    args = arg.parse_args()
+    try:
+        need(os.geteuid() == 0, "ROOT_REQUIRED")
+        need(1024 <= args.port <= 65535 and args.port not in (3080, 7000, 8000, 8443, 8444, 8888, 13080, 18476),
+             "DEDICATED_XHTTP_PORT_REQUIRED")
+        if args.action != "plan":
+            challenge = args.action.upper() + "-RC9-BACKHAUL-XHTTP"
+            need(sys.stdin.isatty() and input(f"Type {challenge}: ").strip() == challenge,
+                 "OPERATOR_CANCELLED")
+        edge = load("backhaul_xhttp_edge", "smite-rc7-wss-edge.py")
+        ingress = load("backhaul_xhttp_ingress", "smite-rc9-backhaul-ingress.py")
+        route = load("backhaul_xhttp_route", "smite-xhttp-nginx-route", executable=True)
+        edge.select_rc9()
+        with edge.rt.locked(), route_lock(route):
+            result, path = configure(edge, ingress, route, args.port, args.action)
+        print("RC9_BACKHAUL_XHTTP=" + result)
+        print("XHTTP_PATH=" + path)
+        return 0
+    except Exception as exc:
+        reason = str(exc)
+        print("HOLD: " + (reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason)
+                          else "BACKHAUL_XHTTP_UNVERIFIED"), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

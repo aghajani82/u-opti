@@ -75,7 +75,10 @@ smite_managed_bh_rc9_retained() (
     local pinned_sha=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
     local image="ghcr.io/aghajani82/smite-node@sha256:3df3c9d40c338ab87205bbe93e9ab9bd94eb4051558c4429fdd09f876b76b2c2"
     echo "RC9 Backhaul engine enrollment / rollback beside active FRP"
-    read -rp "I=IR install, R=IR rollback, F=Foreign install, B=Foreign rollback, 0=cancel: " mode || return 2
+    mode="${1:-}"
+    if [ -z "$mode" ]; then
+        read -rp "I=IR install, R=IR rollback, F=Foreign install, B=Foreign rollback, 0=cancel: " mode || return 2
+    fi
     case "$mode" in
         I|i) action=install; role=ir ;;
         R|r) action=rollback; role=ir ;;

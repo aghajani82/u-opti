@@ -77,6 +77,7 @@ jobs:
           python3 -B tests/test-smite-rc7-wss-preflight.py -v
           python3 -B tests/test-smite-rc7-wss-runtime.py -v
           python3 -B tests/test-smite-rc9-backhaul-ingress.py -v
+          python3 -B tests/test-smite-rc9-backhaul-xhttp.py -v
           python3 -B tests/test-smite-rc7-frp-enrollment.py -v
           cd .stage15-foreign-source
           python3 -B tests/test_panel_signed_nodeclient.py -v

@@ -1043,34 +1043,98 @@ smite_tw_rc9_frp_setup() (
     echo 'RC9 FRP setup verified on this host. Complete setup on both hosts before creating a tunnel in Smite Panel.'
 )
 
+smite_tw_rc9_backhaul_setup() (
+    local role="$1" runtime_role=foreign mode=F response
+    smite_tw_validate_host "$role" || return 2
+    [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
+    if [ "$role" = ir ]; then runtime_role=ir; mode=I; fi
+    if [ ! -s "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh" ] ||
+       [ -L "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh" ]; then
+        echo 'HOLD: Managed Backhaul menu helper missing.'
+        return 2
+    fi
+    source "$SMITE_TW_DIR/smite-managed-backhaul-menu.sh"
+    echo '===== Step 1/2 · Install signed Backhaul engine ====='
+    if python3 -B "$SMITE_MANAGED_BACKHAUL_CONTROL" verify-rc9-bundle \
+        --role "$runtime_role" --expect-backhaul-ready >/dev/null 2>&1; then
+        echo 'The signed Backhaul engine is already enrolled.'
+    else
+        echo 'Signed Backhaul engine readiness has not been verified.'
+        smite_managed_bh_rc9_retained "$mode" || return 2
+    fi
+    echo '===== Step 2/2 · Verify or set up Backhaul control on HTTPS/443 ====='
+    if ! python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-ingress.py" verify --role "$runtime_role"; then
+        if [ "$role" = kh ]; then
+            echo 'Complete this Backhaul setup on Iran first.'
+        fi
+        read -rp 'Set up Backhaul control on this host now? [y/N]: ' response || return 2
+        [[ "$response" == [yY] ]] || return 0
+        python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-ingress.py" apply --role "$runtime_role" || return 2
+    fi
+    echo 'Backhaul engine and HTTPS/443 control verified on this host.'
+)
+
+smite_tw_rc9_backhaul_tunnel() {
+    local role="$1" port action response
+    smite_tw_validate_host "$role" || return 2
+    if [ "$role" != ir ]; then
+        echo 'Create and publish the Backhaul tunnel from the Iran host after completing engine setup on both hosts.'
+        return 2
+    fi
+    echo 'Select an enabled VLESS/XHTTP inbound on the Foreign host with a dedicated port.'
+    echo 'The exact path is read from the signed Foreign Node inventory.'
+    read -rp 'Foreign XHTTP inbound port: ' port || return 2
+    read -rp '[P]review (default), [A]ctivate and publish, [R]oll back publication: ' response || return 2
+    case "$response" in
+        ''|[pP]) action=plan ;;
+        [aA]) action=apply ;;
+        [rR]) action=rollback ;;
+        *) return 2 ;;
+    esac
+    python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-xhttp.py" "$action" --port "$port"
+}
+
 smite_tw_menu() {
-    local role="" choice rc9 frp_option advanced_option
+    local role="" choice rc9 backhaul_option frp_option advanced_option last
     role="$(smite_tw_choose_role always)" || return
     smite_tw_validate_host "$role" || return 2
     while true; do
         rc9=no
+        last=6
+        backhaul_option="Backhaul Sidecar — legacy test-host setup"
         frp_option="FRP — guided status/approval (NO engine installation)"
         advanced_option="Advanced FRP — original setup and recovery"
         if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
             rc9=yes
+            last=7
+            backhaul_option="Backhaul — Install signed Backhaul engine (RC9)"
             frp_option="FRP — Install signed FRP engine (RC9)"
             advanced_option="FRP — Check status / approve XHTTP routes"
         fi
         smite_tw_header
         printf 'Detected/selected host role: %s\n\n' "$role"
-        echo "1) Backhaul — guided Sidecar START HERE"
+        echo "1) $backhaul_option"
         echo "2) $frp_option"
         echo "3) Rathole — safe plan only (no installer)"
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "6) $advanced_option"
+        if [ "$rc9" = yes ]; then
+            echo "7) Backhaul — Activate tunnel / publish XHTTP (Iran)"
+        fi
         echo "0) Back"
-        read -rp "Choose [0-6]: " choice || return
+        read -rp "Choose [0-$last]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         smite_tw_validate_host "$role" || return 2
         case "$choice" in
-            1) smite_tw_backhaul_menu "$role" ;;
+            1)
+                if [ "$rc9" = yes ]; then
+                    smite_tw_rc9_backhaul_setup "$role" || :
+                    smite_tw_pause
+                else
+                    smite_tw_backhaul_menu "$role"
+                fi ;;
             2)
                 if [ "$rc9" = yes ]; then
                     smite_tw_rc9_frp_setup "$role" || :
@@ -1095,6 +1159,13 @@ smite_tw_menu() {
                    smite_tw_pause
                fi ;;
             5) bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-profile-first-menu.sh" "$role" ;;
+            7)
+                if [ "$rc9" = yes ]; then
+                    smite_tw_rc9_backhaul_tunnel "$role" || :
+                else
+                    echo "Invalid choice"
+                fi
+                smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac
