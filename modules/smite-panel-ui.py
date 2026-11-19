@@ -15,6 +15,10 @@ import uuid
 BUNDLE_SHA = 'ad92e819a4a47e80b1991b5d52e1873bb5b08db48118a86e660fe15f979286e1'
 SOURCE = '5e7a289071e446345ac27e4255994daf3446430a'
 IMAGE = 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8'
+# Separate exact RC9 bundle: never overwrite the retained, signed RC7 UI lane.
+SOURCE_RC9 = 'f3f8d39cb66b7cf536879501ccefc74c835ae2bc'
+BUNDLE_SHA_RC9 = 'PENDING_REPRODUCIBLE_CI_PACKAGE'
+IMAGE_RC9 = 'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e'
 STATE = Path('/var/lib/u-opti/smite-panel-ui')
 
 
@@ -39,10 +43,13 @@ def validate(files):
 def bundle(path):
     if path.is_symlink(): raise ValueError('unsafe bundle path')
     raw = path.read_bytes()
-    if digest(raw) != BUNDLE_SHA:
+    is_rc9 = path.name == 'smite-panel-ui-rc9.json'
+    if path.name not in ('smite-panel-ui.json', 'smite-panel-ui-rc9.json'):
+        raise ValueError('unknown UI package')
+    if digest(raw) != (BUNDLE_SHA_RC9 if is_rc9 else BUNDLE_SHA):
         raise ValueError('UI bundle SHA256 mismatch; update U-OPTI before retrying')
     obj = json.loads(raw)
-    if obj['source_sha'] != SOURCE:
+    if obj['source_sha'] != (SOURCE_RC9 if is_rc9 else SOURCE):
         raise ValueError('UI source mismatch')
     return validate(obj['files'])
 
@@ -90,16 +97,24 @@ def docker(*args, data=None):
 
 def admit(container):
     c = json.loads(docker('inspect', container))[0]
-    image = json.loads(docker('image', 'inspect', IMAGE))[0]
-    if c['Image'] != image['Id'] or not c['State']['Running']:
-        raise ValueError('only the running reviewed RC7 Panel image is supported')
+    profile = None
+    for name, image_ref in (('rc7', IMAGE), ('rc9', IMAGE_RC9)):
+        try:
+            image = json.loads(docker('image', 'inspect', image_ref))[0]
+        except subprocess.CalledProcessError:
+            continue  # The other reviewed Panel image may not be present locally.
+        if c['Image'] == image['Id']:
+            profile = name
+            break
+    if not profile or not c['State']['Running']:
+        raise ValueError('only the exact reviewed running RC7/RC9 Panel images are supported')
     if c['State'].get('Health', {}).get('Status') == 'unhealthy':
         raise ValueError('Panel is unhealthy')
     for mount in c.get('Mounts', []):
         dest = mount['Destination'].rstrip('/') or '/'
         if dest == '/' or dest == '/app' or dest.startswith('/app/static'):
             raise ValueError('static directory bind/volume overlays are not supported')
-    return c['Id']
+    return c['Id'], profile
 
 
 def snapshot(cid):
@@ -148,8 +163,13 @@ def operate(action, bundle_path, state=STATE, container='smite-panel'):
         if action == 'status':
             print('UI_SOURCE=' + SOURCE)
             print('UI_JOURNAL=' + (previous['status'] if previous else 'NONE'))
+            print('UI_RC9_SOURCE=' + SOURCE_RC9)
             return
-        cid = admit(container)
+        cid, profile = admit(container)
+        if profile == 'rc9' and bundle_path.name == 'smite-panel-ui.json':
+            bundle_path = bundle_path.with_name('smite-panel-ui-rc9.json')
+        if profile != 'rc9' and bundle_path.name == 'smite-panel-ui-rc9.json':
+            raise ValueError('RC9 UI cannot be applied to another Panel')
         current = snapshot(cid)
         if action == 'rollback':
             if not previous or previous['container_id'] != cid:
@@ -170,12 +190,12 @@ def operate(action, bundle_path, state=STATE, container='smite-panel'):
             raise ValueError('interrupted UI update; use the rollback menu before retrying')
         if previous:
             write_json(state/(uuid.uuid4().hex+'.json'), previous)
-        record = {'status': 'APPLYING', 'container_id': cid, 'source_sha': SOURCE,
+        record = {'status': 'APPLYING', 'container_id': cid, 'source_sha': SOURCE_RC9 if profile == 'rc9' else SOURCE,
                   'before': current, 'after_index': index_hash(target)}
         write_json(journal, record)  # Durable backup BEFORE any write to the Panel.
         publish(cid, target, index_hash(current))
         record['status'] = 'APPLIED'; write_json(journal, record)
-        print('UI_UPDATE=PASS; source=' + SOURCE + '; restart=NO')
+        print('UI_UPDATE=PASS; source=' + (SOURCE_RC9 if profile == 'rc9' else SOURCE) + '; restart=NO')
 
 
 def main():
