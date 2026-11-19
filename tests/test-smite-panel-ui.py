@@ -56,6 +56,34 @@ class Updates(unittest.TestCase):
     def test_path_traversal_and_bad_encoding_rejected(self):
         for files in [dict(OLD,**{'../main.py':'YQ=='}), {'index.html':'not base64'}]:
             with self.assertRaises(ValueError):ui.validate(files)
+    def test_exact_rc9_docker_admission_and_unknown_image_rejection(self):
+        # Compare the actual loaded Docker Image ID; never trust an image tag
+        # or container name as proof of the reviewed image.
+        calls=[]
+        def mock_docker(*args, **kwargs):
+            calls.append(args)
+            if args==('inspect','smite-panel'):
+                return json.dumps([{'Id':'cid-rc9','Image':'rc9-loaded-id',
+                    'State':{'Running':True,'Health':{'Status':'healthy'}},'Mounts':[]}])
+            if args==('image','inspect',ui.IMAGE):
+                raise subprocess.CalledProcessError(1, 'docker')
+            if args==('image','inspect',ui.IMAGE_RC9):
+                return json.dumps([{'Id':'rc9-loaded-id'}])
+            raise AssertionError('Unexpected Docker invocation '+str(args))
+        with patch.object(ui,'docker',side_effect=mock_docker):
+            self.assertEqual(ui.admit('smite-panel'),('cid-rc9','rc9'))
+        self.assertIn(('image','inspect',ui.IMAGE_RC9),calls)
+        def mock_unknown(*args, **kwargs):
+            if args==('inspect','smite-panel'):
+                return json.dumps([{'Id':'cid','Image':'unknown-image',
+                    'State':{'Running':True},'Mounts':[]}])
+            if args[0:2]==('image','inspect'):
+                return json.dumps([{'Id':'different-reviewed-image'}])
+            raise AssertionError('Unexpected Docker invocation')
+        with patch.object(ui,'docker',side_effect=mock_unknown):
+            with self.assertRaisesRegex(ValueError,'exact reviewed'):
+                ui.admit('smite-panel')
+
     def test_rc9_uses_separate_pinned_bundle_and_is_rollback_safe(self):
         target=ROOT/'modules/smite-panel-ui-rc9.json'
         self.assertTrue(target.is_file(), 'reviewed RC9 UI payload is missing')
