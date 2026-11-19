@@ -1,4 +1,5 @@
 name: One-time RC9 Foreign UI fixture package (reviewed source, no deployment)
+# Second run: tested unknown-package and changed-container deny fixtures.
 
 on:
   push:
