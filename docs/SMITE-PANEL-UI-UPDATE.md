@@ -1,17 +1,3 @@
-## Operator-requested suspension of Foreign JSON trial (2026-11-19)
-
-The experimental Foreign Node **one-time installation JSON / two-hour grant** path is now deliberately disabled in the reviewed Smite Panel frontend. This is a suspension of that **separate trial**, not a removal of the Foreign Nodes list, the Iran Node, or existing signed Node pairing.
-
-- Smite reviewed source: `c5b3558db8c89e5e7ab23854d740d6b80862bec8` (PR #60). The `Foreign Nodes` screen displays a disabled-trial notice and falls back to the existing signed Node pairing controls. It no longer opens the `Prepare installation information` JSON dialog, regardless of stale backend readiness.
-- U-OPTI menu option 2 stops **before** Cosign downloads, the JSON prompt, host setup and Docker writes with `FOREIGN_JSON_TRIAL=DISABLED`. This means **one-choice Foreign install is temporarily unavailable** until a verified replacement is released; there is deliberately NO unsigned shortcut.
-- A NEW signed RC9 Iran option-1 installation no longer enables the Foreign JSON trial feature flags / 443 installation routes / schema stage. Existing Iran signed pairing, local Node, TLS gateway, FRP and Sanaei are retained.
-- The separate reviewed RC9 UI package is rebuilt and SHA-256 pinned to the disabled source. After installing/updating U-OPTI, use `Smite Install / Lifecycle → 8) Update Panel appearance (UI only / backup first)` on an EXISTING Iran host. Require `UI_UPDATE=PASS; source=c5b3558db8c89e5e7ab23854d740d6b80862bec8; restart=NO`. The same reviewed UI package is auto-applied on a **new** signed RC9 Iran installation; option 9 still provides its existing static-only rollback.
-- The existing running server's backend feature flags are NOT changed by a static UI update; its trial JSON API still has the existing signed access controls. Full backend removal requires a separately published signed Panel runtime image. Do not claim backend deletion or availability of a replacement foreign install route.
-
-No live VPS was changed by these repository commits. Do not rebuild a server to deliver a UI-only change. The signed manifest and image admission rules are unchanged.
-
----
-
 ## RC9 Foreign Node installation-code fix (2026-11-19)
 
 The original RC7 UI package and its exact-image admission are retained unchanged.
@@ -84,3 +70,7 @@ At browser zoom **100%** with the 90% desktop layout, the dashboard width now fi
 ## Full-width operator pages correction (PR #57)
 
 The original centered max-width remained in five pages after the Dashboard fix. Only the top-level wrappers of Logs, Core Health, Tunnels, Iran Nodes, and Foreign Nodes were changed to the same `w-full min-w-0` layout as Dashboard; Settings was already correct. The login, sidebar, root 90% density, outer padding, card gaps and all runtime/API behavior remain unchanged. Source: Smite `5e7a289071e446345ac27e4255994daf3446430a`; reviewed main UI CI run `42513266989`; artifact `13630845198`; screenshot/browser assertions check 80 route combinations in addition to Login and Dashboard. The U-OPTI SHA-pinned static package must be updated and option 8 reapplied after a U-OPTI update. No live changes occur as part of this source-only PR.
+
+## Repair Foreign pairing after the temporary suspension
+
+Fresh Iran option 1 installs the clock-safe RC9 UI after signed Foreign enrollment and Gateway preparation. On an existing RC9 Iran Panel, update U-OPTI and rerun **Install Panel + Iran Node** (option 1). It resumes from the saved checkpoint and applies the same UI package. Wait for `IR_PANEL_STATIC_UI=RC9_PAIRING_READY` and `PANEL_AND_IR_INSTALL=COMPLETE`, then refresh the Panel and prepare installation information for the same reserved Foreign Node. Update U-OPTI on Foreign before selecting **Install Foreign Node** (option 2). Use the Panel-issued packet in the Foreign installer.

@@ -3845,27 +3845,24 @@ smite_install_finish_local_ir() {
         echo 'Iran Node verified active. Create the Panel administrator account:'
         smite_install_create_admin || return 2
     fi
-    # Operator suspended the problematic experimental Foreign JSON-code
-    # enrollment feature. A new Iran install must NOT re-enable its env
-    # flags, ingress or schema stage. Iran's signed local pairing, Node,
-    # HTTPS/443 Gateway, FRP and all existing services remain unchanged.
+    # The signed Node and admin row are already verified. Schema migration
+    # is additive and separately backed up by the original Smite module.
     if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
-        echo 'IR_FOREIGN_JSON_TRIAL=DISABLED'
-    fi
-    if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
-        echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
-    elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
-        # Apply the separately pinned reviewed RC9 UI with backup after
-        # Iran Node/Admin verification. This disables the old Foreign JSON
-        # trial on NEW installs without changing signed runtime or Compose.
-        # A failure is UI-only; users can retry from menu 8, not rebuild.
-        if smite_install_ui_action apply; then
-            echo 'IR_PANEL_STATIC_UI=APPLIED_FOREIGN_JSON_DISABLED'
-        else
-            echo 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8'
-            echo 'NOTICE: Reviewed Foreign JSON-disabled UI can be retried via menu 8.'
+        smite_install_ir_foreign_schema_stage || {
+            echo 'HOLD: Foreign schema prerequisite incomplete; retry option 1 without rekeying Iran Node.' >&2
+            return 2
+        }
+        # The reviewed UI picks the bundle by exact Panel image. Apply
+        # after the signed Foreign flags, which can recreate the Panel.
+        # A replay of a completed install also repairs a stale UI layer.
+        smite_install_ui_action apply || {
+            echo 'HOLD: RC9 Panel UI update incomplete; keep the existing install and review its UI backup.' >&2
+            return 2
+        }
+        echo 'IR_PANEL_STATIC_UI=RC9_PAIRING_READY'
+        if [ "$phase" != COMPLETE ]; then
+            smite_install_ir_advance COMPLETE || return 2
         fi
-        smite_install_ir_advance COMPLETE || return 2
     else
         # Preserve the independent legacy RC7 UI backup/rollback behavior.
         # This branch never runs for the selected signed RC9 installer.
@@ -3932,7 +3929,7 @@ show_smite_install_menu() {
         echo "======================================"
         echo
         echo "1) Install Panel + Iran Node"
-        echo "2) Foreign Node JSON trial (disabled)"
+        echo "2) Install Foreign Node"
         echo "3) Installation State"
         echo "4) Install Sanaei 3x-UI on Foreign Node"
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
@@ -3958,14 +3955,12 @@ show_smite_install_menu() {
                 fi
                 ;;
             2)
-                # Explicit operator-requested suspension of the experimental
-                # Panel JSON/one-time code workflow. Do not download Cosign,
-                # request a credential, start Docker or mutate any host.
-                # The separate signed Node pairing workflow is retained.
-                echo 'FOREIGN_JSON_TRIAL=DISABLED'
-                echo 'HOLD: Experimental Foreign one-choice JSON installation is disabled.'
-                echo 'Use the existing signed Node pairing workflow only; no unsigned fallback.'
-                smite_install_pause
+                # Same one-choice RC9 release/rollback gate as option 1,
+                # not the legacy clean-rc direct helper on env inheritance.
+                if ! SMITE_INSTALL_PROFILE=stable smite_install_selected_fresh foreign; then
+                    echo 'HOLD: Foreign Node installation did not complete. Review error above.'
+                    smite_install_pause
+                fi
                 ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;

@@ -81,9 +81,9 @@ SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=CORE_COMMITTED
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-fresh"
-[ "$(cat "$TMP/events")" = $'gateway\ntls\ncheckpoint:GATEWAY_VERIFIED\npairing\ncheckpoint:PAIRING_VERIFIED\nadmin\ncheckpoint:ADMIN_CREATED\nui\ncheckpoint:COMPLETE' ]
+[ "$(cat "$TMP/events")" = $'gateway\ntls\ncheckpoint:GATEWAY_VERIFIED\npairing\ncheckpoint:PAIRING_VERIFIED\nadmin\ncheckpoint:ADMIN_CREATED\nschema\nui\ncheckpoint:COMPLETE' ]
 grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/resume-fresh"
-grep -qx 'IR_PANEL_STATIC_UI=APPLIED_FOREIGN_JSON_DISABLED' "$TMP/resume-fresh"
+grep -qx 'IR_PANEL_STATIC_UI=RC9_PAIRING_READY' "$TMP/resume-fresh"
 SMITE_IR_STAGE=GATEWAY_VERIFIED
 : > "$TMP/events"
 FAIL_STAGE=pairing
@@ -97,8 +97,8 @@ SMITE_IR_STAGE=PAIRING_VERIFIED
 ADMIN_EXISTS=1
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-admin"
-[ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nui\ncheckpoint:COMPLETE' ]
-grep -qx 'IR_PANEL_STATIC_UI=APPLIED_FOREIGN_JSON_DISABLED' "$TMP/resume-admin"
+[ "$(cat "$TMP/events")" = $'tls\npairing\ncheckpoint:ADMIN_CREATED\nschema\nui\ncheckpoint:COMPLETE' ]
+grep -qx 'IR_PANEL_STATIC_UI=RC9_PAIRING_READY' "$TMP/resume-admin"
 # An unreadable/unknown Panel DB must NEVER be treated as an empty
 # admin table: it is an unsafe state, and no new admin may be created.
 SMITE_IR_STAGE=PAIRING_VERIFIED
@@ -114,25 +114,31 @@ ADMIN_EXISTS=1
 SMITE_IR_STAGE=COMPLETE
 : > "$TMP/events"
 smite_install_finish_local_ir > "$TMP/resume-finished"
-[ "$(cat "$TMP/events")" = $'tls\npairing' ]
-grep -qx 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED' "$TMP/resume-finished"
-# Foreign JSON trial schema is deliberately not run on fresh Iran installs;
-# an unrelated schema failure cannot block the signed Iran Node.
+[ "$(cat "$TMP/events")" = $'tls\npairing\nschema\nui' ]
+grep -qx 'IR_PANEL_STATIC_UI=RC9_PAIRING_READY' "$TMP/resume-finished"
+# Schema stage can HOLD without losing the signed Node/admin checkpoint.
+# Next option-1 retries from ADMIN_CREATED with no rekey/Node recreation.
 SMITE_IR_STAGE=ADMIN_CREATED
 ADMIN_EXISTS=1
 : > "$TMP/events"
-FAIL_STAGE=schema smite_install_finish_local_ir > "$TMP/json-disabled"
-[ "$(cat "$TMP/events")" = $'tls\npairing\nui\ncheckpoint:COMPLETE' ]
-grep -qx 'IR_FOREIGN_JSON_TRIAL=DISABLED' "$TMP/json-disabled"
-grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/json-disabled"
-# Isolated second fresh ADMIN_CREATED fixture: a failed optional UI
-# never invalidates the signed Iran installation; operator can use menu 8.
+if FAIL_STAGE=schema smite_install_finish_local_ir > "$TMP/schema-failure"; then
+    echo 'FAIL: schema HOLD was incorrectly marked COMPLETE'; exit 1
+fi
+[ "$(cat "$TMP/events")" = $'tls\npairing\nschema' ]
+! grep -q '^PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/schema-failure"
+: > "$TMP/events"
+smite_install_finish_local_ir > "$TMP/schema-retry"
+[ "$(cat "$TMP/events")" = $'tls\npairing\nschema\nui\ncheckpoint:COMPLETE' ]
+grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/schema-retry"
+grep -qx 'IR_PANEL_STATIC_UI=RC9_PAIRING_READY' "$TMP/schema-retry"
 SMITE_IR_STAGE=ADMIN_CREATED
 : > "$TMP/events"
-FAIL_STAGE=ui smite_install_finish_local_ir > "$TMP/ui-retry"
-[ "$(cat "$TMP/events")" = $'tls\npairing\nui\ncheckpoint:COMPLETE' ]
-grep -qx 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8' "$TMP/ui-retry"
-grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/ui-retry"
+if FAIL_STAGE=ui smite_install_finish_local_ir > "$TMP/rc9-ui-hold"; then
+    echo 'FAIL: RC9 UI failure incorrectly reported COMPLETE'; exit 1
+fi
+[ "$(cat "$TMP/events")" = $'tls\npairing\nschema\nui' ]
+[ "$SMITE_IR_STAGE" = ADMIN_CREATED ]
+! grep -q '^PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/rc9-ui-hold"
 SMITE_IR_STAGE=GATEWAY_VERIFIED
 : > "$TMP/events"
 FAIL_STAGE=tls

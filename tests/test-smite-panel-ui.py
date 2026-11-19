@@ -112,16 +112,16 @@ class Updates(unittest.TestCase):
                 ui.operate('apply',ROOT/'modules/smite-panel-ui-rc9.json',self.state)
         self.assertEqual(self.current,OLD)
 
-    def test_signed_rc9_iran_option1_applies_json_disabled_ui(self):
-        # New Iran installs must not activate the suspended JSON-code path.
-        # RC9 uses the separately pinned reviewed bundle, not RC7 assets.
+    def test_signed_rc9_iran_option1_applies_clock_safe_ui_after_schema(self):
+        # Exercise the original option-1 phase owner with ONLY local bash
+        # stubs. The reviewed UI must run after signed Foreign readiness.
         script = r"""
 set -euo pipefail
 source modules/smite-install.sh
 SMITE_IR_RESUMABLE=1
 SMITE_IR_STAGE=ADMIN_CREATED
 smite_gateway_configure_panel() { :; }
-smite_gateway_panel_domain() { printf '%s\\n' 04.example.org; }
+smite_gateway_panel_domain() { printf '%s\n' 04.example.org; }
 smite_gateway_verify_443() { :; }
 python3() {
     case "$*" in
@@ -132,11 +132,11 @@ python3() {
 }
 smite_install_ir_admin_present() { :; }
 smite_install_ir_foreign_schema_stage() {
-    echo 'FORBIDDEN_FOREIGN_JSON_TRIAL_STAGE' >&2; return 77;
+    echo IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION
 }
 smite_install_ui_action() {
     test "$1" = apply || return 77
-    echo 'UI_UPDATE=PASS; source=c5b3558db8c89e5e7ab23854d740d6b80862bec8; restart=NO'
+    echo RC9_UI_FIX=APPLIED
 }
 smite_install_ir_advance() {
     test "$1" = COMPLETE || return 77
@@ -149,31 +149,25 @@ smite_install_finish_local_ir
             ['bash', '-c', script], cwd=ROOT,
             capture_output=True, text=True, timeout=15)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertNotIn('FORBIDDEN_FOREIGN_JSON_TRIAL_STAGE', proc.stdout + proc.stderr)
-        self.assertIn('IR_FOREIGN_JSON_TRIAL=DISABLED', proc.stdout)
-        self.assertIn('IR_PANEL_STATIC_UI=APPLIED_FOREIGN_JSON_DISABLED', proc.stdout)
+        self.assertIn('IR_PANEL_STATIC_UI=RC9_PAIRING_READY', proc.stdout)
+        self.assertLess(proc.stdout.index('IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION'),
+                        proc.stdout.index('RC9_UI_FIX=APPLIED'))
+        self.assertLess(proc.stdout.index('RC9_UI_FIX=APPLIED'), proc.stdout.index('ADVANCE=COMPLETE'))
         self.assertIn('ADVANCE=COMPLETE', proc.stdout)
         self.assertIn('PANEL_AND_IR_INSTALL=COMPLETE', proc.stdout)
+        self.assertIn('IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION', proc.stdout)
 
     def test_rc9_pinned_bundle_from_merge_sha(self):
         target=ROOT/'modules/smite-panel-ui-rc9.json'
         files=ui.bundle(target)
         metadata=json.loads(target.read_text())
         self.assertEqual(metadata['source_sha'],ui.SOURCE_RC9)
-        self.assertEqual(metadata['source_sha'], 'c5b3558db8c89e5e7ab23854d740d6b80862bec8')
-        self.assertIsInstance(metadata['workflow_run'], int)
-        self.assertGreater(metadata['workflow_run'], 0)
-        script=[name for name in files if name.startswith('assets/index-') and name.endswith('.js')]
-        style=[name for name in files if name.startswith('assets/index-') and name.endswith('.css')]
-        self.assertEqual(len(script), 1)
-        self.assertEqual(len(style), 1)
-        self.assertEqual(set(files), {'index.html', script[0], style[0]})
-        js=base64.b64decode(files[script[0]]).decode('utf-8')
-        self.assertIn('Experimental Foreign installation JSON is disabled',js)
-        self.assertIn('Existing signed Node pairing remains available',js)
-        html=base64.b64decode(files['index.html']).decode('utf-8')
-        self.assertIn('/'+script[0],html)
-        self.assertIn('/'+style[0],html)
+        self.assertEqual(metadata['workflow_run'],44575937768)
+        self.assertEqual(set(files), {'index.html','assets/index-Bs0U7sHS.css','assets/index-CrBE3oGb.js'})
+        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-CrBE3oGb.js'])).hexdigest(),
+                         'e56a2768c08e6624a42ba0ceca8f7b24fe89ad69de7889df47b90b2f236d3596')
+        html=base64.b64decode(files['index.html']).decode()
+        self.assertIn('/assets/index-CrBE3oGb.js',html)
         self.assertEqual(ui.IMAGE_RC9,'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e')
 
     def test_pinned_source_and_90_percent_desktop_density(self):
