@@ -80,6 +80,8 @@ class IngressTest(unittest.TestCase):
         self.rt.saved_tunnels_only = Mock()
         self.rt.run.return_value = "PID COMMAND\n123 backhaul"
         with patch.object(ingress, "XHTTP_ROUTES", directory):
+            self.assertEqual(ingress.engine_removal_routes(self.rt, "ir", "frp"), [])
+            self.assertEqual(ingress.engine_removal_routes(self.rt, "ir", "backhaul"), [record])
             with self.assertRaisesRegex(ingress.Hold, "ENGINE_REMOVAL_ROUTE_ROLLBACK_REQUIRED"):
                 ingress.review_engine_removal(self.rt, "ir", "backhaul")
             ingress.review_engine_removal(self.rt, "ir", "frp")

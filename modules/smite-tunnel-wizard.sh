@@ -1136,26 +1136,18 @@ smite_tw_rc9_uninstall_engine() {
     smite_tw_validate_host "$role" || return 2
     [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
     [ "$role" != ir ] || scope=ir
-    case "$engine" in
-        backhaul)
-            python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" review-rc9-uninstall \
-                --role "$scope" || return 2 ;;
-        frp)
-            python3 -B "$SMITE_TW_DIR/smite-rc7-frp-enrollment.py" review-uninstall \
-                --rc9 --role "$scope" || return 2 ;;
-        *) return 2 ;;
-    esac
-    echo "Unenroll $engine on this host. Confirm provider snapshot restore and independent console access."
+    if [ "$engine" = frp ]; then
+        python3 -B "$SMITE_TW_DIR/smite-rc7-frp-enrollment.py" guided-uninstall --rc9 --role "$scope"
+        return $?
+    fi
+    [ "$engine" = backhaul ] || return 2
+    python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" review-rc9-uninstall \
+        --role "$scope" || return 2
+    echo 'Unenroll backhaul on this host. Confirm provider snapshot restore and independent console access.'
     read -rp 'Type SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED: ' approval || return 2
     [ "$approval" = SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED ] || return 2
-    case "$engine" in
-        backhaul)
-            python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" uninstall-rc9-independent \
-                --role "$scope" --confirm-snapshot-and-console "$approval" ;;
-        frp)
-            python3 -B "$SMITE_TW_DIR/smite-rc7-frp-enrollment.py" uninstall \
-                --rc9 --role "$scope" --snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED ;;
-    esac
+    python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" uninstall-rc9-independent \
+        --role "$scope" --confirm-snapshot-and-console "$approval"
 }
 
 smite_tw_menu() {

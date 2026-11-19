@@ -259,12 +259,12 @@ def restore(edge, role, domain, target, before, after, journal):
     rt.fsync_dir(STATE.parent)
 
 
-def review_engine_removal(rt, role, engine):
-    """Report managed routes and refuse removal while they still depend on this engine."""
+def engine_removal_routes(rt, role, engine):
+    """Read the trusted route journal for each outstanding route of this engine."""
     need(engine in ("backhaul", "frp"), "ENGINE_REMOVAL_SCOPE_INVALID")
+    active = []
     if role == "ir" and os.path.lexists(XHTTP_ROUTES):
         rt.trusted_path(XHTTP_ROUTES, directory=True)
-        active = []
         accounted_for = set()
         for path in sorted(XHTTP_ROUTES.glob(".*.transaction.json")):
             record = json.loads(read_trusted(rt, path, 0o600))
@@ -285,11 +285,18 @@ def review_engine_removal(rt, role, engine):
                 need(target.stat().st_size <= 16384 and target.read_bytes() == record["snippet"].encode(),
                      "ENGINE_REMOVAL_ROUTE_STATE_UNTRUSTED")
             if kind == engine and (record["state"] != "ROLLED_BACK" or os.path.lexists(target)):
-                active.append(str(port))
+                active.append(record)
         need(set(XHTTP_ROUTES.glob("*.conf")) <= accounted_for, "ENGINE_REMOVAL_UNKNOWN_XHTTP_ROUTE")
-        if active:
-            print("ENGINE_REMOVAL_ACTIVE_OR_UNSETTLED_ROUTE_PORTS=" + ",".join(active))
-            raise Hold("ENGINE_REMOVAL_ROUTE_ROLLBACK_REQUIRED")
+    return active
+
+
+def review_engine_removal(rt, role, engine):
+    """Report managed routes and refuse removal while they still depend on this engine."""
+    active = engine_removal_routes(rt, role, engine)
+    if active:
+        print("ENGINE_REMOVAL_ACTIVE_OR_UNSETTLED_ROUTE_PORTS=" +
+              ",".join(str(record["port"]) for record in active))
+        raise Hold("ENGINE_REMOVAL_ROUTE_ROLLBACK_REQUIRED")
     processes = rt.run(["docker", "top", "smite-node", "-eo", "pid,comm"])
     commands = {"backhaul"} if engine == "backhaul" else {"frps", "frpc"}
     found = {row.split(maxsplit=1)[-1] for row in processes.splitlines()[1:] if row.strip()} & commands

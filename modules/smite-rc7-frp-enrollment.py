@@ -4,7 +4,8 @@
 This is NOT a generic host FRP installer: verified image-bundled frpc+frps
 are enrolled into the Node's strict root-owned engine inventory, preserving
 all other engine entries. No Docker recreate, binary download, Nginx reload,
-Sanaei change, FRPS start, public listener, or tunnel is ever performed.
+Sanaei change, FRPS start, public listener, or tunnel is performed during enrollment.
+Guided RC9 removal can roll back the existing FRP XHTTP routes before unenrollment.
 """
 from __future__ import annotations
 import argparse
@@ -653,10 +654,99 @@ def restore(entry):
     print(rt.VERSION+'_FRP_ENROLLMENT_ROLLBACK=PASS')
     print('NODE_RESTARTED=NO')
 
+def removal_entry(role):
+    entry=state()
+    need(entry['role']==role,'ROLE_MISMATCH')
+    need(not os.path.lexists(RETAINED_BACKHAUL_CLEANUP)
+         and not os.path.lexists(RETAINED_BACKHAUL),
+         'BACKHAUL_TRANSACTION_REQUIRES_OWN_RECOVERY')
+    need(entry['state'] in ('COMMITTED','ROLLING_BACK','ROLLED_BACK'),
+         'RECOVER_INCOMPLETE_FIRST')
+    if entry['state']=='COMMITTED':
+        verify_file(entry)
+        enrolled_status()
+    return entry
+
+
+def rollback_removal_routes(routes):
+    broker=rt.load('smite-rc5-xhttp-root-broker.py')
+    try:
+        broker._require_ir_root_role()
+        broker._verify_helper(broker._configuration())
+        broker._verify_bridge()
+    except broker.BrokerHold as exc:
+        raise Hold(str(exc)) from exc
+    for record in routes:
+        port,path=record['port'],record['path']
+        try:
+            result=rt.run([str(broker.HELPER),'--port',str(port),'--path',path,
+                           '--rollback','--confirm-local-root'])
+            need('RESULT=PASS_LOCAL_NGINX_ROUTE_ROLLED_BACK' in result.splitlines(),
+                 'FRP_ROUTE_ROLLBACK_NOT_VERIFIED')
+        except (Hold,rt.Hold) as exc:
+            print(f'FRP_ROUTE_ROLLBACK_BLOCKED_PORT={port}',file=sys.stderr)
+            raise Hold('FRP_ROUTE_ROLLBACK_NOT_VERIFIED') from exc
+        print(f'FRP_ROUTE_ROLLED_BACK={port}')
+
+
+def guided_uninstall(role):
+    need(sys.stdin.isatty(),'ROOT_CONSOLE_REQUIRED')
+    ingress=rt.load('smite-rc9-backhaul-ingress.py')
+    panel_step=('Delete the FRP tunnels for this node pair in Smite (shared-port tunnels first, '
+                'then their FRPS owner). Run this option again on each host.')
+    try:
+        with rt.locked():
+            entry=removal_entry(role)
+            routes=ingress.engine_removal_routes(rt,role,'frp')
+            if routes:
+                need(entry['state']=='COMMITTED','FRP_ROUTE_REQUIRES_ACTIVE_ENROLLMENT')
+            else:
+                ingress.review_engine_removal(rt,role,'frp')
+                if entry['state']=='ROLLED_BACK':
+                    print('RC9_FRP_UNINSTALL=COMPLETE')
+                    return
+        if routes:
+            print('FRP XHTTP routes to withdraw on this host:')
+            for record in routes:
+                path=record['path']
+                need(type(path) is str and re.fullmatch(r'/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*',path),
+                     'ENGINE_REMOVAL_ROUTE_STATE_UNTRUSTED')
+                print(f"  {record['port']}  {path}")
+            print('These FRP XHTTP routes will stop taking traffic.')
+        else:
+            print('RC9_FRP_UNINSTALL=READY')
+        action='Withdraw the listed FRP XHTTP routes' if routes else 'Unenroll FRP on this host'
+        print('Confirm provider snapshot restore and independent console access.')
+        need(input(action+'? [y/N]: ').strip().lower()=='y','OPERATOR_CANCELLED')
+        with rt.locked():
+            rt.rc9_state(role)
+            current=removal_entry(role)
+            need(current==entry and ingress.engine_removal_routes(rt,role,'frp')==routes,
+                 'FRP_UNINSTALL_REVIEW_CHANGED')
+            if routes:
+                rollback_removal_routes(routes)
+                need(not ingress.engine_removal_routes(rt,role,'frp'),
+                     'FRP_ROUTE_ROLLBACK_NOT_VERIFIED')
+            else:
+                ingress.review_engine_removal(rt,role,'frp')
+                restore(current)
+        if routes:
+            print('RC9_FRP_UNINSTALL=PANEL_CLEANUP_PENDING')
+            print(panel_step)
+        else:
+            print('RC9_FRP_UNINSTALL=COMPLETE')
+    except ingress.Hold as exc:
+        if str(exc) in ('ENGINE_REMOVAL_TUNNEL_STILL_RUNNING',
+                        'ENGINE_REMOVAL_SAVED_TUNNELS_REQUIRE_REVIEW'):
+            print(panel_step)
+        raise Hold(str(exc)) from exc
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=('plan','apply','verify','verify-owner','verify-child',
-                                         'rollback','recover','review-uninstall','uninstall'))
+                                         'rollback','recover','review-uninstall','uninstall',
+                                         'guided-uninstall'))
     parser.add_argument('--role',choices=('ir','foreign'),required=True)
     parser.add_argument('--rc9',action='store_true',help='Use the exact RC9 image and enrollment journal')
     parser.add_argument('--snapshot-confirm',default='')
@@ -667,10 +757,13 @@ def main():
         if args.rc9:
             select_rc9()
             rt.rc9_state(args.role)
-        removing=args.action in ('review-uninstall','uninstall')
+        removing=args.action in ('review-uninstall','uninstall','guided-uninstall')
         need(not removing or args.rc9,'UNINSTALL_REQUIRES_RC9')
         need(args.tunnel_id is None or args.action=='verify-child',
              'FOREIGN_FRPC_CHILD_ID_UNEXPECTED')
+        if args.action=='guided-uninstall':
+            guided_uninstall(args.role)
+            return 0
         if args.action not in ('plan','verify','verify-owner','verify-child','review-uninstall'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'SNAPSHOT_AND_CONSOLE_REQUIRED')
@@ -690,22 +783,14 @@ def main():
             apply()
         else:
             with rt.locked():
-                entry=state()
+                entry=removal_entry(args.role) if removing else state()
                 need(entry['role']==args.role,'ROLE_MISMATCH')
                 if removing:
-                    need(not os.path.lexists(RETAINED_BACKHAUL_CLEANUP)
-                         and not os.path.lexists(RETAINED_BACKHAUL),
-                         'BACKHAUL_TRANSACTION_REQUIRES_OWN_RECOVERY')
                     ingress=rt.load('smite-rc9-backhaul-ingress.py')
                     try:
                         ingress.review_engine_removal(rt,args.role,'frp')
                     except ingress.Hold as exc:
                         raise Hold(str(exc)) from exc
-                    need(entry['state'] in ('COMMITTED','ROLLING_BACK','ROLLED_BACK'),
-                         'RECOVER_INCOMPLETE_FIRST')
-                    if entry['state']=='COMMITTED':
-                        verify_file(entry)
-                        enrolled_status()
                     if args.action=='uninstall' and entry['state']!='ROLLED_BACK':
                         restore(entry)
                     print('RC9_FRP_UNINSTALL='+('READY' if args.action=='review-uninstall' else 'COMPLETE'))
@@ -737,7 +822,7 @@ def main():
                          'RECOVER_INCOMPLETE_FIRST')
                     restore(entry)
         return 0
-    except (Hold,rt.Hold,RuntimeError,ValueError,OSError,KeyError,TypeError) as exc:
+    except (Hold,rt.Hold,RuntimeError,ValueError,OSError,KeyError,TypeError,EOFError) as exc:
         msg=str(exc)
         print('HOLD: '+(msg if re.fullmatch('[A-Z0-9_]{1,100}',msg)
                          else 'UNTRUSTED_FRP_ENROLLMENT_STATE'),file=sys.stderr)

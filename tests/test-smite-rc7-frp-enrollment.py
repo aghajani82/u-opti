@@ -621,5 +621,53 @@ class EnrollmentTests(unittest.TestCase):
         self.assertIn("NODE_RESTARTED=NO",src)
         self.assertIn("SANAEI_CHANGED=NO",src)
 
+    def test_guided_uninstall_drains_routes_then_waits_for_panel_cleanup(self):
+        entry={"role":"ir","state":"COMMITTED"}
+        routes=[{"port":28149,"path":"/28149/store"},
+                {"port":42618,"path":"/42618/ssr"}]
+        ingress=ctl.rt.load("smite-rc9-backhaul-ingress.py")
+        broker=types.SimpleNamespace(
+            HELPER=Path("/usr/local/libexec/smite-xhttp-nginx-route"),
+            _require_ir_root_role=Mock(), _verify_helper=Mock(), _configuration=Mock(),
+            _verify_bridge=Mock(), BrokerHold=RuntimeError)
+        with patch.object(ctl.rt,"load",side_effect=lambda name: (
+                 ingress if name=="smite-rc9-backhaul-ingress.py" else broker)), \
+             patch.object(ctl.rt,"locked",side_effect=contextlib.nullcontext), \
+             patch.object(ctl.rt,"rc9_state"), \
+             patch.object(ctl.rt,"run",return_value="RESULT=PASS_LOCAL_NGINX_ROUTE_ROLLED_BACK") as worker, \
+             patch.object(ctl.sys.stdin,"isatty",return_value=True), \
+             patch("builtins.input",return_value="y") as confirm, \
+             patch.object(ctl,"removal_entry",return_value=entry), \
+             patch.object(ctl,"restore") as restore, \
+             patch.object(ingress,"engine_removal_routes") as outstanding, \
+             patch.object(ingress,"review_engine_removal") as review, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            outstanding.return_value=routes
+            confirm.return_value=""
+            with self.assertRaisesRegex(ctl.Hold,"OPERATOR_CANCELLED"):
+                ctl.guided_uninstall("ir")
+            worker.assert_not_called()
+            restore.assert_not_called()
+            confirm.reset_mock()
+            confirm.return_value="y"
+            outstanding.side_effect=[routes,routes,[]]
+            ctl.guided_uninstall("ir")
+            restore.assert_not_called()
+            self.assertEqual([call.args[0][1:] for call in worker.call_args_list], [
+                ["--port","28149","--path","/28149/store","--rollback","--confirm-local-root"],
+                ["--port","42618","--path","/42618/ssr","--rollback","--confirm-local-root"]])
+            self.assertIn("PANEL_CLEANUP_PENDING",output.getvalue())
+            outstanding.side_effect=None
+            outstanding.return_value=[]
+            review.side_effect=ingress.Hold("ENGINE_REMOVAL_TUNNEL_STILL_RUNNING")
+            with self.assertRaisesRegex(ctl.Hold,"ENGINE_REMOVAL_TUNNEL_STILL_RUNNING"):
+                ctl.guided_uninstall("ir")
+            confirm.assert_called_once()
+            restore.assert_not_called()
+            review.side_effect=None
+            ctl.guided_uninstall("ir")
+            restore.assert_called_once_with(entry)
+            self.assertIn("RC9_FRP_UNINSTALL=COMPLETE",output.getvalue())
+
 if __name__=='__main__':
     unittest.main(verbosity=2)
