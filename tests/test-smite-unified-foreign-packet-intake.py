@@ -75,7 +75,7 @@ class OperatorPacketIntake(unittest.TestCase):
     def test_leading_newlines_from_terminal_paste_are_not_a_packet_terminator(self):
         # Exact field failure: one blank line before pasted JSON previously
         # stopped capture immediately and fed the remaining lines to Bash.
-        for prefix in ("\n", "\r\n", "\n\n"):
+        for prefix in ("\n", "\r\n", "\n\n", "\n"*5, "  \n\t\n"):
             with self.subTest(prefix=repr(prefix)):
                 if self.file.exists():
                     self.file.unlink()
@@ -90,13 +90,65 @@ class OperatorPacketIntake(unittest.TestCase):
                 self.assertEqual(json.loads(self.file.read_text()), self.grant)
         self.file.unlink()
         # Never allow unlimited empty input or empty-only pseudo-packets.
-        for source in ("\n\n\n" + json.dumps(self.grant) + "\n\n", "\n\n"):
+        for source in ("\n"*9 + json.dumps(self.grant) + "\n\n", "\n\n"):
             with self.assertRaises(module.Hold):
                 module.capture_disposable(io.StringIO(source),
                     target=self.file, expected_panel="https://panel.example.com",
                     expected_domain="https://kh.example.com:443",
                     expected_node="node-kh", now=self.now, disposable_capability=True)
             self.assertFalse(self.file.exists())
+
+    def test_private_paste_diagnostics_are_bounded_and_not_secret(self):
+        # The operator must learn whether the paste reached the parser,
+        # but never see a code, raw JSON, or a Python exception in the CLI.
+        missing = json.dumps(self.grant) + "\n"
+        with self.assertRaises(module.CaptureHold) as ctx:
+            module.read_multiline(io.StringIO(missing))
+        self.assertEqual(ctx.exception.reason, "EMPTY_OR_UNFINISHED_PASTE")
+        self.assertNotIn(self.grant["installation_code"], str(ctx.exception))
+        with self.assertRaises(module.CaptureHold) as ctx:
+            module.read_multiline(io.StringIO("x"*8200 + "\n\n"))
+        self.assertEqual(ctx.exception.reason, "PASTE_TOO_LARGE")
+
+    def test_real_tty_bad_fields_time_and_scope_explain_failures_without_secrets(self):
+        import contextlib
+        from unittest.mock import patch
+        for packet, when, expected_reason in [
+            ({**self.grant, "installation_code": "not-a-code"}, self.now,
+             "JSON_FIELDS_INVALID"),
+            (self.grant, self.now + 7201, "FOREIGN_CLOCK_OR_CODE_EXPIRED"),
+            ({**self.grant, "origin": "https://other.example.org:443"}, self.now,
+             "JSON_FIELDS_INVALID"),
+        ]:
+            self.assertFalse(self.file.exists())
+            master, slave = pty.openpty()
+            out = io.StringIO()
+            try:
+                with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as tty:
+                    def paste():
+                        self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                        os.write(master, (json.dumps(packet, indent=2)+"\n\n").encode())
+                    with contextlib.redirect_stderr(out):
+                        with self.assertRaises(module.CaptureHold) as ctx:
+                            module.capture_selected_hidden_tty(
+                                tty, target=self.file, now=when,
+                                confirm_scope=lambda _: True, ready=paste)
+                    self.assertEqual(ctx.exception.reason, expected_reason)
+                    self.assertIn("FOREIGN_PACKET_PASTE=RECEIVED_PRIVATE",
+                                  out.getvalue())
+                    self.assertNotIn(self.grant["installation_code"],
+                                     out.getvalue() + str(ctx.exception))
+                    self.assertFalse(self.file.exists())
+            finally:
+                os.close(master)
+                os.close(slave)
+
+    def test_private_prompt_and_diagnostic_labels_cannot_echo_credentials(self):
+        code = (ROOT / "modules/smite-unified-foreign-packet-intake.py").read_text()
+        self.assertIn("HOLD_REASON=", code)
+        self.assertIn("NOT only the smi1_ code", code)
+        self.assertNotIn("print(raw", code)
+        self.assertNotIn("print(packet", code)
 
     def test_second_paste_never_replaces_private_packet(self):
         self.operator_paste()
