@@ -3927,7 +3927,7 @@ show_smite_install_menu() {
         echo "======================================"
         echo
         echo "1) Install Panel + Iran Node"
-        echo "2) Install Foreign Node"
+        echo "2) Foreign Node JSON trial (disabled)"
         echo "3) Installation State"
         echo "4) Install Sanaei 3x-UI on Foreign Node"
         echo "5) Upgrade signed Field Trial candidate (existing IR)"
@@ -3953,12 +3953,14 @@ show_smite_install_menu() {
                 fi
                 ;;
             2)
-                # Same one-choice RC9 release/rollback gate as option 1,
-                # not the legacy clean-rc direct helper on env inheritance.
-                if ! SMITE_INSTALL_PROFILE=stable smite_install_selected_fresh foreign; then
-                    echo 'HOLD: Foreign Node installation did not complete. Review error above.'
-                    smite_install_pause
-                fi
+                # Explicit operator-requested suspension of the experimental
+                # Panel JSON/one-time code workflow. Do not download Cosign,
+                # request a credential, start Docker or mutate any host.
+                # The separate signed Node pairing workflow is retained.
+                echo 'FOREIGN_JSON_TRIAL=DISABLED'
+                echo 'HOLD: Experimental Foreign one-choice JSON installation is disabled.'
+                echo 'Use the existing signed Node pairing workflow only; no unsigned fallback.'
+                smite_install_pause
                 ;;
             3) smite_show_installation_state ;;
             4) smite_install_sanaei_foreign ;;
