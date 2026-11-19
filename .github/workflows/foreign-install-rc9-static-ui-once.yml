@@ -1,0 +1,82 @@
+name: One-time RC9 Foreign UI fixture package (reviewed source, no deployment)
+
+on:
+  push:
+    branches: [fix/foreign-install-rc9-ui-main-20261119]
+    paths:
+      - '.github/workflows/foreign-install-rc9-static-ui-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    if: github.repository == 'aghajani82/u-opti'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: f3f8d39cb66b7cf536879501ccefc74c835ae2bc
+          path: _smite_source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _smite_source/frontend/package-lock.json
+      - name: Build reviewed exact Smite main frontend
+        working-directory: _smite_source/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify audited artifact hashes and seal new RC9-only static bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PACKAGE'
+          import base64, hashlib, json, pathlib
+          root = pathlib.Path('_smite_source/frontend/dist')
+          expected = {
+            'index.html': '0b244c755f914685efaa5b89bceb77338aa168622455bb0f7fecef8ed0d1a158',
+            'assets/index-Bs0U7sHS.css': '54e63ec30199071ab6794a8efa0238b84302e4e9c5d9f25b801f903e285a1d0d',
+            'assets/index-CrBE3oGb.js': 'e56a2768c08e6624a42ba0ceca8f7b24fe89ad69de7889df47b90b2f236d3596',
+          }
+          actual = {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in root.rglob('*') if p.is_file()}
+          if actual != expected:
+              raise SystemExit('HOLD: CI build differed from the independently reviewed Smite/main artifact')
+          payload = {
+            'files': {name:base64.b64encode((root/name).read_bytes()).decode('ascii') for name in sorted(expected)},
+            'source_sha': 'f3f8d39cb66b7cf536879501ccefc74c835ae2bc',
+            'workflow_run': 44575937768,
+          }
+          package = (json.dumps(payload,sort_keys=True,separators=(',',':'))+'\n').encode()
+          sha = hashlib.sha256(package).hexdigest()
+          pathlib.Path('modules/smite-panel-ui-rc9.json').write_bytes(package)
+          helper=pathlib.Path('modules/smite-panel-ui.py')
+          code=helper.read_text()
+          marker='PENDING_REPRODUCIBLE_CI_PACKAGE'
+          if code.count(marker)!=1:raise SystemExit('HOLD: RC9 pin already set or ambiguous')
+          helper.write_text(code.replace(marker,sha))
+          print('PINNED_SMITE_RC9_SOURCE=f3f8d39cb66b7cf536879501ccefc74c835ae2bc')
+          print('PINNED_UI_BUNDLE_SHA256='+sha)
+          PY_PACKAGE
+      - name: Test read-only/admission fixture and backup/rollback
+        run: |
+          python3 -B tests/test-smite-panel-ui.py -v
+          python3 -m py_compile modules/smite-panel-ui.py
+      - name: Commit only the two audited UI payload/pin files to the same review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add modules/smite-panel-ui-rc9.json modules/smite-panel-ui.py
+          git diff --cached --name-only | sort > /tmp/ui-files.txt
+          printf 'modules/smite-panel-ui-rc9.json\nmodules/smite-panel-ui.py\n' | sort > /tmp/ui-expected.txt
+          diff -u /tmp/ui-expected.txt /tmp/ui-files.txt
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'build(ui): pin reproducible Smite RC9 Foreign install frontend bundle'
+          git push origin HEAD:fix/foreign-install-rc9-ui-main-20261119
