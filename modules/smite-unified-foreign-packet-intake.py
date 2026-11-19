@@ -35,6 +35,17 @@ class Hold(ValueError):
     pass
 
 
+class IntakeRejected(Hold):
+    """Operator-facing message that never includes raw input."""
+
+
+def check_intake_expiry(expires, now):
+    if expires <= now:
+        raise IntakeRejected("Installation information has expired. Prepare it again for the same Node.")
+    if expires > now + 7200:
+        raise IntakeRejected("Grant expiry is more than two hours ahead of this server. Check both server clocks.")
+
+
 def deny():
     raise Hold("Foreign installation information HOLD; request a fresh Panel code")
 
@@ -614,7 +625,7 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
     packet. The optional expected scope preserves independent trial tests;
     the selected one-choice caller instead uses the Panel-issued scope.
     """
-    if type(now) is not int or not callable(confirm_scope):
+    if (now is not None and type(now) is not int) or not callable(confirm_scope):
         deny()
     if selected_host is True:
         _selected_root_target(target, allow_existing=allow_expired_renewal)
@@ -622,19 +633,29 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
         _private_fixture(target, allow_existing=allow_expired_renewal)
     else:
         deny()
-    raw = read_hidden_tty(tty, ready=ready)
-    packet = client_module().parse_packet(raw)
+    try:
+        raw = read_hidden_tty(tty, ready=ready)
+    except Hold as exc:
+        raise IntakeRejected("Paste the complete JSON and end it with one empty line.") from exc
+    client = client_module()
+    try:
+        packet = client.parse_packet(raw)
+    except client.Hold as exc:
+        raise IntakeRejected("Invalid installation JSON. Copy the complete information from the Panel.") from exc
     scope = packet.scope
-    if not now < packet.expires_at <= now + 7200:
-        deny()
+    # The operator may issue a grant after the hidden prompt opens.
+    # Evaluate against the clock after reading, not before blocking for input.
+    check_intake_expiry(packet.expires_at, int(time.time()) if now is None else now)
     # Legacy disposable harnesses can additionally pin their destination.
-    c = client_module()
+    c = client
     if ((expected_panel is not None and c.origin(expected_panel) != scope["panel_url"])
             or (expected_domain is not None and c.origin(expected_domain) != scope["origin"])
             or (expected_node is not None and expected_node != scope["node_name"])):
         deny()
     if confirm_scope(dict(scope)) is not True:
-        deny()
+        raise IntakeRejected("Node confirmation declined.")
+    now = int(time.time()) if now is None else now
+    check_intake_expiry(packet.expires_at, now)
     # Reuse original no-overwrite, fsynced, 0600 stager and parser. No second
     # grant/Node identity, alternate code format, or host write is created.
     return capture_disposable(
@@ -705,7 +726,7 @@ def main(argv=None):
             _private_fixture(target, allow_existing=True)
         with open("/dev/tty", "r", encoding="utf-8", newline="") as tty:
             capture_selected_hidden_tty(
-                tty, target=target, now=int(time.time()),
+                tty, target=target, now=None,
                 selected_host=selected_host,
                 installer_pid=args.installer_pid if selected_host else None,
                 # Show the prompt only AFTER ECHO is actually disabled.
@@ -719,7 +740,7 @@ def main(argv=None):
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
     except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError,
-            RuntimeError):
+            RuntimeError, KeyboardInterrupt) as exc:
         # Discard any queued remainder of a failed terminal paste before
         # restoring control to the Bash menu; never echo or log credentials.
         try:
@@ -728,8 +749,13 @@ def main(argv=None):
                     termios.tcflush(tty.fileno(), termios.TCIFLUSH)
         except (OSError, ValueError, termios.error):
             pass
-        print("HOLD: Foreign Panel installation information not admitted",
-              file=sys.stderr)
+        if isinstance(exc, IntakeRejected):
+            print("HOLD:", exc, file=sys.stderr)
+        elif isinstance(exc, KeyboardInterrupt):
+            print("HOLD: Installation input canceled.", file=sys.stderr)
+        else:
+            print("HOLD: Foreign Panel installation information not admitted",
+                  file=sys.stderr)
         return 2
 
 

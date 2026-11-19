@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -603,6 +604,25 @@ class OperatorPacketIntake(unittest.TestCase):
         finally:
             self.assertEqual(termios.tcgetattr(slave),original)
             os.close(master);os.close(slave)
+
+    def test_real_clock_is_read_after_paste_and_after_confirmation(self):
+        issued = self.now + 180
+        packet = dict(self.grant, expires_at=issued + 7200)
+        timestamps = iter((self.now, issued, issued + 1))
+        master, slave = pty.openpty()
+        try:
+            with os.fdopen(os.dup(slave), "r", encoding="utf-8", newline="") as tty:
+                def send():
+                    self.assertEqual(module.time.time(), self.now)
+                    os.write(master, (json.dumps(packet) + "\n\n").encode())
+                with patch.object(module.time, "time", side_effect=lambda: next(timestamps)):
+                    result = module.capture_selected_hidden_tty(
+                        tty, target=self.file, now=None, ready=send,
+                        confirm_scope=lambda _: True)
+            self.assertEqual(result["status"], "STAGED_PRIVATE")
+            self.assertEqual(json.loads(self.file.read_text()), packet)
+        finally:
+            os.close(master); os.close(slave)
 
     def test_expired_grant_never_offers_operator_confirmation(self):
         master,slave=pty.openpty()
