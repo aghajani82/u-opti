@@ -1098,14 +1098,12 @@ smite_tw_rc9_backhaul_tunnel() {
         echo 'Create and publish the Backhaul tunnel from the Iran host after completing engine setup on both hosts.'
         return 2
     fi
-    echo 'Use the Backhaul tunnel port shown in Smite for removal.'
-    read -rp 'Foreign XHTTP inbound / Backhaul tunnel port: ' port || return 2
-    read -rp '[P]review (default), [A]ctivate and publish, [R]oll back publication, [D]elete tunnel: ' response || return 2
+    read -rp 'Foreign XHTTP inbound port: ' port || return 2
+    read -rp '[P]review (default), [A]ctivate and publish, [R]oll back publication: ' response || return 2
     case "$response" in
         ''|[pP]) action=plan ;;
         [aA]) action=apply ;;
         [rR]) action=rollback ;;
-        [dD]) action=remove ;;
         *) return 2 ;;
     esac
     python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-xhttp.py" "$action" --port "$port"
@@ -1118,7 +1116,7 @@ smite_tw_rc9_backhaul_menu() {
         return
     fi
     echo '1) Set up signed Backhaul, HTTPS/443 and Smite publishing'
-    echo '2) Preview / publish / recover / delete an XHTTP tunnel'
+    echo '2) Preview / publish / recover an XHTTP tunnel'
     echo '0) Back'
     read -rp 'Choose [0-2] (default 1): ' choice || return
     choice="${choice#"${choice%%[![:space:]]*}"}"
@@ -1150,6 +1148,28 @@ smite_tw_rc9_uninstall_engine() {
         --role "$scope" --confirm-snapshot-and-console "$approval"
 }
 
+smite_tw_rc9_backhaul_removal_menu() {
+    local role="$1" choice port
+    if [ "$role" != ir ]; then
+        smite_tw_rc9_uninstall_engine "$role" backhaul
+        return
+    fi
+    echo '1) Delete a Backhaul tunnel from both Nodes and Smite'
+    echo '2) Uninstall signed Backhaul engine on this host'
+    echo '0) Back'
+    read -rp 'Choose [0-2] (default 0): ' choice || return 2
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
+    case "$choice" in
+        1)
+            read -rp 'Backhaul tunnel port shown in Smite: ' port || return 2
+            python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-xhttp.py" remove --port "$port" ;;
+        2) smite_tw_rc9_uninstall_engine "$role" backhaul ;;
+        ''|0) return 0 ;;
+        *) echo 'Invalid choice'; return 2 ;;
+    esac
+}
+
 smite_tw_menu() {
     local role="" choice rc9 max backhaul_option frp_option advanced_option
     role="$(smite_tw_choose_role always)" || return
@@ -1178,7 +1198,11 @@ smite_tw_menu() {
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "6) $advanced_option"
         if [ "$rc9" = yes ]; then
-            echo '7) Backhaul — Uninstall signed engine (RC9)'
+            if [ "$role" = ir ]; then
+                echo '7) Backhaul — Delete tunnel / uninstall signed engine (RC9)'
+            else
+                echo '7) Backhaul — Uninstall signed engine (RC9)'
+            fi
             echo '8) FRP — Uninstall signed engine (RC9)'
         fi
         echo "0) Back"
@@ -1221,7 +1245,7 @@ smite_tw_menu() {
             7|8)
                 if [ "$rc9" = yes ]; then
                     if [ "$choice" = 7 ]; then
-                        smite_tw_rc9_uninstall_engine "$role" backhaul || :
+                        smite_tw_rc9_backhaul_removal_menu "$role" || :
                     else
                         smite_tw_rc9_uninstall_engine "$role" frp || :
                     fi

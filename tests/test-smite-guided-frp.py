@@ -57,17 +57,19 @@ smite_tw_backhaul_menu() {{ echo "SIDECAR $1"; }}
 smite_tw_rc9_backhaul_setup() {{ echo "ENGINE $1"; }}
 smite_tw_rc9_backhaul_tunnel() {{ echo "TUNNEL $1"; }}
 smite_tw_rc9_uninstall_engine() {{ echo "UNINSTALL $1 $2"; }}
+python3() {{ echo "PYTHON $3 $4 $5"; }}
 if [ {version} = 0 ]; then
-    printf '1\n 1 \r\n1\n 2 \r\n7\n8\n9\n0\n' | smite_tw_menu
+    printf '1\n 1 \r\n1\n 2 \r\n7\n0\n7\n1\n35263\n7\n2\n8\n9\n0\n' | smite_tw_menu
 else
     printf '1\n7\n0\n' | smite_tw_menu
 fi
 """)
    if version == 0:
     self.assertIn('1) Backhaul — Set up signed engine, HTTPS/443 and Smite publishing (RC9)',out)
-    self.assertIn('7) Backhaul — Uninstall signed engine (RC9)',out)
+    self.assertIn('7) Backhaul — Delete tunnel / uninstall signed engine (RC9)',out)
     self.assertIn('8) FRP — Uninstall signed engine (RC9)',out)
-    self.assertIn('UNINSTALL ir backhaul',out)
+    self.assertEqual(out.splitlines().count('UNINSTALL ir backhaul'),1)
+    self.assertEqual(out.splitlines().count('PYTHON remove --port 35263'),1)
     self.assertIn('UNINSTALL ir frp',out)
     self.assertIn('ENGINE ir',out)
     self.assertIn('Invalid choice',out)
@@ -84,6 +86,12 @@ smite_tw_rc9_backhaul_tunnel() { echo "TUNNEL $1"; }
 smite_tw_rc9_backhaul_menu kh
 """)
   self.assertEqual(out.strip(),'ENGINE kh')
+ def test_backhaul_foreign_removal_only_uninstalls_local_engine(self):
+  out=self.shell("""
+smite_tw_rc9_uninstall_engine() { echo "UNINSTALL $1 $2"; }
+smite_tw_rc9_backhaul_removal_menu kh
+""")
+  self.assertEqual(out.strip(),'UNINSTALL kh backhaul')
  def test_backhaul_publisher_runs_only_after_iran_ingress(self):
   fixture=SOURCE.replace('[ "$EUID" = 0 ] && [ -t 0 ]', 'true')
   for role, status, enter in [('ir', 0, ''), ('kh', 0, ''), ('ir', 2, 'n\n')]:
