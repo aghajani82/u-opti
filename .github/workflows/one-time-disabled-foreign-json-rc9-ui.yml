@@ -1,0 +1,86 @@
+name: One-time disabled Foreign JSON RC9 UI (no deployment)
+
+on:
+  push:
+    branches: [fix/disable-foreign-json-trial-menu-20261119]
+    paths:
+      - '.github/workflows/one-time-disabled-foreign-json-rc9-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-seal:
+    if: github.repository == 'aghajani82/u-opti'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/checkout@v4
+        with:
+          repository: aghajani82/Smite
+          ref: c5b3558db8c89e5e7ab23854d740d6b80862bec8
+          path: _smite_source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _smite_source/frontend/package-lock.json
+      - name: Build exact reviewed disabled-Sm ite source
+        working-directory: _smite_source/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify disabled UI and pin private RC9 static package
+        shell: bash
+        env:
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          test "$(git -C _smite_source rev-parse HEAD)" = "c5b3558db8c89e5e7ab23854d740d6b80862bec8"
+          python3 - <<'PY_PACKAGE'
+          import base64,hashlib,json,os,pathlib,re
+          root=pathlib.Path('_smite_source/frontend/dist')
+          files={p.relative_to(root).as_posix():p.read_bytes()
+                 for p in root.rglob('*') if p.is_file()}
+          scripts=[n for n in files if re.fullmatch(r'assets/index-[A-Za-z0-9_-]+\.js',n)]
+          styles=[n for n in files if re.fullmatch(r'assets/index-[A-Za-z0-9_-]+\.css',n)]
+          assert len(scripts)==1 and len(styles)==1 and set(files)=={'index.html',scripts[0],styles[0]}
+          script=files[scripts[0]]
+          assert b'Experimental Foreign installation JSON is disabled' in script
+          assert b'Existing signed Node pairing remains available' in script
+          assert len(script)<2_000_000
+          assert b'/'+scripts[0].encode() in files['index.html']
+          pin='c5b3558db8c89e5e7ab23854d740d6b80862bec8'
+          payload={'files':{n:base64.b64encode(files[n]).decode('ascii') for n in sorted(files)},
+                   'source_sha':pin,'workflow_run':int(os.environ['WORKFLOW_RUN_ID'])}
+          raw=(json.dumps(payload,sort_keys=True,separators=(',',':'))+'\n').encode()
+          sha=hashlib.sha256(raw).hexdigest()
+          pathlib.Path('modules/smite-panel-ui-rc9.json').write_bytes(raw)
+          helper=pathlib.Path('modules/smite-panel-ui.py')
+          source=helper.read_text()
+          placeholder='PENDING_REPRODUCIBLE_CI_PACKAGE'
+          assert source.count(placeholder)==1
+          helper.write_text(source.replace(placeholder,sha))
+          print('REVIEWED_SMITE_SOURCE='+pin)
+          print('DISABLED_JSON_STATIC_SHA256='+sha)
+          print('STATIC_ASSETS_SHA256='+str({n:hashlib.sha256(blob).hexdigest() for n,blob in files.items()}))
+          PY_PACKAGE
+      - name: Test pinned RC9 package and transactional rollback
+        run: |
+          python3 -m py_compile modules/smite-panel-ui.py tests/test-smite-panel-ui.py
+          python3 -B tests/test-smite-panel-ui.py -v
+          bash -n modules/smite-install.sh
+      - name: Commit reviewed static package to same review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add modules/smite-panel-ui-rc9.json modules/smite-panel-ui.py
+          git diff --cached --name-only | sort > /tmp/files.txt
+          printf 'modules/smite-panel-ui-rc9.json\nmodules/smite-panel-ui.py\n' | sort > /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/files.txt
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'build(ui): seal JSON-disabled Smite RC9 static bundle'
+          git push origin HEAD:fix/disable-foreign-json-trial-menu-20261119
