@@ -669,5 +669,70 @@ class EnrollmentTests(unittest.TestCase):
             restore.assert_called_once_with(entry)
             self.assertIn("RC9_FRP_UNINSTALL=COMPLETE",output.getvalue())
 
+    def test_detached_backhaul_is_not_restored_when_frp_is_uninstalled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            journal=root/'journal'
+            journal.mkdir()
+            combined_baseline=b'previous Backhaul manifest'
+            (journal/'manifest.before').write_bytes(combined_baseline)
+            current=root/'engines.json'
+            frp_only=ctl.frp_manifest({}, ctl.RC9_AMD64_FRP_SHA256)
+            current.write_bytes(frp_only)
+            entry={"state":"COMMITTED","role":"ir","old":ctl.sha(combined_baseline),
+                   "new":"1"*64}
+            with patch.object(ctl,"JOURNAL",journal), patch.object(ctl,"MANIFEST",current), \
+                 patch.object(ctl,"RETAINED_BACKHAUL_CLEANUP",root/'cleanup'), \
+                 patch.object(ctl,"RETAINED_BACKHAUL",root/'retained'), \
+                 patch.object(ctl,"node_details",return_value={"role":"ir"}), \
+                 patch.object(ctl,"detached_backhaul_manifest",return_value=(frp_only,None)), \
+                 patch.object(ctl,"read_private",side_effect=Path.read_bytes), \
+                 patch.object(ctl,"no_frp_tunnels"), patch.object(ctl,"verify_file"), \
+                 patch.object(ctl,"make_record"), patch.object(ctl,"signed_inventory"), \
+                 patch.object(ctl.rt,"signed_probe"), patch.object(ctl.rt,"fsync_dir"):
+                ctl.restore(entry)
+            self.assertFalse(current.exists())
+            self.assertEqual(entry["state"],"ROLLED_BACK")
+
+    def test_fresh_root_review_archives_only_completed_frp_route(self):
+        spec=importlib.util.spec_from_file_location(
+            "root_review_route_test",ROOT/'modules/smite-stage15-root-review.py')
+        review=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(review)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary)
+            journal=directory/'.28149.transaction.json'
+            route=directory/'28149.conf'
+            record={"state":"COMMITTED","port":28149,"path":"/28149/store",
+                    "snippet":"expected"}
+            broker=types.SimpleNamespace(
+                HELPER=Path('/usr/local/libexec/smite-xhttp-nginx-route'),
+                PLANNER=Path('/usr/local/libexec/smite_xhttp_nginx_plan.py'),
+                BrokerHold=RuntimeError, hashlib=ctl.hashlib, _dir=Mock(),
+                _file=lambda path, **kw: path.read_bytes(), _json=lambda raw, fields: json.loads(raw),
+                _load_module=Mock(return_value=types.SimpleNamespace(
+                    plan_xhttp_nginx_route=Mock(return_value=types.SimpleNamespace(snippet="expected")))),
+                subprocess=types.SimpleNamespace(run=Mock(return_value=types.SimpleNamespace(
+                    returncode=0, stdout=b'RESULT=PASS_LOCAL_READ_ONLY\n'))))
+            with patch.object(review,"ROUTES",directory), \
+                 patch.object(review,"HISTORY",directory/'history'), \
+                 patch.object(review,"ROUTE_LOCK",directory/'lock'), \
+                 patch.object(review.os,"fstat",return_value=types.SimpleNamespace(
+                     st_mode=0o100600, st_uid=0, st_nlink=1)):
+                journal.write_text(json.dumps(record))
+                with self.assertRaisesRegex(RuntimeError,"REQUIRES_COMPLETED_ROLLBACK"):
+                    review.archive_rolled_back_frp_route(broker,28149,record["path"])
+                record["state"]="ROLLED_BACK"
+                journal.write_text(json.dumps(record))
+                route.touch()
+                with self.assertRaisesRegex(RuntimeError,"REQUIRES_COMPLETED_ROLLBACK"):
+                    review.archive_rolled_back_frp_route(broker,28149,record["path"])
+                broker.subprocess.run.assert_not_called()
+                route.unlink()
+                review.archive_rolled_back_frp_route(broker,28149,record["path"])
+            self.assertFalse(journal.exists())
+            archive,=(directory/'history').glob('frp-rollback-28149-*.json')
+            self.assertEqual(json.loads(archive.read_bytes()),record)
+
 if __name__=='__main__':
     unittest.main(verbosity=2)

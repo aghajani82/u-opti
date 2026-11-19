@@ -477,6 +477,13 @@ def no_frp_tunnels(role, *, restore_before=None):
     rt.no_tunnels()
 
 
+def frp_manifest(engines, hashes):
+    return (json.dumps({'schema':1,'engines':{
+        **engines,'frp':{'sha256':hashes['frpc'],
+                        'server_sha256':hashes['frps']}}},
+        sort_keys=True,indent=2)+'\n').encode()
+
+
 def proposal():
     if os.path.lexists(JOURNAL):
         need(rt.VERSION=='RC9' and state()['state']=='ROLLED_BACK'
@@ -495,10 +502,7 @@ def proposal():
     no_frp_tunnels(doc['role'])
     prior,engines=manifest_before()
     hashes=binaries()
-    contents=(json.dumps({'schema':1,'engines':{
-        **engines,'frp':{'sha256':hashes['frpc'],
-                        'server_sha256':hashes['frps']}}},
-        sort_keys=True,indent=2)+'\n').encode()
+    contents=frp_manifest(engines, hashes)
     return doc,prior,contents,hashes
 
 def make_record(record):
@@ -528,8 +532,28 @@ def state():
              'RC9_FRP_JOURNAL_SCOPE_MISMATCH')
     return record
 
+def detached_backhaul_manifest(entry):
+    if rt.VERSION!='RC9' or not entry['old']:
+        return None
+    control=rt.load('smite-managed-backhaul-control.py')
+    receipt=control.RC9_INDEPENDENT_RECEIPT
+    if not os.path.lexists(receipt):
+        return None
+    rt.trusted_path(receipt)
+    record=json_private(receipt)
+    if record.get('frp')!=entry['new']:
+        return None
+    try:
+        return control.frp_detachment_manifest(entry, record, frp_manifest)
+    except control.Hold as exc:
+        raise Hold(str(exc)) from exc
+
+
 def verify_file(record):
-    need(sha(read_private(MANIFEST))==record['new'],'ENROLLMENT_MANIFEST_DRIFT')
+    raw=read_private(MANIFEST)
+    if sha(raw)!=record['new']:
+        detached=detached_backhaul_manifest(record)
+        need(detached is not None and raw==detached[0],'ENROLLMENT_MANIFEST_DRIFT')
     doc=node_details()
     need(doc['role']==record['role'],'WSS_ROLE_MISMATCH')
     current={}
@@ -632,12 +656,16 @@ def restore(entry):
     if entry['old'] is not None:
         before=read_private(JOURNAL/'manifest.before')
         need(sha(before)==entry['old'],'MANIFEST_BACKUP_TAMPERED')
+    detached=detached_backhaul_manifest(entry)
+    enrolled_hash=entry['new']
+    if detached is not None:
+        enrolled,before=detached
+        enrolled_hash=sha(enrolled)
     no_frp_tunnels(doc['role'],restore_before=before)
     current=read_private(MANIFEST) if MANIFEST.exists() or MANIFEST.is_symlink() else None
-    need(current is None and entry['old'] is None or
-         current is not None and sha(current) in {entry['old'],entry['new']},
+    need(current==before or current is not None and sha(current)==enrolled_hash,
          'MANIFEST_UNREVIEWED_CHANGE')
-    if current is not None and sha(current)==entry['new']:
+    if current is not None and sha(current)==enrolled_hash:
         verify_file(entry)
     entry['state']='ROLLING_BACK';make_record(entry)
     if before is None:

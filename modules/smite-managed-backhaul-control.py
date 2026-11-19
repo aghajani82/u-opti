@@ -928,10 +928,14 @@ def _rc9_independent_locked(frp, ingress, role, *, apply, rollback):
         rt.trusted_path(path)
         record = json.loads(frp.read_private(path))
         if (type(record) is not dict
-                or record.keys() != {"schema", "role", "state", "old", "new"}
+                or record.keys() not in ({"schema", "role", "state", "old", "new"},
+                                         {"schema", "role", "state", "old", "new", "frp"})
                 or type(record["schema"]) is not int or record["schema"] != 1
                 or record["role"] != role
                 or record["state"] not in ("PREPARED", "COMMITTED", "ROLLED_BACK")
+                or ("frp" in record and (record["state"] != "ROLLED_BACK"
+                    or not isinstance(record["frp"], str)
+                    or re.fullmatch(r"[a-f0-9]{64}", record["frp"]) is None))
                 or record["new"] != frp.sha(candidate)
                 or record["old"] is not None and (type(record["old"]) is not str
                     or re.fullmatch(r"(?:[a-f0-9]{2}){1,1024}", record["old"]) is None)):
@@ -1011,6 +1015,7 @@ def _rc9_independent_locked(frp, ingress, role, *, apply, rollback):
     elif record["old"] != old:
         raise Hold("RC9_BACKHAUL_INDEPENDENT_MANIFEST_DRIFT")
     elif record["state"] == "ROLLED_BACK":
+        record.pop("frp", None)
         record["state"] = "PREPARED"
         save()
     if not os.path.lexists(manifest.parent):
@@ -1043,6 +1048,28 @@ def verify_rc9_backhaul_ready(role):
     return _verify_bundled_backhaul(role, rc9=True, expected_backhaul_state="ready")
 
 
+def frp_detachment_manifest(entry, record, frp_manifest):
+    """Reconstruct only the two byte-exact manifests bound to the receipts."""
+    backhaul = {"backhaul": {"sha256": package.OFFICIAL_BINARY_SHA256["amd64"]}}
+    baseline = (json.dumps({"schema": 1, "engines": backhaul}, sort_keys=True) + "\n").encode()
+    digest = hashlib.sha256(baseline).hexdigest()
+    original = record.get("old")
+    if (record.keys() != {"schema", "role", "state", "old", "new", "frp"}
+            or type(record["schema"]) is not int or record["schema"] != 1
+            or record["role"] != entry["role"]
+            or record["state"] not in ("REMOVING_WITH_FRP", "ROLLED_BACK")
+            or record["new"] != digest or entry["old"] != digest
+            or record["frp"] != entry["new"]
+            or hashlib.sha256(frp_manifest(backhaul, entry["binaries"])).hexdigest() != entry["new"]
+            or original is not None and (not isinstance(original, str)
+                or not re.fullmatch(r"(?:[a-f0-9]{2}){1,1024}", original))):
+        raise Hold("RC9_BACKHAUL_FRP_BINDING_UNVERIFIED")
+    before = None if original is None else bytes.fromhex(original)
+    if before is not None and _parse_rc7_manifest_snapshot(before)["engines"]:
+        raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED")
+    return frp_manifest({}, entry["binaries"]), before
+
+
 def uninstall_rc9_independent(role, *, review=False):
     ingress = _load("rc9_uninstall_ingress", "smite-rc9-backhaul-ingress.py")
     worker = _load("rc9_uninstall_worker", "smite-rc9-backhaul-xhttp.py")
@@ -1060,26 +1087,73 @@ def uninstall_rc9_independent(role, *, review=False):
             raise Hold("RC9_BACKHAUL_USE_RETAINED_ENGINE_ROLLBACK")
         rt.trusted_path(RC9_INDEPENDENT_RECEIPT)
         receipt = frp.json_private(RC9_INDEPENDENT_RECEIPT)
-        if receipt.get("role") != role or receipt.get("state") not in ("COMMITTED", "ROLLED_BACK"):
+        if receipt.get("role") != role or receipt.get("state") not in (
+                "COMMITTED", "REMOVING_WITH_FRP", "ROLLED_BACK"):
             raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED")
         ingress.review_engine_removal(rt, role, "backhaul")
-        if (os.path.lexists(frp.JOURNAL) and frp.state()["state"] != "ROLLED_BACK"
-                or os.path.lexists(RC7_RETAINED_JOURNAL)):
-            raise Hold("RC9_BACKHAUL_UNINSTALL_FRP_FIRST")
-        rt.no_tunnels()
-        if receipt["state"] == "COMMITTED":
-            _rc9_independent_operation(role, already_locked=True)
+        if os.path.lexists(RC7_RETAINED_JOURNAL) or os.path.lexists(frp.RETAINED_BACKHAUL_CLEANUP):
+            raise Hold("RC9_BACKHAUL_USE_RETAINED_ENGINE_ROLLBACK")
         if os.path.lexists(ingress.STATE.with_name(ingress.STATE.name + ".slot-pending")):
             raise Hold("RC9_BACKHAUL_PENDING_SLOT_REQUIRES_RECOVERY")
-        if os.path.lexists(ingress.STATE):
+        entry = frp.state() if os.path.lexists(frp.JOURNAL) else None
+        preserve_frp = entry is not None and entry["state"] != "ROLLED_BACK"
+        recovering = receipt["state"] == "REMOVING_WITH_FRP"
+        if recovering and not preserve_frp:
+            raise Hold("RC9_BACKHAUL_FRP_BINDING_UNVERIFIED")
+        if receipt["state"] == "ROLLED_BACK" and preserve_frp:
+            if os.path.lexists(ingress.STATE) or _rc9_independent_inventory(frp) != {
+                    **{engine: "not-installed" for engine in ENGINES}, "frp": "ready"}:
+                raise Hold("RC9_BACKHAUL_ROLLBACK_INVENTORY_UNVERIFIED")
+            frp.verify_file(entry)
+            return
+        if preserve_frp:
+            if entry["state"] != "COMMITTED" or entry["role"] != role or frp.node_details()["role"] != role:
+                raise Hold("RC9_BACKHAUL_FRP_RECEIPT_NOT_COMMITTED")
+            if receipt["state"] == "COMMITTED":
+                _rc9_independent_operation(role, already_locked=True)
+                receipt = {**receipt, "state": "REMOVING_WITH_FRP", "frp": entry["new"]}
+            manifest, _ = frp_detachment_manifest(entry, receipt, frp.frp_manifest)
+            current = frp.read_private(frp.MANIFEST)
+            inventory = _rc9_independent_inventory(frp)
+            backhaul_state = "not-installed" if current == manifest else "ready"
+            if (current != manifest and frp.sha(current) != entry["new"]
+                    or inventory["backhaul"] != backhaul_state or inventory["frp"] != "ready"
+                    or backhaul_state == "not-installed" and os.path.lexists(ingress.STATE)):
+                raise Hold("RC9_BACKHAUL_FRP_BINDING_UNVERIFIED")
+            if recovering:
+                frp.verify_file(entry)
+            snapshot = worker.frps_snapshot(route) if role == "ir" else None
+        else:
+            rt.no_tunnels()
+            if receipt["state"] == "COMMITTED":
+                _rc9_independent_operation(role, already_locked=True)
+        if os.path.lexists(ingress.STATE) and not recovering:
             ingress.run_operation(edge, role, "verify", local_only=True)
         if review:
             return
+        if preserve_frp:
+            ingress.replace_bytes(rt, RC9_INDEPENDENT_RECEIPT,
+                                  (json.dumps(receipt, sort_keys=True) + "\n").encode(), 0o600)
         if role == "ir":
             worker.disable_panel_queue(ingress, rt)
         if os.path.lexists(ingress.STATE):
             ingress.run_operation(edge, role, "rollback", drained=True)
-        _rc9_independent_operation(role, rollback=True, already_locked=True)
+        if not preserve_frp:
+            _rc9_independent_operation(role, rollback=True, already_locked=True)
+            return
+        if current != manifest:
+            ingress.replace_bytes(rt, frp.MANIFEST, manifest, 0o600)
+        rt.signed_probe()
+        inventory = _rc9_independent_inventory(frp)
+        if (inventory["frp"] != "ready" or inventory["backhaul"] != "not-installed"
+                or frp.read_private(frp.MANIFEST) != manifest
+                or role == "ir" and worker.frps_snapshot(route) != snapshot):
+            raise Hold("RC9_BACKHAUL_ROLLBACK_INVENTORY_UNVERIFIED")
+        frp.verify_file(entry)
+        receipt["state"] = "ROLLED_BACK"
+        ingress.replace_bytes(rt, RC9_INDEPENDENT_RECEIPT,
+                              (json.dumps(receipt, sort_keys=True) + "\n").encode(), 0o600)
+        print("FRP_PRESERVED=YES")
 
 
 def main() -> int:

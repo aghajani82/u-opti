@@ -1262,6 +1262,7 @@ class RC9IndependentEnrollment(unittest.TestCase):
             trusted_path=Mock(), run=self.run_node, Hold=RuntimeError)
         self.frp = SimpleNamespace(rt=self.rt, select_rc9=Mock(), MANIFEST=self.manifest,
             JOURNAL=root / "frp", node_details=Mock(return_value={"role": "ir"}),
+            RETAINED_BACKHAUL_CLEANUP=root / "frp-cleanup",
             read_private=lambda path: path.read_bytes(),
             manifest_before=self.manifest_before, safe_dir=Mock(),
             sha=lambda raw: hashlib.sha256(raw).hexdigest(), state=Mock(),
@@ -1387,6 +1388,60 @@ class RC9IndependentEnrollment(unittest.TestCase):
         self.assertFalse(self.manifest.exists())
         self.assertFalse(ingress_state.exists())
         self.assertEqual(json.loads(self.receipt.read_bytes())["state"], "ROLLED_BACK")
+
+    def test_uninstall_preserves_enrolled_frp_and_can_resume_after_ingress_failure(self):
+        control._rc9_independent_operation("ir", apply=True)
+        spec = importlib.util.spec_from_file_location(
+            "frp_manifest_test", ROOT / "modules/smite-rc7-frp-enrollment.py")
+        enrollment = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(enrollment)
+        frp = self.frp
+        frp.frp_manifest = enrollment.frp_manifest
+        frp.json_private = lambda path: json.loads(path.read_bytes())
+        baseline, engines = self.manifest_before()
+        hashes = enrollment.RC9_AMD64_FRP_SHA256
+        joined = frp.frp_manifest(engines, hashes)
+        entry = {"state":"COMMITTED", "role":"ir", "old":frp.sha(baseline),
+                 "new":frp.sha(joined), "binaries":hashes}
+        frp.state.return_value = entry
+        frp.JOURNAL.mkdir()
+        self.manifest.write_bytes(joined)
+        ingress_state = self.receipt.parent / "ingress"
+        ingress_state.touch()
+        interrupt = True
+
+        def operation(_, role, action, **kwargs):
+            if action == "rollback":
+                if interrupt:
+                    raise control.Hold("INTERRUPTED")
+                ingress_state.unlink()
+
+        ingress = SimpleNamespace(STATE=ingress_state, Hold=RuntimeError,
+                                  replace_bytes=self.replace, review_engine_removal=Mock(),
+                                  run_operation=Mock(side_effect=operation))
+        worker = SimpleNamespace(load=Mock(), route_lock=lambda _: contextlib.nullcontext(),
+                                 disable_panel_queue=Mock(), frps_snapshot=Mock(
+                                     return_value=(4321, frozenset({7000, 28149}))))
+        edge = SimpleNamespace(rt=self.rt, select_rc9=Mock())
+        modules = {"smite-rc9-backhaul-ingress.py": ingress, "smite-rc9-backhaul-xhttp.py": worker,
+                   "smite-rc7-wss-edge.py": edge, "smite-rc7-frp-enrollment.py": frp}
+        self.rt.no_tunnels.reset_mock()
+        with patch.object(control, "_load", side_effect=lambda _, name: modules[name]):
+            control.uninstall_rc9_independent("ir", review=True)
+            self.assertEqual(self.manifest.read_bytes(), joined)
+            with self.assertRaisesRegex(control.Hold, "INTERRUPTED"):
+                control.uninstall_rc9_independent("ir")
+            self.assertEqual(self.manifest.read_bytes(), joined)
+            self.assertEqual(frp.json_private(self.receipt)["state"], "REMOVING_WITH_FRP")
+            interrupt = False
+            control.uninstall_rc9_independent("ir")
+            control.uninstall_rc9_independent("ir")
+        self.rt.no_tunnels.assert_not_called()
+        self.assertEqual(self.manifest.read_bytes(), frp.frp_manifest({}, hashes))
+        self.assertEqual(frp.json_private(self.receipt)["state"], "ROLLED_BACK")
+        self.assertEqual(control.frp_detachment_manifest(entry, frp.json_private(self.receipt),
+                                                        frp.frp_manifest),
+                         (self.manifest.read_bytes(), None))
 
 
 if __name__ == "__main__":
