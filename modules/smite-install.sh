@@ -3845,13 +3845,12 @@ smite_install_finish_local_ir() {
         echo 'Iran Node verified active. Create the Panel administrator account:'
         smite_install_create_admin || return 2
     fi
-    # The signed Node and admin row are already verified. Schema migration
-    # is additive and separately backed up by the original Smite module.
+    # Operator suspended the problematic experimental Foreign JSON-code
+    # enrollment feature. A new Iran install must NOT re-enable its env
+    # flags, ingress or schema stage. Iran's signed local pairing, Node,
+    # HTTPS/443 Gateway, FRP and all existing services remain unchanged.
     if [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
-        smite_install_ir_foreign_schema_stage || {
-            echo 'HOLD: Foreign schema prerequisite incomplete; retry option 1 without rekeying Iran Node.' >&2
-            return 2
-        }
+        echo 'IR_FOREIGN_JSON_TRIAL=DISABLED'
     fi
     if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
