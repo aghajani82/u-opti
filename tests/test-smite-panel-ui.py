@@ -70,8 +70,14 @@ class Updates(unittest.TestCase):
             if args==('image','inspect',ui.IMAGE_RC9):
                 return json.dumps([{'Id':'rc9-loaded-id'}])
             raise AssertionError('Unexpected Docker invocation '+str(args))
-        with patch.object(ui,'docker',side_effect=mock_docker):
-            self.assertEqual(ui.admit('smite-panel'),('cid-rc9','rc9'))
+        # setUp stubs admit for transaction fixtures; stop that stub here
+        # so this test invokes the REAL exact-image admission code.
+        self.a.stop()
+        try:
+            with patch.object(ui,'docker',side_effect=mock_docker):
+                self.assertEqual(ui.admit('smite-panel'),('cid-rc9','rc9'))
+        finally:
+            self.a.start()
         self.assertIn(('image','inspect',ui.IMAGE_RC9),calls)
         def mock_unknown(*args, **kwargs):
             if args==('inspect','smite-panel'):
@@ -80,9 +86,13 @@ class Updates(unittest.TestCase):
             if args[0:2]==('image','inspect'):
                 return json.dumps([{'Id':'different-reviewed-image'}])
             raise AssertionError('Unexpected Docker invocation')
-        with patch.object(ui,'docker',side_effect=mock_unknown):
-            with self.assertRaisesRegex(ValueError,'exact reviewed'):
-                ui.admit('smite-panel')
+        self.a.stop()
+        try:
+            with patch.object(ui,'docker',side_effect=mock_unknown):
+                with self.assertRaisesRegex(ValueError,'exact reviewed'):
+                    ui.admit('smite-panel')
+        finally:
+            self.a.start()
 
     def test_rc9_uses_separate_pinned_bundle_and_is_rollback_safe(self):
         target=ROOT/'modules/smite-panel-ui-rc9.json'
