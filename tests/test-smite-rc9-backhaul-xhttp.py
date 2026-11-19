@@ -2,6 +2,7 @@
 """Backhaul route admission and recovery without live hosts or Docker."""
 
 from pathlib import Path
+from contextlib import nullcontext
 import re
 from runpy import run_path
 import sys
@@ -45,6 +46,25 @@ class ProbeTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_idle_publisher_keeps_the_engine_and_route_locks_available(self):
+        sync = workflow["sync_panel"]
+        edge = SimpleNamespace(rt=SimpleNamespace(locked=Mock(side_effect=nullcontext)))
+        ingress = SimpleNamespace(runtime_context=Mock())
+        route = Mock()
+        poll = Mock(side_effect=[False, True])
+        lock = Mock(side_effect=lambda _: nullcontext())
+        consume = Mock()
+        with patch.dict(sync.__globals__, {"queue": poll, "route_lock": lock, "run_queue": consume}):
+            sync(edge, ingress, route)
+            edge.rt.locked.assert_not_called()
+            lock.assert_not_called()
+            consume.assert_not_called()
+            sync(edge, ingress, route)
+        edge.rt.locked.assert_called_once_with()
+        lock.assert_called_once_with(route)
+        consume.assert_called_once_with(edge, ingress, route)
+        poll.assert_called_with(edge.rt, "poll")
+
     def test_worker_binds_the_selected_pair_and_reports_only_confirmed_publication(self):
         run_queue = workflow["run_queue"]
         edge = SimpleNamespace(rt=Mock())

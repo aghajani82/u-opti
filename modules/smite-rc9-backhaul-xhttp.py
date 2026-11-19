@@ -165,11 +165,16 @@ async def run(args):
         if args == ["check"]:
             await db.scalar(select(Job.id).limit(1))
             return None
-        if args == ["claim"]:
+        if args == ["poll"]:
             beat = int(time())
             stmt = insert(Settings).values(key=HEARTBEAT_KEY, value=beat)
             await db.execute(stmt.on_conflict_do_update(
                 index_elements=["key"], set_={"value": beat}))
+            pending = await db.scalar(select(Job.id).where(
+                Job.status.in_(("queued", "applying"))).limit(1))
+            await db.commit()
+            return pending is not None
+        if args == ["claim"]:
             # Host locks span claim, apply and finish. Any applying request
             # visible at the next claim belongs to an interrupted worker.
             await db.execute(update(Job).where(Job.status == "applying").values(
@@ -471,6 +476,17 @@ def run_queue(edge, ingress, route):
         print("BACKHAUL_PANEL_PUBLISH=APPLIED")
 
 
+def sync_panel(edge, ingress, route):
+    # Heartbeat and queue observation do not change host routes. An idle
+    # timer must not compete with FRP's broker for the engine lock.
+    ingress.runtime_context(edge, "ir")
+    pending = queue(edge.rt, "poll")
+    need(type(pending) is bool, "BACKHAUL_PANEL_QUEUE_UNAVAILABLE")
+    if pending:
+        with edge.rt.locked(), route_lock(route):
+            run_queue(edge, ingress, route)
+
+
 def panel_queue_units(ingress, rt):
     service = "u-opti-smite-backhaul-panel.service"
     timer = "u-opti-smite-backhaul-panel.timer"
@@ -538,10 +554,10 @@ def main():
         ingress = load("backhaul_xhttp_ingress", "smite-rc9-backhaul-ingress.py")
         route = load("backhaul_xhttp_route", "smite-xhttp-nginx-route", executable=True)
         edge.select_rc9()
+        if args.action == "sync-panel":
+            sync_panel(edge, ingress, route)
+            return 0
         with edge.rt.locked(), route_lock(route):
-            if args.action == "sync-panel":
-                run_queue(edge, ingress, route)
-                return 0
             if args.action == "enable-panel":
                 enable_panel_queue(edge, ingress)
                 return 0
