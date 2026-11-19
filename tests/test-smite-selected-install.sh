@@ -232,11 +232,14 @@ echo 'OFFICIAL_MENU_OPTION_1_AND_NODE_RETRY=PASS_ISOLATED_FIXTURE'
 # Operator-requested trial pause: option 2 must not solicit a JSON secret,
 # start Cosign downloads, run Docker or change retained installation files.
 : > "$TMP/curl-calls"
+before_dispatch="$(sha256sum "$TMP/dispatch" 2>/dev/null || true)"
+before_enrollment="$(sha256sum "$TMP/enrollment" 2>/dev/null || true)"
 printf '2\n\n0\n' | show_smite_install_menu > "$TMP/disabled-foreign-menu.log"
 grep -qx 'FOREIGN_JSON_TRIAL=DISABLED' "$TMP/disabled-foreign-menu.log"
 grep -q 'Experimental Foreign one-choice JSON installation is disabled' "$TMP/disabled-foreign-menu.log"
 [ ! -s "$TMP/curl-calls" ]
-[ ! -e "$TMP/enrollment" ]
+[ "$before_dispatch" = "$(sha256sum "$TMP/dispatch" 2>/dev/null || true)" ]
+[ "$before_enrollment" = "$(sha256sum "$TMP/enrollment" 2>/dev/null || true)" ]
 echo 'FOREIGN_OPTION2_JSON_TRIAL_DISABLED=PASS_ISOLATED_FIXTURE'
 
 
