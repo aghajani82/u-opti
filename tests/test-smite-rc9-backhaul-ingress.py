@@ -2,6 +2,7 @@
 """RC9 Backhaul ingress tests with disposable files and stubbed host commands."""
 
 import importlib.util
+import json
 from contextlib import nullcontext
 from pathlib import Path
 import re
@@ -65,6 +66,28 @@ class IngressTest(unittest.TestCase):
                 self.assertEqual(ingress.main(), 0)
                 control.verify_rc9_backhaul_ready.assert_called_with(role)
                 operation.assert_called_once_with(self.edge, role, "apply")
+
+    def test_uninstall_preflight_blocks_only_the_selected_managed_route(self):
+        directory = self.state.parent / "routes"
+        directory.mkdir()
+        record = {"state": "COMMITTED", "port": 56053, "path": "/56053/web",
+                  "snippet": "managed route", "kind": "backhaul"}
+        journal = directory / ".56053.transaction.json"
+        route = directory / "56053.conf"
+        journal.write_text(json.dumps(record))
+        journal.chmod(0o600)
+        route.write_text(record["snippet"])
+        self.rt.saved_tunnels_only = Mock()
+        self.rt.run.return_value = "PID COMMAND\n123 backhaul"
+        with patch.object(ingress, "XHTTP_ROUTES", directory):
+            with self.assertRaisesRegex(ingress.Hold, "ENGINE_REMOVAL_ROUTE_ROLLBACK_REQUIRED"):
+                ingress.review_engine_removal(self.rt, "ir", "backhaul")
+            ingress.review_engine_removal(self.rt, "ir", "frp")
+            self.rt.saved_tunnels_only.assert_called_once_with("backhaul")
+            self.assertTrue(route.is_file())
+            self.rt.run.return_value = "PID COMMAND\n123 frpc"
+            with self.assertRaisesRegex(ingress.Hold, "ENGINE_REMOVAL_TUNNEL_STILL_RUNNING"):
+                ingress.review_engine_removal(self.rt, "foreign", "frp")
 
     def test_ir_apply_replay_and_rollback(self):
         self.assertEqual(ingress.run_operation(self.edge, "ir", "plan"), "PLAN_READ_ONLY")

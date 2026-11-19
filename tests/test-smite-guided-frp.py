@@ -56,15 +56,19 @@ grep() {{ return {version}; }}
 smite_tw_backhaul_menu() {{ echo "SIDECAR $1"; }}
 smite_tw_rc9_backhaul_setup() {{ echo "ENGINE $1"; }}
 smite_tw_rc9_backhaul_tunnel() {{ echo "TUNNEL $1"; }}
+smite_tw_rc9_uninstall_engine() {{ echo "UNINSTALL $1 $2"; }}
 if [ {version} = 0 ]; then
-    printf '1\n 1 \r\n1\n 2 \r\n7\n0\n' | smite_tw_menu
+    printf '1\n 1 \r\n1\n 2 \r\n7\n8\n9\n0\n' | smite_tw_menu
 else
     printf '1\n7\n0\n' | smite_tw_menu
 fi
 """)
    if version == 0:
     self.assertIn('1) Backhaul — Set up signed engine, HTTPS/443 and Smite publishing (RC9)',out)
-    self.assertNotIn('7) Backhaul',out)
+    self.assertIn('7) Backhaul — Uninstall signed engine (RC9)',out)
+    self.assertIn('8) FRP — Uninstall signed engine (RC9)',out)
+    self.assertIn('UNINSTALL ir backhaul',out)
+    self.assertIn('UNINSTALL ir frp',out)
     self.assertIn('ENGINE ir',out)
     self.assertIn('Invalid choice',out)
     self.assertEqual(out.splitlines().count('TUNNEL ir'),1)
@@ -72,6 +76,7 @@ fi
    else:
     self.assertIn('SIDECAR ir',out)
     self.assertNotIn('TUNNEL ir',out)
+    self.assertNotIn('UNINSTALL ir',out)
  def test_backhaul_foreign_has_engine_setup_only(self):
   out=self.shell("""
 smite_tw_rc9_backhaul_setup() { echo "ENGINE $1"; }

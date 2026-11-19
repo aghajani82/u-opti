@@ -655,7 +655,8 @@ def restore(entry):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('plan','apply','verify','verify-owner','verify-child','rollback','recover'))
+    parser.add_argument('action',choices=('plan','apply','verify','verify-owner','verify-child',
+                                         'rollback','recover','review-uninstall','uninstall'))
     parser.add_argument('--role',choices=('ir','foreign'),required=True)
     parser.add_argument('--rc9',action='store_true',help='Use the exact RC9 image and enrollment journal')
     parser.add_argument('--snapshot-confirm',default='')
@@ -666,9 +667,11 @@ def main():
         if args.rc9:
             select_rc9()
             rt.rc9_state(args.role)
+        removing=args.action in ('review-uninstall','uninstall')
+        need(not removing or args.rc9,'UNINSTALL_REQUIRES_RC9')
         need(args.tunnel_id is None or args.action=='verify-child',
              'FOREIGN_FRPC_CHILD_ID_UNEXPECTED')
-        if args.action not in ('plan','verify','verify-owner','verify-child'):
+        if args.action not in ('plan','verify','verify-owner','verify-child','review-uninstall'):
             need(sys.stdin.isatty() and args.snapshot_confirm=='SNAPSHOTS-CONSOLES-VERIFIED',
                  'SNAPSHOT_AND_CONSOLE_REQUIRED')
             challenge=args.action.upper()+'-'+rt.VERSION+'-FRP-'+args.role.upper()
@@ -689,7 +692,24 @@ def main():
             with rt.locked():
                 entry=state()
                 need(entry['role']==args.role,'ROLE_MISMATCH')
-                if args.action in ('verify','verify-owner','verify-child'):
+                if removing:
+                    need(not os.path.lexists(RETAINED_BACKHAUL_CLEANUP)
+                         and not os.path.lexists(RETAINED_BACKHAUL),
+                         'BACKHAUL_TRANSACTION_REQUIRES_OWN_RECOVERY')
+                    ingress=rt.load('smite-rc9-backhaul-ingress.py')
+                    try:
+                        ingress.review_engine_removal(rt,args.role,'frp')
+                    except ingress.Hold as exc:
+                        raise Hold(str(exc)) from exc
+                    need(entry['state'] in ('COMMITTED','ROLLING_BACK','ROLLED_BACK'),
+                         'RECOVER_INCOMPLETE_FIRST')
+                    if entry['state']=='COMMITTED':
+                        verify_file(entry)
+                        enrolled_status()
+                    if args.action=='uninstall' and entry['state']!='ROLLED_BACK':
+                        restore(entry)
+                    print('RC9_FRP_UNINSTALL='+('READY' if args.action=='review-uninstall' else 'COMPLETE'))
+                elif args.action in ('verify','verify-owner','verify-child'):
                     need(entry['state']=='COMMITTED','ENROLLMENT_NOT_COMMITTED')
                     if args.action=='verify-owner':
                         need(args.role=='ir','IR_FRPS_OWNER_ONLY')

@@ -1043,11 +1043,51 @@ def verify_rc9_backhaul_ready(role):
     return _verify_bundled_backhaul(role, rc9=True, expected_backhaul_state="ready")
 
 
+def uninstall_rc9_independent(role, *, review=False):
+    ingress = _load("rc9_uninstall_ingress", "smite-rc9-backhaul-ingress.py")
+    worker = _load("rc9_uninstall_worker", "smite-rc9-backhaul-xhttp.py")
+    frp = _load("rc9_uninstall_enrollment", "smite-rc7-frp-enrollment.py")
+    edge = _load("rc9_uninstall_edge", "smite-rc7-wss-edge.py")
+    frp.select_rc9()
+    edge.select_rc9()
+    rt = edge.rt
+    if os.geteuid() != 0:
+        raise Hold("RC9_BACKHAUL_ROOT_REQUIRED")
+    route = worker.load("rc9_uninstall_route_worker", "smite-xhttp-nginx-route", executable=True)
+    with rt.locked(), worker.route_lock(route):
+        rt.rc9_state(role)
+        if not os.path.lexists(RC9_INDEPENDENT_RECEIPT):
+            raise Hold("RC9_BACKHAUL_USE_RETAINED_ENGINE_ROLLBACK")
+        rt.trusted_path(RC9_INDEPENDENT_RECEIPT)
+        receipt = frp.json_private(RC9_INDEPENDENT_RECEIPT)
+        if receipt.get("role") != role or receipt.get("state") not in ("COMMITTED", "ROLLED_BACK"):
+            raise Hold("RC9_BACKHAUL_INDEPENDENT_RECEIPT_UNTRUSTED")
+        ingress.review_engine_removal(rt, role, "backhaul")
+        if (os.path.lexists(frp.JOURNAL) and frp.state()["state"] != "ROLLED_BACK"
+                or os.path.lexists(RC7_RETAINED_JOURNAL)):
+            raise Hold("RC9_BACKHAUL_UNINSTALL_FRP_FIRST")
+        rt.no_tunnels()
+        if receipt["state"] == "COMMITTED":
+            _rc9_independent_operation(role, already_locked=True)
+        if os.path.lexists(ingress.STATE.with_name(ingress.STATE.name + ".slot-pending")):
+            raise Hold("RC9_BACKHAUL_PENDING_SLOT_REQUIRES_RECOVERY")
+        if os.path.lexists(ingress.STATE):
+            ingress.run_operation(edge, role, "verify", local_only=True)
+        if review:
+            return
+        if role == "ir":
+            worker.disable_panel_queue(ingress, rt)
+        if os.path.lexists(ingress.STATE):
+            ingress.run_operation(edge, role, "rollback", drained=True)
+        _rc9_independent_operation(role, rollback=True, already_locked=True)
+
+
 def main() -> int:
     arg = argparse.ArgumentParser(description=__doc__)
     arg.add_argument("action", choices=("status", "review", "verify-stage", "install", "rollback",
                                         "verify-rc7-bundle", "verify-rc9-bundle",
-                                        "install-rc9-independent", "rollback-rc9-independent"))
+                                        "install-rc9-independent", "rollback-rc9-independent",
+                                        "review-rc9-uninstall", "uninstall-rc9-independent"))
     arg.add_argument("--node-dir", type=Path, default=NODE_DEFAULT)
     arg.add_argument("--role", choices=("ir", "foreign"))
     arg.add_argument("--auto-role", action="store_true",
@@ -1061,7 +1101,25 @@ def main() -> int:
     try:
         if args.expect_backhaul_ready and args.action not in ("verify-rc7-bundle", "verify-rc9-bundle"):
             raise Hold("RC7_RETAINED_READ_ONLY_VERIFY_ACTION_REQUIRED")
-        if args.action in ("install-rc9-independent", "rollback-rc9-independent"):
+        if args.action in ("review-rc9-uninstall", "uninstall-rc9-independent"):
+            if (args.role is None or args.auto_role or args.node_dir != NODE_DEFAULT
+                    or args.stage is not None or args.lab_root is not None):
+                raise Hold("RC9_BACKHAUL_INDEPENDENT_SCOPE_UNTRUSTED")
+            review = args.action == "review-rc9-uninstall"
+            if not review:
+                challenge = "UNINSTALL-RC9-BACKHAUL-" + args.role.upper()
+                if (args.confirm_snapshot_and_console != "SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED"
+                        or not sys.stdin.isatty()
+                        or input(f"Type {challenge}: ").strip() != challenge):
+                    raise Hold("RC9_BACKHAUL_APPROVAL_REQUIRED")
+            try:
+                uninstall_rc9_independent(args.role, review=review)
+            except Exception as exc:
+                reason = str(exc)
+                raise Hold(reason if re.fullmatch(r"[A-Z0-9_]{1,100}", reason)
+                           else "RC9_BACKHAUL_UNINSTALL_UNVERIFIED") from exc
+            print("RC9_BACKHAUL_UNINSTALL=" + ("READY" if review else "COMPLETE"))
+        elif args.action in ("install-rc9-independent", "rollback-rc9-independent"):
             if (args.role is None or args.auto_role or args.node_dir != NODE_DEFAULT
                     or args.stage is not None or args.lab_root is not None):
                 raise Hold("RC9_BACKHAUL_INDEPENDENT_SCOPE_UNTRUSTED")

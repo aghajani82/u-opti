@@ -18,6 +18,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 STATE = Path("/var/lib/u-opti/smite-rc9-backhaul-ingress.json")
+XHTTP_ROUTES = Path("/etc/nginx/smite-xhttp-routes")
 KH_CONFIG = Path("/etc/nginx/conf.d/u-opti-smite-rc9-backhaul-bridge.conf")
 HEADER = b"X-U-OPTI-RC9-Backhaul-Control"
 MARKER = HEADER + b": peer-edge"
@@ -258,7 +259,51 @@ def restore(edge, role, domain, target, before, after, journal):
     rt.fsync_dir(STATE.parent)
 
 
-def run_operation(edge, role, action):
+def review_engine_removal(rt, role, engine):
+    """Report managed routes and refuse removal while they still depend on this engine."""
+    need(engine in ("backhaul", "frp"), "ENGINE_REMOVAL_SCOPE_INVALID")
+    if role == "ir" and os.path.lexists(XHTTP_ROUTES):
+        rt.trusted_path(XHTTP_ROUTES, directory=True)
+        active = []
+        accounted_for = set()
+        for path in sorted(XHTTP_ROUTES.glob(".*.transaction.json")):
+            record = json.loads(read_trusted(rt, path, 0o600))
+            need(type(record) is dict, "ENGINE_REMOVAL_ROUTE_STATE_UNTRUSTED")
+            port = record.get("port")
+            fields = {"state", "port", "path", "snippet"}
+            kind = ("frp" if record.keys() == fields else
+                    "backhaul" if record.keys() == fields | {"kind"} and
+                    record.get("kind") == "backhaul" else None)
+            need(kind is not None and type(port) is int and 1 <= port <= 65535
+                 and path.name == f".{port}.transaction.json"
+                 and record.get("state") in ("PREPARED", "COMMITTED", "RECOVERING", "ROLLED_BACK")
+                 and isinstance(record.get("snippet"), str), "ENGINE_REMOVAL_ROUTE_STATE_UNTRUSTED")
+            target = XHTTP_ROUTES / f"{port}.conf"
+            accounted_for.add(target)
+            if os.path.lexists(target):
+                rt.trusted_path(target)
+                need(target.stat().st_size <= 16384 and target.read_bytes() == record["snippet"].encode(),
+                     "ENGINE_REMOVAL_ROUTE_STATE_UNTRUSTED")
+            if kind == engine and (record["state"] != "ROLLED_BACK" or os.path.lexists(target)):
+                active.append(str(port))
+        need(set(XHTTP_ROUTES.glob("*.conf")) <= accounted_for, "ENGINE_REMOVAL_UNKNOWN_XHTTP_ROUTE")
+        if active:
+            print("ENGINE_REMOVAL_ACTIVE_OR_UNSETTLED_ROUTE_PORTS=" + ",".join(active))
+            raise Hold("ENGINE_REMOVAL_ROUTE_ROLLBACK_REQUIRED")
+    processes = rt.run(["docker", "top", "smite-node", "-eo", "pid,comm"])
+    commands = {"backhaul"} if engine == "backhaul" else {"frps", "frpc"}
+    found = {row.split(maxsplit=1)[-1] for row in processes.splitlines()[1:] if row.strip()} & commands
+    for command in sorted(found):
+        print("ENGINE_REMOVAL_RUNNING_PROCESS=" + command)
+    need(not found, "ENGINE_REMOVAL_TUNNEL_STILL_RUNNING")
+    other = "frp" if engine == "backhaul" else "backhaul"
+    try:
+        rt.saved_tunnels_only(other)
+    except (OSError, rt.Hold) as exc:
+        raise Hold("ENGINE_REMOVAL_SAVED_TUNNELS_REQUIRE_REVIEW") from exc
+
+
+def run_operation(edge, role, action, *, drained=False, local_only=False):
     rt = edge.rt
     domain, binding, target, before = runtime_context(edge, role)
     journal = validate_record(rt) if os.path.lexists(STATE) else None
@@ -273,12 +318,13 @@ def run_operation(edge, role, action):
     if journal:
         require_record(journal, role, domain, binding, before, after)
         if action == "rollback":
-            need(not journal.get("slots"), "BACKHAUL_SHARED_CONTROL_SLOTS_ACTIVE")
+            need(drained or not journal.get("slots"), "BACKHAUL_SHARED_CONTROL_SLOTS_ACTIVE")
             restore(edge, role, domain, target, before, after, journal)
             return "RESTORED"
         need(journal["phase"] == "COMMITTED", "BACKHAUL_INGRESS_RECOVERY_REQUIRED")
         need(current == after, "BACKHAUL_INGRESS_CONFIGURATION_DRIFT")
-        verify_live(edge, role, domain)
+        if not local_only:
+            verify_live(edge, role, domain)
         return "VERIFIED"
 
     need(action in ("plan", "apply"), "BACKHAUL_INGRESS_NOT_INSTALLED")

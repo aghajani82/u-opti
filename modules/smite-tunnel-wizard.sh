@@ -1131,17 +1131,45 @@ smite_tw_rc9_backhaul_menu() {
     esac
 }
 
+smite_tw_rc9_uninstall_engine() {
+    local role="$1" engine="$2" scope=foreign approval
+    smite_tw_validate_host "$role" || return 2
+    [ "$EUID" = 0 ] && [ -t 0 ] || { echo 'HOLD: root console required.'; return 2; }
+    [ "$role" != ir ] || scope=ir
+    case "$engine" in
+        backhaul)
+            python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" review-rc9-uninstall \
+                --role "$scope" || return 2 ;;
+        frp)
+            python3 -B "$SMITE_TW_DIR/smite-rc7-frp-enrollment.py" review-uninstall \
+                --rc9 --role "$scope" || return 2 ;;
+        *) return 2 ;;
+    esac
+    echo "Unenroll $engine on this host. Confirm provider snapshot restore and independent console access."
+    read -rp 'Type SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED: ' approval || return 2
+    [ "$approval" = SNAPSHOT-RESTORE-AND-CONSOLE-VERIFIED ] || return 2
+    case "$engine" in
+        backhaul)
+            python3 -B "$SMITE_TW_DIR/smite-managed-backhaul-control.py" uninstall-rc9-independent \
+                --role "$scope" --confirm-snapshot-and-console "$approval" ;;
+        frp)
+            python3 -B "$SMITE_TW_DIR/smite-rc7-frp-enrollment.py" uninstall \
+                --rc9 --role "$scope" --snapshot-confirm SNAPSHOTS-CONSOLES-VERIFIED ;;
+    esac
+}
+
 smite_tw_menu() {
-    local role="" choice rc9 backhaul_option frp_option advanced_option
+    local role="" choice rc9 max backhaul_option frp_option advanced_option
     role="$(smite_tw_choose_role always)" || return
     smite_tw_validate_host "$role" || return 2
     while true; do
-        rc9=no
+        rc9=no; max=6
         backhaul_option="Backhaul Sidecar — legacy test-host setup"
         frp_option="FRP — guided status/approval (NO engine installation)"
         advanced_option="Advanced FRP — original setup and recovery"
         if grep -Fxsq 'SMITE_MANAGED_VERSION=2.0.0-rc.9' /etc/u-opti/smite/state.env; then
             rc9=yes
+            max=8
             backhaul_option="Backhaul — Set up signed engine and HTTPS/443 (RC9)"
             if [ "$role" = ir ]; then
                 backhaul_option="Backhaul — Set up signed engine, HTTPS/443 and Smite publishing (RC9)"
@@ -1157,8 +1185,12 @@ smite_tw_menu() {
         echo "4) Tunnel Control Center — read-only status and routes"
         echo "5) PROFILE FIRST - plan FRP + Backhaul BEFORE Smite"
         echo "6) $advanced_option"
+        if [ "$rc9" = yes ]; then
+            echo '7) Backhaul — Uninstall signed engine (RC9)'
+            echo '8) FRP — Uninstall signed engine (RC9)'
+        fi
         echo "0) Back"
-        read -rp "Choose [0-6]: " choice || return
+        read -rp "Choose [0-$max]: " choice || return
         choice="${choice#"${choice%%[![:space:]]*}"}"
         choice="${choice%"${choice##*[![:space:]]}"}"
         smite_tw_validate_host "$role" || return 2
@@ -1194,6 +1226,17 @@ smite_tw_menu() {
                    smite_tw_pause
                fi ;;
             5) bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/smite-profile-first-menu.sh" "$role" ;;
+            7|8)
+                if [ "$rc9" = yes ]; then
+                    if [ "$choice" = 7 ]; then
+                        smite_tw_rc9_uninstall_engine "$role" backhaul || :
+                    else
+                        smite_tw_rc9_uninstall_engine "$role" frp || :
+                    fi
+                else
+                    echo "Invalid choice"
+                fi
+                smite_tw_pause ;;
             0) return ;;
             *) echo "Invalid choice"; smite_tw_pause ;;
         esac

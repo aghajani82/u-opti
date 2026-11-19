@@ -1348,6 +1348,46 @@ class RC9IndependentEnrollment(unittest.TestCase):
                 control.verify_rc9_backhaul_ready("ir")
             legacy.assert_not_called()
 
+    def test_uninstall_requires_drained_backhaul_then_rolls_back_ingress_and_engine(self):
+        control._rc9_independent_operation("ir", apply=True)
+        self.frp.json_private = lambda path: json.loads(path.read_bytes())
+        ingress_state = self.receipt.parent / "ingress"
+        ingress_state.touch()
+        def ingress_operation(edge, role, action, **kwargs):
+            if action == "rollback":
+                self.assertEqual(kwargs, {"drained": True})
+                ingress_state.unlink()
+        original_load = control._load
+        ingress = SimpleNamespace(STATE=ingress_state, Hold=RuntimeError,
+                                  replace_bytes=self.replace,
+                                  review_engine_removal=Mock(),
+                                  run_operation=Mock(side_effect=ingress_operation))
+        worker = SimpleNamespace(load=Mock(), route_lock=lambda _: contextlib.nullcontext(),
+                                 disable_panel_queue=Mock())
+        edge = SimpleNamespace(rt=self.rt, select_rc9=Mock())
+        def load(alias, filename):
+            if filename == "smite-rc9-backhaul-ingress.py":
+                return ingress
+            if filename == "smite-rc9-backhaul-xhttp.py":
+                return worker
+            if filename == "smite-rc7-wss-edge.py":
+                return edge
+            return original_load(alias, filename)
+        with patch.object(control, "_load", side_effect=load):
+            control.uninstall_rc9_independent("ir", review=True)
+            self.assertTrue(ingress_state.exists())
+            self.assertTrue(self.manifest.exists())
+            worker.disable_panel_queue.assert_not_called()
+            ingress.review_engine_removal.side_effect = control.Hold("ROUTE_ACTIVE")
+            with self.assertRaisesRegex(control.Hold, "ROUTE_ACTIVE"):
+                control.uninstall_rc9_independent("ir")
+            worker.disable_panel_queue.assert_not_called()
+            ingress.review_engine_removal.side_effect = None
+            control.uninstall_rc9_independent("ir")
+        self.assertFalse(self.manifest.exists())
+        self.assertFalse(ingress_state.exists())
+        self.assertEqual(json.loads(self.receipt.read_bytes())["state"], "ROLLED_BACK")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

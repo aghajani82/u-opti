@@ -608,7 +608,8 @@ class EnrollmentTests(unittest.TestCase):
 
     def test_no_host_binaries_or_network_listener_side_effects(self):
         src=PATH.read_text()
-        self.assertIn("choices=('plan','apply','verify','verify-owner','verify-child','rollback','recover')",src)
+        self.assertIn("choices=('plan','apply','verify','verify-owner','verify-child',",src)
+        self.assertIn("'rollback','recover','review-uninstall','uninstall'",src)
         self.assertIn("SNAPSHOTS-CONSOLES-VERIFIED",src)
         self.assertIn("SIGNED_INVENTORY",src)
         self.assertIn("FRP_BINARY_EXTERNAL_MOUNT",src)
