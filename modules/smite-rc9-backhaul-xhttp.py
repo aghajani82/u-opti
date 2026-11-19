@@ -29,13 +29,77 @@ import sys
 import uuid
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.models import Node, Tunnel
+from app.models import BackhaulPublishRequest, Node, Tunnel
 from app.node_client import NodeClient
 from app.routers.tunnels import TunnelCreate, apply_tunnel, create_tunnel
 from app.uopti_backhaul_standard import compile_standard_specs
+
+async def remove_pair(db, client, tunnel, ir, kh, phase, expected_id):
+    from urllib.parse import quote
+
+    tunnel_id = tunnel.id
+    if (not re.fullmatch(r"[0-9a-f-]{36}", tunnel_id)
+            or expected_id and expected_id != tunnel_id):
+        raise RuntimeError("BACKHAUL_REMOVAL_TUNNEL_CHANGED")
+    identity = (Tunnel.id == tunnel_id, Tunnel.core == "backhaul",
+                Tunnel.iran_node_id == ir, Tunnel.foreign_node_id == kh)
+    marker = "UOPTI_BACKHAUL_REMOVE_PENDING"
+    claimed = tunnel.status == "removing" and tunnel.error_message == marker
+    if not claimed and (phase != "claim-remove" or tunnel.status != "active"):
+        raise RuntimeError("BACKHAUL_REMOVAL_STATE_UNVERIFIED")
+
+    async def present(node):
+        response = await client._signed_agent_request(
+            node, method="GET",
+            target="/api/agent/tunnels/status?tunnel_id=" + quote(tunnel_id, safe=""),
+            timeout=4.0)
+        data = response.get("data", {})
+        if (response.get("status") != "success" or type(data.get("active")) is not bool
+                or type(data.get("record_present")) is not bool
+                or data.get("record_core") != ("backhaul" if data["record_present"] else None)
+                or data["active"] and (not data["record_present"] or data.get("type") != "backhaul")):
+            raise RuntimeError("BACKHAUL_REMOVAL_SIGNED_STATUS_UNVERIFIED")
+        return data["active"] or data["record_present"]
+
+    # Check both IDs before touching either Node, including on a resumed removal.
+    observed = {node: await present(node) for node in (kh, ir)}
+    if phase == "claim-remove":
+        if not claimed:
+            result = await db.execute(update(Tunnel).where(
+                *identity, Tunnel.status == "active").values(status="removing", error_message=marker))
+            if result.rowcount != 1:
+                raise RuntimeError("BACKHAUL_REMOVAL_TUNNEL_CHANGED")
+            await db.commit()
+        return
+    if phase == "remove-pair":
+        for node, exists in observed.items():
+            if exists:
+                # Reconcile even on a transport error: the Node may already
+                # have committed Remove. The signed postcheck is authoritative.
+                try:
+                    await client.send_to_node(
+                        node_id=node, endpoint="/api/agent/tunnels/remove",
+                        data={"tunnel_id": tunnel_id})
+                except Exception:
+                    pass
+                if await present(node):
+                    raise RuntimeError("BACKHAUL_REMOVAL_NODE_STILL_PRESENT")
+        return
+    if phase != "finish-remove" or any(observed.values()):
+        raise RuntimeError("BACKHAUL_REMOVAL_PAIR_STILL_PRESENT")
+    await db.execute(update(BackhaulPublishRequest).where(
+        BackhaulPublishRequest.port == tunnel.spec["data_port"],
+        BackhaulPublishRequest.iran_node_id == ir, BackhaulPublishRequest.foreign_node_id == kh,
+        BackhaulPublishRequest.status.in_(("queued", "applying")),
+    ).values(status="hold", detail="BACKHAUL_TUNNEL_REMOVED"))
+    result = await db.execute(delete(Tunnel).where(
+        *identity, Tunnel.status == "removing", Tunnel.error_message == marker))
+    if result.rowcount != 1:
+        raise RuntimeError("BACKHAUL_REMOVAL_TUNNEL_CHANGED")
+    await db.commit()
 
 async def run(phase, port, requested_control, expected_ir, expected_kh, name):
     if (settings.smite_panel_agent_auth_mode != "signed"
@@ -52,16 +116,6 @@ async def run(phase, port, requested_control, expected_ir, expected_kh, name):
         ir, kh = pair["iran"][0], pair["foreign"][0]
         if (expected_ir or expected_kh) and (ir, kh) != (expected_ir, expected_kh):
             raise RuntimeError("BACKHAUL_PUBLISH_PAIR_MISMATCH")
-        inv = await client.get_signed_sanaei_xhttp_inbounds(kh)
-        if inv.get("status") != "success" or inv.get("schema_version") != 1:
-            raise RuntimeError("SIGNED_FOREIGN_XHTTP_INVENTORY_UNAVAILABLE")
-        matches = [entry for entry in inv["inbounds"] if entry.get("port") == port]
-        if len(matches) != 1:
-            raise RuntimeError("INBOUND_PORT_NOT_IN_SIGNED_FOREIGN_INVENTORY")
-        inbound = matches[0]
-        if (inbound.get("enabled") is not True or inbound.get("protocol") != "vless"
-                or inbound.get("network") != "xhttp" or inbound.get("listen") != "127.0.0.1"):
-            raise RuntimeError("SIGNED_FOREIGN_INBOUND_NOT_ELIGIBLE")
         rows = (await db.execute(select(Tunnel).where(Tunnel.core == "backhaul"))).scalars().all()
         def slot_id(data_port):
             return uuid.uuid5(uuid.NAMESPACE_URL,
@@ -87,6 +141,25 @@ async def run(phase, port, requested_control, expected_ir, expected_kh, name):
                 tunnel = row
         if data_ports & controls or port in controls:
             raise RuntimeError("BACKHAUL_TUNNEL_PORT_COLLISION")
+        if phase in ("claim-remove", "remove-pair", "finish-remove"):
+            if tunnel is None:
+                raise RuntimeError("BACKHAUL_TUNNEL_NOT_FOUND")
+            control = tunnel.spec.get("control_port", 3080)
+            result = {"inbound": {"port": port}, "id": tunnel.id, "active": False,
+                      "slot": slot_id(port) if control != 3080 else None,
+                      "control_port": control, "reserved_ports": []}
+            await remove_pair(db, client, tunnel, ir, kh, phase, name)
+            return result
+        inv = await client.get_signed_sanaei_xhttp_inbounds(kh)
+        if inv.get("status") != "success" or inv.get("schema_version") != 1:
+            raise RuntimeError("SIGNED_FOREIGN_XHTTP_INVENTORY_UNAVAILABLE")
+        matches = [entry for entry in inv["inbounds"] if entry.get("port") == port]
+        if len(matches) != 1:
+            raise RuntimeError("INBOUND_PORT_NOT_IN_SIGNED_FOREIGN_INVENTORY")
+        inbound = matches[0]
+        if (inbound.get("enabled") is not True or inbound.get("protocol") != "vless"
+                or inbound.get("network") != "xhttp" or inbound.get("listen") != "127.0.0.1"):
+            raise RuntimeError("SIGNED_FOREIGN_INBOUND_NOT_ELIGIBLE")
         if tunnel and tunnel.status not in ("pending", "active"):
             raise RuntimeError("BACKHAUL_TUNNEL_ALREADY_RESERVED")
         control = tunnel.spec.get("control_port", 3080) if tunnel else (None if rows else 3080)
@@ -314,6 +387,41 @@ def frps_snapshot(route):
         return None, frozenset()
 
 
+def remove_tunnel(edge, ingress, route, port):
+    rt = edge.rt
+    ingress.recover_control_slot(edge)
+    ingress.run_operation(edge, "ir", "verify", local_only=True)
+    rt.load("smite-stage15-xhttp-bridge.py").verify()
+    route._safe_directory(route.ROUTE_DIR)
+    before = frps_snapshot(route)
+    need(port not in before[1], "FRP_DATA_PORT_IN_USE")
+    journal = route.ROUTE_DIR / f".{port}.transaction.json"
+    target = route.ROUTE_DIR / f"{port}.conf"
+    if os.path.lexists(journal):
+        saved = json.loads(ingress.read_trusted(rt, journal, 0o600))
+        need(type(saved) is dict and saved.get("kind") == "backhaul" and saved.get("port") == port,
+             "BACKHAUL_ROUTE_JOURNAL_MISMATCH")
+    else:
+        need(not os.path.lexists(target), "BACKHAUL_ROUTE_JOURNAL_MISSING")
+        active = route._run([route.BIN, "-T"])
+        need(not re.search(r"127\.0\.0\.1:" + str(port) + r"\b", active),
+             "NGINX_DATA_PORT_IN_USE")
+    result = panel(rt, "claim-remove", port)
+    tunnel_id = result["id"]
+    need(tunnel_id is not None, "BACKHAUL_TUNNEL_NOT_FOUND")
+    if os.path.lexists(journal):
+        configure(edge, ingress, route, port, "rollback")
+    panel(rt, "remove-pair", port, name=tunnel_id)
+    listener(rt, port, None)
+    listener(rt, result["control_port"], None)
+    if result["slot"] is not None:
+        ingress.remove_control_slot(edge, result["slot"], result["control_port"])
+    need(frps_snapshot(route) == before, "FRPS_RUNTIME_CHANGED")
+    panel(rt, "finish-remove", port, name=tunnel_id)
+    print("RC9_BACKHAUL_TUNNEL_REMOVAL=COMPLETE")
+    print("RC9_BACKHAUL_PANEL_RECORD=REMOVED")
+
+
 def configure(edge, ingress, route, port, action, *, pair=("", ""), name=""):
     rt = edge.rt
     domain, _, _, _ = ingress.runtime_context(edge, "ir")
@@ -537,7 +645,7 @@ def main():
     import argparse
 
     arg = argparse.ArgumentParser(description=__doc__)
-    arg.add_argument("action", choices=("plan", "apply", "rollback", "sync-panel", "enable-panel"))
+    arg.add_argument("action", choices=("plan", "apply", "rollback", "remove", "sync-panel", "enable-panel"))
     arg.add_argument("--port", type=int)
     args = arg.parse_args()
     try:
@@ -550,6 +658,10 @@ def main():
             challenge = args.action.upper() + "-RC9-BACKHAUL-XHTTP"
             need(sys.stdin.isatty() and input(f"Type {challenge}: ").strip() == challenge,
                  "OPERATOR_CANCELLED")
+        if args.action == "remove":
+            need(sys.stdin.isatty() and input(
+                f"Remove Backhaul tunnel on port {args.port} from both Nodes and Smite? [y/N]: "
+            ).strip().lower() == "y", "OPERATOR_CANCELLED")
         edge = load("backhaul_xhttp_edge", "smite-rc7-wss-edge.py")
         ingress = load("backhaul_xhttp_ingress", "smite-rc9-backhaul-ingress.py")
         route = load("backhaul_xhttp_route", "smite-xhttp-nginx-route", executable=True)
@@ -560,6 +672,9 @@ def main():
         with edge.rt.locked(), route_lock(route):
             if args.action == "enable-panel":
                 enable_panel_queue(edge, ingress)
+                return 0
+            if args.action == "remove":
+                remove_tunnel(edge, ingress, route, args.port)
                 return 0
             result, path = configure(edge, ingress, route, args.port, args.action)
         print("RC9_BACKHAUL_XHTTP=" + result)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Backhaul route admission and recovery without live hosts or Docker."""
 
+import ast
+import asyncio
 from pathlib import Path
 from contextlib import nullcontext
 import re
@@ -9,7 +11,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "modules"))
@@ -91,6 +93,67 @@ class WorkerTests(unittest.TestCase):
         queue.assert_called_with(edge.rt, "finish", TUNNEL_ID, "hold", "", "PUBLIC_XHTTP_HANDLER_UNVERIFIED")
 
 
+class PairedRemovalTests(unittest.TestCase):
+    def setUp(self):
+        job = ast.parse(workflow["PANEL_JOB"])
+        helper = next(node for node in job.body
+                      if isinstance(node, ast.AsyncFunctionDef) and node.name == "remove_pair")
+        column = Mock()
+        model = SimpleNamespace(id=column, core=column, iran_node_id=column, foreign_node_id=column,
+                                status=column, error_message=column, port=column)
+        self.update = Mock(return_value=Mock())
+        self.delete = Mock(return_value=Mock())
+        scope = {"re": re, "Tunnel": model, "BackhaulPublishRequest": model,
+                 "update": self.update, "delete": self.delete}
+        exec(compile(ast.Module(body=[helper], type_ignores=[]), "panel-pair-remove", "exec"), scope)
+        self.remove = scope["remove_pair"]
+        self.tunnel = SimpleNamespace(id=TUNNEL_ID, status="removing",
+                                      error_message="UOPTI_BACKHAUL_REMOVE_PENDING",
+                                      spec={"data_port": 56053})
+        self.db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(rowcount=1)),
+                                  commit=AsyncMock())
+        self.states = {"ir": "backhaul", "kh": "backhaul"}
+
+        async def status(node, **kwargs):
+            core = self.states[node]
+            return {"status": "success", "data": {
+                "active": core is not None, "record_present": core is not None,
+                "record_core": core, "type": core}}
+
+        async def stop(*, node_id, endpoint, data):
+            self.assertEqual(endpoint, "/api/agent/tunnels/remove")
+            self.assertEqual(data, {"tunnel_id": TUNNEL_ID})
+            self.states[node_id] = None
+            raise TimeoutError("reply lost after removal")
+
+        self.client = SimpleNamespace(_signed_agent_request=AsyncMock(side_effect=status),
+                                      send_to_node=AsyncMock(side_effect=stop))
+
+    def invoke(self, phase):
+        return asyncio.run(self.remove(self.db, self.client, self.tunnel, "ir", "kh",
+                                       phase, TUNNEL_ID))
+
+    def test_never_removes_either_side_if_one_has_the_wrong_engine(self):
+        self.states["ir"] = "frp"
+        with self.assertRaisesRegex(RuntimeError, "SIGNED_STATUS_UNVERIFIED"):
+            self.invoke("remove-pair")
+        self.client.send_to_node.assert_not_awaited()
+        self.delete.assert_not_called()
+
+    def test_resumes_after_partial_removal_and_only_then_deletes_panel_record(self):
+        self.states["kh"] = None
+        with self.assertRaisesRegex(RuntimeError, "PAIR_STILL_PRESENT"):
+            self.invoke("finish-remove")
+        self.delete.assert_not_called()
+        self.invoke("remove-pair")
+        self.client.send_to_node.assert_awaited_once_with(
+            node_id="ir", endpoint="/api/agent/tunnels/remove", data={"tunnel_id": TUNNEL_ID})
+        self.delete.assert_not_called()
+        self.invoke("finish-remove")
+        self.delete.assert_called_once()
+        self.db.commit.assert_awaited_once()
+
+
 class BackhaulXhttpTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -143,6 +206,26 @@ class BackhaulXhttpTests(unittest.TestCase):
         self.assertEqual(self.invoke("rollback")[0], "ROLLED_BACK")
         self.assertFalse(self.target.exists())
         self.assertIn('"ROLLED_BACK"', self.journal.read_text())
+
+    def test_delete_withdraws_route_first_and_leaves_frps_running(self):
+        self.assertEqual(self.invoke("apply")[0], "APPLIED")
+        self.panel.reset_mock()
+        self.ingress.remove_control_slot = Mock()
+
+        def phase(rt, action, port, *, name=""):
+            self.assertEqual(self.target.exists(), action == "claim-remove")
+            if action != "claim-remove":
+                self.assertEqual(name, TUNNEL_ID)
+            if action == "finish-remove":
+                self.ingress.remove_control_slot.assert_called_once_with(self.edge, "b" * 32, 41001)
+            return {"id": TUNNEL_ID, "slot": "b" * 32, "control_port": 41001}
+
+        self.panel.side_effect = phase
+        workflow["remove_tunnel"](self.edge, self.ingress, self.route, 56053)
+        self.assertEqual([call.args[1] for call in self.panel.call_args_list],
+                         ["claim-remove", "remove-pair", "finish-remove"])
+        self.assertIn('"ROLLED_BACK"', self.journal.read_text())
+        self.listener.assert_any_call(self.rt, 56053, None)
 
     def test_reload_waits_for_real_public_xhttp_response(self):
         self.probe.side_effect = [True, False, False, True]

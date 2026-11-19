@@ -398,10 +398,18 @@ def recover_control_slot(edge):
     new = render_ir(before, new_doc.get("slots"))
     require_record(old_doc, "ir", domain, binding, before, old)
     require_record(new_doc, "ir", domain, binding, before, new)
-    old_slots = old_doc.get("slots", {})
-    need(record["slot"] not in old_slots and new_doc == {
-         **old_doc, "slots": {**old_slots, record["slot"]: record["port"]}, "after": digest(new),
-    } and old_doc["phase"] == "COMMITTED" and validate_record(rt) in (old_doc, new_doc)
+    slots = dict(old_doc.get("slots", {}))
+    slot, port = record["slot"], record["port"]
+    if slot in slots:
+        need(slots.pop(slot) == port, "BACKHAUL_CONTROL_SLOT_RECOVERY_DRIFT")
+    else:
+        slots[slot] = port
+    candidate = {key: value for key, value in old_doc.items() if key != "slots"}
+    if slots:
+        candidate["slots"] = slots
+    candidate["after"] = digest(new)
+    need(new_doc == candidate and old_doc["phase"] == "COMMITTED"
+        and validate_record(rt) in (old_doc, new_doc)
         and current_content(rt, target) in (old, new), "BACKHAUL_CONTROL_SLOT_RECOVERY_DRIFT")
     if current_content(rt, target) == new:
         replace_bytes(rt, target, old, 0o644)
@@ -424,6 +432,33 @@ def ensure_control_slot(edge, slot, port):
     need(not rt.run(["ss", "-H", "-lnt", f"( sport = :{port} )"], timeout=10),
          "BACKHAUL_CONTROL_SLOT_PORT_IN_USE")
     candidate = {**journal, "slots": {**journal.get("slots", {}), slot: port}, "after": digest(new)}
+    update_control_slot(edge, slot, port, domain, target, journal, candidate, new)
+
+
+def remove_control_slot(edge, slot, port):
+    rt = edge.rt
+    recover_control_slot(edge)
+    domain, binding, target, before = runtime_context(edge, "ir")
+    journal = validate_record(rt)
+    slots = dict(journal.get("slots", {}))
+    old = render_ir(before, slots or None)
+    require_record(journal, "ir", domain, binding, before, old)
+    need(journal["phase"] == "COMMITTED" and current_content(rt, target) == old,
+         "BACKHAUL_INGRESS_CONFIGURATION_DRIFT")
+    if slot not in slots:
+        return
+    need(slots.pop(slot) == port, "BACKHAUL_CONTROL_SLOT_PORT_CHANGED")
+    new = render_ir(before, slots or None)
+    candidate = {key: value for key, value in journal.items() if key != "slots"}
+    if slots:
+        candidate["slots"] = slots
+    candidate["after"] = digest(new)
+    update_control_slot(edge, slot, port, domain, target, journal, candidate, new)
+
+
+def update_control_slot(edge, slot, port, domain, target, journal, candidate, new):
+    rt = edge.rt
+    pending = STATE.with_name(STATE.name + ".slot-pending")
     transaction = {"slot": slot, "port": port, "old": journal, "new": candidate}
     replace_bytes(rt, pending, (json.dumps(transaction, sort_keys=True) + "\n").encode(),
                   0o600, create=True)

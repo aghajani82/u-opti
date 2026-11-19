@@ -1098,14 +1098,14 @@ smite_tw_rc9_backhaul_tunnel() {
         echo 'Create and publish the Backhaul tunnel from the Iran host after completing engine setup on both hosts.'
         return 2
     fi
-    echo 'Select an enabled VLESS/XHTTP inbound on the Foreign host with a dedicated port.'
-    echo 'The exact path is read from the signed Foreign Node inventory.'
-    read -rp 'Foreign XHTTP inbound port: ' port || return 2
-    read -rp '[P]review (default), [A]ctivate and publish, [R]oll back publication: ' response || return 2
+    echo 'Use the Backhaul tunnel port shown in Smite for removal.'
+    read -rp 'Foreign XHTTP inbound / Backhaul tunnel port: ' port || return 2
+    read -rp '[P]review (default), [A]ctivate and publish, [R]oll back publication, [D]elete tunnel: ' response || return 2
     case "$response" in
         ''|[pP]) action=plan ;;
         [aA]) action=apply ;;
         [rR]) action=rollback ;;
+        [dD]) action=remove ;;
         *) return 2 ;;
     esac
     python3 -B "$SMITE_TW_DIR/smite-rc9-backhaul-xhttp.py" "$action" --port "$port"
@@ -1118,7 +1118,7 @@ smite_tw_rc9_backhaul_menu() {
         return
     fi
     echo '1) Set up signed Backhaul, HTTPS/443 and Smite publishing'
-    echo '2) Preview / publish / recover an XHTTP tunnel'
+    echo '2) Preview / publish / recover / delete an XHTTP tunnel'
     echo '0) Back'
     read -rp 'Choose [0-2] (default 1): ' choice || return
     choice="${choice#"${choice%%[![:space:]]*}"}"

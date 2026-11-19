@@ -157,6 +157,30 @@ class IngressTest(unittest.TestCase):
         ingress.ensure_control_slot(self.edge, "b" * 32, 3082)
         self.assertEqual(ingress.validate_record(self.rt)["slots"], {"a" * 32: 3081, "b" * 32: 3082})
 
+    def test_remove_slot_recovers_and_preserves_the_other_slot(self):
+        ingress.run_operation(self.edge, "ir", "apply")
+        baseline = self.alt.read_bytes()
+        self.rt.run.return_value = ""
+        first, second = "a" * 32, "b" * 32
+        ingress.ensure_control_slot(self.edge, first, 3081)
+        ingress.ensure_control_slot(self.edge, second, 3082)
+        existing = self.alt.read_bytes()
+
+        class Interrupted(BaseException):
+            pass
+
+        self.live.side_effect = Interrupted()
+        with self.assertRaises(Interrupted):
+            ingress.remove_control_slot(self.edge, first, 3081)
+        self.live.side_effect = None
+        ingress.recover_control_slot(self.edge)
+        self.assertEqual(self.alt.read_bytes(), existing)
+        ingress.remove_control_slot(self.edge, first, 3081)
+        self.assertEqual(ingress.validate_record(self.rt)["slots"], {second: 3082})
+        ingress.remove_control_slot(self.edge, second, 3082)
+        self.assertNotIn("slots", ingress.validate_record(self.rt))
+        self.assertEqual(self.alt.read_bytes(), baseline)
+
     def test_apply_failure_compensates_without_leaving_journal(self):
         self.live.side_effect = ingress.Hold("BACKHAUL_CONTROL_ROUTE_NOT_PROVEN")
         with self.assertRaisesRegex(ingress.Hold, "APPLY_FAILED_RESTORED"):
