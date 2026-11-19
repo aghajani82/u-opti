@@ -71,6 +71,14 @@ class UpdaterFileListTests(unittest.TestCase):
                 )
 
 
+    def test_rc9_foreign_ui_bundle_is_staged_in_fresh_and_update_inventory(self):
+        installed = quoted_names(array_body(self.installer, "MODULES"))
+        updated = quoted_names(array_body(self.source, "UPDATE_FILE_NAMES"))
+        for filename in ("smite-panel-ui.py", "smite-panel-ui.json", "smite-panel-ui-rc9.json"):
+            self.assertIn(filename, installed)
+            self.assertIn(filename, updated)
+            self.assertTrue((ROOT / "modules" / filename).is_file())
+
     def test_rc7_wss_read_only_plan_installed_and_updated(self):
         helper = "smite-rc7-wss-preflight.py"
         for array in ("UPDATE_FILE_NAMES",):
