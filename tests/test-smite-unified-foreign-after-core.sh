@@ -810,17 +810,13 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     echo 'FOREIGN_ORIGINAL_SIGNED_IDENTITY_READ_ONLY_BOUNDARY=PASS'
 )
 
-# Public menu entries 1/2 must always select the same RC9 one-choice
-# wrappers. A legacy clean-rc environment may still exist from a previous
-# operator session; the visible menu must NOT dispatch to the old installer.
-# Use the real unchanged menu parser with only the selected installer stubbed.
+# Public Iran option 1 must retain its exact selected RC9 wrapper; the
+# operator-requested Foreign JSON trial option 2 is disabled BEFORE any
+# installer dispatch. Never inherit an old legacy install profile.
 (
     SMITE_INSTALL_PROFILE=clean-rc
     : > "$TMP/public-one-choice-menu-calls"
     clear() { :; }
-    # Earlier Foreign Core tests intentionally replace read() with a
-    # fail-on-prompt stub. Restore Bash's builtin ONLY in this subshell
-    # so the real public menu can consume its isolated 1/2/0 inputs.
     read() { builtin read "$@"; }
     smite_install_pause() { :; }
     smite_install_selected_fresh() {
@@ -830,17 +826,17 @@ echo 'UNIFIED_FOREIGN_CORE_SINGLE_PACKET_RELEASE_GATED_HANDOFF=PASS_ISOLATED_NO_
     }
     show_smite_install_menu <<< "$(printf '1\n2\n0\n')" \
         > "$TMP/public-one-choice-menu-output"
-    [ "$(cat "$TMP/public-one-choice-menu-calls")" = \
-      "$(printf 'panel-iran:stable\nforeign:stable')" ] || {
-        echo 'FAIL: public option 1/2 inherited legacy installer profile' >&2
+    [ "$(cat "$TMP/public-one-choice-menu-calls")" = "panel-iran:stable" ] || {
+        echo 'FAIL: disabled Foreign option dispatched installer' >&2
         exit 1
     }
     [ "$SMITE_INSTALL_PROFILE" = clean-rc ] || {
         echo 'FAIL: public selected profile leaked into independent legacy scope' >&2
         exit 1
     }
-    ! grep -q '^HOLD:' "$TMP/public-one-choice-menu-output"
-    echo 'RC9_PUBLIC_ONE_CHOICE_MENU_PROFILE=PASS_ISOLATED_NO_LEGACY_BYPASS'
+    grep -qx 'FOREIGN_JSON_TRIAL=DISABLED' "$TMP/public-one-choice-menu-output"
+    grep -q 'Experimental Foreign one-choice JSON installation is disabled' "$TMP/public-one-choice-menu-output"
+    echo 'RC9_PUBLIC_IR_ONLY_FOREIGN_JSON_DISABLED=PASS_ISOLATED_NO_LEGACY_BYPASS'
 )
 
 echo 'UNIFIED_FOREIGN_POST_CORE_CHOREOGRAPHY=PASS (including retained Gateway retry)'

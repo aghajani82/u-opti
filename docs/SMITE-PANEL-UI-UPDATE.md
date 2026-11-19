@@ -1,3 +1,17 @@
+## Operator-requested suspension of Foreign JSON trial (2026-11-19)
+
+The experimental Foreign Node **one-time installation JSON / two-hour grant** path is now deliberately disabled in the reviewed Smite Panel frontend. This is a suspension of that **separate trial**, not a removal of the Foreign Nodes list, the Iran Node, or existing signed Node pairing.
+
+- Smite reviewed source: `c5b3558db8c89e5e7ab23854d740d6b80862bec8` (PR #60). The `Foreign Nodes` screen displays a disabled-trial notice and falls back to the existing signed Node pairing controls. It no longer opens the `Prepare installation information` JSON dialog, regardless of stale backend readiness.
+- U-OPTI menu option 2 stops **before** Cosign downloads, the JSON prompt, host setup and Docker writes with `FOREIGN_JSON_TRIAL=DISABLED`. This means **one-choice Foreign install is temporarily unavailable** until a verified replacement is released; there is deliberately NO unsigned shortcut.
+- A NEW signed RC9 Iran option-1 installation no longer enables the Foreign JSON trial feature flags / 443 installation routes / schema stage. Existing Iran signed pairing, local Node, TLS gateway, FRP and Sanaei are retained.
+- The separate reviewed RC9 UI package is rebuilt and SHA-256 pinned to the disabled source. After installing/updating U-OPTI, use `Smite Install / Lifecycle → 8) Update Panel appearance (UI only / backup first)` on an EXISTING Iran host. Require `UI_UPDATE=PASS; source=c5b3558db8c89e5e7ab23854d740d6b80862bec8; restart=NO`. The same reviewed UI package is auto-applied on a **new** signed RC9 Iran installation; option 9 still provides its existing static-only rollback.
+- The existing running server's backend feature flags are NOT changed by a static UI update; its trial JSON API still has the existing signed access controls. Full backend removal requires a separately published signed Panel runtime image. Do not claim backend deletion or availability of a replacement foreign install route.
+
+No live VPS was changed by these repository commits. Do not rebuild a server to deliver a UI-only change. The signed manifest and image admission rules are unchanged.
+
+---
+
 ## RC9 Foreign Node installation-code fix (2026-11-19)
 
 The original RC7 UI package and its exact-image admission are retained unchanged.
