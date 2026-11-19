@@ -125,7 +125,9 @@ FAIL_STAGE=schema smite_install_finish_local_ir > "$TMP/json-disabled"
 [ "$(cat "$TMP/events")" = $'tls\npairing\nui\ncheckpoint:COMPLETE' ]
 grep -qx 'IR_FOREIGN_JSON_TRIAL=DISABLED' "$TMP/json-disabled"
 grep -qx 'PANEL_AND_IR_INSTALL=COMPLETE' "$TMP/json-disabled"
-# An optional UI-only failure remains recoverable from menu 8.
+# Isolated second fresh ADMIN_CREATED fixture: a failed optional UI
+# never invalidates the signed Iran installation; operator can use menu 8.
+SMITE_IR_STAGE=ADMIN_CREATED
 : > "$TMP/events"
 FAIL_STAGE=ui smite_install_finish_local_ir > "$TMP/ui-retry"
 [ "$(cat "$TMP/events")" = $'tls\npairing\nui\ncheckpoint:COMPLETE' ]
