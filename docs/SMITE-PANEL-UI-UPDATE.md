@@ -1,3 +1,21 @@
+## RC9 Foreign Node installation-code fix (2026-11-19)
+
+The original RC7 UI package and its exact-image admission are retained unchanged.
+For the **exact reviewed RC9 Panel image** `ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e`, menu **8) Update Panel appearance (UI only / backup first)** now chooses the **separate**, SHA-256-pinned `modules/smite-panel-ui-rc9.json` automatically. It is compiled reproducibly from reviewed Smite `main` source `f3f8d39cb66b7cf536879501ccefc74c835ae2bc` (Smite PR #59, green frontend CI run 44575937768). There is **no** Docker recreate, Node pairing change, database migration, Gateway/FRP mutation, or live host deployment during GitHub commits.
+
+**Reason for the change:** the Foreign installation issuer on Iran Panel returned HTTP **200**, yet the older browser UI displayed `Code could not be prepared`. The old UI rejected code responses when the operator's browser clock did not fall within its exact two-hour expiry window. The reviewed Smite source removes client-clock authority from grant issuance, uses the server Date header for the UI countdown (with a conservative fallback), and shows actionable issue API statuses. The Panel server **still enforces** the actual one-use, two-hour grant, signed identity and HTTPS/443 origin. Do **not** disable backend pairing/security controls or delete/re-create an existing reserved Node.
+
+**Existing Iran RC9 host (no rebuild):**
+
+1. Update U-OPTI from `main` through the ordinary U-OPTI updater (an update must download this helper and the new RC9 JSON bundle).
+2. Select `Docker Management → Smite Management → Install / Lifecycle → 8) Update Panel appearance (UI only / backup first)`, confirm, and require `UI_UPDATE=PASS; source=f3f8d39cb66b7cf536879501ccefc74c835ae2bc; restart=NO`. `UI_UPDATE=ALREADY_CURRENT` is acceptable only if a prior successful RC9 UI update is confirmed.
+3. Refresh the Panel with Ctrl+F5, reuse the **same reserved Foreign Node** and Gateway domain, then prepare installation information again.
+4. If needed, option `9) Roll back previous Panel appearance (UI only)` uses the original durable private backup. A mismatched or unknown container image is a safe **HOLD**; inspect the exact image before trying another path.
+
+The old RC7 package and rollback behavior remain supported. U-OPTI's public Iran/Foreign installation options and signed release admission remain unchanged; upgrading U-OPTI alone does not rewrite the running Panel UI. This procedure does not imply that the Foreign host option-2 release is cleared for use.
+
+---
+
 # Static Panel UI update and rollback
 
 The existing RC7 design is retained. The Login and desktop dashboard now use **90% proportional rem density at viewports >= 1024px**, matching the approved visual references without CSS zoom or transform. The large Smite title stays and mobile (<1024px) keeps its original 16px root font and touch sizing. Sidebar width, dashboard gutters and card gaps shrink together. Dashboard, Logs, Core Health, Tunnels, Iran Nodes and Foreign Nodes now expand across the available main-panel width rather than retaining centered `max-w-7xl` limits, removing large empty side bands. The outer 90%-scaled side padding and existing card gaps remain unchanged; backend, MFA and navigation are unchanged.

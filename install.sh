@@ -111,6 +111,7 @@ MODULES=(
     "smite-rc7-sigstore-trusted-root.json"
     "smite-panel-ui.py"
     "smite-panel-ui.json"
+    "smite-panel-ui-rc9.json"
     "u-opti-update-transaction.py"
     "smite-foreign-gateway-signed-check.py"
     "smite-node-pairing-wizard.sh"

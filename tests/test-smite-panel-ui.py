@@ -20,7 +20,7 @@ class Updates(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.state = Path(self.tmp.name)/'state'
         self.current = dict(OLD)
-        self.a = patch.object(ui, 'admit', return_value='container-id'); self.a.start()
+        self.a = patch.object(ui, 'admit', return_value=('container-id', 'rc7')); self.a.start()
         self.s = patch.object(ui, 'snapshot', side_effect=lambda cid: dict(self.current)); self.s.start()
         def publish(cid, files, expected):
             self.assertEqual(ui.index_hash(self.current), expected); self.current.update(files)
@@ -35,7 +35,7 @@ class Updates(unittest.TestCase):
         self.run_action('rollback'); self.assertEqual(self.current['index.html'], OLD['index.html'])
     def test_corrupt_bundle_does_not_write(self):
         bad=Path(self.tmp.name)/'bad.json';bad.write_text('{}')
-        with self.assertRaisesRegex(ValueError,'SHA256'):ui.operate('apply',bad,self.state)
+        with self.assertRaisesRegex(ValueError,'unknown UI package'):ui.operate('apply',bad,self.state)
         self.assertEqual(self.current,OLD)
     def test_interrupted_publish_has_backup_and_can_rollback(self):
         with patch.object(ui,'publish',side_effect=OSError('injected failure')):
@@ -48,7 +48,7 @@ class Updates(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'differs'):self.run_action('rollback')
     def test_recreated_container_cannot_use_old_backup(self):
         self.run_action('apply')
-        with patch.object(ui,'admit',return_value='different-id'):
+        with patch.object(ui,'admit',return_value=('different-id','rc7')):
             with self.assertRaisesRegex(ValueError,'matching'):self.run_action('rollback')
     def test_journal_symlink_rejected(self):
         self.state.symlink_to(Path(self.tmp.name),target_is_directory=True)
@@ -56,6 +56,62 @@ class Updates(unittest.TestCase):
     def test_path_traversal_and_bad_encoding_rejected(self):
         for files in [dict(OLD,**{'../main.py':'YQ=='}), {'index.html':'not base64'}]:
             with self.assertRaises(ValueError):ui.validate(files)
+    def test_exact_rc9_docker_admission_and_unknown_image_rejection(self):
+        # Compare the actual loaded Docker Image ID; never trust an image tag
+        # or container name as proof of the reviewed image.
+        calls=[]
+        def mock_docker(*args, **kwargs):
+            calls.append(args)
+            if args==('inspect','smite-panel'):
+                return json.dumps([{'Id':'cid-rc9','Image':'rc9-loaded-id',
+                    'State':{'Running':True,'Health':{'Status':'healthy'}},'Mounts':[]}])
+            if args==('image','inspect',ui.IMAGE):
+                raise subprocess.CalledProcessError(1, 'docker')
+            if args==('image','inspect',ui.IMAGE_RC9):
+                return json.dumps([{'Id':'rc9-loaded-id'}])
+            raise AssertionError('Unexpected Docker invocation '+str(args))
+        # setUp stubs admit for transaction fixtures; stop that stub here
+        # so this test invokes the REAL exact-image admission code.
+        self.a.stop()
+        try:
+            with patch.object(ui,'docker',side_effect=mock_docker):
+                self.assertEqual(ui.admit('smite-panel'),('cid-rc9','rc9'))
+        finally:
+            self.a.start()
+        self.assertIn(('image','inspect',ui.IMAGE_RC9),calls)
+        def mock_unknown(*args, **kwargs):
+            if args==('inspect','smite-panel'):
+                return json.dumps([{'Id':'cid','Image':'unknown-image',
+                    'State':{'Running':True},'Mounts':[]}])
+            if args[0:2]==('image','inspect'):
+                return json.dumps([{'Id':'different-reviewed-image'}])
+            raise AssertionError('Unexpected Docker invocation')
+        self.a.stop()
+        try:
+            with patch.object(ui,'docker',side_effect=mock_unknown):
+                with self.assertRaisesRegex(ValueError,'exact reviewed'):
+                    ui.admit('smite-panel')
+        finally:
+            self.a.start()
+
+    def test_rc9_uses_separate_pinned_bundle_and_is_rollback_safe(self):
+        target=ROOT/'modules/smite-panel-ui-rc9.json'
+        self.assertTrue(target.is_file(), 'reviewed RC9 UI payload is missing')
+        with patch.object(ui, 'admit', return_value=('container-id', 'rc9')):
+            self.run_action('apply')
+        journal=json.loads((self.state/'current.json').read_text())
+        self.assertEqual(journal['source_sha'],ui.SOURCE_RC9)
+        self.assertEqual(journal['container_id'],'container-id')
+        with patch.object(ui, 'admit', return_value=('container-id', 'rc9')):
+            self.run_action('rollback')
+        self.assertEqual(self.current['index.html'],OLD['index.html'])
+
+    def test_rc7_rc9_wrong_bundle_refused(self):
+        with patch.object(ui, 'admit', return_value=('container-id','rc7')):
+            with self.assertRaisesRegex(ValueError,'RC9 UI cannot'):
+                ui.operate('apply',ROOT/'modules/smite-panel-ui-rc9.json',self.state)
+        self.assertEqual(self.current,OLD)
+
     def test_signed_rc9_iran_option1_keeps_its_native_ui(self):
         # Exercise the original option-1 phase owner with ONLY local bash
         # stubs. The RC7 UI bundle must never be attempted on signed RC9.
@@ -99,6 +155,19 @@ smite_install_finish_local_ir
         self.assertIn('PANEL_AND_IR_INSTALL=COMPLETE', proc.stdout)
         self.assertIn('IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION', proc.stdout)
 
+    def test_rc9_pinned_bundle_from_merge_sha(self):
+        target=ROOT/'modules/smite-panel-ui-rc9.json'
+        files=ui.bundle(target)
+        metadata=json.loads(target.read_text())
+        self.assertEqual(metadata['source_sha'],ui.SOURCE_RC9)
+        self.assertEqual(metadata['workflow_run'],44575937768)
+        self.assertEqual(set(files), {'index.html','assets/index-Bs0U7sHS.css','assets/index-CrBE3oGb.js'})
+        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-CrBE3oGb.js'])).hexdigest(),
+                         'e56a2768c08e6624a42ba0ceca8f7b24fe89ad69de7889df47b90b2f236d3596')
+        html=base64.b64decode(files['index.html']).decode()
+        self.assertIn('/assets/index-CrBE3oGb.js',html)
+        self.assertEqual(ui.IMAGE_RC9,'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e')
+
     def test_pinned_source_and_90_percent_desktop_density(self):
         files=ui.bundle(BUNDLE)
         metadata=json.loads(BUNDLE.read_text())
@@ -127,7 +196,7 @@ def real_docker():
     try:
         ui.docker('run','-d','--name',name,'--network','none','--entrypoint','python',ui.IMAGE,'-c','import time; time.sleep(300)')
         with tempfile.TemporaryDirectory() as tmp:
-            state=Path(tmp)/'private';cid=ui.admit(name)
+            state=Path(tmp)/'private';cid,profile=ui.admit(name);assert profile=='rc7'
             before=ui.snapshot(cid); started=json.loads(ui.docker('inspect',cid))[0]['State']['StartedAt']
             ui.operate('apply',BUNDLE,state,name)
             target=ui.bundle(BUNDLE);after=ui.snapshot(cid)
