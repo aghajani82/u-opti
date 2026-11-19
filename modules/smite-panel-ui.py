@@ -16,8 +16,8 @@ BUNDLE_SHA = 'ad92e819a4a47e80b1991b5d52e1873bb5b08db48118a86e660fe15f979286e1'
 SOURCE = '5e7a289071e446345ac27e4255994daf3446430a'
 IMAGE = 'ghcr.io/aghajani82/smite-panel@sha256:180a4d1f5ba8e24ed67d9b708e53a2b8cc9ba685aeb3a88d53df46ee663ae9f8'
 # Separate exact RC9 bundle: never overwrite the retained, signed RC7 UI lane.
-SOURCE_RC9 = 'f3f8d39cb66b7cf536879501ccefc74c835ae2bc'
-BUNDLE_SHA_RC9 = '1bd53220d0857d42263af0e14855244e365989c441855b5b13bee371be71e41c'
+SOURCE_RC9 = 'c5b3558db8c89e5e7ab23854d740d6b80862bec8'
+BUNDLE_SHA_RC9 = 'PENDING_REPRODUCIBLE_CI_PACKAGE'
 IMAGE_RC9 = 'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e'
 STATE = Path('/var/lib/u-opti/smite-panel-ui')
 
