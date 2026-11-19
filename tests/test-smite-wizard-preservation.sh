@@ -78,6 +78,10 @@
 # packet scope at all three selected callbacks and expired-resume path.
 # test-smite-integrated-ir-flow.sh and test-smite-local-ir-install.py cover
 # ordering, fail-closed completion and identity-preserving retry behavior.
+# 2026-11-19: operator suspended experimental Foreign JSON issue/option2;
+# this exact reviewed installer digest changes only for the disabled menu,
+# skipped Iran Foreign JSON stage and backed-up RC9 UI-only apply. All other
+# independent wizard source pins below remain unchanged.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -97,7 +101,7 @@ while read -r expected file; do
     echo "PRESERVED: $file"
 done <<'BASELINE'
 7bb908a513e66f07241c68874b47ea57ca4124f9 modules/docker.sh
-0e1c1723bf1b22fc0888883bdbc597b3e14b955d modules/smite-install.sh
+54cbde8a65eb29e21bf093df86e04b0d489af7d5 modules/smite-install.sh
 6c1caec04219f420c554ad3cc1cde4a998ffbf09 modules/smite-private-network.sh
 0d2d12f759ee8e2bc18e67d17606b63cb353bef1 modules/smite-easytier.sh
 de089fe29f3225cf8afe4f284444e683c9502689 modules/smite-setup-progress.sh
