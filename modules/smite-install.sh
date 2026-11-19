@@ -3855,10 +3855,16 @@ smite_install_finish_local_ir() {
     if [ "$phase" = COMPLETE ] && [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
         echo 'IR_PANEL_STATIC_UI=ALREADY_COMPLETED'
     elif [ "${SMITE_IR_RESUMABLE:-0}" = 1 ]; then
-        # The original UI-only helper is pinned to the old RC7 Panel image.
-        # RC9 already contains its own signed static UI. Never probe/push
-        # RC7 assets onto an RC9 container or emit a misleading UI HOLD.
-        echo 'IR_PANEL_STATIC_UI=SIGNED_RC9_RETAINED'
+        # Apply the separately pinned reviewed RC9 UI with backup after
+        # Iran Node/Admin verification. This disables the old Foreign JSON
+        # trial on NEW installs without changing signed runtime or Compose.
+        # A failure is UI-only; users can retry from menu 8, not rebuild.
+        if smite_install_ui_action apply; then
+            echo 'IR_PANEL_STATIC_UI=APPLIED_FOREIGN_JSON_DISABLED'
+        else
+            echo 'IR_PANEL_STATIC_UI=REVIEW_OPTION_8'
+            echo 'NOTICE: Reviewed Foreign JSON-disabled UI can be retried via menu 8.'
+        fi
         smite_install_ir_advance COMPLETE || return 2
     else
         # Preserve the independent legacy RC7 UI backup/rollback behavior.
