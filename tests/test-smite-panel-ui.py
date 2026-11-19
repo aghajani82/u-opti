@@ -20,7 +20,7 @@ class Updates(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.state = Path(self.tmp.name)/'state'
         self.current = dict(OLD)
-        self.a = patch.object(ui, 'admit', return_value='container-id'); self.a.start()
+        self.a = patch.object(ui, 'admit', return_value=('container-id', 'rc7')); self.a.start()
         self.s = patch.object(ui, 'snapshot', side_effect=lambda cid: dict(self.current)); self.s.start()
         def publish(cid, files, expected):
             self.assertEqual(ui.index_hash(self.current), expected); self.current.update(files)
@@ -56,6 +56,24 @@ class Updates(unittest.TestCase):
     def test_path_traversal_and_bad_encoding_rejected(self):
         for files in [dict(OLD,**{'../main.py':'YQ=='}), {'index.html':'not base64'}]:
             with self.assertRaises(ValueError):ui.validate(files)
+    def test_rc9_uses_separate_pinned_bundle_and_is_rollback_safe(self):
+        target=ROOT/'modules/smite-panel-ui-rc9.json'
+        self.assertTrue(target.is_file(), 'reviewed RC9 UI payload is missing')
+        with patch.object(ui, 'admit', return_value=('container-id', 'rc9')):
+            self.run_action('apply')
+        journal=json.loads((self.state/'current.json').read_text())
+        self.assertEqual(journal['source_sha'],ui.SOURCE_RC9)
+        self.assertEqual(journal['container_id'],'container-id')
+        with patch.object(ui, 'admit', return_value=('container-id', 'rc9')):
+            self.run_action('rollback')
+        self.assertEqual(self.current['index.html'],OLD['index.html'])
+
+    def test_rc7_rc9_wrong_bundle_refused(self):
+        with patch.object(ui, 'admit', return_value=('container-id','rc7')):
+            with self.assertRaisesRegex(ValueError,'RC9 UI cannot'):
+                ui.operate('apply',ROOT/'modules/smite-panel-ui-rc9.json',self.state)
+        self.assertEqual(self.current,OLD)
+
     def test_signed_rc9_iran_option1_keeps_its_native_ui(self):
         # Exercise the original option-1 phase owner with ONLY local bash
         # stubs. The RC7 UI bundle must never be attempted on signed RC9.
@@ -99,6 +117,19 @@ smite_install_finish_local_ir
         self.assertIn('PANEL_AND_IR_INSTALL=COMPLETE', proc.stdout)
         self.assertIn('IR_FOREIGN_INSTALL=VERIFIED_READY_FOR_NODE_RESERVATION', proc.stdout)
 
+    def test_rc9_pinned_bundle_from_merge_sha(self):
+        target=ROOT/'modules/smite-panel-ui-rc9.json'
+        files=ui.bundle(target)
+        metadata=json.loads(target.read_text())
+        self.assertEqual(metadata['source_sha'],ui.SOURCE_RC9)
+        self.assertEqual(metadata['workflow_run'],44575937768)
+        self.assertEqual(set(files), {'index.html','assets/index-Bs0U7sHS.css','assets/index-CrBE3oGb.js'})
+        self.assertEqual(__import__('hashlib').sha256(base64.b64decode(files['assets/index-CrBE3oGb.js'])).hexdigest(),
+                         'e56a2768c08e6624a42ba0ceca8f7b24fe89ad69de7889df47b90b2f236d3596')
+        html=base64.b64decode(files['index.html']).decode()
+        self.assertIn('/assets/index-CrBE3oGb.js',html)
+        self.assertEqual(ui.IMAGE_RC9,'ghcr.io/aghajani82/smite-panel@sha256:f6999effd131f6b3272f8d9116b3fbae917f699bf9a29271fc5ede24cc387a2e')
+
     def test_pinned_source_and_90_percent_desktop_density(self):
         files=ui.bundle(BUNDLE)
         metadata=json.loads(BUNDLE.read_text())
@@ -127,7 +158,7 @@ def real_docker():
     try:
         ui.docker('run','-d','--name',name,'--network','none','--entrypoint','python',ui.IMAGE,'-c','import time; time.sleep(300)')
         with tempfile.TemporaryDirectory() as tmp:
-            state=Path(tmp)/'private';cid=ui.admit(name)
+            state=Path(tmp)/'private';cid,profile=ui.admit(name);assert profile=='rc7'
             before=ui.snapshot(cid); started=json.loads(ui.docker('inspect',cid))[0]['State']['StartedAt']
             ui.operate('apply',BUNDLE,state,name)
             target=ui.bundle(BUNDLE);after=ui.snapshot(cid)
