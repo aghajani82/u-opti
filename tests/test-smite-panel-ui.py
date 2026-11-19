@@ -35,7 +35,7 @@ class Updates(unittest.TestCase):
         self.run_action('rollback'); self.assertEqual(self.current['index.html'], OLD['index.html'])
     def test_corrupt_bundle_does_not_write(self):
         bad=Path(self.tmp.name)/'bad.json';bad.write_text('{}')
-        with self.assertRaisesRegex(ValueError,'SHA256'):ui.operate('apply',bad,self.state)
+        with self.assertRaisesRegex(ValueError,'unknown UI package'):ui.operate('apply',bad,self.state)
         self.assertEqual(self.current,OLD)
     def test_interrupted_publish_has_backup_and_can_rollback(self):
         with patch.object(ui,'publish',side_effect=OSError('injected failure')):
@@ -48,7 +48,7 @@ class Updates(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'differs'):self.run_action('rollback')
     def test_recreated_container_cannot_use_old_backup(self):
         self.run_action('apply')
-        with patch.object(ui,'admit',return_value='different-id'):
+        with patch.object(ui,'admit',return_value=('different-id','rc7')):
             with self.assertRaisesRegex(ValueError,'matching'):self.run_action('rollback')
     def test_journal_symlink_rejected(self):
         self.state.symlink_to(Path(self.tmp.name),target_is_directory=True)
