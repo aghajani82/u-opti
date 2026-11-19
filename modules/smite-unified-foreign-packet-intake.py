@@ -35,6 +35,26 @@ class Hold(ValueError):
     pass
 
 
+class CaptureHold(Hold):
+    """An operator-safe fixed diagnostic. Never contain packet fields/codes."""
+
+    REASONS = frozenset({
+        "EMPTY_OR_UNFINISHED_PASTE",
+        "PASTE_TOO_LARGE",
+        "JSON_FIELDS_INVALID",
+        "FOREIGN_CLOCK_OR_CODE_EXPIRED",
+        "PACKET_SCOPE_MISMATCH",
+        "OPERATOR_CONFIRMATION_DECLINED",
+        "PRIVATE_PACKET_STAGE_REFUSED",
+    })
+
+    def __init__(self, reason):
+        if reason not in self.REASONS:
+            reason = "JSON_FIELDS_INVALID"
+        self.reason = reason
+        super().__init__(reason)
+
+
 def deny():
     raise Hold("Foreign installation information HOLD; request a fresh Panel code")
 
@@ -57,35 +77,33 @@ def read_multiline(reader):
     chunks = []
     size = 0
     finished = False
-    # Terminal paste tools may prepend a newline before the opening brace.
-    # Do not treat that as end-of-packet: it previously left the complete
-    # secret JSON queued for the U-OPTI menu and caused repeated invalid
-    # selections. Only a bounded empty preamble is ignored. The packet
-    # itself remains strictly parsed and requires its own blank terminator.
+    # Some SSH paste clients prepend whitespace/blank lines. Treat them
+    # as a bounded preamble, never as an empty secret or a menu command.
+    # A genuine EMPTY line still ends the complete JSON paste.
     preamble_blanks = 0
     started = False
     for _ in range(40):
         line = reader.readline(8194)
         if not isinstance(line, str) or not line or "\x00" in line:
-            deny()
+            raise CaptureHold("EMPTY_OR_UNFINISHED_PASTE")
         size += len(line.encode("utf-8"))
         if size > 8192:
-            deny()
-        if line.rstrip("\r\n") == "":
+            raise CaptureHold("PASTE_TOO_LARGE")
+        if not line.strip():
             if not started:
                 preamble_blanks += 1
-                if preamble_blanks > 2:
-                    deny()
+                if preamble_blanks > 8:
+                    raise CaptureHold("EMPTY_OR_UNFINISHED_PASTE")
                 continue
             finished = True
             break
         started = True
         chunks.append(line)
     if not finished:
-        deny()
+        raise CaptureHold("EMPTY_OR_UNFINISHED_PASTE")
     data = "".join(chunks)
-    if not data or len(data.encode("utf-8")) > 8192:
-        deny()
+    if not data:
+        raise CaptureHold("EMPTY_OR_UNFINISHED_PASTE")
     return data
 
 
@@ -623,28 +641,35 @@ def _capture_hidden_once(tty, *, target, now, confirm_scope, ready,
     else:
         deny()
     raw = read_hidden_tty(tty, ready=ready)
-    packet = client_module().parse_packet(raw)
+    print("FOREIGN_PACKET_PASTE=RECEIVED_PRIVATE", file=sys.stderr, flush=True)
+    c = client_module()
+    try:
+        packet = c.parse_packet(raw)
+    except (c.Hold, ValueError, TypeError, UnicodeError):
+        raise CaptureHold("JSON_FIELDS_INVALID") from None
     scope = packet.scope
     if not now < packet.expires_at <= now + 7200:
-        deny()
+        raise CaptureHold("FOREIGN_CLOCK_OR_CODE_EXPIRED")
     # Legacy disposable harnesses can additionally pin their destination.
-    c = client_module()
     if ((expected_panel is not None and c.origin(expected_panel) != scope["panel_url"])
             or (expected_domain is not None and c.origin(expected_domain) != scope["origin"])
             or (expected_node is not None and expected_node != scope["node_name"])):
-        deny()
+        raise CaptureHold("PACKET_SCOPE_MISMATCH")
     if confirm_scope(dict(scope)) is not True:
-        deny()
+        raise CaptureHold("OPERATOR_CONFIRMATION_DECLINED")
     # Reuse original no-overwrite, fsynced, 0600 stager and parser. No second
     # grant/Node identity, alternate code format, or host write is created.
-    return capture_disposable(
-        io.StringIO(raw + "\n"), target=target,
-        expected_panel=scope["panel_url"],
-        expected_domain=scope["origin"],
-        expected_node=scope["node_name"],
-        now=now, disposable_capability=not selected_host,
-        selected_capability=selected_host, installer_pid=installer_pid,
-        allow_expired_renewal=allow_expired_renewal)
+    try:
+        return capture_disposable(
+            io.StringIO(raw + "\n"), target=target,
+            expected_panel=scope["panel_url"],
+            expected_domain=scope["origin"],
+            expected_node=scope["node_name"],
+            now=now, disposable_capability=not selected_host,
+            selected_capability=selected_host, installer_pid=installer_pid,
+            allow_expired_renewal=allow_expired_renewal)
+    except (Hold, OSError, ValueError, TypeError):
+        raise CaptureHold("PRIVATE_PACKET_STAGE_REFUSED") from None
 
 
 def capture_disposable_hidden_tty(tty, *, confirm_scope, ready=None, **kwargs):
@@ -711,15 +736,16 @@ def main(argv=None):
                 # Show the prompt only AFTER ECHO is actually disabled.
                 # This is also the ready point used by the isolated PTY tests.
                 ready=lambda: print(
-                    "Paste Iran Panel's complete Foreign installation JSON and"
-                    " finish with an empty line. Input is hidden.",
+                    "Paste the complete JSON copied from Iran Panel (the whole"
+                    " { ... } object, NOT only the smi1_ code). Press Enter on"
+                    " an empty line after the closing brace. Input is hidden.",
                     file=sys.stderr, flush=True),
                 confirm_scope=lambda scope: _confirm_selected_scope(tty, scope))
         print("FOREIGN_PACKET=STAGED_PRIVATE")
         print("FOREIGN_CONNECTED=NOT_PROVEN")
         return 0
     except (Hold, OSError, UnicodeError, ValueError, TypeError, EOFError,
-            RuntimeError):
+            RuntimeError) as error:
         # Discard any queued remainder of a failed terminal paste before
         # restoring control to the Bash menu; never echo or log credentials.
         try:
@@ -728,8 +754,22 @@ def main(argv=None):
                     termios.tcflush(tty.fileno(), termios.TCIFLUSH)
         except (OSError, ValueError, termios.error):
             pass
+        # Report ONLY allowlisted error categories. Never echo, log or
+        # include an exception's raw text (which could contain the code).
+        reason = (error.reason if isinstance(error, CaptureHold)
+                  else "RELEASE_OR_PRIVATE_WORKSPACE")
         print("HOLD: Foreign Panel installation information not admitted",
               file=sys.stderr)
+        print("HOLD_REASON=" + reason, file=sys.stderr)
+        if reason == "EMPTY_OR_UNFINISHED_PASTE":
+            print("Copy the entire JSON, paste privately, and end with a blank line.",
+                  file=sys.stderr)
+        elif reason == "FOREIGN_CLOCK_OR_CODE_EXPIRED":
+            print("Check the Foreign server UTC clock; use a fresh code for the same Node.",
+                  file=sys.stderr)
+        elif reason == "JSON_FIELDS_INVALID":
+            print("Use the exact complete installation JSON from the Panel, not a code alone.",
+                  file=sys.stderr)
         return 2
 
 
