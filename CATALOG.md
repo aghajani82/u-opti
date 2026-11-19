@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.17.8** (console-only Stage15 and guarded RC7 fresh installation; VPS qualification pending; Sidecar experimental)
+Current stable version: **v0.18.0** (signed Smite RC9 fresh-host workflow and independent Backhaul/FRP management)
 
 ## Core System Management
 
@@ -159,7 +159,11 @@ Underlying lifecycle actions remain reusable by the Wizard:
 
 The state can record role, connection mode, Panel domain/private IP, node name, Foreign domain/private IP, managed Smite version/ref, verified Xray loopback port, and reboot-validation boot IDs. Connection mode defaults to `standard` for backward compatibility.
 
-## Standard FRP (v0.16.0, opt-in)
+## Smite RC9 fresh-host workflow
+
+Use the official U-OPTI installer on both hosts, then select **Install Smite Components → 1** on Iran and **2** on Foreign. The [README](README.md#smite-backhaul--frp) lists signed pairing, Backhaul and FRP setup, and the tunnel and engine removal menus.
+
+## Historical Standard FRP (v0.16.0, opt-in)
 
 Docker Management -> Smite Management -> **Standard FRP Setup Wizard (IR/KH)** provides a separate Standard setup path. It does not run or alter the 10-step Private Network Wizard.
 

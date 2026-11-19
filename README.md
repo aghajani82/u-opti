@@ -1,14 +1,14 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.17.8**
+Ubuntu Server Optimization and Management Tool · **v0.18.0**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
-[Installation](#installation) · [Features](#features) · [Smite & FRP](#smite--frp) · [Update & recovery](#update--recovery) · [Documentation](#documentation) · [Releases](https://github.com/aghajani82/u-opti/releases)
+[Installation](#installation) · [Features](#features) · [Smite, Backhaul & FRP](#smite-backhaul--frp) · [Update & recovery](#update--recovery) · [Documentation](#documentation) · [Releases](https://github.com/aghajani82/u-opti/releases)
 
 ## Installation
 
-Run as **root** on your Ubuntu server:
+Run the official installer as **root** on each Ubuntu server.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aghajani82/u-opti/main/install.sh -o /tmp/u-opti-install.sh &&
@@ -21,15 +21,7 @@ Open the management menu:
 u-opti
 ```
 
-This installs U-OPTI and its managed modules. Install and configure Docker, Smite, Sanaei, and HTTPS through their menu entries when needed.
-
-**For the current Smite fresh-install path:** use Ubuntu **24.04 amd64** on fresh IR/KH hosts. It selects the signed **Smite 2.0.0-rc.7** candidate. Real fresh-VPS qualification is still pending; this path does not migrate an existing active Smite installation. An interrupted RC6/RC7 installation must use guarded menu recovery (Install Components → 7) before another fresh attempt; never delete its journal or change parent permissions to force a retry. Ubuntu 26.04 LTS is not an RC7 qualified host. Read the [installation and recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) first.
-
-For Iranian networks returning Sigstore TUF CDN HTTP 403, v0.17.5 uses a reviewed SHA-256-pinned TrustedRoot snapshot with strict Cosign signer, image digest and transparency checks; it does not assert live TUF freshness. Installation failures remain visible in the menu.
-
-For an initial Iran-only installation, choose **Docker Management → Smite Management → Install Components → 1**. Foreign Node and active tunnels are not required. Iran Node remains pending until signed pairing. A valid domain and TLS are still required by the secure gateway flow. See [RC7 image provenance](docs/SMITE-RC7-RELEASE-EVIDENCE.md).
-
-**Panel appearance:** fresh Panel installations automatically apply the reviewed original-size UI (Smite heading retained; Login image/subtitle removed). On an existing RC7 Panel, update U-OPTI, then use **Install Components → 8: Update Panel appearance**. Option **9** restores the previous UI from a durable backup. These operations change static files only and do not restart containers. See [UI update and rollback](docs/SMITE-PANEL-UI-UPDATE.md).
+The installer downloads U-OPTI and its managed modules from a single verified revision of `main`. Run the same command on the Iran and Foreign hosts, then choose the appropriate Smite setup from the menu below.
 
 ## Features
 
@@ -40,30 +32,32 @@ For an initial Iran-only installation, choose **Docker Management → Smite Mana
 | Server security | SSH ports and keys, UFW, and Fail2Ban management |
 | Application management | X-UI PRO, Docker Engine/Compose, and Sanaei 3x-UI instances |
 | Certificates | Let's Encrypt/Certbot, certificate validation, and managed 3x-UI certificate synchronization |
-| Smite networking | Panel/Node installation, HTTPS/443 gateways, FRP/XHTTP, signed pairing, and console approval |
+| Smite networking | Panel/Node installation, HTTPS/443 gateways, Backhaul and FRP/XHTTP, signed pairing, and console approval |
 | Maintenance & recovery | U-OPTI self-update, targeted backup/restore, diagnostics, and guarded recovery tools |
 
 For the complete module list and feature status, see the [Feature Catalog](CATALOG.md). Reserved Docker menu entries are explicitly marked as not implemented.
 
-## Smite & FRP
+## Smite, Backhaul & FRP
 
-Open **Docker Management → Smite Management**.
+### Fresh Iran and Foreign setup
 
-### Fresh IR/KH setup
+Use two fresh Ubuntu **24.04 LTS amd64** test hosts with DNS names pointing to the corresponding servers and access to the provider consoles. The fresh Standard flow selects signed **Smite 2.0.0-rc.9**.
 
-In **Install Components**, choose the action for the current host:
+1. On **Iran**, open **Docker Management → Smite Management → Install Smite Components → 1) Install Panel + Iran Node**. Follow the domain and administrator prompts. Wait for `PANEL_AND_IR_INSTALL=COMPLETE`, then sign in over HTTPS and check that the Iran Node is connected.
+2. In the **Smite Panel**, create the Foreign Node and copy its complete private installation packet.
+3. On **Foreign**, open **Docker Management → Smite Management → Install Smite Components → 2) Install Foreign Node** and paste that packet at the hidden prompt. Follow the installer through Node, Sanaei, Gateway and signed pairing. Check for `FOREIGN_ONE_CHOICE_INSTALL=SIGNED_CONNECTED_VERIFIED` and confirm both nodes are connected in the Panel.
 
-| Host / action | Menu option |
-| --- | --- |
-| IR: install Panel + Iran Node | **1** |
-| KH: install Foreign Node | **2** |
-| Recover an interrupted fresh RC6/RC7 installation | **7** |
+For a verified interrupted installation, use the same install option to resume its recorded stage. The **Install Smite Components → 7** recovery action can roll back an eligible interrupted fresh installation. Review the installer status before retrying.
 
-The IR broker preparation requires the hostname `ir`. Continue through the existing Gateway, Signed Pairing, Sanaei, and Tunnel Management menus after core installation. Core installation alone does not activate pairing or publish a tunnel.
+### Backhaul on the RC9 pair
 
-### FRP on the RC9 trial pair
+1. On Iran and Foreign, open **Smite Management → Tunnel Management → 1) Backhaul** and complete the signed engine setup. On Iran, choose **1** in the Backhaul setup submenu.
+2. Use an eligible **loopback VLESS/XHTTP** inbound on Foreign. In Smite, use **Tunnels → Create Tunnel → Backhaul** and enter its port. Confirm the tunnel is active and test actual client traffic.
+3. To remove a tunnel from both nodes and Smite, use **Tunnel Management → 7 → 1** on Iran and enter its port. To remove the Backhaul engine from Iran, remove its tunnels first and then use **7 → 2**. On Foreign, **7** removes the local engine. Active FRP can remain in place while the independent RC9 Backhaul engine is uninstalled.
 
-On the two paired RC9 test hosts, open **Smite Management → Tunnel Management → 2) FRP — Install signed FRP engine (RC9)**. Start on Iran and enter the verified public egress IPv4 of the Foreign host. Then run the same menu on Foreign. The menu verifies completed stages and offers the next stage. WSS activation recreates the owned Smite services on each host and requires verified provider restore and console access.
+### FRP on the RC9 pair
+
+On the two paired RC9 hosts, open **Smite Management → Tunnel Management → 2) FRP — Install signed FRP engine (RC9)**. Start on Iran and enter the verified public egress IPv4 of the Foreign host. Then run the same menu on Foreign. The menu verifies completed stages and offers the next stage. WSS activation recreates the owned Smite services on each host and requires verified provider restore and console access.
 
 After the setup reports success on both hosts, open **Smite Panel → Tunnels → Create → FRP → TCP**. Select the Iran node as server and the Foreign node as client. Use the intended loopback inbound on Foreign and the reserved loopback FRPS control port `7000`. For additional tunnels, bind each new Child to the existing FRPS Owner. Use the XHTTP approval steps below when publishing a route.
 
@@ -79,11 +73,13 @@ Once the gateways, signed pairing, FRP setup, and Signed KH Inventory are ready:
 4. Return to the same Panel dialog and submit a **fresh final publication request**.
 5. Use **Verify**, then test actual VLESS/XHTTP client traffic.
 
-Approval retains signature, request-matching, expiry, and replay checks. Passkey and independent Secure Web Approval are not part of this flow. **Backhaul is not required by FRP.**
+Approval retains signature, request-matching, expiry, and replay checks. FRP runs independently of Backhaul.
+
+To remove the FRP engine, use **Tunnel Management → 8** on the intended host. On Iran, the menu withdraws published FRP routes before prompting for tunnel cleanup in Smite. Remove shared Child tunnels before their Owner, then rerun **8** to complete engine removal. To publish the same port and path after reinstalling, follow the fresh approval and publication steps above.
 
 ### Other networking modes
 
-Private Network/EasyTier, advanced tools, and legacy recovery remain separate menu paths. Backhaul Sidecar remains experimental. For the **active IR + Grandoptical** pair, Backhaul remains on **HOLD**; see the [Issue #102 recovery and signed-peer evidence gates](docs/BACKHAUL-ISSUE102-SIGNED-IMAGE-REVIEW.md#production-recovery-evidence--live-ir--grandoptical-operator-only-hold) before any host action. The [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) describes the older private-network deployment; it is not the selected fresh-install guide.
+Private Network/EasyTier and legacy Sidecar setups have their own menu paths. See the [historical EasyTier validation record](docs/SMITE-EASYTIER-CLEAN-TEST.md) for the older private-network deployment.
 
 ## Sanaei & certificates
 
@@ -108,7 +104,7 @@ Xray archive history is limited by rotation count and early size-based rotations
 
 Choose **Update U-OPTI** from the main menu. The updater stages and validates files, retains a pre-update backup, and supports rollback on failure.
 
-Installations pinned to an experimental source ref retain that channel until explicitly changed. Updating U-OPTI does not by itself migrate running Smite images or reconfigure existing tunnels.
+If U-OPTI was installed from the trial branch or an exact SHA, launch `U_OPTI_BRANCH=main u-opti` and choose **8) Update U-OPTI** to return to the main channel. Existing Smite installations keep their running images and tunnel configuration during a U-OPTI update.
 
 #### One-time transition from U-OPTI 0.16.7
 
@@ -140,13 +136,15 @@ for later releases. Persistent private backups are retained under
 the installation. Existing active services are not automatically upgraded.
 
 
-### Recover an interrupted RC6/RC7 install
+### Recover an interrupted RC6/RC7/RC9 install
 
 Use **Smite Management → Install Components → 7** and review the status before entering `ROLLBACK-RC6`.
 
 The recovery path quarantines owned files and retains stopped containers and volumes. It refuses completed installations, enrolled identities, active managed state, and foreign or replaced resources. After a successful rollback, retry the appropriate fresh-install option.
 
-This is **rollback and retry**, not an active-server migration or a full OS reset. Packages and images remain installed. Do not use the historical RC1 resume tool for RC6. See the [recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) for the exact checks and retained-data locations.
+This operation rolls back eligible install stages and retains packages and images. The [historical RC6/RC7 recovery guide](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) explains the original recovery scope and retained-data locations.
+
+For the older RC7 Panel, **Install Smite Components → 8/9** applies or restores the bundled static UI. See the [RC7 UI update and rollback guide](docs/SMITE-PANEL-UI-UPDATE.md).
 
 ### Backup & uninstall
 
@@ -159,7 +157,7 @@ Use **Backup & Restore** for supported U-OPTI backups, and keep a provider snaps
 | Resource | Purpose |
 | --- | --- |
 | [Feature Catalog](CATALOG.md) | Modules, capabilities, and feature status |
-| [RC6 installation & recovery](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) | Fresh-host requirements, rollback scope, and validation limits |
+| [Historical RC6/RC7 installation & recovery](docs/SMITE-RC6-FRESH-INSTALL-RECOVERY.md) | Fresh-host requirements, rollback scope, and validation limits |
 | [Stage15 release checkpoint](docs/STAGE15-CONSOLE-RELEASE-CHECKPOINT.md) | Source commits, signed images, release evidence, and remaining host tests |
 | [Smite delivery board](https://github.com/aghajani82/Smite/blob/main/docs/SMITE-UOPTI-DELIVERY-BOARD.md) | Cross-repository integration tracking |
 | [Historical EasyTier validation](docs/SMITE-EASYTIER-CLEAN-TEST.md) | Earlier private-network architecture and test results |
@@ -170,4 +168,4 @@ Use **Backup & Restore** for supported U-OPTI backups, and keep a provider snaps
 
 `main` supplies the official installer and self-updater. CI checks source syntax, security contracts, installation behavior, and recovery scenarios; relevant workflows also exercise real disposable Docker containers.
 
-Passing CI is separate from completing a real VPS deployment. The current RC7 fresh-host path still requires operator validation of public TLS, Signed Pairing/Inventory, tunnel publication, real client traffic, and reboot persistence.
+The maintainer verified Backhaul and FRP creation, removal, and reuse of the original port and path on the two test servers. A fresh run of the released installer on both clean hosts remains the final acceptance test.

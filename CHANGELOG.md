@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.18.0] - 2026-11-19
+
+### Added
+
+- Signed Smite RC9 fresh-install menu flows for Iran Panel + Node and the paired Foreign Node, including HTTPS/443, resumable stages, Sanaei inventory, and authenticated pairing.
+- Managed Backhaul publication from Smite and signed FRP on the same pair. The tunnel menu groups Backhaul tunnel deletion and engine removal under option 7, and FRP engine removal under option 8.
+- Coordinated Backhaul tunnel removal verifies both nodes before removing the Panel record. Independent Backhaul engine removal can preserve the active FRP engine and its tunnels.
+
+### Changed
+
+- Fresh installs and updates resolve the selected GitHub ref once, verify downloaded files, and apply staged U-OPTI updates with a durable transaction journal.
+- Document fresh installation and updates from the official `main` channel.
+
+### Fixed
+
+- Allow FRP to publish the same port and path again after verified withdrawal and fresh signed approval. Backhaul also supports reusing the original port and path after removal and setup.
+
+### Validation
+
+- The maintainer verified tunnel creation, removal, and port/path reuse on the test pair. A fresh install of this release on both clean hosts remains the final acceptance test.
+
 ## [0.17.8] - 2026-11-03
 
 ### Added
@@ -214,6 +235,7 @@ No unreleased changes are currently documented.
 - New installs package both Standard FRP modules; updated U-OPTI self-updates fetch and verify them. Legacy v0.15.2 upgrades prepare the missing pair upon relaunch.
 - The Standard FRP WSS/TLS helper is explicitly opt-in and does not replace the upstream Smite image or modify the legacy Private Network Wizard.
 
+
 ### Validation
 
 - Clean IR/KH rebuild, real FRP login, local XHTTP forwarding and authenticated v2rayN/VLESS traffic were validated on October 12, 2026.
@@ -245,6 +267,7 @@ No unreleased changes are currently documented.
 - Certificate sync validates the certificate hostname and matching private key before activation.
 - U-OPTI verifies that `/root/cert` is bound from the exact selected Instance directory before copying certificate material.
 - Certificate and key files are replaced atomically, the private key remains mode `0600`, and renewed material is validated before the deploy hook activates it.
+
 
 ### Validation
 
@@ -283,6 +306,7 @@ No unreleased changes are currently documented.
 - Step 8 only marks Xray/VLESS complete when the configured target port is actually listening on loopback (`127.0.0.1` or `::1`). A wildcard/public listener such as `*:10000` is intentionally rejected even if end-to-end traffic works.
 - The Wizard does not request, persist, or print EasyTier secrets, Backhaul tokens, VLESS UUIDs, or other credentials.
 - Public service exposure remains designed for TCP `80` and `443` only; Smite API/control, EasyTier backends, Backhaul data/control, and Xray targets remain private or loopback-bound as appropriate.
+
 
 ### Validation
 
@@ -332,6 +356,7 @@ No unreleased changes are currently documented.
 - Bootstrap downloads must be non-empty, pass `bash -n`, and contain the expected `show_smite_private_network_menu()` / `show_smite_easytier_menu()` entry points before activation.
 - Internal Smite ports `8000`, `8888`, and Backhaul control remain intended for private/internal reachability only; the validated provider firewall exposed public TCP `80` and `443` only.
 
+
 ### Validation
 
 - Clean Ubuntu 24.04.5 rebuilds were completed for both Iran and Foreign servers.
@@ -374,6 +399,7 @@ No unreleased changes are currently documented.
 - If helper refresh fails but the existing local helper validates, U-OPTI keeps the validated local copy instead of replacing it with unverified content.
 - Digest migration itself continues to verify the running image identity, back up the Compose file, validate `docker compose config`, attempt rollback on validation failure, and confirm that container identity/start time/ImageID remain unchanged.
 - Digest migration does not restart/recreate Smite containers and does not modify X-UI PRO or Sanaei 3x-UI resources.
+
 
 ### Validation
 
