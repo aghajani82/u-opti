@@ -1,6 +1,6 @@
 # U-OPTI
 
-Ubuntu Server Optimization and Management Tool · **v0.18.0**
+Ubuntu Server Optimization and Management Tool · **v0.18.1**
 
 Manage Ubuntu servers through an interactive terminal menu: system maintenance, security, Docker, Sanaei 3x-UI, certificates, backups, and Smite tunnels.
 
@@ -168,4 +168,4 @@ Use **Backup & Restore** for supported U-OPTI backups, and keep a provider snaps
 
 `main` supplies the official installer and self-updater. CI checks source syntax, security contracts, installation behavior, and recovery scenarios; relevant workflows also exercise real disposable Docker containers.
 
-The maintainer verified Backhaul and FRP creation, removal, and reuse of the original port and path on the two test servers. A fresh run of the released installer on both clean hosts remains the final acceptance test.
+The maintainer verified Backhaul and FRP creation, removal, and reuse of the original port and path on the two test servers. The maintainer also confirmed a successful installation after a server rebuild with a new domain.

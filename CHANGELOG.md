@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 No unreleased changes are currently documented.
 
+## [0.18.1] - 2026-11-20
+
+### Fixed
+
+- Restore the signed Foreign Node installer (option 2) and code preparation in the Iran Panel.
+- Apply the compatible RC9 Panel UI during Iran setup and resume. The grant countdown uses the Panel response time to tolerate browser clock skew.
+- Check the grant lifetime after reading the hidden JSON and again after confirming the Node. Report malformed input, expiration and clock mismatch without printing the installation secret.
+
+### Validation
+
+- The maintainer confirmed the installation worked after a server rebuild with a new domain. Smite remains on the signed RC9 runtime selected by U-OPTI.
+
 ## [0.18.0] - 2026-11-19
 
 ### Added

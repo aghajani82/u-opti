@@ -2,7 +2,7 @@
 
 This catalog summarizes the major U-OPTI modules, their purpose, and the boundaries between related subsystems.
 
-Current stable version: **v0.18.0** (signed Smite RC9 fresh-host workflow and independent Backhaul/FRP management)
+Current stable version: **v0.18.1** (signed Smite RC9 fresh-host workflow and independent Backhaul/FRP management)
 
 ## Core System Management
 
