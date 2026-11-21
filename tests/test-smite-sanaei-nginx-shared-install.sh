@@ -169,8 +169,8 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
         esac
     }
 
-    printf '14\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
-    grep -Fxq 'Please enter your selection [0-15]:' "$tmp/xhttp-menu"
+    printf '16\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
+    grep -Fxq 'Please enter your selection [0-16]:' "$tmp/xhttp-menu"
     grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP route sync complete. You can test the published routes now.' "$tmp/xhttp-menu"
@@ -194,8 +194,10 @@ echo "PASS: Guarded XHTTP route sync shows prompts and reports outcomes"
     source "$root/modules/docker-3xui.sh"
     clear() { return 0; }
     docker_3xui_change_panel_path() { echo "Panel path menu selected"; }
-    printf '15\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
+    docker_3xui_change_subscription_url() { echo "Subscription menu selected"; }
+    printf '5\n6\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
     grep -Fxq 'Panel path menu selected' "$tmp/path-menu"
+    grep -Fxq 'Subscription menu selected' "$tmp/path-menu"
 )
 (
     source "$root/modules/docker-3xui.sh"
@@ -243,3 +245,50 @@ EOF
     grep -Fxq '/custom/panel/' "$tmp/path-current"
 )
 echo "PASS: Panel URI path changes preserve subscriptions and roll back on failure"
+
+# Public subscription aliases retain the original /sub/ backend and old links.
+(
+    source "$root/modules/docker-3xui.sh"
+    db="$tmp/subscription-state"
+    site="$tmp/subscription-site.conf"
+    aliases="$tmp/subscription-routes"
+    old_uri=https://example.test/2095/sub/
+    printf '%s\n' "$old_uri" > "$db"
+    printf '%s\n' '    # Sanaei Subscription' '    location ^~ /sub/ {' '    }' > "$site"
+    mktemp() { command mktemp -d "$tmp/subscription-backup.XXXXXX"; }
+    sqlite3() {
+        if [[ "$1" == -readonly ]]; then
+            cat "$db"
+        else
+            local value="${!#}"
+            value="${value#*value=\'}"
+            printf '%s\n' "${value%%\'*}" > "$db"
+        fi
+    }
+    nginx() { test "$1" = -t; }
+    docker() { test "$*" = 'restart 3xui-01'; }
+    systemctl() {
+        if grep -Fq '/bad/' "$aliases/public-url.conf"; then
+            return 1
+        fi
+        test "$*" = 'reload nginx'
+    }
+
+    docker_3xui_apply_subscription_url 3xui-01 example.test "$db" "$site" "$aliases" /feed/ "$old_uri"
+    grep -Fxq "    include $aliases/*.conf;" "$site"
+    grep -Fxq '    location ^~ /sub/ {' "$site"
+    grep -Fxq '        rewrite ^/feed/(.*)$ /sub/$1 last;' "$aliases/public-url.conf"
+    grep -Fxq 'https://example.test/feed/' "$db"
+
+    if docker_3xui_apply_subscription_url 3xui-01 example.test "$db" "$site" "$aliases" /bad/ https://example.test/feed/; then
+        echo "ERROR: Subscription rollback was not triggered" >&2
+        exit 1
+    fi
+    grep -Fxq '    location ^~ /feed/ {' "$aliases/public-url.conf"
+    grep -Fxq 'https://example.test/feed/' "$db"
+
+    docker_3xui_apply_subscription_url 3xui-01 example.test "$db" "$site" "$aliases" /sub/ https://example.test/feed/
+    test ! -s "$aliases/public-url.conf"
+    grep -Fxq 'https://example.test/sub/' "$db"
+)
+echo "PASS: Public subscription URL changes preserve the backend and roll back on failure"
