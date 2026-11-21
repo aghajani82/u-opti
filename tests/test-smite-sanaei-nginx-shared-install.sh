@@ -148,3 +148,43 @@ echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
     grep -Fxq 'Press Enter to return...' "$tmp/ssl-pause"
 )
 echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
+
+# The guarded route menu must show what to enter when stdin is redirected.
+(
+    source "$root/modules/docker-3xui.sh"
+
+    clear() { return 0; }
+    docker_3xui_select_instance() { DOCKER_3XUI_SELECTED_INSTANCE_ID=01; }
+    python3() {
+        case "${!#}" in
+            --check) printf '%s\n' "XHTTP_REVIEW=PASS ROUTES=2 LEGACY_ROUTE=NO" ;;
+            --apply)
+                if [[ "${fail_apply:-no}" == yes ]]; then
+                    printf '%s\n' "HOLD: Mock apply failure"
+                    return 2
+                fi
+                printf '%s\n' "XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    printf '14\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
+    grep -Fxq 'Please enter your selection [0-14]:' "$tmp/xhttp-menu"
+    grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
+    grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
+    grep -Fxq 'XHTTP route sync complete. You can test the published routes now.' "$tmp/xhttp-menu"
+    grep -Fxq 'Press Enter to return to 3x-UI Docker Management...' "$tmp/xhttp-menu"
+
+    printf '\n\n' | docker_3xui_xhttp_guard_menu > "$tmp/xhttp-cancel"
+    grep -Fxq 'Cancelled without changes.' "$tmp/xhttp-cancel"
+    if grep -Fq 'XHTTP_SYNC=' "$tmp/xhttp-cancel"; then
+        echo "ERROR: Blank XHTTP confirmation applied routes" >&2
+        exit 1
+    fi
+
+    fail_apply=yes
+    printf 'y\n\n' | docker_3xui_xhttp_guard_menu > "$tmp/xhttp-failure"
+    grep -Fxq 'XHTTP route sync failed. See the diagnostic above.' "$tmp/xhttp-failure"
+)
+echo "PASS: Guarded XHTTP route sync shows prompts and reports outcomes"
