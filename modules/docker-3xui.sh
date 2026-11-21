@@ -3607,6 +3607,132 @@ docker_3xui_xhttp_guard_menu() {
     read -r answer || return 0
 }
 
+# Update only the managed panel route, retaining other Nginx locations.
+docker_3xui_apply_panel_path() {
+    local container="$1" domain="$2" compat="$3" site="$4" old="$5" new="$6"
+    local backup attempt status restored=1
+
+    backup="$(mktemp -d /root/sanaei-path-backup.XXXXXX)" || return 1
+    if ! cp -a -- "$compat" "$backup/compat.env" ||
+       ! cp -a -- "$site" "$backup/nginx.conf"; then
+        echo "ERROR: Could not back up panel path configuration."
+        return 1
+    fi
+
+    if sed -i \
+        -e "s|^# Web Base Path: $old$|# Web Base Path: $new|" \
+        -e "s|^    location = ${old%/} {$|    location = ${new%/} {|" \
+        -e "s|^        return 301 $old;$|        return 301 $new;|" \
+        -e "s|^    location \^~ $old {$|    location ^~ $new {|" "$site" &&
+       nginx -t &&
+       docker_3xui_compat_configure_web_base_path "$container" "$new" &&
+       docker restart "$container" >/dev/null &&
+       systemctl reload nginx; then
+        for attempt in {1..15}; do
+            status="$(curl --noproxy '*' --resolve "$domain:443:127.0.0.1" \
+                --max-time 3 -sS -o /dev/null -w '%{http_code}' \
+                "https://$domain$new" 2>/dev/null)" || status=""
+            case "$status" in
+                200|301|302|303|307|308)
+                    if sed -i "s|^WEB_BASE_PATH=$old$|WEB_BASE_PATH=$new|" "$compat"; then
+                        printf 'Panel URL: https://%s%s\n' "$domain" "$new"
+                        printf 'Backup: %s\n' "$backup"
+                        return 0
+                    fi
+                    break
+                    ;;
+            esac
+            sleep 1
+        done
+    fi
+
+    echo "ERROR: Panel path change failed. Restoring the previous path..."
+    cp -a -- "$backup/compat.env" "$compat" || restored=0
+    cp -a -- "$backup/nginx.conf" "$site" || restored=0
+    docker_3xui_compat_configure_web_base_path "$container" "$old" &&
+        docker restart "$container" >/dev/null || restored=0
+    nginx -t && systemctl reload nginx || restored=0
+    if [ "$restored" = 1 ]; then
+        echo "Previous panel path restored."
+    else
+        echo "ERROR: Rollback incomplete. Restore from the retained backup."
+    fi
+    printf 'Backup: %s\n' "$backup"
+    return 1
+}
+
+docker_3xui_change_panel_path() {
+    if ! docker_3xui_select_instance; then
+        return 0
+    fi
+
+    local container="$DOCKER_3XUI_CONTAINER"
+    local domain="$DOCKER_3XUI_DOMAIN"
+    local compat="$DOCKER_3XUI_COMPAT_ENV"
+    local site="/etc/nginx/sites-available/3xui-$domain"
+    local enabled="/etc/nginx/sites-enabled/3xui-$domain"
+    local old new input existing
+
+    if [[ ! -f "$compat" || -L "$compat" || ! -f "$site" || -L "$site" ||
+          ! -L "$enabled" || ! "$enabled" -ef "$site" ]] ||
+       ! grep -Fxq '# U-OPTI-MANAGED-3XUI-NGINX' "$site" ||
+       ! docker_3xui_is_running; then
+        echo "ERROR: A running instance with an enabled, U-OPTI-managed HTTPS site is required."
+        printf '%s\n' "Press Enter to return..."
+        read -r input || return 0
+        return 0
+    fi
+
+    old="$(sed -n 's/^WEB_BASE_PATH=//p' "$compat")"
+    if [[ ! "$old" =~ ^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/$ ]] ||
+       ! grep -Fxq "    location = ${old%/} {" "$site" ||
+       ! grep -Fxq "    location ^~ $old {" "$site" ||
+       ! grep -Fxq "        return 301 $old;" "$site"; then
+        echo "ERROR: The saved panel path does not match the managed Nginx site."
+        printf '%s\n' "Press Enter to return..."
+        read -r input || return 0
+        return 0
+    fi
+
+    printf 'Current panel path: %s\n' "$old"
+    printf '%s\n' "Enter a new panel URI path (example: /my-panel/), or Enter to cancel:"
+    read -r input || return 0
+    [ -n "$input" ] || return 0
+    if ! new="$(docker_3xui_normalize_web_base_path "$input")"; then
+        printf '%s\n' "$new"
+    elif [[ "$new" == "$old" ]]; then
+        echo "The panel already uses that path."
+    elif [[ "$new" == / || "$new" == /smite-node/* ]]; then
+        echo "ERROR: Choose a dedicated path outside /smite-node/."
+    else
+        # The public HTTPS site may also serve Smite and custom routes.
+        while IFS= read -r existing; do
+            existing="${existing%/}/"
+            if [[ "$existing" != / && "$existing" != "$old" &&
+                  ( "$new" == "$existing"* || "$existing" == "$new"* ) ]]; then
+                echo "ERROR: That path overlaps an existing Nginx location."
+                printf '%s\n' "Press Enter to return..."
+                read -r input || return 0
+                return 0
+            fi
+        done < <(sed -nE 's/^[[:space:]]*location[[:space:]]+((=|\^~)[[:space:]]+)?(\/[A-Za-z0-9_/-]+)[[:space:]]*\{.*/\3/p' "$site")
+
+        printf 'New panel URL: https://%s%s\n' "$domain" "$new"
+        printf '%s\n' "Apply the path change and briefly restart 3x-UI? [y/N]:"
+        read -r input || return 0
+        if [[ "$input" == y || "$input" == Y ]]; then
+            if docker_3xui_load_compat; then
+                docker_3xui_apply_panel_path "$container" "$domain" "$compat" "$site" "$old" "$new" || true
+            fi
+        else
+            echo "Panel path change cancelled."
+        fi
+    fi
+
+    printf '%s\n' "Press Enter to return..."
+    read -r input || return 0
+}
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -3629,11 +3755,12 @@ show_docker_3xui_menu() {
         echo "12) Nginx / SSL Configuration"
         echo "13) Default Website / FakeSite"
         echo "14) Sync guarded dynamic XHTTP routes"
+        echo "15) Change Panel URI Path"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-14]:"
+        printf '%s\n' "Please enter your selection [0-15]:"
         read -r DOCKER_3XUI_CHOICE || return 0
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
@@ -3653,6 +3780,7 @@ show_docker_3xui_menu() {
             12) docker_3xui_nginx_ssl_management ;;
             13) docker_3xui_fakesite_management ;;
             14) docker_3xui_xhttp_guard_menu ;;
+            15) docker_3xui_change_panel_path ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
