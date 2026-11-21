@@ -170,7 +170,7 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
     }
 
     printf '14\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
-    grep -Fxq 'Please enter your selection [0-14]:' "$tmp/xhttp-menu"
+    grep -Fxq 'Please enter your selection [0-15]:' "$tmp/xhttp-menu"
     grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP route sync complete. You can test the published routes now.' "$tmp/xhttp-menu"
@@ -188,3 +188,58 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
     grep -Fxq 'XHTTP route sync failed. See the diagnostic above.' "$tmp/xhttp-failure"
 )
 echo "PASS: Guarded XHTTP route sync shows prompts and reports outcomes"
+
+# Exercise menu dispatch, path changes, and rollback without a running instance.
+(
+    source "$root/modules/docker-3xui.sh"
+    clear() { return 0; }
+    docker_3xui_change_panel_path() { echo "Panel path menu selected"; }
+    printf '15\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
+    grep -Fxq 'Panel path menu selected' "$tmp/path-menu"
+)
+(
+    source "$root/modules/docker-3xui.sh"
+    compat="$tmp/path-compat.env"
+    site="$tmp/path-site.conf"
+    printf '%s\n' 'WEB_BASE_PATH=/original/' 'SUBSCRIPTION_PORT=2095' > "$compat"
+    cat > "$site" <<'EOF'
+# Web Base Path: /original/
+    location = /original {
+        return 301 /original/;
+    }
+    location ^~ /original/ {
+        proxy_pass http://127.0.0.1:2053;
+    }
+    location ^~ /sub/ {
+        proxy_pass http://127.0.0.1:2095;
+    }
+EOF
+    mktemp() { command mktemp -d "$tmp/path-backup.XXXXXX"; }
+    nginx() { test "$1" = -t; }
+    docker() { test "$*" = "restart 3xui-01"; }
+    systemctl() { test "$*" = "reload nginx"; }
+    curl() { printf '302'; }
+    docker_3xui_compat_configure_web_base_path() {
+        test "$1" = 3xui-01 || return 1
+        printf '%s\n' "$2" > "$tmp/path-current"
+        test "$2" != /fail/
+    }
+
+    docker_3xui_apply_panel_path 3xui-01 example.test "$compat" "$site" /original/ /custom/panel/
+    grep -Fxq 'WEB_BASE_PATH=/custom/panel/' "$compat"
+    grep -Fxq '    location = /custom/panel {' "$site"
+    grep -Fxq '        return 301 /custom/panel/;' "$site"
+    grep -Fxq '    location ^~ /custom/panel/ {' "$site"
+    grep -Fxq '    location ^~ /sub/ {' "$site"
+    cp "$compat" "$tmp/path-expected-compat"
+    cp "$site" "$tmp/path-expected-site"
+
+    if docker_3xui_apply_panel_path 3xui-01 example.test "$compat" "$site" /custom/panel/ /fail/; then
+        echo "ERROR: Failed panel path change succeeded" >&2
+        exit 1
+    fi
+    cmp -s "$compat" "$tmp/path-expected-compat"
+    cmp -s "$site" "$tmp/path-expected-site"
+    grep -Fxq '/custom/panel/' "$tmp/path-current"
+)
+echo "PASS: Panel URI path changes preserve subscriptions and roll back on failure"
