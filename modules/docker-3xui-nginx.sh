@@ -89,7 +89,8 @@ docker_3xui_nginx_build_server_names() {
 
 docker_3xui_nginx_pause() {
     echo
-    read -r -p "Press Enter to return..." _
+    printf '%s\n' "Press Enter to return..."
+    read -r _
 }
 
 

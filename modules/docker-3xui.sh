@@ -3494,7 +3494,8 @@ docker_3xui_nginx_ssl_management() {
         echo "0) Back"
         echo
 
-        read -r -p "Please enter your selection [0-3]: " NGINX_MENU_CHOICE
+        printf '%s\n' "Please enter your selection [0-3]:"
+        read -r NGINX_MENU_CHOICE || return 0
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE#"${NGINX_MENU_CHOICE%%[![:space:]]*}"}"
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE%"${NGINX_MENU_CHOICE##*[![:space:]]}"}"
 
@@ -3533,7 +3534,8 @@ docker_3xui_nginx_ssl_management() {
                 echo "  Web Base Path  : ${DOCKER_3XUI_WEB_BASE_PATH:-/}"
                 echo
 
-                read -r -p "Continue with Nginx / SSL setup? [y/N]: " CONFIRM
+                printf '%s\n' "Continue with Nginx / SSL setup? [y/N]:"
+                read -r CONFIRM || return 0
 
                 case "$CONFIRM" in
                     y|Y|yes|YES)
