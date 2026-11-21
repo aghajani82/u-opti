@@ -81,3 +81,43 @@ grep -Fq 'docker_3xui_nginx_activate_shared_smite "$temp_path" "$site_path"' "$r
 grep -Fq 'Reusing existing Smite ACME HTTP/80 vhost' "$root/modules/docker-3xui-nginx.sh"
 grep -Fq 'conflicting server name .*on .*:443' "$root/modules/docker-3xui-nginx.sh"
 echo "PASS: Imported Smite control remains restricted while preserving Sanaei routes; fails closed on invalid source"
+
+# Exercise the standard Sanaei HTTPS flow with a separate www hostname.
+(
+    DOCKER_3XUI_NGINX_DOMAIN="example.test"
+    DOCKER_3XUI_NGINX_ACME_ROOT="$tmp/webroot"
+    DOCKER_3XUI_NGINX_ACME_CONF_DIR="$tmp/conf.d"
+    DOCKER_3XUI_NGINX_SITES_AVAILABLE="$tmp/sites-available"
+    DOCKER_3XUI_NGINX_SITES_ENABLED="$tmp/sites-enabled"
+    DOCKER_3XUI_NGINX_WEB_BASE_PATH="/panel/"
+    DOCKER_3XUI_NGINX_PANEL_PORT=2053
+    DOCKER_3XUI_NGINX_SUB_PORT=2095
+    DOCKER_3XUI_NGINX_CERTBOT_BIN=mock_certbot
+
+    mkdir -p "$DOCKER_3XUI_NGINX_ACME_CONF_DIR" \
+        "$DOCKER_3XUI_NGINX_SITES_AVAILABLE" "$DOCKER_3XUI_NGINX_SITES_ENABLED"
+    nginx() { return 0; }
+    systemctl() { return 0; }
+    curl() {
+        printf '%s\n' "$@" >> "$tmp/acme-args"
+        printf '%s\n' "u-opti-test"
+    }
+    mock_certbot() {
+        printf '%s\n' "$@" > "$tmp/certbot-args"
+        return 1
+    }
+
+    docker_3xui_nginx_prepare_acme
+    docker_3xui_nginx_write_site
+    if docker_3xui_nginx_issue_certificate > "$tmp/issue-output"; then
+        echo "ERROR: Sanaei accepted a failed certificate request" >&2
+        exit 1
+    fi
+
+    grep -Fq 'server_name example.test;' "$(docker_3xui_nginx_acme_conf_path)"
+    grep -Fq 'server_name example.test;' "$(docker_3xui_nginx_site_path)"
+    grep -Fxq 'Host: example.test' "$tmp/acme-args"
+    test "$(sed -n '/^-d$/{n;p;}' "$tmp/certbot-args")" = 'example.test'
+    test "$(docker_3xui_nginx_build_server_names example.test)" = 'example.test www.example.test'
+)
+echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
