@@ -3672,6 +3672,11 @@ docker_3xui_change_panel_path() {
     local site="/etc/nginx/sites-available/3xui-$domain"
     local enabled="/etc/nginx/sites-enabled/3xui-$domain"
     local old new input existing
+    local -a route_files=("$site")
+    local subscription_route="/etc/nginx/u-opti-3xui-subscription-$domain/public-url.conf"
+    if [[ -f "$subscription_route" ]]; then
+        route_files+=("$subscription_route")
+    fi
 
     if [[ ! -f "$compat" || -L "$compat" || ! -f "$site" || -L "$site" ||
           ! -L "$enabled" || ! "$enabled" -ef "$site" ]] ||
@@ -3715,7 +3720,7 @@ docker_3xui_change_panel_path() {
                 read -r input || return 0
                 return 0
             fi
-        done < <(sed -nE 's/^[[:space:]]*location[[:space:]]+((=|\^~)[[:space:]]+)?(\/[A-Za-z0-9_/-]+)[[:space:]]*\{.*/\3/p' "$site")
+        done < <(sed -nE 's/^[[:space:]]*location[[:space:]]+((=|\^~)[[:space:]]+)?(\/[A-Za-z0-9_/-]+)[[:space:]]*\{.*/\3/p' "${route_files[@]}")
 
         printf 'New panel URL: https://%s%s\n' "$domain" "$new"
         printf '%s\n' "Apply the path change and briefly restart 3x-UI? [y/N]:"
@@ -3733,6 +3738,134 @@ docker_3xui_change_panel_path() {
     read -r input || return 0
 }
 
+
+docker_3xui_apply_subscription_url() (
+    local container="$1" domain="$2" db="$3" site="$4" aliases="$5" path="$6" old_uri="$7"
+    local include="    include $aliases/*.conf;"
+    local snippet="$aliases/public-url.conf"
+    local new_uri="https://$domain$path" backup candidate prior_uri restored=1 database_updated=0
+
+    umask 077
+    if [[ -L "$aliases" || -L "$snippet" || ( -e "$snippet" && ! -f "$snippet" ) ]]; then
+        echo "ERROR: Unexpected subscription route file."
+        return 1
+    fi
+    backup="$(mktemp -d /root/sanaei-subscription-backup.XXXXXX)" || return 1
+    cp -a -- "$site" "$backup/nginx.conf" || return 1
+    printf '%s\n' "$old_uri" > "$backup/subURI" || return 1
+    if [[ -f "$snippet" ]]; then
+        cp -a -- "$snippet" "$backup/public-url.conf" || return 1
+    fi
+
+    candidate="$backup/candidate.conf"
+    if [[ "$path" != /sub/ ]]; then
+        printf '    location ^~ %s {\n        rewrite ^%s(.*)$ /sub/$1 last;\n    }\n' \
+            "$path" "$path" > "$candidate" || return 1
+    else
+        : > "$candidate" || return 1
+    fi
+
+    if mkdir -p -- "$aliases" &&
+       cp -a -- "$candidate" "$snippet" &&
+       { grep -Fxq "$include" "$site" ||
+         sed -i "\|^    # Sanaei Subscription$|a\\$include" "$site"; } &&
+       grep -Fxq "$include" "$site" &&
+       nginx -t &&
+       sqlite3 -cmd '.timeout 5000' "$db" "UPDATE settings SET value='$new_uri' WHERE key='subURI';" &&
+       database_updated=1 &&
+       [[ "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subURI';")" == "$new_uri" ]] &&
+       docker restart "$container" >/dev/null &&
+       systemctl reload nginx; then
+        printf 'Subscription base URL: %s\n' "$new_uri"
+        printf 'Backup: %s\n' "$backup"
+        return 0
+    fi
+
+    echo "ERROR: Subscription URL change failed. Restoring the previous settings..."
+    cp -a -- "$backup/nginx.conf" "$site" || restored=0
+    if [[ -f "$backup/public-url.conf" ]]; then
+        cp -a -- "$backup/public-url.conf" "$snippet" || restored=0
+    else
+        rm -f -- "$snippet" || restored=0
+    fi
+    if [[ "$database_updated" == 1 ]]; then
+        prior_uri="${old_uri//\'/\'\'}"
+        sqlite3 -cmd '.timeout 5000' "$db" "UPDATE settings SET value='$prior_uri' WHERE key='subURI';" &&
+            docker restart "$container" >/dev/null || restored=0
+    fi
+    nginx -t && systemctl reload nginx || restored=0
+    if [[ "$restored" == 1 ]]; then
+        echo "Previous subscription settings restored."
+    else
+        echo "ERROR: Rollback incomplete. Use the retained backup."
+    fi
+    printf 'Backup: %s\n' "$backup"
+    return 1
+)
+
+docker_3xui_change_subscription_url() {
+    docker_3xui_select_instance || return 0
+
+    local domain="$DOCKER_3XUI_DOMAIN" input path old_uri
+    local db="$DOCKER_3XUI_DIR/db/x-ui.db"
+    local site="/etc/nginx/sites-available/3xui-$domain"
+    local enabled="/etc/nginx/sites-enabled/3xui-$domain"
+    local aliases="/etc/nginx/u-opti-3xui-subscription-$domain"
+    local existing
+
+    if [[ ! "$domain" =~ ^[A-Za-z0-9.-]+$ || ! -f "$db" || -L "$db" ||
+          ! -f "$site" || -L "$site" || ! -L "$enabled" || ! "$enabled" -ef "$site" ]] ||
+       ! grep -Fxq '# U-OPTI-MANAGED-3XUI-NGINX' "$site" ||
+       ! grep -Fxq '    # Sanaei Subscription' "$site" ||
+       ! grep -Fxq '    location ^~ /sub/ {' "$site" ||
+       ! docker_3xui_is_running ||
+       [[ "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subPath';")" != /sub/ ]] ||
+       [[ "$(sqlite3 -readonly "$db" "SELECT count(*) FROM settings WHERE key='subURI';")" != 1 ]] ||
+       ! old_uri="$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subURI';")"; then
+        echo "ERROR: A running instance with the managed HTTPS /sub/ route is required."
+        printf '%s\n' "Press Enter to return..."
+        read -r input || return 0
+        return 0
+    fi
+
+    printf 'Current subscription base URL: %s\n' "${old_uri:-https://$domain/sub/}"
+    printf '%s\n' "Enter the public subscription path (example: /my-sub/ or /sub/), or Enter to cancel:"
+    read -r input || return 0
+    [ -n "$input" ] || return 0
+    if [[ "$input" == sub || "$input" == /sub || "$input" == sub/ || "$input" == /sub/ ]]; then
+        path=/sub/
+    elif ! path="$(docker_3xui_normalize_web_base_path "$input")" ||
+         [[ "$path" == / || "$path" == /smite-node/* ]]; then
+        echo "ERROR: Choose a dedicated subscription path using letters, digits, _ or -."
+        printf '%s\n' "Press Enter to return..."
+        read -r input || return 0
+        return 0
+    fi
+
+    while IFS= read -r existing; do
+        existing="${existing%/}/"
+        if [[ "$existing" != / && ( "$path" == "$existing"* || "$existing" == "$path"* ) &&
+              ! ( "$path" == /sub/ && "$existing" == /sub/ ) ]]; then
+            echo "ERROR: That path overlaps an existing Nginx location."
+            printf '%s\n' "Press Enter to return..."
+            read -r input || return 0
+            return 0
+        fi
+    done < <(sed -nE 's/^[[:space:]]*location[[:space:]]+((=|\^~)[[:space:]]+)?(\/[A-Za-z0-9_/-]+)[[:space:]]*\{.*/\3/p' "$site")
+
+    printf 'New subscription base URL: https://%s%s\n' "$domain" "$path"
+    printf '%s\n' "Apply and briefly restart 3x-UI? [y/N]:"
+    read -r input || return 0
+    if [[ "$input" == y || "$input" == Y ]]; then
+        docker_3xui_apply_subscription_url "$DOCKER_3XUI_CONTAINER" "$domain" \
+            "$db" "$site" "$aliases" "$path" "$old_uri" || true
+    else
+        echo "Subscription URL change cancelled."
+    fi
+    printf '%s\n' "Press Enter to return..."
+    read -r input || return 0
+}
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -3745,22 +3878,23 @@ show_docker_3xui_menu() {
         echo "2) Start 3x-UI"
         echo "3) Stop 3x-UI"
         echo "4) Change Panel Port"
-        echo "5) Restart 3x-UI"
-        echo "6) Update 3x-UI"
-        echo "7) Backup 3x-UI"
-        echo "8) Restore 3x-UI"
-        echo "9) Uninstall 3x-UI"
-        echo "10) Show Status"
-        echo "11) Sanaei 3x-UI Management"
-        echo "12) Nginx / SSL Configuration"
-        echo "13) Default Website / FakeSite"
-        echo "14) Sync guarded dynamic XHTTP routes"
-        echo "15) Change Panel URI Path"
+        echo "5) Change Panel URI Path"
+        echo "6) Change Subscription URL"
+        echo "7) Restart 3x-UI"
+        echo "8) Update 3x-UI"
+        echo "9) Backup 3x-UI"
+        echo "10) Restore 3x-UI"
+        echo "11) Uninstall 3x-UI"
+        echo "12) Show Status"
+        echo "13) Sanaei 3x-UI Management"
+        echo "14) Nginx / SSL Configuration"
+        echo "15) Default Website / FakeSite"
+        echo "16) Sync guarded dynamic XHTTP routes"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-15]:"
+        printf '%s\n' "Please enter your selection [0-16]:"
         read -r DOCKER_3XUI_CHOICE || return 0
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
@@ -3770,17 +3904,18 @@ show_docker_3xui_menu() {
             2) docker_3xui_start ;;
             3) docker_3xui_stop ;;
             4) docker_3xui_change_panel_port ;;
-            5) docker_3xui_restart ;;
-            6) docker_3xui_update ;;
-            7) docker_3xui_backup ;;
-            8) docker_3xui_restore ;;
-            9) docker_3xui_uninstall ;;
-            10) docker_3xui_status ;;
-            11) docker_3xui_sanaei_management ;;
-            12) docker_3xui_nginx_ssl_management ;;
-            13) docker_3xui_fakesite_management ;;
-            14) docker_3xui_xhttp_guard_menu ;;
-            15) docker_3xui_change_panel_path ;;
+            5) docker_3xui_change_panel_path ;;
+            6) docker_3xui_change_subscription_url ;;
+            7) docker_3xui_restart ;;
+            8) docker_3xui_update ;;
+            9) docker_3xui_backup ;;
+            10) docker_3xui_restore ;;
+            11) docker_3xui_uninstall ;;
+            12) docker_3xui_status ;;
+            13) docker_3xui_sanaei_management ;;
+            14) docker_3xui_nginx_ssl_management ;;
+            15) docker_3xui_fakesite_management ;;
+            16) docker_3xui_xhttp_guard_menu ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
