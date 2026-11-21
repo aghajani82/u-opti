@@ -3866,6 +3866,126 @@ docker_3xui_change_subscription_url() {
     read -r input || return 0
 }
 
+
+# Verify the configured panel path after starting an image on the host network.
+docker_3xui_verify_version_switch() {
+    local container="$1" image_id="$2" port="$3" path="$4" attempt
+    for attempt in {1..20}; do
+        if [[ "$(docker inspect --format '{{.State.Status}} {{.Image}}' "$container" 2>/dev/null)" == "running $image_id" ]] &&
+           curl --noproxy '*' --fail --silent --max-time 2 --output /dev/null "http://127.0.0.1:$port$path"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+docker_3xui_apply_version_switch() (
+    local target="$1" container="$DOCKER_3XUI_CONTAINER" compose="$DOCKER_3XUI_COMPOSE_FILE"
+    local data="$DOCKER_3XUI_DIR" port="$DOCKER_3XUI_PANEL_PORT"
+    local path previous_id target_id backup rollback_image
+
+    umask 077
+    path="$(sed -n 's/^WEB_BASE_PATH=//p' "$DOCKER_3XUI_COMPAT_ENV")" || return 1
+    if [[ ! "$path" =~ ^/([A-Za-z0-9_-]+/)*$ || ! "$port" =~ ^[0-9]+$ ||
+          ! -f "$compose" || -L "$compose" || ! -d "$data/db" || -L "$data/db" ||
+          ! -s "$data/db/x-ui.db" || -L "$data/db/x-ui.db" ||
+          ! -d "$data/cert" || -L "$data/cert" ]] ||
+       [[ "$(grep -cE '^[[:space:]]+image:[[:space:]]+' "$compose")" != 1 ]] ||
+       ! docker_3xui_is_running; then
+        echo "ERROR: Running U-OPTI instance, panel settings and managed Compose file are required."
+        return 1
+    fi
+    previous_id="$(docker inspect --format '{{.Image}}' "$container")" || return 1
+    [[ "$previous_id" == sha256:* ]] || return 1
+
+    printf 'Pulling %s before stopping the current instance...\n' "$target"
+    docker pull "$target" || {
+        echo "ERROR: The requested image could not be downloaded. The running instance was left online."
+        return 1
+    }
+    target_id="$(docker image inspect --format '{{.Id}}' "$target")" || return 1
+    [[ "$target_id" == sha256:* ]] || return 1
+    if [[ "$target_id" == "$previous_id" ]]; then
+        echo "The requested image is already running."
+        return 0
+    fi
+
+    mkdir -p "$data/backups" || return 1
+    backup="$(mktemp -d "$data/backups/pre-version-change.XXXXXX")" || return 1
+    rollback_image="u-opti/3x-ui-rollback:${backup##*.}"
+    cp -a -- "$compose" "$backup/docker-compose.yml" &&
+        docker tag "$previous_id" "$rollback_image" || return 1
+    printf 'Backup directory: %s\n' "$backup"
+    printf '%s\n' "$rollback_image" > "$backup/rollback-image" || return 1
+
+    docker stop "$container" >/dev/null || return 1
+    if ! tar -C "$data" -czf "$backup/data.tar.gz" db cert; then
+        echo "ERROR: Could not take a stopped-instance data backup."
+        docker start "$container" >/dev/null || echo "ERROR: Could not restart the original container."
+        return 1
+    fi
+
+    if sed -i "s|^\([[:space:]]\+image:\).*|\1 $target|" "$compose" &&
+       docker compose -f "$compose" up -d --force-recreate --pull never &&
+       docker_3xui_verify_version_switch "$container" "$target_id" "$port" "$path"; then
+        printf 'Image running: %s\n' "$target"
+        return 0
+    fi
+
+    echo "ERROR: The selected version did not pass the panel check. Restoring the previous image and data..."
+    if docker compose -f "$compose" stop &&
+       mkdir "$backup/restore" "$backup/failed-data" &&
+       tar -C "$backup/restore" -xzf "$backup/data.tar.gz" &&
+       mv -- "$data/db" "$data/cert" "$backup/failed-data/" &&
+       mv -- "$backup/restore/db" "$backup/restore/cert" "$data/" &&
+       sed "s|^\([[:space:]]\+image:\).*|\1 $rollback_image|" "$backup/docker-compose.yml" > "$compose" &&
+       docker compose -f "$compose" up -d --force-recreate --pull never &&
+       docker_3xui_verify_version_switch "$container" "$previous_id" "$port" "$path" &&
+       cp -a -- "$backup/docker-compose.yml" "$compose"; then
+        echo "Previous image and data restored."
+    else
+        printf 'ERROR: Rollback incomplete. Recovery files and image details: %s\n' "$backup"
+    fi
+    return 1
+)
+
+docker_3xui_change_version() {
+    docker_3xui_select_instance || return 0
+    local choice version target
+
+    printf '%s\n' "1) Choose an official Sanaei release" "2) Switch to the U-OPTI fork image" "0) Back"
+    printf '%s\n' "Select image source [0-2]:"
+    read -r choice || return 0
+    case "$choice" in
+        1)
+            printf '%s\n' "Enter a release version (example: v3.10.0), or Enter to cancel:"
+            read -r version || return 0
+            [[ -n "$version" ]] || return 0
+            if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "ERROR: Enter a version like v3.10.0."
+                printf '%s\n' "Press Enter to return..."
+                read -r choice || return 0
+                return 0
+            fi
+            target="ghcr.io/mhsanaei/3x-ui:v${version#v}"
+            ;;
+        2) target="$DOCKER_3XUI_IMAGE" ;;
+        *) return 0 ;;
+    esac
+
+    printf 'Selected image: %s\n' "$target"
+    printf '%s\n' "The container will stop briefly for a data backup and version change."
+    printf '%s\n' "An older release might not support data created by a newer release."
+    printf '%s\n' "Apply this version change? [y/N]:"
+    read -r choice || return 0
+    if [[ "$choice" == y || "$choice" == Y ]]; then
+        docker_3xui_apply_version_switch "$target" || true
+    fi
+    printf '%s\n' "Press Enter to return..."
+    read -r choice || return 0
+}
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -3890,11 +4010,12 @@ show_docker_3xui_menu() {
         echo "14) Nginx / SSL Configuration"
         echo "15) Default Website / FakeSite"
         echo "16) Sync guarded dynamic XHTTP routes"
+        echo "17) Change 3x-UI Version"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-16]:"
+        printf '%s\n' "Please enter your selection [0-17]:"
         read -r DOCKER_3XUI_CHOICE || return 0
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
@@ -3916,6 +4037,7 @@ show_docker_3xui_menu() {
             14) docker_3xui_nginx_ssl_management ;;
             15) docker_3xui_fakesite_management ;;
             16) docker_3xui_xhttp_guard_menu ;;
+            17) docker_3xui_change_version ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
