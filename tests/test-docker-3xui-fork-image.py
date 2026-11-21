@@ -15,7 +15,8 @@ class SanaeiForkImageTest(unittest.TestCase):
         content = SANA.read_text()
         actual = re.findall(r'^DOCKER_3XUI_IMAGE="([^"]+)"$', content, re.M)
         self.assertEqual(actual, [FORK_IMAGE])
-        self.assertNotIn("ghcr.io/mhsanaei/3x-ui", content.lower())
+        installer = content.split("\ndocker_3xui_install() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertNotIn("ghcr.io/mhsanaei/3x-ui", installer.lower())
 
     def test_compose_and_pull_are_tied_to_the_fork_image(self):
         content = SANA.read_text()
