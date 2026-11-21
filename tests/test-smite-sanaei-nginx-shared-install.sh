@@ -121,3 +121,30 @@ echo "PASS: Imported Smite control remains restricted while preserving Sanaei ro
     test "$(docker_3xui_nginx_build_server_names example.test)" = 'example.test www.example.test'
 )
 echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
+
+# SSH wrappers and redirected stdin still need to see the menu prompts.
+(
+    source "$root/modules/docker-3xui.sh"
+
+    clear() { return 0; }
+    sleep() { return 0; }
+    docker_3xui_load_nginx() { return 0; }
+    docker_3xui_select_instance() { DOCKER_3XUI_INSTANCE_ID=01; }
+    docker_3xui_nginx_setup() { printf '%s\n' "SSL setup called"; }
+
+    printf '1\ny\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/ssl-menu"
+    grep -Fxq 'Please enter your selection [0-3]:' "$tmp/ssl-menu"
+    grep -Fxq 'Continue with Nginx / SSL setup? [y/N]:' "$tmp/ssl-menu"
+    grep -Fxq 'SSL setup called' "$tmp/ssl-menu"
+
+    printf '1\n\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/ssl-cancel"
+    grep -Fxq 'Nginx / SSL setup cancelled.' "$tmp/ssl-cancel"
+    if grep -Fxq 'SSL setup called' "$tmp/ssl-cancel"; then
+        echo "ERROR: Blank confirmation accepted" >&2
+        exit 1
+    fi
+
+    printf '\n' | docker_3xui_nginx_pause > "$tmp/ssl-pause"
+    grep -Fxq 'Press Enter to return...' "$tmp/ssl-pause"
+)
+echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
