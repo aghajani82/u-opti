@@ -6,14 +6,8 @@
 # This module configures public HTTPS access for a Sanaei 3x-UI Docker
 # instance managed by docker-3xui.sh.
 #
-# v0.13.0 changes:
-#   - Automatic www / non-www alias for apex domains.
-#   - Certificate requests now include both apex and www names.
-#   - ACME challenge config serves all server names.
-#   - Custom Domain and SSL-only modes follow the same alias rules.
-#   - Repair reporting distinguishes repaired sites from skipped sites.
-#   - Repair can fix missing certificate coverage even when server_name is already correct.
-#   - Repair menu wording is scoped to U-OPTI-managed Nginx sites.
+# Sanaei uses the configured hostname for Nginx and HTTPS certificates.
+# Custom Domain and explicit repair of U-OPTI sites can add www / non-www names.
 
 DOCKER_3XUI_NGINX_CONTAINER="3xui"
 DOCKER_3XUI_NGINX_DIR="/opt/3x-ui"
@@ -373,12 +367,8 @@ PY_SMITE_MERGE
 }
 
 docker_3xui_nginx_existing_domain_conflict() {
-    local server_names
     local site_path
     local output=""
-    local name
-
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
 
     site_path="$(docker_3xui_nginx_site_path)"
 
@@ -399,28 +389,22 @@ docker_3xui_nginx_existing_domain_conflict() {
     local foreign_smite_source=""
     foreign_smite_source="$(docker_3xui_nginx_foreign_smite_source || true)"
     if [[ -n "$foreign_smite_source" ]]; then
-        if [[ "$server_names" != "$DOCKER_3XUI_NGINX_DOMAIN" ]]; then
-            echo "ERROR: Shared Foreign domain cannot have additional aliases."
-            return 1
-        fi
         return 0
     fi
 
-    for name in $server_names; do
-        if grep -Eq \
-            "server_name[[:space:]]+[^;]*(^|[[:space:]])${name}([[:space:]]|;)" \
-            <<< "$output"; then
+    if grep -Eq \
+        "server_name[[:space:]]+[^;]*(^|[[:space:]])${DOCKER_3XUI_NGINX_DOMAIN}([[:space:]]|;)" \
+        <<< "$output"; then
 
-            if [[ ! -f "$site_path" ]] ||
-               ! docker_3xui_nginx_site_is_managed "$site_path"; then
+        if [[ ! -f "$site_path" ]] ||
+           ! docker_3xui_nginx_site_is_managed "$site_path"; then
 
-                echo "Error: The domain '$name' is already configured in Nginx."
-                echo
-                echo "U-OPTI will not overwrite an existing non-U-OPTI site."
-                return 1
-            fi
+            echo "Error: The domain '$DOCKER_3XUI_NGINX_DOMAIN' is already configured in Nginx."
+            echo
+            echo "U-OPTI will not overwrite an existing non-U-OPTI site."
+            return 1
         fi
-    done
+    fi
 
     return 0
 }
@@ -430,10 +414,8 @@ docker_3xui_nginx_prepare_acme() {
     local conf_path
     local previous=""
     local had_previous=0
-    local server_names
 
     conf_path="$(docker_3xui_nginx_acme_conf_path)"
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
 
     # Reuse the verified Smite HTTP-01 webroot when the two panels
     # intentionally share one public domain. Never create two :80 vhosts.
@@ -472,13 +454,13 @@ docker_3xui_nginx_prepare_acme() {
     cat > "$conf_path" <<EOF_CONF
 # U-OPTI - Let's Encrypt ACME Challenge
 # Domain: $DOCKER_3XUI_NGINX_DOMAIN
-# Server Names: $server_names
+# Server Names: $DOCKER_3XUI_NGINX_DOMAIN
 
 server {
     listen 80;
     listen [::]:80;
 
-    server_name $server_names;
+    server_name $DOCKER_3XUI_NGINX_DOMAIN;
 
     location ^~ /.well-known/acme-challenge/ {
         root $DOCKER_3XUI_NGINX_ACME_ROOT;
@@ -524,59 +506,44 @@ docker_3xui_nginx_test_acme() {
     local response=""
     local curl_status=0
     local attempt
-    local name
 
     test_file="$(mktemp "$DOCKER_3XUI_NGINX_ACME_ROOT/.well-known/acme-challenge/u-opti-test-XXXXXXXX")" || return 1
 
     printf '%s\n' "u-opti-test" > "$test_file" || { rm -f "$test_file"; return 1; }
     chmod 0644 "$test_file" || { rm -f "$test_file"; return 1; }
 
-    # Test every server name; each must resolve to the same ACME webroot.
-    for name in $(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN"); do
-        local ok=0
+    for attempt in {1..20}; do
+        response="$(
+            curl -fsS \
+                --max-time 10 \
+                --noproxy '*' \
+                -H "Host: $DOCKER_3XUI_NGINX_DOMAIN" \
+                "http://127.0.0.1/.well-known/acme-challenge/$(basename "$test_file")" \
+                2>/dev/null
+        )"
+        curl_status=$?
 
-        for attempt in {1..20}; do
-            response="$(
-                curl -fsS \
-                    --max-time 10 \
-                    --noproxy '*' \
-                    -H "Host: $name" \
-                    "http://127.0.0.1/.well-known/acme-challenge/$(basename "$test_file")" \
-                    2>/dev/null
-            )"
-            curl_status=$?
-
-            if [[ "$curl_status" -eq 0 && "$response" == "u-opti-test" ]]; then
-                ok=1
-                break
-            fi
-
-            sleep 0.5
-        done
-
-        if [[ "$ok" -ne 1 ]]; then
+        if [[ "$curl_status" -eq 0 && "$response" == "u-opti-test" ]]; then
             rm -f "$test_file"
-
-            echo "Error: ACME challenge path did not become reachable for:"
-            echo "$name"
-            echo "Last curl status: $curl_status"
-            echo "Last response: ${response:-<empty>}"
-
-            return 1
+            return 0
         fi
+
+        sleep 0.5
     done
 
     rm -f "$test_file"
-    return 0
+
+    echo "Error: ACME challenge path did not become reachable for:"
+    echo "$DOCKER_3XUI_NGINX_DOMAIN"
+    echo "Last curl status: $curl_status"
+    echo "Last response: ${response:-<empty>}"
+
+    return 1
 }
 
 
 docker_3xui_nginx_issue_certificate() {
     local cert_file
-    local server_names
-    local -a server_names_arr
-    local -a cert_domains
-    local name
 
     cert_file="/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/fullchain.pem"
 
@@ -593,17 +560,9 @@ docker_3xui_nginx_issue_certificate() {
         return 1
     fi
 
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
-    read -ra server_names_arr <<< "$server_names"
-
-    cert_domains=()
-    for name in "${server_names_arr[@]}"; do
-        cert_domains+=("-d" "$name")
-    done
-
     echo
     echo "Requesting Let's Encrypt certificate..."
-    echo "Domains: $server_names"
+    echo "Domains: $DOCKER_3XUI_NGINX_DOMAIN"
     echo
 
     if ! "$DOCKER_3XUI_NGINX_CERTBOT_BIN" certonly \
@@ -613,7 +572,7 @@ docker_3xui_nginx_issue_certificate() {
         --agree-tos \
         --register-unsafely-without-email \
         --cert-name "$DOCKER_3XUI_NGINX_DOMAIN" \
-        "${cert_domains[@]}"; then
+        -d "$DOCKER_3XUI_NGINX_DOMAIN"; then
 
         echo "Error: Let's Encrypt certificate issuance failed."
         return 1
@@ -718,17 +677,15 @@ docker_3xui_nginx_activate_shared_smite() {
 docker_3xui_nginx_write_site() {
     local site_path
     local temp_path
-    local server_names
 
     site_path="$(docker_3xui_nginx_site_path)"
     temp_path="${site_path}.u-opti-new"
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
 
     cat > "$temp_path" <<EOF_CONF
 $DOCKER_3XUI_NGINX_MARKER
 # U-OPTI - Sanaei 3x-UI Docker Public Access
 # Domain: $DOCKER_3XUI_NGINX_DOMAIN
-# Server Names: $server_names
+# Server Names: $DOCKER_3XUI_NGINX_DOMAIN
 # Panel: $DOCKER_3XUI_NGINX_PANEL_PORT
 # Subscription: $DOCKER_3XUI_NGINX_SUB_PORT
 # Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH
@@ -739,7 +696,7 @@ server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
 
-    server_name $server_names;
+    server_name $DOCKER_3XUI_NGINX_DOMAIN;
 
     ssl_certificate /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN/privkey.pem;
@@ -924,9 +881,6 @@ EOF_HOOK
 
 
 docker_3xui_nginx_show_result() {
-    local server_names
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
-
     echo
     echo "======================================"
     echo "     Sanaei Nginx / SSL Completed"
@@ -934,7 +888,7 @@ docker_3xui_nginx_show_result() {
     echo
 
     echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
-    echo "Server Names : $server_names"
+    echo "Server Names : $DOCKER_3XUI_NGINX_DOMAIN"
     echo
     if [[ "$DOCKER_3XUI_NGINX_WEB_BASE_PATH" = "/" ]]; then
         echo "Panel        : https://$DOCKER_3XUI_NGINX_DOMAIN/"
@@ -1002,7 +956,7 @@ docker_3xui_nginx_setup() {
     fi
 
     echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
-    echo "Server Names : $(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
+    echo "Server Names : $DOCKER_3XUI_NGINX_DOMAIN"
     echo "Panel        : 127.0.0.1:$DOCKER_3XUI_NGINX_PANEL_PORT"
     echo "Subscription : 127.0.0.1:$DOCKER_3XUI_NGINX_SUB_PORT"
 
@@ -1084,15 +1038,13 @@ docker_3xui_nginx_status() {
     local cert_dir
     local acme_conf
     local cert_expiry=""
-    local server_names
 
     site_path="$(docker_3xui_nginx_site_path)"
     cert_dir="/etc/letsencrypt/live/$DOCKER_3XUI_NGINX_DOMAIN"
     acme_conf="$(docker_3xui_nginx_acme_conf_path)"
-    server_names="$(docker_3xui_nginx_build_server_names "$DOCKER_3XUI_NGINX_DOMAIN")"
 
     echo "Domain       : $DOCKER_3XUI_NGINX_DOMAIN"
-    echo "Server Names : $server_names"
+    echo "Server Names : $DOCKER_3XUI_NGINX_DOMAIN"
     echo "Panel Port   : $DOCKER_3XUI_NGINX_PANEL_PORT"
     echo "Sub Port     : $DOCKER_3XUI_NGINX_SUB_PORT"
     echo "Web Base Path: $DOCKER_3XUI_NGINX_WEB_BASE_PATH"
