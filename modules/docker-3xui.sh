@@ -71,7 +71,7 @@ docker_3xui_select_instance() {
         echo "0) Back"
         echo
         echo "Select Instance [0-${#INSTANCE_IDS[@]}]:"
-        read -r CHOICE
+        read -r CHOICE || return 1
         CHOICE="${CHOICE#"${CHOICE%%[![:space:]]*}"}"
         CHOICE="${CHOICE%"${CHOICE##*[![:space:]]}"}"
 
@@ -3568,20 +3568,43 @@ docker_3xui_nginx_ssl_management() {
 
 
 docker_3xui_xhttp_guard_menu() {
-    if ! docker_3xui_select_instance; then return; fi
-    local guard="$(dirname "${BASH_SOURCE[0]}")/docker-3xui-xhttp-guard.py"
-    if [ ! -f "$guard" ]; then echo "HOLD: XHTTP guard missing."; read -r -p "Press Enter..."; return; fi
-    echo "Read-only KH XHTTP route review:"
-    if ! python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --check; then
-        echo "HOLD: No changes made."
-        read -r -p "Press Enter..."; return
+    if ! docker_3xui_select_instance; then
+        return
     fi
-    echo "Unknown numeric ports will be denied. Only verified loopback XHTTP paths are permitted."
-    read -r -p "Apply guarded routes on this KH host? [y/N]: " answer
-    if [[ "$answer" == y || "$answer" == Y ]]; then
-        python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --apply || true
-    else echo "Cancelled without changes."; fi
-    read -r -p "Press Enter..."
+
+    local guard="$(dirname "${BASH_SOURCE[0]}")/docker-3xui-xhttp-guard.py"
+    local answer
+
+    echo
+    echo "Guarded XHTTP Route Sync"
+    if [ ! -f "$guard" ]; then
+        echo "HOLD: XHTTP guard missing."
+    else
+        echo "Reviewing the selected instance's active loopback XHTTP inbounds..."
+        if python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --check; then
+            echo "Sync publishes the reviewed routes in Nginx and denies unknown numeric ports."
+            printf '%s\n' "Apply these XHTTP routes now? [y/N] (Enter cancels):"
+            read -r answer || return 0
+
+            case "$answer" in
+                y|Y)
+                    if python3 -B "$guard" --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --apply; then
+                        echo "XHTTP route sync complete. You can test the published routes now."
+                    else
+                        echo "XHTTP route sync failed. See the diagnostic above."
+                    fi
+                    ;;
+                *)
+                    echo "Cancelled without changes."
+                    ;;
+            esac
+        else
+            echo "Review failed. No route changes were made."
+        fi
+    fi
+
+    printf '%s\n' "Press Enter to return to 3x-UI Docker Management..."
+    read -r answer || return 0
 }
 
 show_docker_3xui_menu() {
@@ -3610,7 +3633,8 @@ show_docker_3xui_menu() {
         echo "0) Back"
         echo
 
-        read -rp "Please enter your selection [0-14]: " DOCKER_3XUI_CHOICE
+        printf '%s\n' "Please enter your selection [0-14]:"
+        read -r DOCKER_3XUI_CHOICE || return 0
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
 
