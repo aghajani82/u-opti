@@ -752,6 +752,8 @@ EOF_PANEL_PATH
 
     cat >> "$temp_path" <<EOF_CONF
 
+    include /etc/nginx/u-opti-3xui-subscription-$DOCKER_3XUI_NGINX_DOMAIN/*.conf;
+
     # Sanaei Subscription
     location ^~ /sub/ {
         proxy_pass http://127.0.0.1:$DOCKER_3XUI_NGINX_SUB_PORT/sub/;
