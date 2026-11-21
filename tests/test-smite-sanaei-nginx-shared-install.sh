@@ -170,7 +170,7 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
     }
 
     printf '16\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
-    grep -Fxq 'Please enter your selection [0-16]:' "$tmp/xhttp-menu"
+    grep -Fxq 'Please enter your selection [0-17]:' "$tmp/xhttp-menu"
     grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP route sync complete. You can test the published routes now.' "$tmp/xhttp-menu"
@@ -292,3 +292,51 @@ echo "PASS: Panel URI path changes preserve subscriptions and roll back on failu
     grep -Fxq 'https://example.test/sub/' "$db"
 )
 echo "PASS: Public subscription URL changes preserve the backend and roll back on failure"
+
+# Verify explicit version selection and recovery of the database after a failed switch.
+(
+    source "$root/modules/docker-3xui.sh"
+    clear() { return 0; }
+    docker_3xui_select_instance() { return 0; }
+    docker_3xui_apply_version_switch() { printf 'Selected %s\n' "$1"; }
+    printf '17\n1\n3.10.0\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/version-menu"
+    grep -Fxq 'Selected ghcr.io/mhsanaei/3x-ui:v3.10.0' "$tmp/version-menu"
+)
+(
+    source "$root/modules/docker-3xui.sh"
+    DOCKER_3XUI_CONTAINER=3xui-01
+    DOCKER_3XUI_DIR="$tmp/version-instance"
+    DOCKER_3XUI_COMPOSE_FILE="$DOCKER_3XUI_DIR/docker-compose.yml"
+    DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
+    DOCKER_3XUI_PANEL_PORT=2053
+    mkdir -p "$DOCKER_3XUI_DIR/db" "$DOCKER_3XUI_DIR/cert"
+    printf '%s\n' '    image: ghcr.io/aghajani82/3x-ui:main' > "$DOCKER_3XUI_COMPOSE_FILE"
+    cp "$DOCKER_3XUI_COMPOSE_FILE" "$tmp/version-original-compose"
+    printf '%s\n' 'WEB_BASE_PATH=/panel/' > "$DOCKER_3XUI_COMPAT_ENV"
+    printf '%s\n' 'original database' > "$DOCKER_3XUI_DIR/db/x-ui.db"
+    docker_3xui_is_running() { return 0; }
+    docker() {
+        case "$1 $2" in
+            'inspect --format') echo sha256:original ;;
+            'image inspect') echo sha256:candidate ;;
+            'pull unavailable') return 1 ;;
+            'compose -f')
+                if [[ "$4" == up ]] && grep -Fq 'image: candidate' "$DOCKER_3XUI_COMPOSE_FILE"; then
+                    printf '%s\n' 'candidate database' > "$DOCKER_3XUI_DIR/db/x-ui.db"
+                    touch "$DOCKER_3XUI_DIR/db/x-ui.db-wal"
+                fi
+                ;;
+            'stop 3xui-01') touch "$tmp/version-stopped" ;;
+        esac
+        return 0
+    }
+    docker_3xui_verify_version_switch() { [[ "$2" == sha256:original ]]; }
+
+    if docker_3xui_apply_version_switch unavailable; then exit 1; fi
+    test ! -e "$tmp/version-stopped"
+    if docker_3xui_apply_version_switch candidate; then exit 1; fi
+    cmp -s "$tmp/version-original-compose" "$DOCKER_3XUI_COMPOSE_FILE"
+    grep -Fxq 'original database' "$DOCKER_3XUI_DIR/db/x-ui.db"
+    test ! -e "$DOCKER_3XUI_DIR/db/x-ui.db-wal"
+)
+echo "PASS: Version selection downloads first and restores the previous image and database on failure"
