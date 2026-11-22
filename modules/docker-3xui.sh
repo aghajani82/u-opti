@@ -1761,6 +1761,10 @@ docker_3xui_update() {
     CONTAINER="$DOCKER_3XUI_CONTAINER"
     COMPOSE_FILE="$DOCKER_3XUI_COMPOSE_FILE"
     DATA_DIR="$DOCKER_3XUI_DIR"
+    local saved_panel_path=""
+    if [ -f "$DOCKER_3XUI_COMPAT_ENV" ]; then
+        saved_panel_path="$(sed -n 's/^WEB_BASE_PATH=//p' "$DOCKER_3XUI_COMPAT_ENV")"
+    fi
 
     echo
     echo "Instance       : $INSTANCE_ID"
@@ -1982,8 +1986,10 @@ EOF
 
     sleep 3
 
-    if ! docker_3xui_is_running; then
-        echo "ERROR: Updated 3x-UI container is not running."
+    if ! docker_3xui_is_running ||
+       { [ -n "$saved_panel_path" ] &&
+         ! docker_3xui_preserve_panel_path "$DOCKER_3XUI_CONTAINER" "$DOCKER_3XUI_PANEL_PORT" "$saved_panel_path"; }; then
+        echo "ERROR: Updated 3x-UI did not restore its saved panel settings."
         echo "Starting automatic rollback..."
 
         docker stop "$DOCKER_3XUI_CONTAINER" >/dev/null 2>&1 || true
@@ -3867,6 +3873,33 @@ docker_3xui_change_subscription_url() {
 }
 
 
+
+# Reconcile version-specific startup defaults with the managed panel URL.
+docker_3xui_preserve_panel_path() {
+    local container="$1" port="$2" path="$3" attempt
+    [[ "$path" =~ ^/([A-Za-z0-9_-]+/)*$ ]] || return 1
+    docker_3xui_load_compat || return 1
+
+    # Wait for the new process to finish opening its database. A response
+    # at / is sufficient here because the configured panel can live elsewhere.
+    for attempt in {1..20}; do
+        if curl --noproxy '*' --silent --max-time 2 --output /dev/null "http://127.0.0.1:$port/"; then
+            if docker_3xui_compat_verify_web_base_path "$container" "$path" >/dev/null 2>&1; then
+                return 0
+            fi
+
+            echo "Restoring the saved panel URI path on the selected image..."
+            docker_3xui_compat_configure_web_base_path "$container" "$path" &&
+                docker restart "$container" >/dev/null &&
+                docker_3xui_compat_verify_web_base_path "$container" "$path"
+            return $?
+        fi
+        sleep 1
+    done
+    echo "ERROR: The panel listener did not become ready."
+    return 1
+}
+
 # Verify the configured panel path after starting an image on the host network.
 docker_3xui_verify_version_switch() {
     local container="$1" image_id="$2" port="$3" path="$4" attempt
@@ -3928,6 +3961,7 @@ docker_3xui_apply_version_switch() (
 
     if sed -i "s|^\([[:space:]]\+image:\).*|\1 $target|" "$compose" &&
        docker compose -f "$compose" up -d --force-recreate --pull never &&
+       docker_3xui_preserve_panel_path "$container" "$port" "$path" &&
        docker_3xui_verify_version_switch "$container" "$target_id" "$port" "$path"; then
         printf 'Image running: %s\n' "$target"
         return 0
