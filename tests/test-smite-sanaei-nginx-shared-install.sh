@@ -331,6 +331,7 @@ echo "PASS: Public subscription URL changes preserve the backend and roll back o
         return 0
     }
     docker_3xui_verify_version_switch() { [[ "$2" == sha256:original ]]; }
+    docker_3xui_preserve_panel_path() { [[ "$*" == "3xui-01 2053 /panel/" ]]; }
 
     if docker_3xui_apply_version_switch unavailable; then exit 1; fi
     test ! -e "$tmp/version-stopped"
@@ -340,3 +341,22 @@ echo "PASS: Public subscription URL changes preserve the backend and roll back o
     test ! -e "$DOCKER_3XUI_DIR/db/x-ui.db-wal"
 )
 echo "PASS: Version selection downloads first and restores the previous image and database on failure"
+
+(
+    source "$root/modules/docker-3xui.sh"
+    current_path=/random-after-version-change/
+    docker_3xui_load_compat() { return 0; }
+    curl() { [[ "${!#}" == http://127.0.0.1:2053/ ]]; }
+    docker_3xui_compat_verify_web_base_path() { [[ "$current_path" == "$2" ]]; }
+    docker_3xui_compat_configure_web_base_path() { current_path="$2"; }
+    docker() {
+        [[ "$*" == 'restart 3xui-01' ]] || return 1
+        echo restarted >> "$tmp/version-path-restarts"
+    }
+
+    docker_3xui_preserve_panel_path 3xui-01 2053 /saved/panel/
+    [[ "$current_path" == /saved/panel/ ]]
+    docker_3xui_preserve_panel_path 3xui-01 2053 /saved/panel/
+    test "$(wc -l < "$tmp/version-path-restarts")" -eq 1
+)
+echo "PASS: Version changes restore the saved panel URI and only restart on path drift"
