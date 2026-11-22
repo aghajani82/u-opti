@@ -4020,6 +4020,141 @@ docker_3xui_change_version() {
     read -r choice || return 0
 }
 
+
+docker_3xui_apply_subscription_port() (
+    local old="$1" new="$2" site="$3" db="$DOCKER_3XUI_DIR/db/x-ui.db"
+    local compat="$DOCKER_3XUI_COMPAT_ENV" state="$DOCKER_3XUI_INSTANCE_STATE_FILE"
+    local container="$DOCKER_3XUI_CONTAINER" domain="$DOCKER_3XUI_DOMAIN"
+    local legacy_uri="https://$domain/$old/sub/" clean_uri="https://$domain/sub/"
+    local backup attempt file restored=1 db_changed=0 uri_changed=0 ready=0
+
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ && "$old" =~ ^[0-9]+$ && "$new" =~ ^[0-9]+$ ]] || return 1
+    umask 077
+    for file in "$compat" "$state" "$site" "$db"; do
+        if [[ ! -f "$file" || -L "$file" ]]; then
+            echo "ERROR: Expected a regular managed configuration file."
+            return 1
+        fi
+    done
+    if [[ "$(grep -Fxc "SUBSCRIPTION_PORT=$old" "$compat")" != 1 ||
+          "$(grep -Fxc "SUBSCRIPTION_PORT=$old" "$state")" != 1 ||
+          "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subPort';")" != "$old" ||
+          "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subListen';")" != 127.0.0.1 ||
+          "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subPath';")" != /sub/ ]] ||
+       ! grep -Fxq "        proxy_pass http://127.0.0.1:$old/sub/;" "$site" ||
+       ! grep -Fxq "    location ~ ^/$old/sub/(?<subpath>.*)$ {" "$site" ||
+       ! grep -Fxq "        proxy_pass http://127.0.0.1:$old/sub/\$subpath\$is_args\$args;" "$site"; then
+        echo "ERROR: The subscription port, path or managed Nginx routes do not match."
+        return 1
+    fi
+    if [[ "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subURI';")" == "$legacy_uri" ]]; then
+        uri_changed=1
+    fi
+
+    mkdir -p "$DOCKER_3XUI_DIR/backups" || return 1
+    backup="$(mktemp -d "$DOCKER_3XUI_DIR/backups/pre-subscription-port.XXXXXX")" || return 1
+    cp -a -- "$compat" "$backup/compat.env" &&
+        cp -a -- "$state" "$backup/state.env" &&
+        cp -a -- "$site" "$backup/nginx.conf" || return 1
+    printf 'Prior port: %s\nPrior legacy URL (if changed): %s\n' "$old" "$([[ "$uri_changed" == 1 ]] && printf '%s' "$legacy_uri")" > "$backup/change-info" || return 1
+
+    if sed -i \
+        -e "s|^\([[:space:]]*proxy_pass http://127[.]0[.]0[.]1:\)$old\(/sub/.*\)$|\1$new\2|" \
+        -e "s|^\(    location ~ \^/\)$old\(/sub/.*\)$|\1$new\2|" \
+        -e "s|^# Subscription: $old$|# Subscription: $new|" "$site" &&
+       nginx -t &&
+       sqlite3 -bail -cmd '.timeout 5000' "$db" "
+           BEGIN IMMEDIATE;
+           UPDATE settings SET value='$new' WHERE key='subPort' AND value='$old';
+           UPDATE settings SET value='$clean_uri'
+               WHERE key='subURI' AND value='$legacy_uri' AND $uri_changed = 1;
+           COMMIT;" &&
+       db_changed=1 &&
+       [[ "$(sqlite3 -readonly "$db" "SELECT value FROM settings WHERE key='subPort';")" == "$new" ]] &&
+       docker restart "$container" >/dev/null; then
+        for attempt in {1..15}; do
+            # /sub/ may return 404 without a subscription ID. An HTTP
+            # response is enough to verify the local subscription listener.
+            if curl --noproxy '*' --silent --max-time 2 --output /dev/null "http://127.0.0.1:$new/sub/"; then
+                ready=1
+                break
+            fi
+            sleep 1
+        done
+        if [[ "$ready" == 1 ]] &&
+           sed -i "s|^SUBSCRIPTION_PORT=$old$|SUBSCRIPTION_PORT=$new|" "$compat" "$state" &&
+           systemctl reload nginx; then
+            printf 'Subscription listen port: 127.0.0.1:%s\n' "$new"
+            if [[ "$uri_changed" == 1 ]]; then
+                printf 'New public subscription base URL: %s\n' "$clean_uri"
+            fi
+            printf 'Backup: %s\n' "$backup"
+            return 0
+        fi
+    fi
+
+    echo "ERROR: Subscription port change failed. Restoring the previous settings..."
+    cp -a -- "$backup/compat.env" "$compat" || restored=0
+    cp -a -- "$backup/state.env" "$state" || restored=0
+    cp -a -- "$backup/nginx.conf" "$site" || restored=0
+    if [[ "$db_changed" == 1 ]]; then
+        sqlite3 -bail -cmd '.timeout 5000' "$db" "
+            BEGIN IMMEDIATE;
+            UPDATE settings SET value='$old' WHERE key='subPort' AND value='$new';
+            UPDATE settings SET value='$legacy_uri'
+                WHERE key='subURI' AND value='$clean_uri' AND $uri_changed = 1;
+            COMMIT;" &&
+            docker restart "$container" >/dev/null || restored=0
+    fi
+    nginx -t && systemctl reload nginx || restored=0
+    if [[ "$restored" == 1 ]]; then
+        echo "Previous subscription port restored."
+    else
+        echo "ERROR: Rollback incomplete. Use the retained backup."
+    fi
+    printf 'Backup: %s\n' "$backup"
+    return 1
+)
+
+docker_3xui_change_subscription_port() {
+    docker_3xui_select_instance || return 0
+
+    local domain="$DOCKER_3XUI_DOMAIN" old="$DOCKER_3XUI_SUBSCRIPTION_PORT" new answer
+    local site="/etc/nginx/sites-available/3xui-$domain"
+    local enabled="/etc/nginx/sites-enabled/3xui-$domain"
+
+    if [[ ! "$domain" =~ ^[A-Za-z0-9.-]+$ || ! "$old" =~ ^[0-9]+$ ||
+          ! -L "$enabled" || ! "$enabled" -ef "$site" ]] ||
+       ! grep -Fxq '# U-OPTI-MANAGED-3XUI-NGINX' "$site" || ! docker_3xui_is_running; then
+        echo "ERROR: A running instance with an enabled, managed HTTPS site is required."
+    else
+        printf 'Current subscription listen port: %s\n' "$old"
+        printf '%s\n' "Enter a new internal subscription port (1024-65535), or Enter to cancel:"
+        read -r new || return 0
+        [[ -n "$new" ]] || return 0
+        if [[ ! "$new" =~ ^[1-9][0-9]{3,4}$ ]] || (( new < 1024 || new > 65535 )); then
+            echo "ERROR: Enter a port between 1024 and 65535."
+        elif [[ "$new" == "$old" ]]; then
+            echo "The subscription already uses that port."
+        elif ! docker_3xui_instance_port_available "$new"; then
+            echo "ERROR: The requested port is in use or reserved."
+        else
+            echo "HTTPS still uses port 443. Existing URLs with the old port in their path need updating."
+            printf '%s\n' "Apply the new subscription port and briefly restart 3x-UI? [y/N]:"
+            read -r answer || return 0
+            if [[ "$answer" == y || "$answer" == Y ]]; then
+                if docker_3xui_instance_port_available "$new"; then
+                    docker_3xui_apply_subscription_port "$old" "$new" "$site" || true
+                else
+                    echo "ERROR: The requested port is no longer available."
+                fi
+            fi
+        fi
+    fi
+    printf '%s\n' "Press Enter to return..."
+    read -r answer || return 0
+}
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -4032,24 +4167,25 @@ show_docker_3xui_menu() {
         echo "2) Start 3x-UI"
         echo "3) Stop 3x-UI"
         echo "4) Change Panel Port"
-        echo "5) Change Panel URI Path"
-        echo "6) Change Subscription URL"
-        echo "7) Restart 3x-UI"
-        echo "8) Update 3x-UI"
-        echo "9) Backup 3x-UI"
-        echo "10) Restore 3x-UI"
-        echo "11) Uninstall 3x-UI"
-        echo "12) Show Status"
-        echo "13) Sanaei 3x-UI Management"
-        echo "14) Nginx / SSL Configuration"
-        echo "15) Default Website / FakeSite"
-        echo "16) Sync guarded dynamic XHTTP routes"
-        echo "17) Change 3x-UI Version"
+        echo "5) Change Subscription Port"
+        echo "6) Change Panel URI Path"
+        echo "7) Change Subscription URL"
+        echo "8) Restart 3x-UI"
+        echo "9) Update 3x-UI"
+        echo "10) Backup 3x-UI"
+        echo "11) Restore 3x-UI"
+        echo "12) Uninstall 3x-UI"
+        echo "13) Show Status"
+        echo "14) Sanaei 3x-UI Management"
+        echo "15) Nginx / SSL Configuration"
+        echo "16) Default Website / FakeSite"
+        echo "17) Sync guarded dynamic XHTTP routes"
+        echo "18) Change 3x-UI Version"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-17]:"
+        printf '%s\n' "Please enter your selection [0-18]:"
         read -r DOCKER_3XUI_CHOICE || return 0
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE#"${DOCKER_3XUI_CHOICE%%[![:space:]]*}"}"
         DOCKER_3XUI_CHOICE="${DOCKER_3XUI_CHOICE%"${DOCKER_3XUI_CHOICE##*[![:space:]]}"}"
@@ -4059,19 +4195,20 @@ show_docker_3xui_menu() {
             2) docker_3xui_start ;;
             3) docker_3xui_stop ;;
             4) docker_3xui_change_panel_port ;;
-            5) docker_3xui_change_panel_path ;;
-            6) docker_3xui_change_subscription_url ;;
-            7) docker_3xui_restart ;;
-            8) docker_3xui_update ;;
-            9) docker_3xui_backup ;;
-            10) docker_3xui_restore ;;
-            11) docker_3xui_uninstall ;;
-            12) docker_3xui_status ;;
-            13) docker_3xui_sanaei_management ;;
-            14) docker_3xui_nginx_ssl_management ;;
-            15) docker_3xui_fakesite_management ;;
-            16) docker_3xui_xhttp_guard_menu ;;
-            17) docker_3xui_change_version ;;
+            5) docker_3xui_change_subscription_port ;;
+            6) docker_3xui_change_panel_path ;;
+            7) docker_3xui_change_subscription_url ;;
+            8) docker_3xui_restart ;;
+            9) docker_3xui_update ;;
+            10) docker_3xui_backup ;;
+            11) docker_3xui_restore ;;
+            12) docker_3xui_uninstall ;;
+            13) docker_3xui_status ;;
+            14) docker_3xui_sanaei_management ;;
+            15) docker_3xui_nginx_ssl_management ;;
+            16) docker_3xui_fakesite_management ;;
+            17) docker_3xui_xhttp_guard_menu ;;
+            18) docker_3xui_change_version ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;
         esac
