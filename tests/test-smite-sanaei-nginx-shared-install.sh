@@ -169,8 +169,8 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
         esac
     }
 
-    printf '16\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
-    grep -Fxq 'Please enter your selection [0-17]:' "$tmp/xhttp-menu"
+    printf '17\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
+    grep -Fxq 'Please enter your selection [0-18]:' "$tmp/xhttp-menu"
     grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP route sync complete. You can test the published routes now.' "$tmp/xhttp-menu"
@@ -195,7 +195,9 @@ echo "PASS: Guarded XHTTP route sync shows prompts and reports outcomes"
     clear() { return 0; }
     docker_3xui_change_panel_path() { echo "Panel path menu selected"; }
     docker_3xui_change_subscription_url() { echo "Subscription menu selected"; }
-    printf '5\n6\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
+    docker_3xui_change_subscription_port() { echo "Subscription port menu selected"; }
+    printf '5\n6\n7\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
+    grep -Fxq 'Subscription port menu selected' "$tmp/path-menu"
     grep -Fxq 'Panel path menu selected' "$tmp/path-menu"
     grep -Fxq 'Subscription menu selected' "$tmp/path-menu"
 )
@@ -299,7 +301,7 @@ echo "PASS: Public subscription URL changes preserve the backend and roll back o
     clear() { return 0; }
     docker_3xui_select_instance() { return 0; }
     docker_3xui_apply_version_switch() { printf 'Selected %s\n' "$1"; }
-    printf '17\n1\n3.10.0\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/version-menu"
+    printf '18\n1\n3.10.0\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/version-menu"
     grep -Fxq 'Selected ghcr.io/mhsanaei/3x-ui:v3.10.0' "$tmp/version-menu"
 )
 (
@@ -360,3 +362,74 @@ echo "PASS: Version selection downloads first and restores the previous image an
     test "$(wc -l < "$tmp/version-path-restarts")" -eq 1
 )
 echo "PASS: Version changes restore the saved panel URI and only restart on path drift"
+
+# Switch the backend port without changing a custom public subscription URL.
+(
+    source "$root/modules/docker-3xui.sh"
+    DOCKER_3XUI_DIR="$tmp/sub-port-instance"
+    DOCKER_3XUI_COMPAT_ENV="$DOCKER_3XUI_DIR/compat.env"
+    DOCKER_3XUI_INSTANCE_STATE_FILE="$DOCKER_3XUI_DIR/state.env"
+    DOCKER_3XUI_CONTAINER=3xui-01
+    DOCKER_3XUI_DOMAIN=example.test
+    mkdir -p "$DOCKER_3XUI_DIR/db"
+    db="$DOCKER_3XUI_DIR/db/x-ui.db"
+    site="$tmp/sub-port-site.conf"
+    printf '%s\n' 'SUBSCRIPTION_PORT=2095' > "$DOCKER_3XUI_COMPAT_ENV"
+    cp "$DOCKER_3XUI_COMPAT_ENV" "$DOCKER_3XUI_INSTANCE_STATE_FILE"
+    cat > "$site" <<'EOF'
+# Subscription: 2095
+    location ^~ /panel/ {
+        proxy_pass http://127.0.0.1:2053;
+    }
+    location ^~ /sub/ {
+        proxy_pass http://127.0.0.1:2095/sub/;
+    }
+    location ~ ^/2095/sub/(?<subpath>.*)$ {
+        proxy_pass http://127.0.0.1:2095/sub/$subpath$is_args$args;
+    }
+EOF
+    sqlite3() {
+        python3 - "${@: -2}" <<'PY'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as db:
+    sql = sys.argv[2]
+    if sql.lstrip().upper().startswith('SELECT'):
+        for row in db.execute(sql):
+            print(row[0])
+    else:
+        db.executescript(sql)
+PY
+    }
+    sqlite3 "$db" "
+        CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO settings VALUES
+            ('subPort', '2095'), ('subListen', '127.0.0.1'), ('subPath', '/sub/'),
+            ('subURI', 'https://example.test/feed/');"
+    nginx() { [[ "$*" == '-t' ]]; }
+    docker() { [[ "$*" == 'restart 3xui-01' ]]; }
+    curl() { [[ "${!#}" == http://127.0.0.1:*/sub/ ]]; }
+    systemctl() { [[ "$*" == 'reload nginx' ]] && ! grep -Fq ':2097/sub/' "$site"; }
+
+    docker_3xui_apply_subscription_port 2095 2096 "$site"
+    grep -Fxq 'SUBSCRIPTION_PORT=2096' "$DOCKER_3XUI_COMPAT_ENV"
+    cmp -s "$DOCKER_3XUI_COMPAT_ENV" "$DOCKER_3XUI_INSTANCE_STATE_FILE"
+    grep -Fxq '    location ~ ^/2096/sub/(?<subpath>.*)$ {' "$site"
+    grep -Fxq '        proxy_pass http://127.0.0.1:2096/sub/;' "$site"
+    grep -Fxq '        proxy_pass http://127.0.0.1:2096/sub/$subpath$is_args$args;' "$site"
+    grep -Fxq '        proxy_pass http://127.0.0.1:2053;' "$site"
+    test "$(sqlite3 "$db" "SELECT value FROM settings WHERE key='subURI';")" = https://example.test/feed/
+
+    cp "$site" "$tmp/sub-port-old.conf"
+    sqlite3 "$db" "UPDATE settings SET value='https://example.test/2096/sub/' WHERE key='subURI';"
+    if docker_3xui_apply_subscription_port 2096 2097 "$site"; then
+        echo "ERROR: Simulated reload failure did not roll back" >&2
+        exit 1
+    fi
+    cmp -s "$site" "$tmp/sub-port-old.conf"
+    grep -Fxq 'SUBSCRIPTION_PORT=2096' "$DOCKER_3XUI_COMPAT_ENV"
+    cmp -s "$DOCKER_3XUI_COMPAT_ENV" "$DOCKER_3XUI_INSTANCE_STATE_FILE"
+    test "$(sqlite3 "$db" "SELECT value FROM settings WHERE key='subPort';")" = 2096
+    test "$(sqlite3 "$db" "SELECT value FROM settings WHERE key='subURI';")" = https://example.test/2096/sub/
+)
+echo "PASS: Subscription port changes synchronize SQLite, Nginx and instance state"
