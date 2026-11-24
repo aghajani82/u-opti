@@ -2433,6 +2433,26 @@ docker_3xui_restore() {
         return
     fi
 
+    local restore_mode backup
+    printf '%s\n' "1) Restore a U-OPTI backup (Compose, database and certificates)"
+    printf '%s\n' "2) Restore a panel SQLite export and keep its HTTPS URLs"
+    printf '%s\n' "0) Back"
+    read -rp "Restore mode [0-2] (default 1): " restore_mode || return
+    case "${restore_mode:-1}" in
+        1) ;;
+        2)
+            docker_3xui_select_instance || return
+            read -rp "Path to the exported .db file (Enter cancels): " backup || return
+            [ -n "$backup" ] || return
+            python3 -B "$(dirname "${BASH_SOURCE[0]}")/docker-3xui-db-restore.py" \
+                --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" -- "$backup"
+            read -rp "Press Enter to return..."
+            return
+            ;;
+        0) return ;;
+        *) echo "Invalid restore mode."; return ;;
+    esac
+
     if ! docker_3xui_select_instance; then
         echo
         echo "Restore cancelled."
@@ -3680,9 +3700,12 @@ docker_3xui_change_panel_path() {
     local old new input existing
     local -a route_files=("$site")
     local subscription_route="/etc/nginx/u-opti-3xui-subscription-$domain/public-url.conf"
-    if [[ -f "$subscription_route" ]]; then
-        route_files+=("$subscription_route")
-    fi
+    local route
+    for route in "$subscription_route" "${subscription_route%/*}/restored-formats.conf"; do
+        if [[ -f "$route" ]]; then
+            route_files+=("$route")
+        fi
+    done
 
     if [[ ! -f "$compat" || -L "$compat" || ! -f "$site" || -L "$site" ||
           ! -L "$enabled" || ! "$enabled" -ef "$site" ]] ||
@@ -4026,6 +4049,7 @@ docker_3xui_apply_subscription_port() (
     local compat="$DOCKER_3XUI_COMPAT_ENV" state="$DOCKER_3XUI_INSTANCE_STATE_FILE"
     local container="$DOCKER_3XUI_CONTAINER" domain="$DOCKER_3XUI_DOMAIN"
     local legacy_uri="https://$domain/$old/sub/" clean_uri="https://$domain/sub/"
+    local formats="/etc/nginx/u-opti-3xui-subscription-$domain/restored-formats.conf"
     local backup attempt file restored=1 db_changed=0 uri_changed=0 ready=0
 
     [[ "$domain" =~ ^[A-Za-z0-9.-]+$ && "$old" =~ ^[0-9]+$ && "$new" =~ ^[0-9]+$ ]] || return 1
@@ -4056,12 +4080,18 @@ docker_3xui_apply_subscription_port() (
     cp -a -- "$compat" "$backup/compat.env" &&
         cp -a -- "$state" "$backup/state.env" &&
         cp -a -- "$site" "$backup/nginx.conf" || return 1
+    if [[ -e "$formats" || -L "$formats" ]]; then
+        [[ -f "$formats" && ! -L "$formats" ]] &&
+            cp -a -- "$formats" "$backup/restored-formats.conf" || return 1
+    fi
     printf 'Prior port: %s\nPrior legacy URL (if changed): %s\n' "$old" "$([[ "$uri_changed" == 1 ]] && printf '%s' "$legacy_uri")" > "$backup/change-info" || return 1
 
     if sed -i \
         -e "s|^\([[:space:]]*proxy_pass http://127[.]0[.]0[.]1:\)$old\(/sub/.*\)$|\1$new\2|" \
         -e "s|^\(    location ~ \^/\)$old\(/sub/.*\)$|\1$new\2|" \
         -e "s|^# Subscription: $old$|# Subscription: $new|" "$site" &&
+       { [[ ! -f "$backup/restored-formats.conf" ]] ||
+         sed -i "s|^        proxy_pass http://127[.]0[.]0[.]1:$old/|        proxy_pass http://127.0.0.1:$new/|" "$formats"; } &&
        nginx -t &&
        sqlite3 -bail -cmd '.timeout 5000' "$db" "
            BEGIN IMMEDIATE;
@@ -4097,6 +4127,9 @@ docker_3xui_apply_subscription_port() (
     cp -a -- "$backup/compat.env" "$compat" || restored=0
     cp -a -- "$backup/state.env" "$state" || restored=0
     cp -a -- "$backup/nginx.conf" "$site" || restored=0
+    if [[ -f "$backup/restored-formats.conf" ]]; then
+        cp -a -- "$backup/restored-formats.conf" "$formats" || restored=0
+    fi
     if [[ "$db_changed" == 1 ]]; then
         sqlite3 -bail -cmd '.timeout 5000' "$db" "
             BEGIN IMMEDIATE;
