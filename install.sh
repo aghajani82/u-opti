@@ -200,6 +200,7 @@ MODULES=(
     "docker-3xui-compat.sh"
     "docker-3xui-nginx.sh"
     "docker-3xui-xhttp-guard.py"
+    "docker-3xui-db-restore.py"
     "fakesite.sh"
 )
 
