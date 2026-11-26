@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore a 3x-ui SQLite export behind its existing U-OPTI HTTPS site."""
+"""Restore 3x-ui SQLite exports and publish subscription formats behind U-OPTI HTTPS."""
 
 import argparse
 import contextlib
@@ -361,18 +361,102 @@ def restore_locked(instance, base, source, nginx=Path("/etc/nginx")):
         print("Database restore and HTTPS route verification complete.", flush=True)
 
 
+def sync_subscription_formats(base, nginx=Path("/etc/nginx")):
+    state = read_env(base / "state.env")
+    domain = state["DOMAIN"].lower()
+    port = int(state["SUBSCRIPTION_PORT"])
+    if not re.fullmatch(r"[a-z0-9.-]+", domain) or not 1 <= port <= 65535:
+        raise RestoreError("Invalid managed subscription host or port.")
+    site = nginx / "sites-available" / f"3xui-{domain}"
+    enabled = nginx / "sites-enabled" / site.name
+    if not (enabled.exists() or enabled.is_symlink()):
+        return
+    if not enabled.is_symlink() or enabled.resolve() != checked_file(site):
+        raise RestoreError("The HTTPS site is not managed by U-OPTI.")
+
+    with contextlib.closing(read_db(checked_file(base / "db/x-ui.db"))) as db:
+        config = settings(db)
+    subdir = nginx / f"u-opti-3xui-subscription-{domain}"
+    if subdir.is_symlink():
+        raise RestoreError("Unexpected Nginx routing directory.")
+    snippet = subdir / "restored-formats.conf"
+    saved_snippet = config_snapshot(snippet)
+    if not saved_snippet and not (
+        config.get("subEnable") != "false"
+        and any(config.get(key) == "true" for key in ("subClashEnable", "subJsonEnable"))
+    ):
+        return
+
+    if (config.get("subListen") != "127.0.0.1" or config.get("subPort") != str(port)
+            or config.get("subCertFile") or config.get("subKeyFile")):
+        raise RestoreError("The subscription listener must use the managed loopback HTTP port.")
+    panel = route_path(config.get("webBasePath"))
+    routes = formats(config, domain) if config.get("subEnable") != "false" else []
+    for key, public, backend in routes:
+        if key == "subURI":
+            continue
+        if any(path.startswith("/sub/") or "/sub/".startswith(path) for path in (public, backend)):
+            raise RestoreError("Use a separate URI path for each subscription format. Keep /sub/ for the standard subscription.")
+        if public.split("/")[1].isdigit():
+            raise RestoreError("A subscription format overlaps the reserved XHTTP path space.")
+        if any(other_key != key and (public.startswith(other) or other.startswith(public))
+               for other_key, other, _ in routes):
+            raise RestoreError("Subscription formats have overlapping public paths.")
+    _, dedicated = render_subscriptions(routes, panel, port)
+    include = f"    include {subdir}/*.conf;"
+    saved_site = config_snapshot(site)
+    current_site = saved_site[0].decode()
+    updated_site = render_site(current_site, panel, panel, include)
+    content = dedicated.encode()
+    if current_site == updated_site and (
+        (saved_snippet is None and not content) or (saved_snippet and saved_snippet[0] == content)
+    ):
+        return
+
+    run("nginx", "-t")
+    subdir.mkdir(mode=0o700, exist_ok=True)
+    try:
+        if current_site != updated_site:
+            atomic_file(site, updated_site.encode(), *saved_site[1:])
+        if content:
+            atomic_file(snippet, content, 0o600)
+        else:
+            snippet.unlink(missing_ok=True)
+        run("nginx", "-t")
+        run("systemctl", "reload", "nginx")
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt):
+        put_snapshot(snippet, saved_snippet)
+        if current_site != updated_site:
+            put_snapshot(site, saved_site)
+        run("nginx", "-t")
+        run("systemctl", "reload", "nginx")
+        raise
+    print("3x-UI HTTPS subscription formats synchronized.", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instance", required=True)
-    parser.add_argument("backup", type=Path)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--sync-subscription-formats", action="store_true")
+    modes.add_argument("backup", type=Path, nargs="?")
     args = parser.parse_args()
+    action = "Subscription route sync" if args.sync_subscription_formats else "Restore"
     try:
         if os.geteuid() != 0:
-            raise RestoreError("Run this restore as root.")
+            raise RestoreError("Run this command as root.")
         os.umask(0o077)
-        restore(args.instance, args.backup)
+        if args.sync_subscription_formats:
+            if not re.fullmatch(r"[0-9]{2}", args.instance):
+                raise RestoreError("Invalid instance ID.")
+            base = Path("/opt/3x-ui/instances") / args.instance
+            with (base / ".sqlite-restore.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                sync_subscription_formats(base)
+        else:
+            restore(args.instance, args.backup)
     except (OSError, KeyError, ValueError, RestoreError, sqlite3.Error, subprocess.SubprocessError, KeyboardInterrupt) as exc:
-        parser.exit(1, f"Restore failed: {exc}\n")
+        parser.exit(1, f"{action} failed: {exc}\n")
 
 
 if __name__ == "__main__":
