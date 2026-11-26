@@ -3526,12 +3526,11 @@ docker_3xui_nginx_ssl_management() {
         echo "1) Docker 3x-UI Nginx / SSL"
         echo "2) Custom Domain / Nginx / SSL"
         echo "3) Repair Existing Domain (add missing www / non-www)"
-        echo "4) Sync Clash / Mihomo and JSON subscription URLs"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-4]:"
+        printf '%s\n' "Please enter your selection [0-3]:"
         read -r NGINX_MENU_CHOICE || return 0
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE#"${NGINX_MENU_CHOICE%%[![:space:]]*}"}"
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE%"${NGINX_MENU_CHOICE##*[![:space:]]}"}"
@@ -3590,14 +3589,6 @@ docker_3xui_nginx_ssl_management() {
                 ;;
             3)
                 docker_3xui_nginx_repair_menu
-                ;;
-            4)
-                if docker_3xui_select_instance; then
-                    if docker_3xui_sync_subscription_formats "$DOCKER_3XUI_SELECTED_INSTANCE_ID"; then
-                        echo "Subscription route check complete."
-                    fi
-                    read -r -p "Press Enter to return..." _
-                fi
                 ;;
             0)
                 return
@@ -4211,6 +4202,70 @@ docker_3xui_change_subscription_port() {
     read -r answer || return 0
 }
 
+docker_3xui_change_clash_path_menu() {
+    local path answer
+    docker_3xui_select_instance || return 0
+
+    printf '%s\n' "New Clash URI path (for example /mihomo/, Enter cancels):"
+    read -r path || return 0
+    [[ -n "$path" ]] || return 0
+
+    printf '%s\n' "This updates the public Clash URL and briefly restarts the selected 3x-UI container."
+    printf '%s\n' "Existing profiles using the old Clash URL will need the new URL."
+    printf '%s\n' "Apply the Clash URI path change? [y/N]:"
+    read -r answer || return 0
+    if [[ "$answer" == [yY] ]]; then
+        python3 -B "$(dirname "${BASH_SOURCE[0]}")/docker-3xui-db-restore.py" \
+            --instance "$DOCKER_3XUI_SELECTED_INSTANCE_ID" --change-clash-path "$path" ||
+            echo "Clash URI path change failed. See the diagnostic above."
+        printf '%s\n' "Press Enter to return..."
+        read -r answer || return 0
+    fi
+}
+
+
+docker_3xui_subscription_url_menu() {
+    local choice
+    while true; do
+        printf '\n%s\n' "Change Subscription URL" \
+            "1) Change standard subscription URL" "2) Change Clash URI Path" "0) Back" \
+            "Please enter your selection [0-2]:"
+        read -r choice || return 0
+        case "$choice" in
+            1) docker_3xui_change_subscription_url ;;
+            2) docker_3xui_change_clash_path_menu ;;
+            0) return ;;
+            *) echo "Invalid selection!" ;;
+        esac
+    done
+}
+
+
+docker_3xui_route_sync_menu() {
+    local choice
+    while true; do
+        printf '\n%s\n' "Nginx Route Sync" \
+            "1) Sync guarded dynamic XHTTP routes" "2) Sync Clash / Mihomo and JSON subscription URLs" \
+            "0) Back" "Please enter your selection [0-2]:"
+        read -r choice || return 0
+        case "$choice" in
+            1) docker_3xui_xhttp_guard_menu ;;
+            2)
+                if docker_3xui_select_instance; then
+                    if docker_3xui_sync_subscription_formats "$DOCKER_3XUI_SELECTED_INSTANCE_ID"; then
+                        echo "Subscription route check complete."
+                    fi
+                    printf '%s\n' "Press Enter to return..."
+                    read -r choice || return 0
+                fi
+                ;;
+            0) return ;;
+            *) echo "Invalid selection!" ;;
+        esac
+    done
+}
+
+
 show_docker_3xui_menu() {
     while true; do
         clear
@@ -4235,7 +4290,7 @@ show_docker_3xui_menu() {
         echo "14) Sanaei 3x-UI Management"
         echo "15) Nginx / SSL Configuration"
         echo "16) Default Website / FakeSite"
-        echo "17) Sync guarded dynamic XHTTP routes"
+        echo "17) Sync XHTTP and subscription routes"
         echo "18) Change 3x-UI Version"
         echo
         echo "0) Back"
@@ -4253,7 +4308,7 @@ show_docker_3xui_menu() {
             4) docker_3xui_change_panel_port ;;
             5) docker_3xui_change_subscription_port ;;
             6) docker_3xui_change_panel_path ;;
-            7) docker_3xui_change_subscription_url ;;
+            7) docker_3xui_subscription_url_menu ;;
             8) docker_3xui_restart ;;
             9) docker_3xui_update ;;
             10) docker_3xui_backup ;;
@@ -4263,7 +4318,7 @@ show_docker_3xui_menu() {
             14) docker_3xui_sanaei_management ;;
             15) docker_3xui_nginx_ssl_management ;;
             16) docker_3xui_fakesite_management ;;
-            17) docker_3xui_xhttp_guard_menu ;;
+            17) docker_3xui_route_sync_menu ;;
             18) docker_3xui_change_version ;;
             0) break ;;
             *) echo; echo "Invalid selection!"; sleep 2 ;;

@@ -361,7 +361,15 @@ def restore_locked(instance, base, source, nginx=Path("/etc/nginx")):
         print("Database restore and HTTPS route verification complete.", flush=True)
 
 
-def sync_subscription_formats(base, nginx=Path("/etc/nginx")):
+def write_clash_settings(database, values):
+    with contextlib.closing(sqlite3.connect(database)) as db, db:
+        for key in ("subClashPath", "subClashURI"):
+            db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            if key in values:
+                db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, values[key]))
+
+
+def sync_subscription_formats(base, nginx=Path("/etc/nginx"), *, clash_path=None):
     state = read_env(base / "state.env")
     domain = state["DOMAIN"].lower()
     port = int(state["SUBSCRIPTION_PORT"])
@@ -370,12 +378,21 @@ def sync_subscription_formats(base, nginx=Path("/etc/nginx")):
     site = nginx / "sites-available" / f"3xui-{domain}"
     enabled = nginx / "sites-enabled" / site.name
     if not (enabled.exists() or enabled.is_symlink()):
+        if clash_path is not None:
+            raise RestoreError("Set up the managed HTTPS site first.")
         return
     if not enabled.is_symlink() or enabled.resolve() != checked_file(site):
         raise RestoreError("The HTTPS site is not managed by U-OPTI.")
 
-    with contextlib.closing(read_db(checked_file(base / "db/x-ui.db"))) as db:
-        config = settings(db)
+    database = checked_file(base / "db/x-ui.db")
+    with contextlib.closing(read_db(database)) as db:
+        original = settings(db)
+    config = original
+    if clash_path is not None:
+        clash_path = route_path(clash_path)
+        if original.get("subEnable") == "false" or original.get("subClashEnable") != "true":
+            raise RestoreError("Enable the Clash / Mihomo subscription in the panel first.")
+        config = {**original, "subClashPath": clash_path, "subClashURI": f"https://{domain}{clash_path}"}
     subdir = nginx / f"u-opti-3xui-subscription-{domain}"
     if subdir.is_symlink():
         raise RestoreError("Unexpected Nginx routing directory.")
@@ -408,14 +425,34 @@ def sync_subscription_formats(base, nginx=Path("/etc/nginx")):
     current_site = saved_site[0].decode()
     updated_site = render_site(current_site, panel, panel, include)
     content = dedicated.encode()
-    if current_site == updated_site and (
+    if (clash_path is None or config == original) and current_site == updated_site and (
         (saved_snippet is None and not content) or (saved_snippet and saved_snippet[0] == content)
     ):
         return
 
+    container = state["CONTAINER_NAME"]
+    changing = config != original
+    if changing and (container != f"3xui-{base.name}"
+                     or run("docker", "inspect", "-f", "{{.State.Running}}", container).strip() != "true"):
+        raise RestoreError("Start the selected managed 3x-UI container first.")
     run("nginx", "-t")
     subdir.mkdir(mode=0o700, exist_ok=True)
+    stopped = settings_changed = start_requested = False
     try:
+        if changing:
+            stopped = True
+            run("docker", "stop", container, timeout=60)
+            with contextlib.closing(read_db(database)) as db:
+                if settings(db) != original:
+                    raise RestoreError("Panel settings changed during preparation. Run the command again.")
+            backup = Path(tempfile.mkdtemp(dir=base, prefix="pre-clash-path-"))
+            snapshot_sqlite(database, backup / "x-ui.db")
+            for path, saved in ((site, saved_site), (snippet, saved_snippet)):
+                if saved is not None:
+                    atomic_file(backup / path.name, saved[0], 0o600)
+            print(f"Clash path recovery files: {backup}", flush=True)
+            write_clash_settings(database, config)
+            settings_changed = True
         if current_site != updated_site:
             atomic_file(site, updated_site.encode(), *saved_site[1:])
         if content:
@@ -424,14 +461,32 @@ def sync_subscription_formats(base, nginx=Path("/etc/nginx")):
             snippet.unlink(missing_ok=True)
         run("nginx", "-t")
         run("systemctl", "reload", "nginx")
-    except (OSError, subprocess.SubprocessError, KeyboardInterrupt):
-        put_snapshot(snippet, saved_snippet)
-        if current_site != updated_site:
-            put_snapshot(site, saved_site)
-        run("nginx", "-t")
-        run("systemctl", "reload", "nginx")
+        if changing:
+            start_requested = True
+            run("docker", "start", container, timeout=60)
+            with tempfile.TemporaryDirectory(dir=backup) as work:
+                clash_routes = [route for route in routes if route[0] == "subClashURI"]
+                verify_routes(domain, panel, clash_routes, subscription_ids(database), Path(work))
+    except (OSError, ValueError, RestoreError, sqlite3.Error, subprocess.SubprocessError, KeyboardInterrupt):
+        try:
+            if start_requested:
+                run("docker", "stop", container, timeout=60)
+            if settings_changed:
+                write_clash_settings(database, original)
+            put_snapshot(snippet, saved_snippet)
+            if current_site != updated_site:
+                put_snapshot(site, saved_site)
+            if stopped:
+                run("docker", "start", container, timeout=60)
+            run("nginx", "-t")
+            run("systemctl", "reload", "nginx")
+        except (OSError, sqlite3.Error, subprocess.SubprocessError) as rollback_error:
+            raise RestoreError(f"Automatic rollback incomplete: {rollback_error}") from rollback_error
         raise
-    print("3x-UI HTTPS subscription formats synchronized.", flush=True)
+    if clash_path is not None:
+        print(f"Clash subscription base URL: https://{domain}{clash_path}", flush=True)
+    else:
+        print("3x-UI HTTPS subscription formats synchronized.", flush=True)
 
 
 def main():
@@ -439,20 +494,25 @@ def main():
     parser.add_argument("--instance", required=True)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--sync-subscription-formats", action="store_true")
+    modes.add_argument("--change-clash-path", metavar="PATH")
     modes.add_argument("backup", type=Path, nargs="?")
     args = parser.parse_args()
-    action = "Subscription route sync" if args.sync_subscription_formats else "Restore"
+    action = "Restore"
+    if args.change_clash_path is not None:
+        action = "Clash path change"
+    elif args.sync_subscription_formats:
+        action = "Subscription route sync"
     try:
         if os.geteuid() != 0:
             raise RestoreError("Run this command as root.")
         os.umask(0o077)
-        if args.sync_subscription_formats:
+        if args.backup is None:
             if not re.fullmatch(r"[0-9]{2}", args.instance):
                 raise RestoreError("Invalid instance ID.")
             base = Path("/opt/3x-ui/instances") / args.instance
             with (base / ".sqlite-restore.lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                sync_subscription_formats(base)
+                sync_subscription_formats(base, clash_path=args.change_clash_path)
         else:
             restore(args.instance, args.backup)
     except (OSError, KeyError, ValueError, RestoreError, sqlite3.Error, subprocess.SubprocessError, KeyboardInterrupt) as exc:

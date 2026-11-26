@@ -155,6 +155,46 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.site.read_bytes(), before)
         self.assertEqual(snippet.read_text(), "# old route\n")
 
+    def test_change_clash_path_updates_panel_and_nginx_together(self):
+        self.set_clash_paths("/mihomo/", "/clash-backend/")
+        original = restore.subscription_ids(self.live)
+        with mock.patch.object(restore, "run", return_value="true") as run, \
+             mock.patch.object(restore, "verify_routes") as verify:
+            restore.sync_subscription_formats(self.base, self.nginx, clash_path="/new-clash/")
+        with contextlib.closing(restore.read_db(self.live)) as db:
+            config = restore.settings(db)
+        self.assertEqual(config["subClashPath"], "/new-clash/")
+        self.assertEqual(config["subClashURI"], "https://example.org/new-clash/")
+        self.assertEqual(config["subURI"], "https://example.org/sub/")
+        self.assertEqual(restore.subscription_ids(self.live), original)
+        self.assertIn("proxy_pass http://127.0.0.1:2095/new-clash/;",
+                      self.snippet.with_name("restored-formats.conf").read_text())
+        run.assert_any_call("docker", "stop", "3xui-01", timeout=60)
+        run.assert_any_call("docker", "start", "3xui-01", timeout=60)
+        self.assertEqual(verify.call_args.args[2], [("subClashURI", "/new-clash/", "/new-clash/")])
+        self.assertEqual(len(list(self.base.glob("pre-clash-path-*/x-ui.db"))), 1)
+
+    def test_change_clash_path_rolls_back_failed_https_probe(self):
+        self.set_clash_paths("/mihomo/", "/clash-backend/")
+        before = self.site.read_bytes()
+        with mock.patch.object(restore, "run", return_value="true") as run, \
+             mock.patch.object(restore, "verify_routes", side_effect=restore.RestoreError("Invalid YAML")):
+            with self.assertRaisesRegex(restore.RestoreError, "Invalid YAML"):
+                restore.sync_subscription_formats(self.base, self.nginx, clash_path="/new-clash/")
+        with contextlib.closing(restore.read_db(self.live)) as db:
+            config = restore.settings(db)
+        self.assertEqual(config["subClashPath"], "/clash-backend/")
+        self.assertEqual(config["subClashURI"], "https://example.org/mihomo/")
+        self.assertEqual(self.site.read_bytes(), before)
+        self.assertFalse(self.snippet.with_name("restored-formats.conf").exists())
+        self.assertEqual(run.call_args_list.count(mock.call("docker", "start", "3xui-01", timeout=60)), 2)
+
+    def test_change_clash_path_rejects_standard_path_before_stopping(self):
+        self.set_clash_paths("/mihomo/", "/clash-backend/")
+        with mock.patch.object(restore, "run") as run, self.assertRaisesRegex(restore.RestoreError, "Keep /sub/"):
+            restore.sync_subscription_formats(self.base, self.nginx, clash_path="/sub/")
+        run.assert_not_called()
+
     def test_foreign_domain_and_reserved_paths_are_rejected(self):
         with self.assertRaises(restore.RestoreError):
             restore.public_path({"subURI": "https://old.example/sub/"}, "subURI", "/sub/", "example.org")
