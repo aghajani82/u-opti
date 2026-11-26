@@ -4206,7 +4206,7 @@ docker_3xui_change_clash_path_menu() {
     local path answer
     docker_3xui_select_instance || return 0
 
-    printf '%s\n' "New Clash URI path (for example /mihomo/, Enter cancels):"
+    printf '%s\n' "New Clash URI path (for example mihomo or /mihomo/, Enter cancels):"
     read -r path || return 0
     [[ -n "$path" ]] || return 0
 

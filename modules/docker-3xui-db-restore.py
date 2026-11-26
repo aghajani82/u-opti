@@ -389,7 +389,9 @@ def sync_subscription_formats(base, nginx=Path("/etc/nginx"), *, clash_path=None
         original = settings(db)
     config = original
     if clash_path is not None:
-        clash_path = route_path(clash_path)
+        clash_path = "/" + clash_path.strip().removeprefix("/").removesuffix("/") + "/"
+        if not SAFE_PATH.fullmatch(clash_path) or clash_path.startswith("/smite-node/"):
+            raise RestoreError("Enter a Clash path such as mihomo or /mihomo/. Use letters, digits, hyphens, or underscores in each segment.")
         if original.get("subEnable") == "false" or original.get("subClashEnable") != "true":
             raise RestoreError("Enable the Clash / Mihomo subscription in the panel first.")
         config = {**original, "subClashPath": clash_path, "subClashURI": f"https://{domain}{clash_path}"}
