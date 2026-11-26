@@ -137,7 +137,7 @@ echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
     docker_3xui_nginx_setup() { printf '%s\n' "SSL setup called"; }
 
     printf '1\ny\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/ssl-menu"
-    grep -Fxq 'Please enter your selection [0-4]:' "$tmp/ssl-menu"
+    grep -Fxq 'Please enter your selection [0-3]:' "$tmp/ssl-menu"
     grep -Fxq 'Continue with Nginx / SSL setup? [y/N]:' "$tmp/ssl-menu"
     grep -Fxq 'SSL setup called' "$tmp/ssl-menu"
 
@@ -148,7 +148,7 @@ echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
         exit 1
     fi
 
-    printf '4\n\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/subscription-sync"
+    printf '2\n\n0\n' | docker_3xui_route_sync_menu > "$tmp/subscription-sync"
     grep -Fxq 'Subscription sync for 01' "$tmp/subscription-sync"
     grep -Fxq 'Subscription route check complete.' "$tmp/subscription-sync"
 
@@ -177,7 +177,7 @@ echo "PASS: Sanaei SSL prompts are visible with redirected stdin"
         esac
     }
 
-    printf '17\ny\n\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
+    printf '17\n1\ny\n\n0\n0\n' | show_docker_3xui_menu > "$tmp/xhttp-menu"
     grep -Fxq 'Please enter your selection [0-18]:' "$tmp/xhttp-menu"
     grep -Fxq 'Apply these XHTTP routes now? [y/N] (Enter cancels):' "$tmp/xhttp-menu"
     grep -Fxq 'XHTTP_SYNC=PASS ROUTES=2 UNKNOWN_NUMERIC_PORTS=DENIED' "$tmp/xhttp-menu"
@@ -203,11 +203,14 @@ echo "PASS: Guarded XHTTP route sync shows prompts and reports outcomes"
     clear() { return 0; }
     docker_3xui_change_panel_path() { echo "Panel path menu selected"; }
     docker_3xui_change_subscription_url() { echo "Subscription menu selected"; }
+    docker_3xui_select_instance() { DOCKER_3XUI_SELECTED_INSTANCE_ID=01; }
+    python3() { printf 'Clash path command: %s\n' "${*:3}"; }
     docker_3xui_change_subscription_port() { echo "Subscription port menu selected"; }
-    printf '5\n6\n7\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
+    printf '5\n6\n7\n1\n2\n/mihomo/\ny\n\n0\n0\n' | show_docker_3xui_menu > "$tmp/path-menu"
     grep -Fxq 'Subscription port menu selected' "$tmp/path-menu"
     grep -Fxq 'Panel path menu selected' "$tmp/path-menu"
     grep -Fxq 'Subscription menu selected' "$tmp/path-menu"
+    grep -Fxq 'Clash path command: --instance 01 --change-clash-path /mihomo/' "$tmp/path-menu"
 )
 (
     source "$root/modules/docker-3xui.sh"
