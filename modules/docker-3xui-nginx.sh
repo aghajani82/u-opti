@@ -1019,6 +1019,9 @@ docker_3xui_nginx_setup() {
         systemctl reload nginx >/dev/null 2>&1 || true
     fi
 
+    docker_3xui_sync_subscription_formats "$DOCKER_3XUI_INSTANCE_ID" ||
+        echo "WARNING: Could not synchronize HTTPS subscription formats."
+
     docker_3xui_nginx_show_result
     docker_3xui_nginx_pause_if_needed
 }

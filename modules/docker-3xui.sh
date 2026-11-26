@@ -1931,6 +1931,8 @@ EOF
     if [ -n "$NEW_IMAGE_ID" ] && [ "$NEW_IMAGE_ID" = "$CURRENT_IMAGE_ID" ]; then
         echo "3x-UI image is already up to date."
         echo "No container recreation was required."
+        docker_3xui_sync_subscription_formats "$INSTANCE_ID" ||
+            echo "WARNING: Could not synchronize HTTPS subscription formats."
         docker image rm "$ROLLBACK_IMAGE" >/dev/null 2>&1 || true
         rm -rf "$UPDATE_BACKUP_DIR"
         echo
@@ -2077,6 +2079,8 @@ EOF
     echo "Status         : Running"
     echo "Panel Port     : $PANEL_PORT"
     echo
+    docker_3xui_sync_subscription_formats "$INSTANCE_ID" ||
+        echo "WARNING: Could not synchronize HTTPS subscription formats."
     echo "Persistent data was preserved."
     echo "Database backup:"
     echo "$UPDATE_BACKUP_DIR/db.tar.gz"
@@ -3505,6 +3509,12 @@ docker_3xui_fakesite_management() {
 }
 
 
+docker_3xui_sync_subscription_formats() {
+    python3 -B "$(dirname "${BASH_SOURCE[0]}")/docker-3xui-db-restore.py" \
+        --instance "$1" --sync-subscription-formats
+}
+
+
 docker_3xui_nginx_ssl_management() {
     while true; do
         clear
@@ -3516,11 +3526,12 @@ docker_3xui_nginx_ssl_management() {
         echo "1) Docker 3x-UI Nginx / SSL"
         echo "2) Custom Domain / Nginx / SSL"
         echo "3) Repair Existing Domain (add missing www / non-www)"
+        echo "4) Sync Clash / Mihomo and JSON subscription URLs"
         echo
         echo "0) Back"
         echo
 
-        printf '%s\n' "Please enter your selection [0-3]:"
+        printf '%s\n' "Please enter your selection [0-4]:"
         read -r NGINX_MENU_CHOICE || return 0
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE#"${NGINX_MENU_CHOICE%%[![:space:]]*}"}"
         NGINX_MENU_CHOICE="${NGINX_MENU_CHOICE%"${NGINX_MENU_CHOICE##*[![:space:]]}"}"
@@ -3579,6 +3590,14 @@ docker_3xui_nginx_ssl_management() {
                 ;;
             3)
                 docker_3xui_nginx_repair_menu
+                ;;
+            4)
+                if docker_3xui_select_instance; then
+                    if docker_3xui_sync_subscription_formats "$DOCKER_3XUI_SELECTED_INSTANCE_ID"; then
+                        echo "Subscription route check complete."
+                    fi
+                    read -r -p "Press Enter to return..." _
+                fi
                 ;;
             0)
                 return
@@ -3964,6 +3983,8 @@ docker_3xui_apply_version_switch() (
     [[ "$target_id" == sha256:* ]] || return 1
     if [[ "$target_id" == "$previous_id" ]]; then
         echo "The requested image is already running."
+        docker_3xui_sync_subscription_formats "$DOCKER_3XUI_SELECTED_INSTANCE_ID" ||
+            echo "WARNING: Could not synchronize HTTPS subscription formats."
         return 0
     fi
 
@@ -3987,6 +4008,8 @@ docker_3xui_apply_version_switch() (
        docker_3xui_preserve_panel_path "$container" "$port" "$path" &&
        docker_3xui_verify_version_switch "$container" "$target_id" "$port" "$path"; then
         printf 'Image running: %s\n' "$target"
+        docker_3xui_sync_subscription_formats "$DOCKER_3XUI_SELECTED_INSTANCE_ID" ||
+            echo "WARNING: Could not synchronize HTTPS subscription formats."
         return 0
     fi
 

@@ -112,6 +112,49 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(sibling.read_text(), "custom")
         self.assertEqual(restore.subscription_ids(self.live), ["destination"])
 
+    def set_clash_paths(self, public, backend):
+        with contextlib.closing(sqlite3.connect(self.live)) as db, db:
+            db.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", (
+                ("subClashEnable", "true"),
+                ("subClashPath", backend),
+                ("subClashURI", f"https://example.org{public}"),
+            ))
+
+    def test_sync_adds_https_route_and_does_not_reload_twice(self):
+        self.set_clash_paths("/mihomo/", "/clash-backend/")
+        db_before = self.live.read_bytes()
+        snippet = self.snippet.with_name("restored-formats.conf")
+        with mock.patch.object(restore, "run") as run:
+            restore.sync_subscription_formats(self.base, self.nginx)
+            restore.sync_subscription_formats(self.base, self.nginx)
+        self.assertIn("include " + str(snippet.parent / "*.conf") + ";", self.site.read_text())
+        self.assertIn("location ^~ /mihomo/ {", snippet.read_text())
+        self.assertIn("proxy_pass http://127.0.0.1:2095/clash-backend/;", snippet.read_text())
+        self.assertEqual(self.live.read_bytes(), db_before)
+        self.assertEqual(run.call_args_list.count(mock.call("systemctl", "reload", "nginx")), 1)
+
+    def test_sync_refuses_sub_path_overlap_before_nginx_change(self):
+        self.set_clash_paths("/mihomo/", "/sub/")
+        before = self.site.read_bytes()
+        with mock.patch.object(restore, "run") as run, self.assertRaisesRegex(restore.RestoreError, "Keep /sub/"):
+            restore.sync_subscription_formats(self.base, self.nginx)
+        self.assertEqual(self.site.read_bytes(), before)
+        self.assertFalse(self.snippet.parent.exists())
+        run.assert_not_called()
+
+    def test_sync_restores_files_if_nginx_rejects_route(self):
+        self.set_clash_paths("/mihomo/", "/clash-backend/")
+        self.snippet.parent.mkdir()
+        snippet = self.snippet.with_name("restored-formats.conf")
+        snippet.write_text("# old route\n")
+        before = self.site.read_bytes()
+        fail = subprocess.CalledProcessError(1, "nginx")
+        with mock.patch.object(restore, "run", side_effect=["", fail, "", ""]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                restore.sync_subscription_formats(self.base, self.nginx)
+        self.assertEqual(self.site.read_bytes(), before)
+        self.assertEqual(snippet.read_text(), "# old route\n")
+
     def test_foreign_domain_and_reserved_paths_are_rejected(self):
         with self.assertRaises(restore.RestoreError):
             restore.public_path({"subURI": "https://old.example/sub/"}, "subURI", "/sub/", "example.org")

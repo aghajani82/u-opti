@@ -129,11 +129,15 @@ echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
     clear() { return 0; }
     sleep() { return 0; }
     docker_3xui_load_nginx() { return 0; }
-    docker_3xui_select_instance() { DOCKER_3XUI_INSTANCE_ID=01; }
+    docker_3xui_select_instance() {
+        DOCKER_3XUI_INSTANCE_ID=01
+        DOCKER_3XUI_SELECTED_INSTANCE_ID=01
+    }
+    docker_3xui_sync_subscription_formats() { printf 'Subscription sync for %s\n' "$1"; }
     docker_3xui_nginx_setup() { printf '%s\n' "SSL setup called"; }
 
     printf '1\ny\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/ssl-menu"
-    grep -Fxq 'Please enter your selection [0-3]:' "$tmp/ssl-menu"
+    grep -Fxq 'Please enter your selection [0-4]:' "$tmp/ssl-menu"
     grep -Fxq 'Continue with Nginx / SSL setup? [y/N]:' "$tmp/ssl-menu"
     grep -Fxq 'SSL setup called' "$tmp/ssl-menu"
 
@@ -143,6 +147,10 @@ echo "PASS: Sanaei uses only the configured hostname for Nginx and ACME"
         echo "ERROR: Blank confirmation accepted" >&2
         exit 1
     fi
+
+    printf '4\n\n0\n' | docker_3xui_nginx_ssl_management > "$tmp/subscription-sync"
+    grep -Fxq 'Subscription sync for 01' "$tmp/subscription-sync"
+    grep -Fxq 'Subscription route check complete.' "$tmp/subscription-sync"
 
     printf '\n' | docker_3xui_nginx_pause > "$tmp/ssl-pause"
     grep -Fxq 'Press Enter to return...' "$tmp/ssl-pause"
